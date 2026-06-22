@@ -42,4 +42,20 @@ export default defineConfig([
       'no-unused-vars': 'off',
     },
   },
+  {
+    // .ts files introduced by Plan 003 (domain, store, renderer) frequently
+    // use the TS "type namespace" pattern (export interface X + export
+    // const X = { ... } with the same name). ESLint's `no-redeclare` blocks
+    // this. We also turn off `no-unused-vars` for type-signature-only
+    // arguments (interface methods, callback type literals) where the
+    // parameter is part of the public API and would be used at the call
+    // site, not inside the type body. Real unused runtime variables are
+    // still caught by the TS compiler when `noUnusedLocals` is enabled
+    // (currently off; turn on once the codebase stabilizes).
+    files: ['**/*.ts'],
+    rules: {
+      'no-redeclare': 'off',
+      'no-unused-vars': 'off',
+    },
+  },
 ])

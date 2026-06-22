@@ -1,0 +1,48 @@
+import { onBeforeUnmount, ref, watch, type Ref } from 'vue';
+import { ThreeJSRenderer } from '@infrastructure/rendering';
+import { useWorldStore } from '@interfaces/stores/worldStore';
+
+export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => {
+  const store = useWorldStore();
+  const isReady = ref(false);
+  let renderer: ThreeJSRenderer | null = null;
+  let resizeObserver: ResizeObserver | null = null;
+
+  const setupRenderer = (canvas: HTMLCanvasElement) => {
+    renderer = new ThreeJSRenderer(canvas, { onTick: store.step });
+    // Pass a getter, NOT the network object — the store mutates the
+    // network in place each tick, and the renderer's per-frame loop
+    // calls the getter to see the latest state.
+    renderer.setNetworkGetter(store.getNetwork);
+    renderer.start();
+    const container = canvas.parentElement;
+    if (container) {
+      renderer.resize(container.clientWidth, container.clientHeight);
+      resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          renderer?.resize(width, height);
+        }
+      });
+      resizeObserver.observe(container);
+    }
+    isReady.value = true;
+  };
+
+  watch(
+    canvasRef,
+    (canvas) => {
+      if (canvas) setupRenderer(canvas);
+    },
+    { immediate: true },
+  );
+
+  onBeforeUnmount(() => {
+    renderer?.dispose();
+    renderer = null;
+    resizeObserver?.disconnect();
+    resizeObserver = null;
+  });
+
+  return { isReady, store };
+};

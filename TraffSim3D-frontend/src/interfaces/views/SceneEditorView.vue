@@ -1,18 +1,19 @@
 <template>
-  <main class="view view--placeholder">
-    <h1>Scene Editor</h1>
-    <p>占位 — Plan 003 落地</p>
-  </main>
+  <div class="scene-editor">
+    <WorldCanvas />
+    <WorldHUD />
+  </div>
 </template>
 
-<script setup>
-// Placeholder. Real implementation in Plan 003.
+<script setup lang="ts">
+import WorldCanvas from '@interfaces/components/scene/WorldCanvas.vue';
+import WorldHUD from '@interfaces/components/scene/WorldHUD.vue';
 </script>
 
 <style scoped>
-.view--placeholder {
-  padding: 48px 24px;
-  text-align: center;
-  color: rgba(0, 0, 0, 0.6);
+.scene-editor {
+  position: fixed;
+  inset: 0;
+  background: #0b1220;
 }
 </style>
