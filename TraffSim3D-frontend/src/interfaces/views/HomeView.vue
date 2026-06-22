@@ -73,7 +73,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import EnhancedWebGLBackground from './components/EnhancedWebGLBackground.vue'
+import EnhancedWebGLBackground from '@interfaces/components/showcase/EnhancedWebGLBackground.vue'
 
 const mobileOpen = ref(false)
 
