@@ -7,6 +7,7 @@ import { buildDefaultNetwork } from '@application/services/defaultScene';
 import { tick } from '@application/services/tick';
 import { Speed } from '@domain/value-objects/Speed';
 import { LightPhase } from '@domain/value-objects/Phase';
+import { saveScene, loadScene, clearScene } from '@application/use-cases';
 
 export const useWorldStore = defineStore('world', () => {
   // Plain object — see Plan 003 for why this is NOT a ref/shallowRef.
@@ -15,13 +16,39 @@ export const useWorldStore = defineStore('world', () => {
   const fps = ref(0);
   const isRunning = ref(false);
 
+  // FPS rolling window (500ms)
   let frameCount = 0;
   let fpsAcc = 0;
   let lastFpsUpdateMs = performance.now();
 
+  // Frame-time rolling window (30 frames, ~0.5s at 60fps).
+  // `Min` starts at Infinity so the first frame sets it correctly.
+  // `Max` starts at -Infinity so the DebugPanel can show "0.0" until a
+  // frame arrives (the formatter below guards against the otherwise
+  // misleading "0.0 ms max" on first load).
+  const frameMsMin = ref(Infinity);
+  const frameMsMax = ref(-Infinity);
+  const frameMsAvg = ref(0);
+  let frameWindowMs = 0;
+  let frameWindowCount = 0;
+
   const step = (dt: number) => {
     tick(network, dt);
     tickCount.value += 1;
+
+    // Frame-time stats
+    const ms = dt * 1000;
+    frameMsMin.value = Math.min(frameMsMin.value, ms);
+    frameMsMax.value = Math.max(frameMsMax.value, ms);
+    frameWindowMs += ms;
+    frameWindowCount += 1;
+    if (frameWindowCount >= 30) {
+      frameMsAvg.value = frameWindowMs / frameWindowCount;
+      frameWindowMs = 0;
+      frameWindowCount = 0;
+    }
+
+    // FPS rolling window
     frameCount += 1;
     fpsAcc += dt;
     const now = performance.now();
@@ -40,18 +67,14 @@ export const useWorldStore = defineStore('world', () => {
 
   const getNetwork = (): RoadNetwork => network;
 
-  // ----- editor actions -----
+  const bumpTick = () => {
+    tickCount.value += 1;
+  };
+  const notifyChange = bumpTick;
 
   let nextVehicleNum = Object.keys(network.vehicles).length + 1;
   let nextLightNum = Object.values(network.intersections)
     .reduce((s, i) => s + i.trafficLights.length, 0) + 1;
-
-  const bumpTick = () => {
-    tickCount.value += 1;  // signal to Vue watchers; the renderer doesn't need this
-  };
-
-  /** Public bump: callers (e.g. InspectorPanel after editing an entity field) trigger Vue re-render. */
-  const notifyChange = () => bumpTick();
 
   const addVehicle = (overrides: Partial<Vehicle> = {}): Vehicle => {
     const id = overrides.id ?? `v-${nextVehicleNum++}`;
@@ -114,6 +137,31 @@ export const useWorldStore = defineStore('world', () => {
     bumpTick();
   };
 
+  // ----- persistence (added by Plan 005) -----
+
+  const serialize = (): { ok: true } | { ok: false; reason: string } => {
+    try {
+      saveScene(network);
+      return { ok: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, reason: msg };
+    }
+  };
+
+  const hydrate = (): { ok: true } | { ok: false; reason: string } => {
+    const result = loadScene();
+    if (!result.ok) return result;
+    network = result.network;
+    bumpTick();  // signal Vue watchers; the renderer will rebuild via identity change
+    return { ok: true };
+  };
+
+  const clearStorage = (): { ok: true } => {
+    clearScene();
+    return { ok: true };
+  };
+
   return {
     network,
     tickCount,
@@ -127,5 +175,11 @@ export const useWorldStore = defineStore('world', () => {
     addTrafficLight,
     removeTrafficLight,
     notifyChange,
+    serialize,
+    hydrate,
+    clearStorage,
+    frameMsMin,
+    frameMsMax,
+    frameMsAvg,
   };
 });
