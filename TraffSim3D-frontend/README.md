@@ -1,35 +1,44 @@
-# smart-city
+# TraffSim3D Frontend
 
-This template should help get you started developing with Vue 3 in Vite.
+Vue 3 + Vite + Three.js + Pinia. DDD-layered — see
+`../docs/` §3.2 for the structure spec.
 
-## Recommended IDE Setup
-
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
+## Develop
 
 ```sh
 npm install
+npm run dev          # http://localhost:5173/
 ```
 
-### Compile and Hot-Reload for Development
+The interesting route is `/scene-editor` — landing `/` is a showcase.
+
+## Build
 
 ```sh
-npm run dev
+npm run build        # outputs dist/
+npm run preview      # serves dist/
 ```
 
-### Compile and Minify for Production
+## Lint / format
 
 ```sh
-npm run build
+npm run lint         # ESLint flat config
+npm run format       # Prettier write
 ```
 
-### Lint with [ESLint](https://eslint.org/)
+## Test
 
-```sh
-npm run lint
-```
+No test runner is wired up yet. A future plan will add Vitest with
+tests for the pure functions in `src/domain/value-objects/`, the
+serializer in `src/infrastructure/persistence/`, and the `tick` step
+function in `src/application/services/`.
+
+## Architecture cheat sheet
+
+| Layer            | Path                | Imports from       |
+|------------------|---------------------|--------------------|
+| Domain           | `src/domain/`       | nothing (pure)     |
+| Application      | `src/application/`  | domain             |
+| Infrastructure   | `src/infrastructure/`| domain, three, browser APIs |
+| Interfaces       | `src/interfaces/`   | application, infrastructure, shared |
+| Shared           | `src/shared/`       | nothing            |
