@@ -44,5 +44,6 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
     resizeObserver = null;
   });
 
-  return { isReady, store };
+  const getRenderer = (): ThreeJSRenderer | null => renderer;
+  return { isReady, store, getRenderer };
 };

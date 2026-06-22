@@ -1,8 +1,8 @@
 /** 2D position in world units (meters). z is unused at street level; reserved for grade separation. */
 export interface Position {
-  readonly x: number;
-  readonly y: number;  // y is "up" in Three.js; we map domain y to three.js y unchanged.
-  readonly z: number;
+  x: number;
+  y: number;  // y is "up" in Three.js; we map domain y to three.js y unchanged.
+  z: number;
 }
 
 export const Position = {

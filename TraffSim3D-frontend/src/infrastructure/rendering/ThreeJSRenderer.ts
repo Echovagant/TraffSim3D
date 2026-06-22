@@ -16,6 +16,7 @@ export class ThreeJSRenderer {
   private built: BuiltScene | null = null;
   private currentNetwork: RoadNetwork | null = null;
   private getNetwork: (() => RoadNetwork) | null = null;
+  private controls: { update: () => void } | null = null;
   private rafId: number | null = null;
   private lastFrameMs = 0;
   private callbacks: RendererCallbacks;
@@ -39,6 +40,47 @@ export class ThreeJSRenderer {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
+  }
+
+  /** Public camera accessor so external controls (e.g. OrbitControls) can be attached. */
+  getCamera(): THREE.PerspectiveCamera {
+    return this.camera;
+  }
+
+  /** Attach external controls by exposing the camera. OrbitControls wraps this. */
+  attachControls(controls: { update: () => void }): void {
+    this.controls = controls;
+    this.controls.update();
+  }
+
+  /** Cast a ray from screen coordinates and return the first hit vehicle or light, or null. */
+  pick(
+    screenX: number,
+    screenY: number,
+    network: RoadNetwork,
+  ): { kind: 'vehicle'; id: string } | { kind: 'light'; id: string } | null {
+    if (!this.built) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((screenX - rect.left) / rect.width) * 2 - 1,
+      -((screenY - rect.top) / rect.height) * 2 + 1,
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(ndc, this.camera);
+    // Prefer vehicles (smaller, fewer tests)
+    const vehicleMeshes = Array.from(this.built.vehicleMeshes.values());
+    const hits = raycaster.intersectObjects(vehicleMeshes, false);
+    if (hits.length > 0) {
+      const mesh = hits[0]!.object as THREE.Mesh;
+      for (const [vid, m] of this.built.vehicleMeshes) if (m === mesh) return { kind: 'vehicle', id: vid };
+    }
+    const lightMeshes = Array.from(this.built.lightMeshes.values());
+    const lh = raycaster.intersectObjects(lightMeshes, false);
+    if (lh.length > 0) {
+      const mesh = lh[0]!.object as THREE.Mesh;
+      for (const [lid, m] of this.built.lightMeshes) if (m === mesh) return { kind: 'light', id: lid };
+    }
+    return null;
   }
 
   /**
@@ -74,6 +116,7 @@ export class ThreeJSRenderer {
           syncMeshTransforms(network, this.built);
         }
       }
+      this.controls?.update();
       this.renderer.render(this.scene, this.camera);
       this.rafId = requestAnimationFrame(loop);
     };

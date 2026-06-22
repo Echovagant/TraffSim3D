@@ -2,6 +2,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 import globals from 'globals'
 import js from '@eslint/js'
 import pluginVue from 'eslint-plugin-vue'
+import vueParser from 'vue-eslint-parser'
 import skipFormatting from '@vue/eslint-config-prettier/skip-formatting'
 import tseslint from 'typescript-eslint'
 
@@ -14,6 +15,10 @@ export default defineConfig([
   globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**']),
 
   {
+    // Plain .js files — use tseslint parser for proper ESM + TS-flavored
+    // syntax (even though .js doesn't have type annotations, tseslint
+    // parser is the same JS parser vue uses for its script blocks).
+    files: ['**/*.{js,mjs,jsx,ts}'],
     languageOptions: {
       globals: {
         ...globals.browser,
@@ -22,7 +27,27 @@ export default defineConfig([
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module',
-        extraFileExtensions: ['.vue'],
+      },
+    },
+  },
+  {
+    // .vue SFCs — need vue-eslint-parser as the outer parser so the
+    // template block is parsed, and tseslint parser as the inner parser
+    // so <script lang="ts"> blocks (and the type-only imports they
+    // contain) are understood. Plan 004 introduces the first .vue
+    // file with TS syntax (WorldCanvas imports `import type { ... }`),
+    // which exposed the missing double-parser config.
+    files: ['**/*.vue'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+      },
+      parser: vueParser,
+      parserOptions: {
+        parser: tseslint.parser,
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        extraFileExtensions: ['.ts'],
       },
     },
   },
