@@ -1,0 +1,50 @@
+{
+  "folders": [
+    {
+      "name": "📦 TraffSim3D (Root)",
+      "path": "."
+    },
+    {
+      "name": "🎨 TraffSim3D-frontend",
+      "path": "TraffSim3D-frontend"
+    },
+    {
+      "name": "⚙️ TraffSim3D-backend",
+      "path": "TraffSim3D-backend"
+    },
+    {
+      "name": "📚 docs",
+      "path": "docs"
+    }
+  ],
+  "settings": {
+    "files.eol": "\n",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "[python]": {
+      "editor.defaultFormatter": "ms-python.black-formatter",
+      "editor.tabSize": 4
+    },
+    "[vue]": {
+      "editor.defaultFormatter": "Vue.volar"
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "Vue.volar",
+      "esbenp.prettier-vscode",
+      "dbaeumer.vscode-eslint",
+      "ms-python.python",
+      "ms-python.vscode-pylance",
+      "ms-python.black-formatter",
+      "ms-azuretools.vscode-docker",
+      "tamasfe.even-better-toml"
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [],
+    "compounds": []
+  }
+}
