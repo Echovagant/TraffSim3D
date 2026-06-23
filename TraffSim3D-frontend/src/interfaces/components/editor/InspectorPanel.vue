@@ -3,7 +3,8 @@
     <header>
       <span class="kind">{{ selection.kind }}</span>
       <span class="id">#{{ selection.id }}</span>
-      <button class="danger" @click="deleteSelected">Delete</button>
+      <button class="ghost" title="取消选中 (Esc)" @click="deselect">✕</button>
+      <button class="danger" title="删除实体 (Delete)" @click="deleteSelected">🗑</button>
     </header>
     <div v-if="selection.kind === 'vehicle'">
       <label>Color <input type="color" :value="(entity as Vehicle).color" @change="updateColor(($event.target as HTMLInputElement).value)" /></label>
@@ -57,6 +58,10 @@ const entity = computed(() => {
   return null;
 });
 
+const deselect = (): void => {
+  selection.clear();
+};
+
 const updateColor = (color: string) => {
   if (selection.kind === 'vehicle' && entity.value && 'color' in entity.value) {
     (entity.value as { color: string }).color = color;
@@ -96,26 +101,43 @@ const deleteSelected = () => {
 
 <style scoped>
 .inspector {
+  /* Right column, below the DebugPanel. The DebugPanel is ~140px tall;
+   * this offset is its top (12) + height + 16 gap, rounded. */
   position: absolute;
-  top: 60px;
-  left: 12px;
+  top: 168px;
+  right: 12px;
   width: 240px;
   padding: 10px;
   background: rgba(15, 23, 42, 0.85);
   color: #f1f5f9;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
 }
 .inspector header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 8px;
 }
-.inspector .kind { text-transform: uppercase; font-size: 11px; opacity: 0.7; }
-.inspector .id { flex: 1; }
-.inspector label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
-.inspector input, .inspector select { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-radius: 4px; padding: 2px 4px; }
-.inspector button.danger { padding: 4px 8px; background: #7f1d1d; color: #f1f5f9; border: none; border-radius: 4px; cursor: pointer; }
+.inspector .kind { text-transform: uppercase; font-size: 10px; opacity: 0.7; }
+.inspector .id { flex: 1; font-weight: 600; }
+.inspector label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11px; }
+.inspector input, .inspector select { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-radius: 4px; padding: 2px 4px; font-family: inherit; font-size: 11px; }
+.inspector button {
+  padding: 3px 6px;
+  background: #1e293b;
+  color: #f1f5f9;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+}
+.inspector button.ghost { background: transparent; opacity: 0.6; }
+.inspector button.ghost:hover { background: rgba(148, 163, 184, 0.15); opacity: 1; }
+.inspector button.danger { background: #7f1d1d; }
+.inspector button.danger:hover { background: #991b1b; }
 </style>

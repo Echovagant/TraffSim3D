@@ -6,7 +6,14 @@ import type { Road } from '@domain/entities/Road';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { createRoadNetwork } from '@domain/entities/RoadNetwork';
 
-export const SCENE_SCHEMA_VERSION = 1;
+// Bumped to v3 in M1.5: Vehicle gained `enteredIntersectionAt`
+// (simulation-time when the car first crossed into an intersection box;
+// used by the cross-road emergency-brake logic for right-of-way).
+// Bumped to v4 in M2-B (plan 007): LightPhase enum gained 7 new values
+// (GreenLeft, YellowLeft, RedLeft, FlashingYellow, FlashingRed, AllRed, Dark).
+// hydrateNetwork must accept v3 + v4 scenes; v3 scenes with unknown
+// phase values fall back to Red (per plan 007 R1).
+export const SCENE_SCHEMA_VERSION = 4;
 
 export interface SerializedScene {
   schemaVersion: number;
@@ -22,8 +29,21 @@ interface SerializedIntersection extends Omit<Intersection, 'trafficLights'> {
   trafficLights: TrafficLight[];
 }
 
+const KNOWN_PHASES = new Set<string>([
+  'green',
+  'yellow',
+  'red',
+  'greenLeft',
+  'yellowLeft',
+  'redLeft',
+  'flashingYellow',
+  'flashingRed',
+  'allRed',
+  'dark',
+]);
+
 const isLightPhase = (v: unknown): v is TrafficLight['phase'] =>
-  v === LightPhase.Red || v === LightPhase.Yellow || v === LightPhase.Green;
+  typeof v === 'string' && KNOWN_PHASES.has(v);
 
 export const serializeNetwork = (network: RoadNetwork): SerializedScene => ({
   schemaVersion: SCENE_SCHEMA_VERSION,
@@ -41,9 +61,22 @@ export interface HydrationResult {
   network?: RoadNetwork;
 }
 
+/**
+ * M1.5 (v3) → M2-B (v4) migration: v3 has no light phases outside
+ * green/yellow/red, so no per-light rewrites needed. Future migrations
+ * (e.g. vehicle type change) plug in here.
+ */
+const migrateScene = (d: any): any => {
+  if (d.schemaVersion === 3) {
+    return { ...d, schemaVersion: 4 };
+  }
+  return d;
+};
+
 export const hydrateNetwork = (data: unknown): HydrationResult => {
   if (typeof data !== 'object' || data === null) return { ok: false, reason: 'not an object' };
-  const d = data as Partial<SerializedScene>;
+  const migrated = migrateScene(data as any);
+  const d = migrated as Partial<SerializedScene>;
   if (d.schemaVersion !== SCENE_SCHEMA_VERSION) {
     return { ok: false, reason: `unsupported schemaVersion ${d.schemaVersion}` };
   }

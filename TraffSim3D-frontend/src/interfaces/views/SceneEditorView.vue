@@ -3,7 +3,7 @@
     <WorldCanvas />
     <DebugPanel />
     <EditorToolbar />
-    <SceneIOButtons />
+    <EntityOutline />
     <InspectorPanel />
   </div>
 </template>
@@ -12,8 +12,11 @@
 import WorldCanvas from '@interfaces/components/scene/WorldCanvas.vue';
 import DebugPanel from '@interfaces/components/debug/DebugPanel.vue';
 import EditorToolbar from '@interfaces/components/editor/EditorToolbar.vue';
-import SceneIOButtons from '@interfaces/components/editor/SceneIOButtons.vue';
+import EntityOutline from '@interfaces/components/editor/EntityOutline.vue';
 import InspectorPanel from '@interfaces/components/editor/InspectorPanel.vue';
+import { useEditorShortcuts } from '@interfaces/composables/useEditorShortcuts';
+
+useEditorShortcuts();
 </script>
 
 <style scoped>

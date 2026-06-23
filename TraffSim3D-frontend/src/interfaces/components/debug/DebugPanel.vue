@@ -4,14 +4,36 @@
     <div class="row"><span>Vehicles</span><b>{{ vehicleCount }}</b></div>
     <div class="row"><span>Lights</span><b>{{ lightCount }} <small>(R:{{ counts.red }} Y:{{ counts.yellow }} G:{{ counts.green }})</small></b></div>
     <div class="row"><span>Frame ms</span><b>{{ frameMin }}-{{ frameMax }} <small>avg {{ frameAvg }}</small></b></div>
+    <div class="row" :class="{ paused: !store.isRunning }">
+      <span>Sim</span>
+      <b>{{ store.isRunning ? `running @ ${formatRate(store.tickRate)}` : 'paused' }}</b>
+    </div>
+    <div class="row backend" :title="backendTooltip">
+      <span>Backend</span>
+      <b :class="backendClass">
+        <span class="dot" :class="backendDotClass"></span>
+        {{ backendLabel }}
+      </b>
+      <button
+        class="refresh"
+        :disabled="isProbing"
+        title="重新探测后端 (B)"
+        @click="probeBackend"
+      >{{ isProbing ? '…' : '↻' }}</button>
+    </div>
+    <label class="auto-poll" :title="autoPoll ? `每 ${POLL_INTERVAL_MS / 1000}s 自动探测` : '关闭自动探测'">
+      <input type="checkbox" v-model="autoPoll" />
+      <span>auto-poll</span>
+    </label>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useWorldStore } from '@interfaces/stores/worldStore';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { M1_MIN_FPS } from '@shared/constants/simulation';
+import { defaultBackend, BackendError } from '@infrastructure/api';
 
 const store = useWorldStore();
 const vehicleCount = computed(() => Object.keys(store.network.vehicles).length);
@@ -32,6 +54,91 @@ const frameMin = computed(() => (store.frameMsMin === Infinity ? 0 : store.frame
 const frameMax = computed(() => (store.frameMsMax === -Infinity ? 0 : store.frameMsMax.toFixed(1)));
 const frameAvg = computed(() => store.frameMsAvg.toFixed(1));
 const fpsClass = computed(() => (store.fps >= M1_MIN_FPS ? 'ok' : 'warn'));
+
+const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
+
+// ----- Backend probe (Plan A, extended) -----
+// On mount, hit `/health` and `/api/v1/ping` in parallel. The user can
+// re-trigger with the `↻` button or toggle `auto-poll` to keep the
+// status fresh (e.g. while waiting for the backend to come back up).
+type BackendState = 'unknown' | 'ok' | 'error';
+const POLL_INTERVAL_MS = 5000;
+const backendState = ref<BackendState>('unknown');
+const backendDetail = ref<string>('');
+const backendCheckedAt = ref<number | null>(null);
+const isProbing = ref(false);
+const autoPoll = ref(false);
+let pollTimer: number | null = null;
+
+const probeBackend = async (): Promise<void> => {
+  if (isProbing.value) return;
+  isProbing.value = true;
+  try {
+    const [h, p] = await Promise.all([defaultBackend.health(), defaultBackend.ping()]);
+    if (h.status === 'ok' && p.pong === true) {
+      backendState.value = 'ok';
+      backendDetail.value = `health=${h.status} ping=${String(p.pong)}`;
+    } else {
+      backendState.value = 'error';
+      backendDetail.value = `unexpected payload: ${JSON.stringify({ h, p })}`;
+    }
+  } catch (err) {
+    backendState.value = 'error';
+    backendDetail.value =
+      err instanceof BackendError
+        ? `${err.status || 'network'}: ${err.message}`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+  } finally {
+    backendCheckedAt.value = Date.now();
+    isProbing.value = false;
+  }
+};
+
+const startPolling = (): void => {
+  if (pollTimer !== null) return;
+  pollTimer = window.setInterval(() => {
+    void probeBackend();
+  }, POLL_INTERVAL_MS);
+};
+const stopPolling = (): void => {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
+};
+
+watch(autoPoll, (on) => {
+  if (on) {
+    void probeBackend();  // probe immediately on toggle
+    startPolling();
+  } else {
+    stopPolling();
+  }
+});
+
+onMounted(() => {
+  void probeBackend();
+});
+
+onBeforeUnmount(() => {
+  stopPolling();
+});
+
+const backendClass = computed(() => (backendState.value === 'ok' ? 'ok' : backendState.value === 'error' ? 'warn' : ''));
+const backendDotClass = computed(() => `dot-${backendState.value}`);
+const backendLabel = computed(() => {
+  if (isProbing.value) return 'checking…';
+  if (backendState.value === 'ok') return 'online';
+  if (backendState.value === 'error') return 'offline';
+  return 'checking…';
+});
+const backendTooltip = computed(() => {
+  if (!backendCheckedAt.value) return 'Backend status unknown';
+  const ago = Math.max(0, Math.round((Date.now() - backendCheckedAt.value) / 1000));
+  return `${backendDetail.value} (checked ${ago}s ago)`;
+});
 </script>
 
 <style scoped>
@@ -47,10 +154,51 @@ const fpsClass = computed(() => (store.fps >= M1_MIN_FPS ? 'ok' : 'warn'));
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 1.5;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
 }
-.debug .row { display: flex; justify-content: space-between; gap: 12px; }
+.debug .row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .debug .row b { font-weight: 600; }
 .debug .row b.ok { color: #22c55e; }
 .debug .row b.warn { color: #fbbf24; }
 .debug .row small { opacity: 0.6; }
+.debug .row.paused b { color: #fde047; }
+
+.debug .row.backend { border-top: 1px solid rgba(148, 163, 184, 0.2); margin-top: 4px; padding-top: 4px; }
+.debug .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: 1px;
+}
+.debug .dot-unknown { background: #64748b; }
+.debug .dot-ok { background: #22c55e; box-shadow: 0 0 4px #22c55e; }
+.debug .dot-error { background: #ef4444; box-shadow: 0 0 4px #ef4444; }
+
+.debug button.refresh {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 12px;
+  background: #1e293b;
+  color: #f1f5f9;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.4;
+}
+.debug button.refresh:hover:not(:disabled) { background: #334155; }
+.debug button.refresh:disabled { opacity: 0.4; cursor: wait; }
+
+.debug .auto-poll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.8;
+  cursor: pointer;
+}
+.debug .auto-poll input { margin: 0; }
 </style>

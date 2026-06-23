@@ -1,2 +1,10 @@
 export { ThreeJSRenderer } from './ThreeJSRenderer';
-export { buildScene } from './SceneBuilder';
+export { buildScene, syncMeshTransforms, syncSceneContents, syncSelection } from './SceneBuilder';
+export type { BuiltScene, VehicleNode, RoadNode } from './SceneBuilder';
+export type { SelectionGetter, RendererCallbacks } from './ThreeJSRenderer';
+export { PHASE_COLOR, createTrafficLightNode } from './TrafficLightNode';
+export type { TrafficLightNode } from './TrafficLightNode';
+export { createVehicleTrail } from './VehicleTrailMesh';
+export type { VehicleTrail } from './VehicleTrailMesh';
+export { createRoadMarkings } from './RoadMarkingsMesh';
+export { createSelectionRing } from './SelectionRingMesh';

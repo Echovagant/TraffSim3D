@@ -83,4 +83,36 @@ export default defineConfig([
       'no-unused-vars': 'off',
     },
   },
+  {
+    // Plan 006 — M2-A 强制 invariant I1 (domain 纯): domain 层不允许
+    // import three / @dimforge/rapier3d-compat / vue。这是 M2 设计契约
+    // plans/m2-interface-contract.md §I1 的**机器可执行**保障。
+    // 任何 domain/* 文件 import 这些包 → lint 报错。
+    files: ['src/domain/**/*.{ts,js}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'three', message: 'domain 不允许依赖 three（I1 违反）' },
+            {
+              name: '@dimforge/rapier3d-compat',
+              message: 'domain 不允许依赖 Rapier（I1 违反）',
+            },
+            { name: 'vue', message: 'domain 不允许依赖 vue（I1 违反）' },
+          ],
+          patterns: [
+            {
+              group: ['three/*'],
+              message: 'domain 不允许依赖 three（I1 违反）',
+            },
+            {
+              group: ['@dimforge/rapier3d-compat*'],
+              message: 'domain 不允许依赖 Rapier（I1 违反）',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ])

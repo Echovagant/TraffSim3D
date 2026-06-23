@@ -1,12 +1,31 @@
 import * as THREE from 'three';
 import type { RoadNetwork } from '@domain/entities/RoadNetwork';
-import { buildScene, syncMeshTransforms, type BuiltScene } from './SceneBuilder';
+import {
+  buildScene,
+  syncMeshTransforms,
+  syncSceneContents,
+  syncSelection,
+  type BuiltScene,
+} from './SceneBuilder';
 import { MAX_DPR } from '@shared/constants/simulation';
 
 export interface RendererCallbacks {
   /** Called once per frame with the elapsed seconds since the last call. */
   onTick: (dt: number) => void;
 }
+
+export type SelectionGetter = () => { kind: 'vehicle' | 'light'; id: string } | null;
+
+/**
+ * Tick policy tells the renderer how to advance the simulation each frame.
+ * - `paused: true` → skip the `onTick` call entirely (the scene is frozen
+ *   but still redrawn, so the selection ring can follow a stationary
+ *   entity and OrbitControls still respond to mouse).
+ * - `rate` → multiplier on the wall-clock `dt` before calling `onTick`.
+ *   `1` is real-time; `2` is 2× speed (cars move twice as fast in
+ *   the same wall-clock second); `0.25` is quarter-speed.
+ */
+export type TickPolicyGetter = () => { paused: boolean; rate: number };
 
 /** Pure-TS Three.js renderer. Owns its own scene/camera/renderer; no Vue imports. */
 export class ThreeJSRenderer {
@@ -16,6 +35,8 @@ export class ThreeJSRenderer {
   private built: BuiltScene | null = null;
   private currentNetwork: RoadNetwork | null = null;
   private getNetwork: (() => RoadNetwork) | null = null;
+  private getSelection: SelectionGetter | null = null;
+  private getTickPolicy: TickPolicyGetter | null = null;
   private controls: { update: () => void } | null = null;
   private rafId: number | null = null;
   private lastFrameMs = 0;
@@ -53,7 +74,13 @@ export class ThreeJSRenderer {
     this.controls.update();
   }
 
-  /** Cast a ray from screen coordinates and return the first hit vehicle or light, or null. */
+  /**
+   * Cast a ray from screen coordinates and return the first hit vehicle or light, or null.
+   * Raycasts against the body meshes (vehicles) and sphere meshes (lights) of the
+   * currently built scene. With the new vehicle models the body is a
+   * child of a parent Group, so we walk up the hit object's parent
+   * chain to find the Group that matches one of our vehicle nodes.
+   */
   pick(
     screenX: number,
     screenY: number,
@@ -67,18 +94,26 @@ export class ThreeJSRenderer {
     );
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(ndc, this.camera);
-    // Prefer vehicles (smaller, fewer tests)
-    const vehicleMeshes = Array.from(this.built.vehicleMeshes.values());
-    const hits = raycaster.intersectObjects(vehicleMeshes, false);
+
+    // Vehicles: collect the body meshes and raycast against them
+    // (recursive=false — only the body itself, not its decorations).
+    const vehicleBodies: THREE.Mesh[] = [];
+    for (const node of this.built.vehicleNodes.values()) vehicleBodies.push(node.body);
+    const hits = raycaster.intersectObjects(vehicleBodies, false);
     if (hits.length > 0) {
-      const mesh = hits[0]!.object as THREE.Mesh;
-      for (const [vid, m] of this.built.vehicleMeshes) if (m === mesh) return { kind: 'vehicle', id: vid };
+      const hit = hits[0]!.object as THREE.Mesh;
+      // Find which vehicle this body belongs to.
+      for (const [id, node] of this.built.vehicleNodes) {
+        if (node.body === hit) return { kind: 'vehicle', id };
+      }
     }
-    const lightMeshes = Array.from(this.built.lightMeshes.values());
+
+    const lightMeshes: THREE.Mesh[] = [];
+    for (const node of this.built.lightNodes.values()) lightMeshes.push(node.sphere);
     const lh = raycaster.intersectObjects(lightMeshes, false);
     if (lh.length > 0) {
       const mesh = lh[0]!.object as THREE.Mesh;
-      for (const [lid, m] of this.built.lightMeshes) if (m === mesh) return { kind: 'light', id: lid };
+      for (const [lid, node] of this.built.lightNodes) if (node.sphere === mesh) return { kind: 'light', id: lid };
     }
     return null;
   }
@@ -96,25 +131,67 @@ export class ThreeJSRenderer {
     this.getNetwork = getter;
   }
 
+  /**
+   * Provide a getter for the current selection. The renderer reads it every
+   * frame and positions the selection ring accordingly. Optional — if never
+   * set, the ring stays hidden.
+   */
+  setSelectionGetter(getter: SelectionGetter): void {
+    this.getSelection = getter;
+  }
+
+  /**
+   * Provide a getter for the current tick policy (pause + rate). Called
+   * every frame so the user can flip pause and change rate from anywhere.
+   * If never set, the renderer defaults to `{ paused: false, rate: 1 }`
+   * (real-time, unpaused) so the legacy single-arg `onTick(dt)` callers
+   * keep working.
+   */
+  setTickPolicyGetter(getter: TickPolicyGetter): void {
+    this.getTickPolicy = getter;
+  }
+
   start(): void {
     if (this.rafId !== null) return;
     this.lastFrameMs = performance.now();
     const loop = (now: number) => {
-      const dt = Math.min(0.1, (now - this.lastFrameMs) / 1000);  // clamp to avoid tab-switch jumps
+      const rawDt = Math.min(0.1, (now - this.lastFrameMs) / 1000);  // clamp to avoid tab-switch jumps
       this.lastFrameMs = now;
-      this.callbacks.onTick(dt);
-      // Reconcile the scene with the current network. onTick above has
-      // already mutated positions; this just syncs the mesh transforms.
+
+      // Tick policy: read every frame so pause/rate flips take effect
+      // immediately. Default to real-time / unpaused.
+      const policy = this.getTickPolicy
+        ? this.getTickPolicy()
+        : { paused: false, rate: 1 };
+      if (!policy.paused) {
+        this.callbacks.onTick(rawDt * policy.rate);
+      }
+
+      // Reconcile the scene with the current network. `onTick` above has
+      // already mutated positions; this is where the per-frame visual sync
+      // happens (cheap) plus the incremental add/remove diff (also cheap for
+      // the handful of entities an M1 scene holds). When paused, the network
+      // is unchanged but we still want mesh positions to track the static
+      // snapshot (a save/load could have replaced it under us).
       if (this.getNetwork) {
         const network = this.getNetwork();
         if (network !== this.currentNetwork) {
-          if (this.built) this.scene.remove(this.built.root);
+          if (this.built) {
+            this.scene.remove(this.built.root);
+            // Dispose is best-effort — new built replaces it. The old meshes
+            // were already linked to the scene root and will be GC'd once
+            // the renderer drops its reference.
+          }
           this.built = buildScene(network);
           this.scene.add(this.built.root);
           this.currentNetwork = network;
         } else if (this.built) {
           syncMeshTransforms(network, this.built);
+          syncSceneContents(network, this.built);
         }
+      }
+      if (this.built && this.getSelection) {
+        syncSelection(this.built, this.getSelection());
       }
       this.controls?.update();
       this.renderer.render(this.scene, this.camera);

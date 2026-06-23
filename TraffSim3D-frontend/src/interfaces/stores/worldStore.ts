@@ -5,16 +5,48 @@ import type { Vehicle } from '@domain/entities/Vehicle';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
 import { buildDefaultNetwork } from '@application/services/defaultScene';
 import { tick } from '@application/services/tick';
-import { Speed } from '@domain/value-objects/Speed';
+import { spawnVehicle, type SpawnOptions, type SpawnResult } from '@application/services/spawnVehicle';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { saveScene, loadScene, clearScene } from '@application/use-cases';
+import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
+
+export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const;
 
 export const useWorldStore = defineStore('world', () => {
   // Plain object — see Plan 003 for why this is NOT a ref/shallowRef.
   let network: RoadNetwork = buildDefaultNetwork();
   const tickCount = ref(0);
   const fps = ref(0);
-  const isRunning = ref(false);
+  const isRunning = ref(true);
+
+  // Discrete tick rate ladder. +/- keys (and the toolbar buttons) cycle
+  // through this list. The ladder lives at module scope so the toolbar
+  // and shortcut composable can share the same array.
+  const tickRate = ref<number>(1);
+
+  // Monotonic simulation time in seconds. Reset to 0 on `reset()`. Used
+  // by tick() to stamp `Vehicle.enteredIntersectionAt` so the cross-road
+  // right-of-way rule can pick "the car that got there first".
+  let simTime = 0;
+
+  const togglePause = (): void => {
+    isRunning.value = !isRunning.value;
+  };
+  const setRunning = (running: boolean): void => {
+    isRunning.value = running;
+  };
+  const setTickRate = (rate: number): void => {
+    tickRate.value = rate;
+  };
+  const cycleTickRate = (direction: 1 | -1): void => {
+    const ladder = TICK_RATE_LADDER;
+    const idx = ladder.findIndex((r) => r === tickRate.value);
+    // If the current value isn't in the ladder (shouldn't happen, but be safe),
+    // start from 1×. Then move with wrap-around.
+    const cur = idx === -1 ? ladder.findIndex((r) => r === 1) : idx;
+    const next = (cur + direction + ladder.length) % ladder.length;
+    tickRate.value = ladder[next]!;
+  };
 
   // FPS rolling window (500ms)
   let frameCount = 0;
@@ -33,7 +65,8 @@ export const useWorldStore = defineStore('world', () => {
   let frameWindowCount = 0;
 
   const step = (dt: number) => {
-    tick(network, dt);
+    simTime += dt;
+    tick(network, dt, simTime);
     tickCount.value += 1;
 
     // Frame-time stats
@@ -62,6 +95,7 @@ export const useWorldStore = defineStore('world', () => {
 
   const reset = () => {
     network = buildDefaultNetwork();
+    simTime = 0;
     tickCount.value += 1;
   };
 
@@ -76,31 +110,26 @@ export const useWorldStore = defineStore('world', () => {
   let nextLightNum = Object.values(network.intersections)
     .reduce((s, i) => s + i.trafficLights.length, 0) + 1;
 
-  const addVehicle = (overrides: Partial<Vehicle> = {}): Vehicle => {
+  const addVehicle = (overrides: Partial<Vehicle> & Partial<SpawnOptions> = {}): SpawnResult => {
     const id = overrides.id ?? `v-${nextVehicleNum++}`;
-    const centerInter = Object.values(network.intersections)[0];
-    if (!centerInter) {
-      throw new Error('addVehicle: network has no intersections to anchor on');
-    }
-    const offsetX = (Math.random() - 0.5) * 10;
-    const offsetZ = (Math.random() - 0.5) * 10;
-    const v: Vehicle = {
-      id,
-      type: overrides.type ?? 'car',
-      position: overrides.position ?? {
-        x: centerInter.position.x + offsetX,
-        y: 0,
-        z: centerInter.position.z + offsetZ,
-      },
-      speed: overrides.speed ?? Speed.fromKmh(40),
-      heading: overrides.heading ?? 0,
-      lane: overrides.lane ?? 'r-ns#1',
-      color: overrides.color ?? '#3a86ff',
-      status: overrides.status ?? 'driving',
+    // `spawnVehicle` handles picking a road/lane/s that's free, picking
+    // a type with weighted random, and assigning the correct world
+    // position + heading. If every lane is full (M1.5 density check),
+    // it returns `{ ok: false, reason }` and we surface a flash
+    // message — we never silently place a colliding car.
+    const spawnOpts: SpawnOptions = {
+      type: overrides.type,
+      color: overrides.color,
+      speed: overrides.speed,
     };
-    network.vehicles[id] = v;
+    const result = spawnVehicle(network, id, spawnOpts);
+    if (!result.ok) {
+      showFlashMessage('交通密度已满 — 现有车道都无法再放车了', 'error');
+      return result;
+    }
+    network.vehicles[result.vehicle.id] = result.vehicle;
     bumpTick();
-    return v;
+    return result;
   };
 
   const removeVehicle = (id: string): void => {
@@ -167,6 +196,7 @@ export const useWorldStore = defineStore('world', () => {
     tickCount,
     fps,
     isRunning,
+    tickRate,
     step,
     reset,
     getNetwork,
@@ -181,5 +211,9 @@ export const useWorldStore = defineStore('world', () => {
     frameMsMin,
     frameMsMax,
     frameMsAvg,
+    togglePause,
+    setRunning,
+    setTickRate,
+    cycleTickRate,
   };
 });
