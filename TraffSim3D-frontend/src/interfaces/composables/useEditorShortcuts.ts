@@ -33,6 +33,21 @@ export const useEditorShortcuts = (): void => {
   };
 
   const onKeyDown = (e: KeyboardEvent): void => {
+    // Undo/Redo: handle BEFORE the Ctrl-skip below.
+    // Use Ctrl on all platforms (Mac users can use Cmd — Ctrl is mapped
+    // to Cmd by the browser for most users, but to be safe, accept both
+    // via the metaKey || ctrlKey check).
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      world.undo();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.shiftKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      world.redo();
+      return;
+    }
+
     // Ignore auto-repeat for +/- rate cycling — we don't want one
     // long press to fly through the whole ladder. Pause toggle and
     // delete both want auto-repeat, so they're handled below.

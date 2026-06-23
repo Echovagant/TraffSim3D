@@ -11,6 +11,7 @@ import { LightPhase } from '@domain/value-objects/Phase';
 import { saveScene, loadScene, clearScene } from '@application/use-cases';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
 import { RapierWorld, buildRigidBodySpec } from '@infrastructure/physics';
+import { serializeNetwork, cloneScene, sceneToNetwork, type SerializedScene } from '@infrastructure/persistence';
 
 export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const;
 
@@ -52,6 +53,31 @@ export const useWorldStore = defineStore('world', () => {
   };
   const getDraggingId = (): string | null => draggingId;
 
+  // History for undo/redo. Each entry is a full SerializedScene JSON
+  // string. Bounded to 50 entries to keep memory predictable; oldest
+  // entries are dropped on overflow. Cleared on hydrate/reset (loading
+  // a new scene is not undoable — it's the user's explicit decision).
+  const HISTORY_LIMIT = 50;
+  let history: SerializedScene[] = [];
+  let redoStack: SerializedScene[] = [];
+
+  /**
+   * Push the current network state to the history stack. Called by
+   * every user-initiated mutation (add/remove/edit). Skipped during
+   * tick simulation (tick mutates position/speed every frame, which
+   * would fill the history in <1 second).
+   *
+   * Clears the redo stack — any new mutation invalidates the redo
+   * trail (standard undo/redo semantic).
+   */
+  const pushHistory = (): void => {
+    history.push(cloneScene(serializeNetwork(network)));
+    if (history.length > HISTORY_LIMIT) {
+      history.shift();  // drop oldest
+    }
+    redoStack = [];
+  };
+
   /**
    * Editor dropped a vehicle at `position`. Update the entity's
    * position, sync the Rapier body, and re-snap to the nearest lane
@@ -72,6 +98,7 @@ export const useWorldStore = defineStore('world', () => {
   ): { ok: true } | { ok: false; reason: string } => {
     const v = network.vehicles[vehicleId];
     if (!v) return { ok: false, reason: 'vehicle not found' };
+    pushHistory();
     v.position = { x: position.x, y: position.y, z: position.z };
     if (rapierWorld) {
       rapierWorld.setVehiclePosition(vehicleId, v.position);
@@ -167,6 +194,8 @@ export const useWorldStore = defineStore('world', () => {
         rapierWorld.removeVehicle(id);
       }
     }
+    history = [];
+    redoStack = [];
     network = buildDefaultNetwork();
     simTime = 0;
     // Re-register default vehicles.
@@ -192,6 +221,7 @@ export const useWorldStore = defineStore('world', () => {
     .reduce((s, i) => s + i.trafficLights.length, 0) + 1;
 
   const addVehicle = (overrides: Partial<Vehicle> & Partial<SpawnOptions> = {}): SpawnResult => {
+    pushHistory();
     const id = overrides.id ?? `v-${nextVehicleNum++}`;
     // `spawnVehicle` handles picking a road/lane/s that's free, picking
     // a type with weighted random, and assigning the correct world
@@ -226,6 +256,7 @@ export const useWorldStore = defineStore('world', () => {
   };
 
   const removeVehicle = (id: string): void => {
+    pushHistory();
     if (rapierWorld) rapierWorld.removeVehicle(id);
     delete network.vehicles[id];
     bumpTick();
@@ -244,6 +275,7 @@ export const useWorldStore = defineStore('world', () => {
   const setVehicleSpeed = (vehicleId: string, speedKmh: number): void => {
     const v = network.vehicles[vehicleId];
     if (!v) return;
+    pushHistory();
     v.speed = speedKmh / 3.6;  // km/h → m/s
     if (rapierWorld) {
       rapierWorld.setVehicleSpeed(vehicleId, v.speed, v.heading);
@@ -259,6 +291,7 @@ export const useWorldStore = defineStore('world', () => {
   const updateVehicleType = (vehicleId: string, newType: Vehicle['type']): void => {
     const v = network.vehicles[vehicleId];
     if (!v) return;
+    pushHistory();
     v.type = newType;
     if (rapierWorld) {
       rapierWorld.updateVehicleType(vehicleId, newType);
@@ -267,6 +300,7 @@ export const useWorldStore = defineStore('world', () => {
   };
 
   const addTrafficLight = (overrides: Partial<TrafficLight> = {}): TrafficLight | null => {
+    pushHistory();
     const inter = Object.values(network.intersections)[0];
     if (!inter) return null;
     const id = overrides.id ?? `tl-${nextLightNum++}`;
@@ -289,6 +323,7 @@ export const useWorldStore = defineStore('world', () => {
   };
 
   const removeTrafficLight = (id: string): void => {
+    pushHistory();
     for (const inter of Object.values(network.intersections)) {
       inter.trafficLights = inter.trafficLights.filter((l) => l.id !== id);
     }
@@ -339,6 +374,9 @@ export const useWorldStore = defineStore('world', () => {
   const hydrate = (): { ok: true } | { ok: false; reason: string } => {
     const result = loadScene();
     if (!result.ok) return result;
+    // Loading a new scene is the user's explicit decision — not undoable.
+    history = [];
+    redoStack = [];
     return replaceNetwork(result.network);
   };
 
@@ -356,6 +394,41 @@ export const useWorldStore = defineStore('world', () => {
     clearScene();
     return { ok: true };
   };
+
+  /**
+   * Undo the last user-initiated mutation. Pops the current state to
+   * the redo stack, then restores the network from the popped history
+   * entry. If history is empty, no-op (returns false).
+   *
+   * After restore: re-registers Rapier bodies via the existing
+   * loadNetwork path (which removes old bodies + registers new).
+   */
+  const undo = (): boolean => {
+    if (history.length === 0) return false;
+    const previous = history.pop()!;
+    redoStack.push(cloneScene(serializeNetwork(network)));
+    if (redoStack.length > HISTORY_LIMIT) redoStack.shift();
+    const restored = sceneToNetwork(previous);
+    // Use loadNetwork to re-register Rapier bodies
+    loadNetwork(restored);
+    return true;
+  };
+
+  /**
+   * Redo the last undone mutation. Mirror of undo().
+   */
+  const redo = (): boolean => {
+    if (redoStack.length === 0) return false;
+    const next = redoStack.pop()!;
+    history.push(cloneScene(serializeNetwork(network)));
+    if (history.length > HISTORY_LIMIT) history.shift();
+    const restored = sceneToNetwork(next);
+    loadNetwork(restored);
+    return true;
+  };
+
+  const canUndo = (): boolean => history.length > 0;
+  const canRedo = (): boolean => redoStack.length > 0;
 
   return {
     network,
@@ -389,5 +462,9 @@ export const useWorldStore = defineStore('world', () => {
     setDraggingId,
     getDraggingId,
     moveVehicleTo,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   };
 });

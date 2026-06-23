@@ -35,6 +35,9 @@
     <button title="添加信号灯" @click="world.addTrafficLight()">+ Light</button>
     <button title="重置场景 (R)" @click="world.reset()">Reset</button>
 
+    <button title="撤销 (Ctrl+Z)" :disabled="!world.canUndo()" @click="world.undo()">↶ Undo</button>
+    <button title="重做 (Ctrl+Shift+Z)" :disabled="!world.canRedo()" @click="world.redo()">↷ Redo</button>
+
     <span class="sep" />
 
     <button title="保存到 LocalStorage" @click="io.save">💾 Save</button>

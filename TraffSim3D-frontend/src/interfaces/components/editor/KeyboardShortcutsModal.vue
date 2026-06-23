@@ -55,6 +55,14 @@
               <td>聚焦到当前选中的实体</td>
             </tr>
             <tr>
+              <td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td>
+              <td>撤销上一步</td>
+            </tr>
+            <tr>
+              <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td>
+              <td>重做</td>
+            </tr>
+            <tr>
               <td><kbd>?</kbd></td>
               <td>显示本快捷键面板</td>
             </tr>
