@@ -59,3 +59,25 @@ export const STOP_LINE_DISTANCE = 5.0;
  * physics is borderline.
  */
 export const STOP_LINE_BUFFER = 4.0;
+
+// ===== M2-A — Rapier body specs =====
+//
+// Per-type body spec for Rapier rigid bodies. Length/width are in
+// world units (metres). Mass is in kg. Inertia is derived from
+// RapierBodySpec.ts (cube inertia tensor) at register-time.
+//
+// Note: M1 used a hand-tuned COLLISION_RADIUS (car=2.6, truck=3.6,
+// bus=5.0) for its distance check. The Rapier collider uses the
+// actual body dimensions (length/width), which give a more faithful
+// footprint. M1's NUDGE_SPEED / NUDGE_REVERSE / NUDGE_REVERSE_SPEED
+// are deleted with applyIntersectionNudge (M2-A doesn't need a
+// reverse-nudge step — Rapier collision response handles it).
+
+export const VEHICLE_BODY_SPEC: Record<
+  'car' | 'truck' | 'bus',
+  { length: number; width: number; mass: number }
+> = {
+  car:   { length: 4.2, width: 1.8, mass: 1500 },
+  truck: { length: 6.5, width: 2.2, mass: 4500 },
+  bus:   { length: 9.0, width: 2.5, mass: 8000 },
+};
