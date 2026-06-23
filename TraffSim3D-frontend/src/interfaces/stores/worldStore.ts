@@ -255,16 +255,23 @@ export const useWorldStore = defineStore('world', () => {
     }
   };
 
-  const hydrate = (): { ok: true } | { ok: false; reason: string } => {
-    const result = loadScene();
-    if (!result.ok) return result;
+  /**
+   * Internal helper used by both `hydrate()` (which loads from
+   * LocalStorage) and `loadNetwork()` (which accepts an already-
+   * parsed network from an imported file). Tears down the old
+   * Rapier bodies, swaps the network, and re-registers the new
+   * vehicles. Returns `{ ok: true }`; the network reference is
+   * always replaced as long as we got here (the caller has already
+   * validated the input).
+   */
+  const replaceNetwork = (next: RoadNetwork): { ok: true } => {
     // Remove old bodies
     if (rapierWorld) {
       for (const id of Object.keys(network.vehicles)) {
         rapierWorld.removeVehicle(id);
       }
     }
-    network = result.network;
+    network = next;
     // Re-register new vehicles
     if (rapierWorld) {
       for (const v of Object.values(network.vehicles)) {
@@ -275,6 +282,22 @@ export const useWorldStore = defineStore('world', () => {
     }
     bumpTick();  // signal Vue watchers; the renderer will rebuild via identity change
     return { ok: true };
+  };
+
+  const hydrate = (): { ok: true } | { ok: false; reason: string } => {
+    const result = loadScene();
+    if (!result.ok) return result;
+    return replaceNetwork(result.network);
+  };
+
+  /**
+   * Replace the current network with an already-validated `RoadNetwork`
+   * (e.g. one produced by `importSceneFile`). Bypasses the LocalStorage
+   * round-trip — the caller has already done the validation that
+   * `hydrate()` would do via `loadScene()`.
+   */
+  const loadNetwork = (next: RoadNetwork): { ok: true } => {
+    return replaceNetwork(next);
   };
 
   const clearStorage = (): { ok: true } => {
@@ -300,6 +323,7 @@ export const useWorldStore = defineStore('world', () => {
     notifyChange,
     serialize,
     hydrate,
+    loadNetwork,
     clearStorage,
     frameMsMin,
     frameMsMax,

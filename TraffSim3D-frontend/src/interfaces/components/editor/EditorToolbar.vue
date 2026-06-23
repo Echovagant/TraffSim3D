@@ -41,6 +41,16 @@
     <button title="从 LocalStorage 加载" @click="io.load">📂 Load</button>
     <button title="清除 LocalStorage 中的场景" @click="io.clear">🗑️ Clear</button>
 
+    <button title="导出场景为 JSON 文件" @click="io.exportFile">⬇ Export</button>
+    <button title="从 JSON 文件导入场景" @click="onImportFile">⬆ Import</button>
+    <input
+      ref="fileInput"
+      type="file"
+      accept="application/json,.json"
+      style="display: none"
+      @change="onFileSelected"
+    />
+
     <!-- Flash message: any code can call `showFlashMessage`; the
          toolbar always renders whatever's there for 3s. -->
     <span
@@ -62,11 +72,35 @@ import { TICK_RATE_LADDER } from '@interfaces/stores/worldStore';
 const { world } = useEditor(ref(null));
 const io = useSceneIO();
 const flash = _flashMessageRef;
+const fileInput = ref<HTMLInputElement | null>(null);
 
 const onAddVehicle = (): void => {
   // `addVehicle` returns `{ ok, ... }` in M1.5; we don't need the
   // result here because failures surface via the flash channel.
   world.addVehicle();
+};
+
+/**
+ * Trigger the hidden file input so the browser opens its native
+ * file picker. The actual read happens in `onFileSelected`.
+ */
+const onImportFile = (): void => {
+  fileInput.value?.click();
+};
+
+/**
+ * Read the user-selected file and forward to `useSceneIO.importFile`,
+ * which parses + validates + loads it. Reset `target.value` so the
+ * same file can be re-selected (browsers cache the previous selection
+ * and won't fire `change` again otherwise).
+ */
+const onFileSelected = async (e: Event): Promise<void> => {
+  const target = e.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+  await io.importFile(file);
+  // Reset the input so re-selecting the same file fires `change` again.
+  target.value = '';
 };
 
 const formatRate = (r: number): string => {
