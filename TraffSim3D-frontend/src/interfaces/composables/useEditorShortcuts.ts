@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted } from 'vue';
 import { useWorldStore } from '@interfaces/stores/worldStore';
 import { useSelectionStore } from '@interfaces/stores/selectionStore';
+import { focusOnSelection } from './useCameraFocus';
 
 /**
  * Bind editor-wide keyboard shortcuts. Mount this once at the route
@@ -16,6 +17,8 @@ import { useSelectionStore } from '@interfaces/stores/selectionStore';
  *   + / =               → tick rate up
  *   - / _               → tick rate down
  *   Escape              → clear selection
+ *   F                   → focus camera on currently selected entity
+ *   ?                   → toggle keyboard-shortcuts modal
  */
 export const useEditorShortcuts = (): void => {
   const world = useWorldStore();
@@ -77,6 +80,13 @@ export const useEditorShortcuts = (): void => {
         if (selection.kind) {
           e.preventDefault();
           selection.clear();
+        }
+        break;
+      case 'f':
+      case 'F':
+        e.preventDefault();
+        if (selection.kind && selection.id) {
+          focusOnSelection(selection.kind, selection.id, world);
         }
         break;
       case '?':

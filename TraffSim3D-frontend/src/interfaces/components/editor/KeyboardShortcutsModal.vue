@@ -51,6 +51,10 @@
               <td>取消选择 / 关闭弹窗</td>
             </tr>
             <tr>
+              <td><kbd>F</kbd></td>
+              <td>聚焦到当前选中的实体</td>
+            </tr>
+            <tr>
               <td><kbd>?</kbd></td>
               <td>显示本快捷键面板</td>
             </tr>

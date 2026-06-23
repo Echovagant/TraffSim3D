@@ -40,6 +40,7 @@
     <button title="保存到 LocalStorage" @click="io.save">💾 Save</button>
     <button title="从 LocalStorage 加载" @click="io.load">📂 Load</button>
     <button title="清除 LocalStorage 中的场景" @click="io.clear">🗑️ Clear</button>
+    <button title="聚焦当前选中 (F)" @click="onFocusSelected">🎯 Focus</button>
 
     <button title="导出场景为 JSON 文件" @click="io.exportFile">⬇ Export</button>
     <button title="从 JSON 文件导入场景" @click="onImportFile">⬆ Import</button>
@@ -75,6 +76,8 @@
 import { useEditor } from '@interfaces/composables/useEditor';
 import { useSceneIO } from '@interfaces/composables/useSceneIO';
 import { _flashMessageRef } from '@interfaces/composables/useFlashMessage';
+import { focusOnSelection } from '@interfaces/composables/useCameraFocus';
+import { useSelectionStore } from '@interfaces/stores/selectionStore';
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { TICK_RATE_LADDER } from '@interfaces/stores/worldStore';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal.vue';
@@ -84,6 +87,13 @@ const io = useSceneIO();
 const flash = _flashMessageRef;
 const fileInput = ref<HTMLInputElement | null>(null);
 const showShortcuts = ref(false);
+const selection = useSelectionStore();
+
+const onFocusSelected = (): void => {
+  if (selection.kind && selection.id) {
+    focusOnSelection(selection.kind, selection.id, world);
+  }
+};
 
 // Bridge from the `?` key handler in `useEditorShortcuts` (which
 // dispatches a window-level custom event so it doesn't need a direct
