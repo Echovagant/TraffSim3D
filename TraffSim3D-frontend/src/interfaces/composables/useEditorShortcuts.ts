@@ -79,6 +79,16 @@ export const useEditorShortcuts = (): void => {
           selection.clear();
         }
         break;
+      case '?':
+        // Open / close the keyboard-shortcuts modal. The actual open
+        // state lives in EditorToolbar.vue; we bridge via a window-level
+        // custom event so this composable doesn't need a direct ref.
+        // `?` requires Shift on QWERTY (Shift+/), and the layout-specific
+        // character (`?` vs other) is the trade-off — the toolbar `?`
+        // button is the primary discovery path.
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('traffsim3d:toggle-shortcuts'));
+        break;
     }
   };
 

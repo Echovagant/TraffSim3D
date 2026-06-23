@@ -51,6 +51,13 @@
       @change="onFileSelected"
     />
 
+    <span class="sep" />
+    <button
+      class="help-btn"
+      title="显示键盘快捷键 (?)"
+      @click="showShortcuts = true"
+    >?</button>
+
     <!-- Flash message: any code can call `showFlashMessage`; the
          toolbar always renders whatever's there for 3s. -->
     <span
@@ -59,6 +66,8 @@
       :class="`flash-${flash.level}`"
     >{{ flash.text }}</span>
     <span v-if="io.lastMessage.value" class="io-msg">{{ io.lastMessage.value }}</span>
+
+    <KeyboardShortcutsModal v-model:open="showShortcuts" />
   </div>
 </template>
 
@@ -66,13 +75,24 @@
 import { useEditor } from '@interfaces/composables/useEditor';
 import { useSceneIO } from '@interfaces/composables/useSceneIO';
 import { _flashMessageRef } from '@interfaces/composables/useFlashMessage';
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { TICK_RATE_LADDER } from '@interfaces/stores/worldStore';
+import KeyboardShortcutsModal from './KeyboardShortcutsModal.vue';
 
 const { world } = useEditor(ref(null));
 const io = useSceneIO();
 const flash = _flashMessageRef;
 const fileInput = ref<HTMLInputElement | null>(null);
+const showShortcuts = ref(false);
+
+// Bridge from the `?` key handler in `useEditorShortcuts` (which
+// dispatches a window-level custom event so it doesn't need a direct
+// ref into the toolbar) to the modal's `open` ref.
+const onToggleShortcuts = (): void => {
+  showShortcuts.value = !showShortcuts.value;
+};
+onMounted(() => window.addEventListener('traffsim3d:toggle-shortcuts', onToggleShortcuts));
+onBeforeUnmount(() => window.removeEventListener('traffsim3d:toggle-shortcuts', onToggleShortcuts));
 
 const onAddVehicle = (): void => {
   // `addVehicle` returns `{ ok, ... }` in M1.5; we don't need the
