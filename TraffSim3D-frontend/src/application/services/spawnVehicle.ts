@@ -62,24 +62,32 @@ export interface SpawnOptions {
 
 /**
  * True if no existing vehicle on (roadId, laneIndex) is within
- * `requiredGap` of `candidate.s` (along-lane distance, in lane-forward
- * terms — so a forward-lane car at s=20 doesn't count as "near" a
- * backward-lane car at the same s).
+ * `requiredGap` of the candidate's world position. M2-A: we compare
+ * in **world space** (2D distance) rather than the lane-frame `s`
+ * coordinate, because Rapier lets vehicles drift physically and the
+ * `s` value (re-derived by `findNearestLane` each tick) can lag or
+ * snap to a different lane than the body is actually on. World-space
+ * distance is the truthful "are these two cars about to overlap".
+ *
+ * Candidate position is computed via `lanePoint(road, laneIndex, s)`
+ * because `s` is the only lane-frame handle we have at spawn time —
+ * the new body doesn't exist in Rapier yet, so `readPose()` would
+ * return `null`.
  */
 const isSpotFree = (
   network: RoadNetwork,
   candidate: SpawnCandidate,
   requiredGap: number,
 ): boolean => {
-  const roadLen = roadLength(network.roads[candidate.roadId]!);
+  const road = network.roads[candidate.roadId]!;
+  const cp = lanePoint(road, candidate.laneIndex, candidate.s);
+  const cx = cp.position.x;
+  const cz = cp.position.z;
   for (const other of Object.values(network.vehicles)) {
-    if (other.roadId !== candidate.roadId) continue;
-    if (other.laneIndex !== candidate.laneIndex) continue;
-    // Along-lane distance, accounting for wraparound (a car at s=58
-    // and a candidate at s=2 are 4u apart on a 60u road, not 56u).
-    const ds = Math.abs(other.s - candidate.s);
-    const wrapDs = Math.min(ds, roadLen - ds);
-    if (wrapDs < requiredGap) return false;
+    const dx = other.position.x - cx;
+    const dz = other.position.z - cz;
+    const distSq = dx * dx + dz * dz;
+    if (distSq < requiredGap * requiredGap) return false;
   }
   return true;
 };
