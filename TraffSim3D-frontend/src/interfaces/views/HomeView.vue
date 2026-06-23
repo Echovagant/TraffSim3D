@@ -15,7 +15,9 @@
         <nav class="nav-links" aria-label="模块导航">
           <router-link to="/scene-editor" class="nav-link">SceneLab</router-link>
           <router-link to="/simulation-lab" class="nav-link">SimulationLab</router-link>
+          <router-link to="/map-importer" class="nav-link">MapLab</router-link>
           <router-link to="/ai-playground" class="nav-link">AI Proving Ground</router-link>
+          <router-link to="/deliverables" class="nav-link">DeliveryLab</router-link>
           <router-link to="/backend" class="nav-link">Backend</router-link>
         </nav>
       </div>
@@ -41,7 +43,7 @@
 
       <section class="modules">
         <header class="modules-header">
-          <h2>四大产品模块</h2>
+          <h2>五大产品模块</h2>
           <p>每个模块对应一个前端路由和一个后端 app，按里程碑逐步交付。</p>
         </header>
 
@@ -74,6 +76,21 @@
             </div>
           </router-link>
 
+          <router-link to="/map-importer" class="module-card status-planned">
+            <div class="module-icon" aria-hidden>🗺️</div>
+            <div class="module-body">
+              <div class="module-title-row">
+                <h3>MapLab</h3>
+                <span class="badge badge-planned">M3 · Planned</span>
+              </div>
+              <p class="module-sub">OSM 地图导入与路网生成</p>
+              <p class="module-desc">
+                解析 OpenStreetMap 的 <code>.osm</code> / <code>.pbf</code> 文件 → 路网 graph → SceneLab 加载。
+                通过后端 <code>apps/maps</code> (PostGIS) 持久化, 前端拉取并渲染。
+              </p>
+            </div>
+          </router-link>
+
           <router-link to="/ai-playground" class="module-card status-planned">
             <div class="module-icon" aria-hidden>🤖</div>
             <div class="module-body">
@@ -84,6 +101,21 @@
               <p class="module-sub">RL 训练 + 回放</p>
               <p class="module-desc">
                 与后端 apps/rl (PyTorch + Gymnasium) 联动：多智能体策略训练、回放 buffer 可视化、学到策略的影子车在 SceneLab 里 replay。
+              </p>
+            </div>
+          </router-link>
+
+          <router-link to="/deliverables" class="module-card status-planned">
+            <div class="module-icon" aria-hidden>📦</div>
+            <div class="module-body">
+              <div class="module-title-row">
+                <h3>DeliveryLab</h3>
+                <span class="badge badge-planned">M5 · Planned</span>
+              </div>
+              <p class="module-sub">部署与交付物总览</p>
+              <p class="module-desc">
+                Docker Compose 启动清单、ADR 归档、API 文档、测试覆盖率报告的目录页。
+                不引入新功能, 只把前 4 个里程碑的可交付物集中展示给项目接手人。
               </p>
             </div>
           </router-link>

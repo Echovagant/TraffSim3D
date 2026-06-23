@@ -22,6 +22,16 @@ const router = createRouter({
       component: () => import('@interfaces/views/AIPlaygroundView.vue'),
     },
     {
+      path: '/map-importer',
+      name: 'map-importer',
+      component: () => import('@interfaces/views/MapImporterView.vue'),
+    },
+    {
+      path: '/deliverables',
+      name: 'deliverables',
+      component: () => import('@interfaces/views/DeliveryView.vue'),
+    },
+    {
       path: '/backend',
       name: 'backend',
       component: () => import('@interfaces/views/BackendView.vue'),
