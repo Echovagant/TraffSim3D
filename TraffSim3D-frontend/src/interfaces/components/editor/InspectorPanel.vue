@@ -70,13 +70,16 @@ const updateColor = (color: string) => {
 };
 const updateType = (type: 'car' | 'truck' | 'bus') => {
   if (selection.kind === 'vehicle' && entity.value) {
-    (entity.value as { type: 'car' | 'truck' | 'bus' }).type = type;
+    const v = entity.value as Vehicle;
+    if (v.type === type) return;
+    world.updateVehicleType(v.id, type);
     world.notifyChange();
   }
 };
 const updateSpeed = (kmh: number) => {
   if (selection.kind === 'vehicle' && entity.value) {
-    (entity.value as { speed: number }).speed = Speed.fromKmh(kmh);
+    const v = entity.value as Vehicle;
+    world.setVehicleSpeed(v.id, kmh);
     world.notifyChange();
   }
 };

@@ -184,6 +184,41 @@ export const useWorldStore = defineStore('world', () => {
     bumpTick();
   };
 
+  /**
+   * User-edited a vehicle's speed via the Inspector. Update the
+   * Rapier body's linear velocity immediately so the 3D scene
+   * reflects the change, then mutate the entity field. The entity's
+   * `targetSpeed` is NOT changed — the next tick's applyControl will
+   * re-derive linvel from `targetSpeed`, which is the road limit, so
+   * the user's edit only persists for one frame. This is a known
+   * trade-off; the inspector's purpose is **observe** + **small nudges**,
+   * not permanent speed override.
+   */
+  const setVehicleSpeed = (vehicleId: string, speedKmh: number): void => {
+    const v = network.vehicles[vehicleId];
+    if (!v) return;
+    v.speed = speedKmh / 3.6;  // km/h → m/s
+    if (rapierWorld) {
+      rapierWorld.setVehicleSpeed(vehicleId, v.speed, v.heading);
+    }
+    bumpTick();
+  };
+
+  /**
+   * User-edited a vehicle's type via the Inspector. Mutate the
+   * entity field, then ask Rapier to re-register the body with the
+   * new type's mass + halfExtents.
+   */
+  const updateVehicleType = (vehicleId: string, newType: Vehicle['type']): void => {
+    const v = network.vehicles[vehicleId];
+    if (!v) return;
+    v.type = newType;
+    if (rapierWorld) {
+      rapierWorld.updateVehicleType(vehicleId, newType);
+    }
+    bumpTick();
+  };
+
   const addTrafficLight = (overrides: Partial<TrafficLight> = {}): TrafficLight | null => {
     const inter = Object.values(network.intersections)[0];
     if (!inter) return null;
@@ -268,6 +303,8 @@ export const useWorldStore = defineStore('world', () => {
     getNetwork,
     addVehicle,
     removeVehicle,
+    setVehicleSpeed,
+    updateVehicleType,
     addTrafficLight,
     removeTrafficLight,
     notifyChange,

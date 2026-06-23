@@ -12,6 +12,7 @@
 import type { Vec3, WorldConfig } from './WorldConfig';
 import { DEFAULT_WORLD_CONFIG } from './WorldConfig';
 import type { RigidBodySpec } from './RapierBodySpec';
+import { buildRigidBodySpec } from './RapierBodySpec';
 
 export interface ContactEvent {
   colliderA: string;
@@ -170,6 +171,73 @@ export class RapierWorld {
     const vx = v * Math.cos(heading);
     const vz = v * Math.sin(heading);
     body.setLinvel({ x: vx, y: 0, z: vz }, true);
+  }
+
+  /**
+   * Set a vehicle's linear velocity to `speed` along `heading`
+   * (world-space, in radians). Heading follows the same convention
+   * as `applyControl`: `vx = speed * cos(heading)`, `vz = speed * sin(heading)`.
+   *
+   * Unlike `applyControl`, this method is intended for **discrete
+   * user-initiated edits** (the inspector), not the per-tick
+   * physics step. The speed is applied immediately; the next
+   * `applyControl` will respect it (because `applyControl` reads
+   * `targetSpeed` and the entity's `targetSpeed` is the road limit,
+   * but if the user set `speed` directly we want the body to show
+   * that speed until the next traffic-light / car-following
+   * decision resets `targetSpeed`).
+   *
+   * For the inspector use case, we want the user's edit to be
+   * **observable** — change the body's linvel now. Subsequent ticks
+   * will move `targetSpeed` again, but at least the visual
+   * responds to the click.
+   */
+  setVehicleSpeed(vehicleId: string, speed: number, heading: number): void {
+    if (!this.world) return;
+    const bodyHandle = this.bodies.get(vehicleId);
+    if (bodyHandle === undefined) return;
+    const body = this.world.getRigidBody(bodyHandle);
+    if (!body) return;
+    const v = Math.max(0, speed);
+    const vx = v * Math.cos(heading);
+    const vz = v * Math.sin(heading);
+    body.setLinvel({ x: vx, y: 0, z: vz }, true);
+  }
+
+  /**
+   * Re-register a vehicle with a new type's body spec (mass + collider
+   * halfExtents). Used by the inspector when the user changes
+   * car → bus etc. The body keeps its current position, heading, and
+   * linear velocity. The new collider's mass affects the simulation
+   * immediately (heavier vehicles decelerate less from the same
+   * impulse).
+   *
+   * Implementation: remove the existing body, then `registerVehicle`
+   * again with the new spec. Rapier will create a fresh body at the
+   * given position; we then restore the previous linvel.
+   */
+  updateVehicleType(vehicleId: string, newType: import('@domain/entities/Vehicle').VehicleType): void {
+    if (!this.world || !this.R) {
+      throw new Error('RapierWorld not initialized — call init() first');
+    }
+    const bodyHandle = this.bodies.get(vehicleId);
+    if (bodyHandle === undefined) return;
+    const body = this.world.getRigidBody(bodyHandle);
+    if (!body) return;
+    const pos = body.translation();
+    const rot = body.rotation();
+    const linvel = body.linvel();
+    // Re-derive heading from quaternion (same formula as readPose).
+    const heading = Math.atan2(2 * (rot.w * rot.y + rot.x * rot.z), 1 - 2 * (rot.y * rot.y + rot.x * rot.x));
+    // Remove old body + collider.
+    this.removeVehicle(vehicleId);
+    // Build a new spec from RapierBodySpec and re-register.
+    // The caller is responsible for updating the entity's type field;
+    // here we just need the physical body to match the new type.
+    const spec = buildRigidBodySpec(vehicleId, newType, { x: pos.x, y: pos.y, z: pos.z }, heading);
+    this.registerVehicle(spec);
+    // Restore velocity on the new body.
+    this.setVehicleSpeed(vehicleId, Math.hypot(linvel.x, linvel.z), heading);
   }
 
   step(dt: number): WorldStepResult {
