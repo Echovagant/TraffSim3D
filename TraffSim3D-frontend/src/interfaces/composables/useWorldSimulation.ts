@@ -2,31 +2,77 @@ import { onBeforeUnmount, ref, watch, type Ref } from 'vue';
 import { ThreeJSRenderer } from '@infrastructure/rendering';
 import { useWorldStore } from '@interfaces/stores/worldStore';
 import { useSelectionStore } from '@interfaces/stores/selectionStore';
+import { RapierWorld } from '@infrastructure/physics';
+
+let sharedRapierWorld: RapierWorld | null = null;
+let rapierInitPromise: Promise<RapierWorld> | null = null;
+
+/** Lazily create + init the Rapier world singleton. Called from
+ *  useWorldSimulation. M2-A: 1 world per page lifetime; HMR
+ *  destroys on dispose (R7). */
+export const getOrCreateRapierWorld = async (): Promise<RapierWorld> => {
+  if (sharedRapierWorld) return sharedRapierWorld;
+  if (!rapierInitPromise) {
+    const w = new RapierWorld();
+    rapierInitPromise = w.init().then(() => {
+      sharedRapierWorld = w;
+      return w;
+    });
+  }
+  return rapierInitPromise;
+};
+
+export const destroySharedRapierWorld = (): void => {
+  if (sharedRapierWorld) {
+    sharedRapierWorld.destroy();
+    sharedRapierWorld = null;
+  }
+  rapierInitPromise = null;
+};
+
+// HMR teardown (R7) — Vite dispose callback runs on module reload.
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    destroySharedRapierWorld();
+  });
+}
 
 export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => {
   const store = useWorldStore();
   const selection = useSelectionStore();
   const isReady = ref(false);
+  const rapierReady = ref(false);
   let renderer: ThreeJSRenderer | null = null;
   let resizeObserver: ResizeObserver | null = null;
+  let rapierWorld: RapierWorld | null = null;
 
-  const setupRenderer = (canvas: HTMLCanvasElement) => {
+  const setupRenderer = async (canvas: HTMLCanvasElement) => {
+    // Init Rapier first so the store can register bodies before the
+    // first frame.
+    rapierWorld = await getOrCreateRapierWorld();
+    rapierReady.value = true;
+    // Register existing vehicles in Rapier (covers M1 saved-scene
+    // load path AND the default scene built by buildDefaultNetwork).
+    for (const v of Object.values(store.getNetwork().vehicles)) {
+      rapierWorld.registerVehicle({
+        vehicleId: v.id,
+        type: v.type,
+        position: v.position,
+        heading: v.heading,
+        mass: 1500,  // default; updated per-type in RapierBodySpec at register time
+        halfExtents: { x: 2.1, y: 0.75, z: 0.9 },
+      });
+    }
+    store.setRapierWorld(rapierWorld);
+
     renderer = new ThreeJSRenderer(canvas, { onTick: store.step });
-    // Pass a getter, NOT the network object — the store mutates the
-    // network in place each tick, and the renderer's per-frame loop
-    // calls the getter to see the latest state.
     renderer.setNetworkGetter(store.getNetwork);
-    // Plan B: the renderer reads the current selection each frame and
-    // positions the selection ring under the chosen entity.
     renderer.setSelectionGetter(() => {
       if (selection.kind && selection.id) {
         return { kind: selection.kind, id: selection.id };
       }
       return null;
     });
-    // Pause + sim rate: read every frame so toolbar/keyboard changes
-    // take effect immediately. `isRunning` defaults to `true`; `tickRate`
-    // defaults to `1` (real-time).
     renderer.setTickPolicyGetter(() => ({
       paused: !store.isRunning,
       rate: store.tickRate,
@@ -49,7 +95,7 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
   watch(
     canvasRef,
     (canvas) => {
-      if (canvas) setupRenderer(canvas);
+      if (canvas) void setupRenderer(canvas);
     },
     { immediate: true },
   );
@@ -59,8 +105,12 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
     renderer = null;
     resizeObserver?.disconnect();
     resizeObserver = null;
+    // Note: do NOT destroy the shared RapierWorld here. HMR might
+    // re-mount the same composable. HMR disposal goes through
+    // import.meta.hot.dispose above.
+    rapierWorld = null;
   });
 
   const getRenderer = (): ThreeJSRenderer | null => renderer;
-  return { isReady, store, getRenderer };
+  return { isReady, rapierReady, store, getRenderer };
 };

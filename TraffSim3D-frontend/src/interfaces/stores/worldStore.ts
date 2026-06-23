@@ -9,6 +9,7 @@ import { spawnVehicle, type SpawnOptions, type SpawnResult } from '@application/
 import { LightPhase } from '@domain/value-objects/Phase';
 import { saveScene, loadScene, clearScene } from '@application/use-cases';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
+import { RapierWorld } from '@infrastructure/physics';
 
 export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const;
 
@@ -28,6 +29,15 @@ export const useWorldStore = defineStore('world', () => {
   // by tick() to stamp `Vehicle.enteredIntersectionAt` so the cross-road
   // right-of-way rule can pick "the car that got there first".
   let simTime = 0;
+
+  // M2-A: optional Rapier physics world. Null before useWorldSimulation
+  // has finished its async `init()` (which loads the WASM). When null,
+  // tick() falls back to M1's hand-rolled move+s wrap.
+  let rapierWorld: RapierWorld | null = null;
+  const setRapierWorld = (w: RapierWorld | null): void => {
+    rapierWorld = w;
+  };
+  const getRapierWorld = (): RapierWorld | null => rapierWorld;
 
   const togglePause = (): void => {
     isRunning.value = !isRunning.value;
@@ -66,7 +76,9 @@ export const useWorldStore = defineStore('world', () => {
 
   const step = (dt: number) => {
     simTime += dt;
-    tick(network, dt, simTime);
+    // Clamp dt (I5): 防止卡顿后大跳跃穿模.
+    const clampedDt = Math.min(dt, 1 / 30);
+    tick(network, clampedDt, simTime, rapierWorld);
     tickCount.value += 1;
 
     // Frame-time stats
@@ -94,8 +106,27 @@ export const useWorldStore = defineStore('world', () => {
   };
 
   const reset = () => {
+    // Reset physics: remove all bodies, rebuild network.
+    if (rapierWorld) {
+      for (const id of Object.keys(network.vehicles)) {
+        rapierWorld.removeVehicle(id);
+      }
+    }
     network = buildDefaultNetwork();
     simTime = 0;
+    // Re-register default vehicles.
+    if (rapierWorld) {
+      for (const v of Object.values(network.vehicles)) {
+        rapierWorld.registerVehicle({
+          vehicleId: v.id,
+          type: v.type,
+          position: v.position,
+          heading: v.heading,
+          mass: 1500,
+          halfExtents: { x: 2.1, y: 0.75, z: 0.9 },
+        });
+      }
+    }
     tickCount.value += 1;
   };
 
@@ -128,11 +159,24 @@ export const useWorldStore = defineStore('world', () => {
       return result;
     }
     network.vehicles[result.vehicle.id] = result.vehicle;
+    // Register the new body in Rapier (no-op when Rapier is not yet
+    // initialised — useWorldSimulation will re-register on init).
+    if (rapierWorld) {
+      rapierWorld.registerVehicle({
+        vehicleId: result.vehicle.id,
+        type: result.vehicle.type,
+        position: result.vehicle.position,
+        heading: result.vehicle.heading,
+        mass: 1500,
+        halfExtents: { x: 2.1, y: 0.75, z: 0.9 },
+      });
+    }
     bumpTick();
     return result;
   };
 
   const removeVehicle = (id: string): void => {
+    if (rapierWorld) rapierWorld.removeVehicle(id);
     delete network.vehicles[id];
     bumpTick();
   };
@@ -181,7 +225,26 @@ export const useWorldStore = defineStore('world', () => {
   const hydrate = (): { ok: true } | { ok: false; reason: string } => {
     const result = loadScene();
     if (!result.ok) return result;
+    // Remove old bodies
+    if (rapierWorld) {
+      for (const id of Object.keys(network.vehicles)) {
+        rapierWorld.removeVehicle(id);
+      }
+    }
     network = result.network;
+    // Re-register new vehicles
+    if (rapierWorld) {
+      for (const v of Object.values(network.vehicles)) {
+        rapierWorld.registerVehicle({
+          vehicleId: v.id,
+          type: v.type,
+          position: v.position,
+          heading: v.heading,
+          mass: 1500,
+          halfExtents: { x: 2.1, y: 0.75, z: 0.9 },
+        });
+      }
+    }
     bumpTick();  // signal Vue watchers; the renderer will rebuild via identity change
     return { ok: true };
   };
@@ -215,5 +278,7 @@ export const useWorldStore = defineStore('world', () => {
     setRunning,
     setTickRate,
     cycleTickRate,
+    setRapierWorld,
+    getRapierWorld,
   };
 });
