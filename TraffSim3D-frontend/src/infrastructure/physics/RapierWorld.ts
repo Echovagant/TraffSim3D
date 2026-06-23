@@ -212,6 +212,29 @@ export class RapierWorld {
   }
 
   /**
+   * Teleport a vehicle's rigid body to `position` (world-space, metres).
+   * Used by the editor's drag-to-move: while dragging, the position
+   * is updated every frame; on drag end, the body is teleported to
+   * the final spot and linvel is zeroed so the next applyControl
+   * restarts from rest at the new spot.
+   *
+   * Implementation: setTranslation (wakes the body via `true`), then
+   * setLinvel to zero. The `heading` is NOT updated here — drag
+   * doesn't rotate the vehicle; rotation is set on drag end via
+   * `setRotation` if needed (out of scope for this plan — vehicle
+   * keeps its current heading).
+   */
+  setVehiclePosition(vehicleId: string, position: { x: number; y: number; z: number }): void {
+    if (!this.world) return;
+    const bodyHandle = this.bodies.get(vehicleId);
+    if (bodyHandle === undefined) return;
+    const body = this.world.getRigidBody(bodyHandle);
+    if (!body) return;
+    body.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
+    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  }
+
+  /**
    * Re-register a vehicle with a new type's body spec (mass + collider
    * halfExtents). Used by the inspector when the user changes
    * car → bus etc. The body keeps its current position, heading, and

@@ -6,6 +6,7 @@ import type { TrafficLight } from '@domain/entities/TrafficLight';
 import { buildDefaultNetwork } from '@application/services/defaultScene';
 import { tick } from '@application/services/tick';
 import { spawnVehicle, type SpawnOptions, type SpawnResult } from '@application/services/spawnVehicle';
+import { findNearestLaneOnNetwork } from '@application/services/laneFrameSync';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { saveScene, loadScene, clearScene } from '@application/use-cases';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
@@ -38,6 +39,57 @@ export const useWorldStore = defineStore('world', () => {
     rapierWorld = w;
   };
   const getRapierWorld = (): RapierWorld | null => rapierWorld;
+
+  // Editor is currently dragging a vehicle on the 3D canvas. While
+  // non-null, tick() skips that vehicle in both the applyControl
+  // loop AND the per-frame position re-derivation (otherwise Rapier
+  // would overwrite the drag-move on every frame). Lives as a
+  // plain `let` (not a ref) — only the renderer's read path and
+  // the drag handlers care; no Vue watcher needed.
+  let draggingId: string | null = null;
+  const setDraggingId = (id: string | null): void => {
+    draggingId = id;
+  };
+  const getDraggingId = (): string | null => draggingId;
+
+  /**
+   * Editor dropped a vehicle at `position`. Update the entity's
+   * position, sync the Rapier body, and re-snap to the nearest lane
+   * (across the whole network — the user may have dropped on a
+   * different road) so future ticks resume lane-based movement.
+   *
+   * The re-snap is what makes the next tick "know" where the
+   * vehicle is on the lane graph — without it, the vehicle would
+   * snap back to its old `s` on the next frame.
+   *
+   * Returns `{ ok: true }` on success, `{ ok: false, reason }` if
+   * the vehicle id is unknown. The caller (useEditor) uses the
+   * return value to decide whether to keep or clear the drag.
+   */
+  const moveVehicleTo = (
+    vehicleId: string,
+    position: { x: number; y: number; z: number },
+  ): { ok: true } | { ok: false; reason: string } => {
+    const v = network.vehicles[vehicleId];
+    if (!v) return { ok: false, reason: 'vehicle not found' };
+    v.position = { x: position.x, y: position.y, z: position.z };
+    if (rapierWorld) {
+      rapierWorld.setVehiclePosition(vehicleId, v.position);
+    }
+    // Re-snap to the nearest lane across the whole network. If the
+    // drop point is far from any lane (e.g. mid-intersection with
+    // no road near the cursor), keep the entity's existing roadId
+    // / laneIndex / s — the next tick will derive a sensible
+    // position via findNearestLane anyway.
+    const snap = findNearestLaneOnNetwork(network, v.position);
+    if (snap) {
+      v.roadId = snap.roadId;
+      v.laneIndex = snap.laneIndex;
+      v.s = snap.s;
+    }
+    bumpTick();
+    return { ok: true };
+  };
 
   const togglePause = (): void => {
     isRunning.value = !isRunning.value;
@@ -81,7 +133,7 @@ export const useWorldStore = defineStore('world', () => {
     // 都用同一个值.
     const clampedDt = Math.max(0, Math.min(dt, 1 / 30));
     simTime += clampedDt;
-    tick(network, clampedDt, simTime, rapierWorld);
+    tick(network, clampedDt, simTime, rapierWorld, draggingId);
     tickCount.value += 1;
 
     // Frame-time stats
@@ -334,5 +386,8 @@ export const useWorldStore = defineStore('world', () => {
     cycleTickRate,
     setRapierWorld,
     getRapierWorld,
+    setDraggingId,
+    getDraggingId,
+    moveVehicleTo,
   };
 });

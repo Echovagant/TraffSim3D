@@ -1,6 +1,11 @@
 <template>
   <div ref="containerRef" class="world-canvas">
-    <canvas ref="canvasRef" @click="handleClick" />
+    <canvas
+      ref="canvasRef"
+      @mousedown="handleMouseDown"
+      @mousemove="handleMouseMove"
+      @mouseup="handleMouseUp"
+    />
   </div>
 </template>
 
@@ -23,7 +28,7 @@ watch(isReady, (ready) => {
   if (ready) rendererRef.value = getRenderer();
 });
 useCameraControls(canvasRef, rendererRef);
-const { handleClick } = useEditor(rendererRef);
+const { handleMouseDown, handleMouseMove, handleMouseUp } = useEditor(rendererRef);
 </script>
 
 <style scoped>

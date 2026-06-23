@@ -68,6 +68,26 @@ export class ThreeJSRenderer {
     return this.camera;
   }
 
+  /**
+   * Cast a ray from the camera through the screen point `(x, y)`
+   * and return the intersection with the y=0 ground plane. Used by
+   * the editor's drag handler to convert mouse coordinates to world
+   * coordinates. Returns null if the ray is parallel to the plane.
+   */
+  screenToGround(x: number, y: number): { x: number; y: number; z: number } | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((x - rect.left) / rect.width) * 2 - 1,
+      -((y - rect.top) / rect.height) * 2 + 1,
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(ndc, this.camera);
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const intersection = new THREE.Vector3();
+    const hit = raycaster.ray.intersectPlane(groundPlane, intersection);
+    return hit ? { x: hit.x, y: 0, z: hit.z } : null;
+  }
+
   /** Attach external controls by exposing the camera. OrbitControls wraps this. */
   attachControls(controls: { update: () => void }): void {
     this.controls = controls;

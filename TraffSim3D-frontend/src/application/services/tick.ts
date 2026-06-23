@@ -41,6 +41,7 @@ export const tick = (
   dt: number,
   simTime: number,
   rapierWorld: RapierWorld | null,
+  draggingId: string | null,
 ): void => {
   // 1. Advance traffic-light phases (M1 30/3/30 — M2-B replaces).
   //    For M2-A we keep the hard-coded cycle so the perf gate
@@ -84,6 +85,10 @@ export const tick = (
   // 5. Hand each vehicle's control to Rapier.
   if (rapierWorld) {
     for (const v of Object.values(network.vehicles)) {
+      // Skip the vehicle the user is currently dragging on the
+      // canvas — otherwise Rapier would yank it back to the
+      // lane-frame position every frame.
+      if (v.id === draggingId) continue;
       const road = network.roads[v.roadId];
       if (!road) continue;
       const heading = v.heading;  // world-space
@@ -102,8 +107,11 @@ export const tick = (
     classifyContacts(network, result.contactEvents);
 
     // 8. Re-derive Vehicle.position / heading from Rapier pose,
-    //    and update laneIndex / s via findNearestLane.
+    //    and update laneIndex / s via findNearestLane. Skip the
+    //    dragged vehicle — its position is being driven by the
+    //    editor's drag handler, not by Rapier.
     for (const v of Object.values(network.vehicles)) {
+      if (v.id === draggingId) continue;
       const pose = rapierWorld.readPose(v.id);
       if (!pose) continue;  // body not registered (skip — should not happen)
       v.position.x = pose.position.x;
