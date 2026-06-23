@@ -13,6 +13,7 @@ import type { Vec3, WorldConfig } from './WorldConfig';
 import { DEFAULT_WORLD_CONFIG } from './WorldConfig';
 import type { RigidBodySpec } from './RapierBodySpec';
 import { buildRigidBodySpec } from './RapierBodySpec';
+import type { World, EventQueue } from '@dimforge/rapier3d-compat/pipeline';
 
 export interface ContactEvent {
   colliderA: string;
@@ -45,10 +46,11 @@ type HandleMap = Map<string, number>;
 
 export class RapierWorld {
   private R: typeof import('@dimforge/rapier3d-compat') | null = null;
-  private world: any = null;  // RAPIER.World
-  private eventQueue: any = null;  // RAPIER.EventQueue
+  private world: World | null = null;
+  private eventQueue: EventQueue | null = null;
   private bodies: HandleMap = new Map();
   private colliders: HandleMap = new Map();
+  private colliderHandleToVehicleIdMap: Map<number, string> = new Map();
   private bodyForCollider: Map<number, number> = new Map();  // collider handle → body handle
   private cfg: WorldConfig;
   private simTime = 0;
@@ -77,7 +79,7 @@ export class RapierWorld {
   }
 
   private buildGround(): void {
-    if (!this.R) return;
+    if (!this.R || !this.world) return;
     // 大地面 cuboid. 1000x1000 足够大覆盖默认 scene.
     const groundDesc = this.R.RigidBodyDesc.fixed().setTranslation(0, -this.cfg.groundThickness, 0);
     const body = this.world.createRigidBody(groundDesc);
@@ -121,6 +123,7 @@ export class RapierWorld {
     const colliderHandle = collider.handle;
     this.bodies.set(spec.vehicleId, bodyHandle);
     this.colliders.set(spec.vehicleId, colliderHandle);
+    this.colliderHandleToVehicleIdMap.set(colliderHandle, spec.vehicleId);
     this.bodyForCollider.set(colliderHandle, bodyHandle);
     return spec.vehicleId;
   }
@@ -134,7 +137,11 @@ export class RapierWorld {
       this.world.removeRigidBody(body);
     }
     this.bodies.delete(vehicleId);
+    const colliderHandle = this.colliders.get(vehicleId);
     this.colliders.delete(vehicleId);
+    if (colliderHandle !== undefined) {
+      this.colliderHandleToVehicleIdMap.delete(colliderHandle);
+    }
     // bodyForCollider 由 Rapier 的 handle 空间回收 — 不用手清.
   }
 
@@ -297,10 +304,10 @@ export class RapierWorld {
     if (!hit) {
       return { point: null, distance: Number.POSITIVE_INFINITY, colliderHandle: null };
     }
-    const pt = ray.pointAt(hit.toi);
+    const pt = ray.pointAt(hit.timeOfImpact);
     return {
       point: { x: pt.x, y: pt.y, z: pt.z },
-      distance: hit.toi,
+      distance: hit.timeOfImpact,
       colliderHandle: String(hit.collider.handle),
     };
   }
@@ -327,6 +334,7 @@ export class RapierWorld {
     }
     this.bodies.clear();
     this.colliders.clear();
+    this.colliderHandleToVehicleIdMap.clear();
     this.bodyForCollider.clear();
     this.R = null;
     this.eventQueue = null;
@@ -335,10 +343,7 @@ export class RapierWorld {
   // --- private helpers ---
 
   private colliderHandleToVehicleId(h: number): string | null {
-    for (const [vid, ch] of this.colliders) {
-      if (ch === h) return vid;
-    }
-    return null;
+    return this.colliderHandleToVehicleIdMap.get(h) ?? null;
   }
 
   private toRapierVec3(v: Vec3): { x: number; y: number; z: number } {
