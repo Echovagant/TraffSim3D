@@ -33,4 +33,13 @@ export default defineConfig({
       },
     },
   },
+  optimizeDeps: {
+    // Rapier compat ships .wasm + asm.js; let Vite pre-bundle and
+    // serve it without trying to crawl the .wasm file as JS.
+    exclude: ['@dimforge/rapier3d-compat'],
+  },
+  assetsInclude: ['**/*.wasm'],
+  worker: {
+    format: 'es',
+  },
 })
