@@ -1,6 +1,7 @@
 import type { SerializedScene } from './sceneSerializer';
+import { SCENE_SCHEMA_VERSION } from './sceneSerializer';
 
-const KEY = 'traffsim3d:scene:v1';
+const KEY = `traffsim3d:scene:v${SCENE_SCHEMA_VERSION}`;
 
 export const LocalStorageAdapter = {
   save(scene: SerializedScene): void {

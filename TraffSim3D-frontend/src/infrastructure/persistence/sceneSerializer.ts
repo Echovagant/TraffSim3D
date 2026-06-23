@@ -62,35 +62,94 @@ export interface HydrationResult {
 }
 
 /**
- * M1.5 (v3) → M2-B (v4) migration: v3 has no light phases outside
- * green/yellow/red, so no per-light rewrites needed. Future migrations
- * (e.g. vehicle type change) plug in here.
+ * Schema migration dispatcher. Receives a `SerializedScene` of
+ * any known version and returns the current version, or `null`
+ * if the input is unrecognised.
+ *
+ * CRITICAL: do NOT coerce `schemaVersion` to a number implicitly.
+ * If the input has no schemaVersion (corrupted payload, or hand-
+ * edited localStorage), return null and let the caller surface a
+ * "saved scene is corrupted" error.
  */
-const migrateScene = (d: any): any => {
-  if (d.schemaVersion === 3) {
-    return { ...d, schemaVersion: 4 };
+const migrateScene = (d: unknown): SerializedScene | null => {
+  if (typeof d !== 'object' || d === null) return null;
+  const obj = d as Record<string, unknown>;
+  const v = obj.schemaVersion;
+  if (typeof v !== 'number') return null;
+  switch (v) {
+    case 1:
+    case 2:
+    case 3:
+      // v1, v2, v3 all upgrade to v4. If we add more versions,
+      // add cases here. Missing cases fall through to the default
+      // which returns null.
+      return { ...obj, schemaVersion: SCENE_SCHEMA_VERSION } as SerializedScene;
+    case SCENE_SCHEMA_VERSION:
+      return obj as unknown as SerializedScene;
+    default:
+      return null;
   }
-  return d;
 };
 
-export const hydrateNetwork = (data: unknown): HydrationResult => {
-  if (typeof data !== 'object' || data === null) return { ok: false, reason: 'not an object' };
-  const migrated = migrateScene(data as any);
-  const d = migrated as Partial<SerializedScene>;
-  if (d.schemaVersion !== SCENE_SCHEMA_VERSION) {
-    return { ok: false, reason: `unsupported schemaVersion ${d.schemaVersion}` };
+/**
+ * Parse a raw `localStorage` payload into a `RoadNetwork`. Returns
+ * `{ ok: true, network }` on success, `{ ok: false, reason }` on
+ * any validation failure. Failures are intentional: a corrupted
+ * saved scene must NOT silently replace the user's in-memory
+ * network with garbage.
+ *
+ * Accepts either a raw JSON string (preferred for unified error
+ * reporting) or an already-parsed object (legacy callers).
+ */
+export const hydrateNetwork = (raw: unknown): HydrationResult => {
+  if (raw === null || raw === undefined) return { ok: false, reason: 'no saved scene' };
+
+  let parsed: unknown;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { ok: false, reason: 'saved scene is not valid JSON' };
+    }
+  } else {
+    parsed = raw;
   }
-  if (!d.network || !Array.isArray(d.network.roads) || !Array.isArray(d.network.intersections) || !Array.isArray(d.network.vehicles)) {
-    return { ok: false, reason: 'network shape invalid' };
+
+  const migrated = migrateScene(parsed);
+  if (migrated === null) {
+    return { ok: false, reason: 'saved scene has unsupported or missing schemaVersion' };
   }
-  const net = createRoadNetwork();
-  for (const r of d.network.roads) net.roads[r.id] = r;
-  for (const i of d.network.intersections) {
-    if (!i.trafficLights.every((l) => isLightPhase(l.phase))) {
+
+  // Strict field validation. Empty arrays are OK (user saved a
+  // cleared scene), but missing fields, wrong types, or non-array
+  // shapes are not.
+  if (typeof migrated.schemaVersion !== 'number') {
+    return { ok: false, reason: 'migrated scene has no schemaVersion' };
+  }
+  if (migrated.schemaVersion !== SCENE_SCHEMA_VERSION) {
+    return { ok: false, reason: `migrated scene is v${migrated.schemaVersion}, expected v${SCENE_SCHEMA_VERSION}` };
+  }
+  const n = migrated.network as Record<string, unknown> | undefined;
+  if (typeof n !== 'object' || n === null) {
+    return { ok: false, reason: 'saved scene has no network' };
+  }
+  if (!Array.isArray(n.roads) || !Array.isArray(n.intersections) || !Array.isArray(n.vehicles)) {
+    return { ok: false, reason: 'saved scene network has malformed arrays' };
+  }
+
+  // Phase validation per traffic light
+  for (const i of (n.intersections as Array<Record<string, unknown>>)) {
+    const tls = i.trafficLights as unknown;
+    if (!Array.isArray(tls) || !tls.every((l) => isLightPhase((l as Record<string, unknown>).phase))) {
       return { ok: false, reason: 'invalid light phase' };
     }
-    net.intersections[i.id] = i;
   }
-  for (const v of d.network.vehicles) net.vehicles[v.id] = v;
+
+  // Build network
+  const net = createRoadNetwork();
+  for (const r of n.roads as Array<Road>) net.roads[r.id] = r;
+  for (const i of n.intersections as Array<SerializedIntersection>) net.intersections[i.id] = i;
+  for (const v of n.vehicles as Array<Vehicle>) net.vehicles[v.id] = v;
+
   return { ok: true, network: net };
 };
