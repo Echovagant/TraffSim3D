@@ -75,14 +75,17 @@ export const useWorldStore = defineStore('world', () => {
   let frameWindowCount = 0;
 
   const step = (dt: number) => {
-    simTime += dt;
-    // Clamp dt (I5): 防止卡顿后大跳跃穿模.
-    const clampedDt = Math.min(dt, 1 / 30);
+    // Clamp dt (I5): 防止卡顿后大跳跃穿模, AND 防止 rAF 边界
+    // 偶发的负 dt 进入 frame-time 统计 (会把 min 拉到 -0.x ms,
+    // 看起来像 bug). 上下界都 clamp 后 simTime/tick/frame 统计
+    // 都用同一个值.
+    const clampedDt = Math.max(0, Math.min(dt, 1 / 30));
+    simTime += clampedDt;
     tick(network, clampedDt, simTime, rapierWorld);
     tickCount.value += 1;
 
     // Frame-time stats
-    const ms = dt * 1000;
+    const ms = clampedDt * 1000;
     frameMsMin.value = Math.min(frameMsMin.value, ms);
     frameMsMax.value = Math.max(frameMsMax.value, ms);
     frameWindowMs += ms;
@@ -95,7 +98,7 @@ export const useWorldStore = defineStore('world', () => {
 
     // FPS rolling window
     frameCount += 1;
-    fpsAcc += dt;
+    fpsAcc += clampedDt;
     const now = performance.now();
     if (now - lastFpsUpdateMs >= 500) {
       fps.value = Math.round(frameCount / fpsAcc);
