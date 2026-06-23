@@ -9,7 +9,7 @@ import { spawnVehicle, type SpawnOptions, type SpawnResult } from '@application/
 import { LightPhase } from '@domain/value-objects/Phase';
 import { saveScene, loadScene, clearScene } from '@application/use-cases';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
-import { RapierWorld } from '@infrastructure/physics';
+import { RapierWorld, buildRigidBodySpec } from '@infrastructure/physics';
 
 export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const;
 
@@ -120,14 +120,9 @@ export const useWorldStore = defineStore('world', () => {
     // Re-register default vehicles.
     if (rapierWorld) {
       for (const v of Object.values(network.vehicles)) {
-        rapierWorld.registerVehicle({
-          vehicleId: v.id,
-          type: v.type,
-          position: v.position,
-          heading: v.heading,
-          mass: 1500,
-          halfExtents: { x: 2.1, y: 0.75, z: 0.9 },
-        });
+        rapierWorld.registerVehicle(
+          buildRigidBodySpec(v.id, v.type, v.position, v.heading),
+        );
       }
     }
     tickCount.value += 1;
@@ -165,14 +160,14 @@ export const useWorldStore = defineStore('world', () => {
     // Register the new body in Rapier (no-op when Rapier is not yet
     // initialised — useWorldSimulation will re-register on init).
     if (rapierWorld) {
-      rapierWorld.registerVehicle({
-        vehicleId: result.vehicle.id,
-        type: result.vehicle.type,
-        position: result.vehicle.position,
-        heading: result.vehicle.heading,
-        mass: 1500,
-        halfExtents: { x: 2.1, y: 0.75, z: 0.9 },
-      });
+      rapierWorld.registerVehicle(
+        buildRigidBodySpec(
+          result.vehicle.id,
+          result.vehicle.type,
+          result.vehicle.position,
+          result.vehicle.heading,
+        ),
+      );
     }
     bumpTick();
     return result;
@@ -273,14 +268,9 @@ export const useWorldStore = defineStore('world', () => {
     // Re-register new vehicles
     if (rapierWorld) {
       for (const v of Object.values(network.vehicles)) {
-        rapierWorld.registerVehicle({
-          vehicleId: v.id,
-          type: v.type,
-          position: v.position,
-          heading: v.heading,
-          mass: 1500,
-          halfExtents: { x: 2.1, y: 0.75, z: 0.9 },
-        });
+        rapierWorld.registerVehicle(
+          buildRigidBodySpec(v.id, v.type, v.position, v.heading),
+        );
       }
     }
     bumpTick();  // signal Vue watchers; the renderer will rebuild via identity change

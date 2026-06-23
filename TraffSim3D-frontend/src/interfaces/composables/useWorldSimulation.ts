@@ -2,7 +2,7 @@ import { onBeforeUnmount, ref, watch, type Ref } from 'vue';
 import { ThreeJSRenderer } from '@infrastructure/rendering';
 import { useWorldStore } from '@interfaces/stores/worldStore';
 import { useSelectionStore } from '@interfaces/stores/selectionStore';
-import { RapierWorld } from '@infrastructure/physics';
+import { RapierWorld, buildRigidBodySpec } from '@infrastructure/physics';
 
 let sharedRapierWorld: RapierWorld | null = null;
 let rapierInitPromise: Promise<RapierWorld> | null = null;
@@ -54,14 +54,9 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
     // Register existing vehicles in Rapier (covers M1 saved-scene
     // load path AND the default scene built by buildDefaultNetwork).
     for (const v of Object.values(store.getNetwork().vehicles)) {
-      rapierWorld.registerVehicle({
-        vehicleId: v.id,
-        type: v.type,
-        position: v.position,
-        heading: v.heading,
-        mass: 1500,  // default; updated per-type in RapierBodySpec at register time
-        halfExtents: { x: 2.1, y: 0.75, z: 0.9 },
-      });
+      rapierWorld.registerVehicle(
+        buildRigidBodySpec(v.id, v.type, v.position, v.heading),
+      );
     }
     store.setRapierWorld(rapierWorld);
 
