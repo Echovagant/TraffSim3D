@@ -99,3 +99,27 @@ export const MIN_RED_SECS = 10;
 export const YELLOW_CLEAR_SECS = 3;
 /** Default controller kind at app startup. */
 export const DEFAULT_CONTROLLER_KIND = 'actuated' as const;
+
+// ===== M2-C — sensor + export constants =====
+//
+// 16-line default per 008 §1.1. 32/64 deferred to M2-D.
+
+/** Per-type LiDAR mount height (m). 008 §1.2. */
+export const LIDAR_MOUNT_HEIGHT: Record<'car' | 'truck' | 'bus', number> = {
+  car:   1.5,
+  truck: 2.2,
+  bus:   2.6,
+};
+/** Horizontal rays (1° granularity). */
+export const LIDAR_HORIZONTAL_RAYS = 360;
+/** Vertical rays. M2-C default = 16 (008 §1.1). */
+export const LIDAR_VERTICAL_RAYS = 16;
+/** Max range (m). */
+export const LIDAR_MAX_RANGE = 100;
+/** Gaussian noise stddev (m). 008 §2 R2. */
+export const LIDAR_NOISE_STDDEV = 0.02;
+
+/** Trajectory sample interval (s). 10Hz. */
+export const TRAJECTORY_SAMPLE_INTERVAL = 0.1;
+/** Trajectory buffer cap (rows). 100k ≈ 30min @ 30车 × 10Hz. */
+export const TRAJECTORY_BUFFER_CAP = 100_000;
