@@ -12,7 +12,7 @@ import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { LightPhase } from '@domain/value-objects/Phase';
 import { roadLength } from '@domain/services/laneGeometry';
 import { STOP_LINE_DISTANCE } from '@shared/constants/simulation';
-import { FixedCycleController, ActuatedController, RLController } from './controllers';
+import { FixedCycleController, ActuatedController, RLController, CoordinatedController, type CoordinatedControllerDeps } from './controllers';
 
 export interface SignalDecision {
   phase: LightPhase;
@@ -33,7 +33,7 @@ export interface SignalController {
   applyAction(light: TrafficLight, action: SignalAction['name']): void;
 }
 
-export type ControllerKind = 'fixed-cycle' | 'actuated' | 'rl';
+export type ControllerKind = 'fixed-cycle' | 'actuated' | 'coordinated' | 'rl';
 
 /**
  * Queue length on `light.controlledLane` (or "any lane on this
@@ -87,13 +87,24 @@ export const getAxisQueueLength = (light: TrafficLight, network: RoadNetwork): n
 
 /**
  * Factory: returns a SignalController instance for the requested kind.
- * `coordinated` is not implemented in M2-B (deferred to M2-D / M3) —
- * falls back to actuated. Unknown kinds also fall back.
+ * `coordinated` was added in plan 028 (M2-B green-wave); its deps
+ * (offset map + enabled flag) are passed by worldStore so the
+ * controller stays a pure decision function.
  */
-export const createSignalController = (kind: ControllerKind): SignalController => {
+export interface CreateSignalControllerDeps {
+  getCoordinatedOffsets: () => ReadonlyMap<string, number>;
+  isCoordinatedEnabled: () => boolean;
+}
+
+export const createSignalController = (kind: ControllerKind, deps: CreateSignalControllerDeps): SignalController => {
   switch (kind) {
     case 'fixed-cycle': return new FixedCycleController();
     case 'actuated':    return new ActuatedController();
+    case 'coordinated':
+      return new CoordinatedController({
+        getOffsets: deps.getCoordinatedOffsets,
+        isEnabled: deps.isCoordinatedEnabled,
+      });
     case 'rl':          return new RLController();
     default:            return new ActuatedController();
   }

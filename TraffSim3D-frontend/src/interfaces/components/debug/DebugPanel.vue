@@ -90,13 +90,13 @@ const fpsClass = computed(() => (store.fps >= M1_MIN_FPS ? 'ok' : 'warn'));
 
 // 027: controller kind label + coordinated offset list (read from worldStore).
 const controllerKindLabel = computed(() => {
-  const k = store.controllerKind as string;
+  const k = store.controllerKind;
   if (k === 'fixed-cycle') return 'fixed';
   if (k === 'actuated') return 'actuated';
   if (k === 'coordinated') return 'coordinated';
   return 'rl';
 });
-const isCoordinated = computed(() => (store.controllerKind as string) === 'coordinated');
+const isCoordinated = computed(() => store.controllerKind === 'coordinated');
 const coordinatedPairs = computed(() =>
   Array.from(store.coordinatedOffsets.entries()).filter(([, v]) => v !== 0).sort());
 const laneDistribution = computed(() => {

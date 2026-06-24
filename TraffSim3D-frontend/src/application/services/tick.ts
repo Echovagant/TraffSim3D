@@ -42,6 +42,10 @@ import type { SensorRegistry } from './sensors/SensorRegistry';
 export interface SignalContext {
   controllers: Map<string, SignalController>;
   controllerKind: ControllerKind;
+  /** Plan 028: read by tick when lazily creating a new
+   *  CoordinatedController (M2-B green-wave). */
+  getCoordinatedOffsets: () => ReadonlyMap<string, number>;
+  isCoordinatedEnabled: () => boolean;
 }
 
 export interface TickContext {
@@ -73,7 +77,10 @@ export const tick = (
         let controller = ctx.signal.controllers.get(light.id);
         if (!controller) {
           // Lazy create (covers lights added after reset/hydrate).
-          controller = createSignalController(ctx.signal.controllerKind);
+          controller = createSignalController(ctx.signal.controllerKind, {
+            getCoordinatedOffsets: ctx.signal.getCoordinatedOffsets,
+            isCoordinatedEnabled: ctx.signal.isCoordinatedEnabled,
+          });
           ctx.signal.controllers.set(light.id, controller);
         }
         const decision = controller.decide(light, network, simTime);

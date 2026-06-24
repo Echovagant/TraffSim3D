@@ -86,7 +86,12 @@ export const useWorldStore = defineStore('world', () => {
   };
   const getControllerKind = (): ControllerKind => controllerKind.value;
   const getControllers = (): Map<string, SignalController> => controllers;
-  const signalContext: SignalContext = { controllers, get controllerKind() { return controllerKind.value; } };
+  const signalContext: SignalContext = {
+    controllers,
+    get controllerKind() { return controllerKind.value; },
+    getCoordinatedOffsets: () => coordinatedOffsets.value,
+    isCoordinatedEnabled: () => coordinatedOffsetsEnabled.value,
+  };
 
   /**
    * Force every traffic light to AllRed for `durationSeconds`.

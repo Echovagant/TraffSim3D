@@ -117,8 +117,6 @@ import { _flashMessageRef } from '@interfaces/composables/useFlashMessage';
 import { focusOnSelection } from '@interfaces/composables/useCameraFocus';
 import { useSelectionStore } from '@interfaces/stores/selectionStore';
 import type { ControllerKind } from '@application/services/signalController';
-// ControllerKind import 保留 — 028 收紧旁路时再用.
-void (null as unknown as ControllerKind);
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { TICK_RATE_LADDER } from '@interfaces/stores/worldStore';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal.vue';
@@ -154,10 +152,8 @@ const onAddVehicle = (): void => {
 };
 
 const onControllerKindChange = (e: Event): void => {
-  // 027 旁路: 'coordinated' 还没接 ControllerKind (028 才接). 临时宽化.
-  // 028 完成后收紧.
-  const v = (e.target as HTMLSelectElement).value as 'fixed-cycle' | 'actuated' | 'rl' | string;
-  world.setControllerKind(v as Parameters<typeof world.setControllerKind>[0]);
+  const v = (e.target as HTMLSelectElement).value as ControllerKind;
+  world.setControllerKind(v);
 };
 
 const onLidarToggle = (e: Event): void => {
@@ -217,9 +213,7 @@ const formatRate = (r: number): string => {
 
 const isMinRate = computed(() => world.tickRate === TICK_RATE_LADDER[0]);
 const isMaxRate = computed(() => world.tickRate === TICK_RATE_LADDER[TICK_RATE_LADDER.length - 1]);
-// 027 旁路: ControllerKind 还不含 'coordinated' (028 才扩). 用 string cast 绕过.
-// 028 完成后改成 `world.controllerKind === 'coordinated'`.
-const isCoordinatedKind = computed(() => (world.controllerKind as string) === 'coordinated');
+const isCoordinatedKind = computed(() => world.controllerKind === 'coordinated');
 </script>
 
 <style scoped>
