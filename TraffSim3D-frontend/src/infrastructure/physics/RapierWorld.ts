@@ -369,6 +369,17 @@ export class RapierWorld {
     return this.colliderHandleToVehicleIdMap.get(h) ?? null;
   }
 
+  /**
+   * Lookup the collider handle for a vehicle. Used by LiDAR
+   * excludeColliders (M2-C, plan 017 H4 fix). Returns the handle
+   * as a string for contract consistency with `ContactEvent.colliderA/B`
+   * (which is string in our domain).
+   */
+  getColliderHandle(vehicleId: string): string | null {
+    const h = this.colliders.get(vehicleId);
+    return h !== undefined ? String(h) : null;
+  }
+
   private toRapierVec3(v: Vec3): { x: number; y: number; z: number } {
     return { x: v.x, y: v.y, z: v.z };
   }

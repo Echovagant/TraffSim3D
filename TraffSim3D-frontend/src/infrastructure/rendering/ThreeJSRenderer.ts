@@ -168,6 +168,23 @@ export class ThreeJSRenderer {
   }
 
   /**
+   * Add an auxiliary mesh (e.g. LiDAR point cloud) to the scene.
+   * Auxiliary meshes are NOT picked, NOT synced to vehicles; they
+   * live alongside the main scene until removed. If the scene hasn't
+   * been built yet, the mesh is queued and added on next build.
+   */
+  addAuxiliary(mesh: THREE.Object3D): void {
+    if (this.built) this.built.root.add(mesh);
+  }
+
+  /**
+   * Remove a previously-added auxiliary mesh.
+   */
+  removeAuxiliary(mesh: THREE.Object3D): void {
+    if (this.built) this.built.root.remove(mesh);
+  }
+
+  /**
    * Provide a getter for the current tick policy (pause + rate). Called
    * every frame so the user can flip pause and change rate from anywhere.
    * If never set, the renderer defaults to `{ paused: false, rate: 1 }`

@@ -1,23 +1,16 @@
 // src/application/services/tick.ts
 //
-// M2-A: Rapier-driven simulation step. The hand-rolled collision
-// logic (M1: applyBoxInAndCollisionAvoidance + applyIntersectionNudge)
-// is gone — Rapier handles physics. This file does:
-//   1. Advance traffic lights (M1 30/3/30 — M2-B replaces)
-//   2. Compute per-vehicle targetSpeed (light + leader).
-//   3. Stamp simTime on vehicles entering intersection (for
-//      right-of-way tiebreaker; M1.5 behaviour kept).
-//   4. Cross-road yield (先到先行) — target-speed heuristic, since
-//      Rapier physics doesn't know about domain-level right-of-way.
-//   5. Hand each vehicle's (throttle, brake, targetSpeed, heading)
-//      to RapierWorld.applyControl.
-//   6. Call rapierWorld.step(dt) — physics integration.
-//   7. Drain contact events → classify contacts → update Vehicle.status.
-//   8. Re-derive Vehicle.position / heading / laneIndex / s from Rapier.
-//   9. Update status (driving / waiting / crashed).
+// M2-C (plan 017): tick signature is `tick(network, dt, simTime, ctx: TickContext)`.
+// This supersedes plan 010's 6-arg signature. The 5th param is now a
+// single `ctx: TickContext` that bundles:
+//   - rapierWorld       (M2-A physics)
+//   - signal            (M2-B per-light signal controllers)
+//   - trajectoryExporter (M2-C per-tick trajectory sample)
+//   - sensorRegistry    (M2-C per-tick LiDAR scan)
+//   - lidarEnabled      (M2-C UI toggle)
+//   - getHostPose       (M2-C sensor host pose lookup)
 //
-// The I5 fixed-timestep accumulator lives in useWorldSimulation,
-// not here. tick() always receives dt=1/60 (the physics step).
+// See plans/m2-interface-contract.md §4 for the per-tick event ordering.
 
 import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
@@ -30,47 +23,89 @@ import {
   STOP_LINE_BUFFER,
   STOP_LINE_DISTANCE,
   TIME_HEADWAY,
+  TRAJECTORY_SAMPLE_INTERVAL,
+  DEFAULT_CONTROLLER_KIND,
 } from '@shared/constants/simulation';
-import type { RapierWorld, ContactEvent } from '@infrastructure/physics';
+import type { RapierWorld, ContactEvent, Vec3 } from '@infrastructure/physics';
 import { findNearestLane } from './laneFrameSync';
-import { createSignalController, type SignalController, type ControllerKind } from './signalController';
-import { DEFAULT_CONTROLLER_KIND } from '@shared/constants/simulation';
+import {
+  createSignalController,
+  type SignalController,
+  type ControllerKind,
+} from './signalController';
+import type { TrajectoryExporter } from '@infrastructure/export';
+import type { SensorRegistry } from './sensors/SensorRegistry';
 
-/** SimTime clock — caller passes the current sim time so
- *  `enteredIntersectionAt` can be stamped. */
+/** Signal-controller cache + active kind. Built once by worldStore,
+ *  passed by reference each tick. tick() never mutates this object —
+ *  it only calls `controller.decide(...)` and reads `controllerKind`. */
+export interface SignalContext {
+  controllers: Map<string, SignalController>;
+  controllerKind: ControllerKind;
+}
+
+export interface TickContext {
+  rapierWorld: RapierWorld | null;
+  signal: SignalContext | null;
+  trajectoryExporter: TrajectoryExporter | null;
+  sensorRegistry: SensorRegistry | null;
+  lidarEnabled: boolean;
+  /** Lookup host vehicle's live pose (used by sensor scan). */
+  getHostPose: (vehicleId: string) => { position: Vec3; heading: number } | null;
+  /** Vehicle currently being dragged on the 3D canvas (M1.5, plan 023).
+   *  When non-null, tick() skips Rapier applyControl + position re-derivation
+   *  for this vehicle so the drag handler can move it freely. */
+  draggingId: string | null;
+}
+
 export const tick = (
   network: RoadNetwork,
   dt: number,
   simTime: number,
-  rapierWorld: RapierWorld | null,
-  draggingId: string | null,
-  controllers: Map<string, SignalController>,
-  controllerKind: ControllerKind = DEFAULT_CONTROLLER_KIND,
+  ctx: TickContext,
 ): void => {
   // 1. Advance traffic-light phases via per-light SignalController
   //    (M2-B, plan 010). Replaces M1's hard-coded 30/3/30 loop.
-  //    Controller cache (lightId → SignalController) is owned by
-  //    worldStore and shared across ticks — see plan 010 §9.
-  for (const inter of Object.values(network.intersections)) {
-    for (const light of inter.trafficLights) {
-      light.phaseRemaining -= dt;
-      let controller = controllers.get(light.id);
-      if (!controller) {
-        // Lazy create (covers lights added after reset/hydrate).
-        controller = createSignalController(controllerKind);
-        controllers.set(light.id, controller);
+  if (ctx.signal) {
+    for (const inter of Object.values(network.intersections)) {
+      for (const light of inter.trafficLights) {
+        light.phaseRemaining -= dt;
+        let controller = ctx.signal.controllers.get(light.id);
+        if (!controller) {
+          // Lazy create (covers lights added after reset/hydrate).
+          controller = createSignalController(ctx.signal.controllerKind);
+          ctx.signal.controllers.set(light.id, controller);
+        }
+        const decision = controller.decide(light, network, simTime);
+        light.phase = decision.phase;
+        light.phaseRemaining = decision.duration;
       }
-      const decision = controller.decide(light, network, simTime);
-      light.phase = decision.phase;
-      light.phaseRemaining = decision.duration;
+    }
+  } else {
+    // M1 fallback: no Rapier → no controllers yet, keep hand-rolled cycle.
+    for (const inter of Object.values(network.intersections)) {
+      for (const light of inter.trafficLights) {
+        light.phaseRemaining -= dt;
+        if (light.phaseRemaining <= 0) {
+          if (light.phase === LightPhase.Green) {
+            light.phase = LightPhase.Yellow;
+            light.phaseRemaining = 3;
+          } else if (light.phase === LightPhase.Yellow) {
+            light.phase = LightPhase.Red;
+            light.phaseRemaining = light.cycleSeconds - 33;
+          } else {
+            light.phase = LightPhase.Green;
+            light.phaseRemaining = 30;
+          }
+        }
+      }
     }
   }
 
   // 2. Stamp each vehicle's intersection-entry time (M1.5 — keep).
   updateIntersectionEntry(network, simTime);
 
-  // 3. Compute each vehicle's target speed (light + leader only;
-  //    cross-road yield is now a Rapier-collision concern).
+  // 3. Compute each vehicle's target speed (light + leader).
   for (const v of Object.values(network.vehicles)) {
     const road = network.roads[v.roadId];
     if (!road) continue;
@@ -79,43 +114,36 @@ export const tick = (
     applyCarFollowingConstraint(v, road, network);
   }
 
-  // 4. Cross-road yield (先到先行) — M1.5 right-of-way priority
-  //    kept as a *target-speed* constraint (not hand-rolled
-  //    collision). Rapier physics enforces the actual non-overlap.
+  // 4. Cross-road yield (先到先行) — M1.5 right-of-way priority.
   applyCrossRoadYield(network);
 
-  // 5. Hand each vehicle's control to Rapier.
-  if (rapierWorld) {
+  // 5-6. Hand each vehicle's control to Rapier + step.
+  if (ctx.rapierWorld) {
     for (const v of Object.values(network.vehicles)) {
-      // Skip the vehicle the user is currently dragging on the
-      // canvas — otherwise Rapier would yank it back to the
-      // lane-frame position every frame.
-      if (v.id === draggingId) continue;
+      // Skip the dragged vehicle — its position is driven by the
+      // editor's drag handler, not by Rapier.
+      if (v.id === ctx.draggingId) continue;
       const road = network.roads[v.roadId];
       if (!road) continue;
-      const heading = v.heading;  // world-space
-      rapierWorld.applyControl(
+      const heading = v.heading;
+      ctx.rapierWorld.applyControl(
         v.id,
         { throttle: 1, brake: v.status === 'crashed' ? 1 : 0, steering: 0 },
         v.targetSpeed,
         heading,
       );
     }
-
-    // 6. Physics step.
-    const result = rapierWorld.step(dt);
+    const result = ctx.rapierWorld.step(dt);
 
     // 7. Classify contact events → crash status.
     classifyContacts(network, result.contactEvents);
 
-    // 8. Re-derive Vehicle.position / heading from Rapier pose,
-    //    and update laneIndex / s via findNearestLane. Skip the
-    //    dragged vehicle — its position is being driven by the
-    //    editor's drag handler, not by Rapier.
+    // 8. Re-derive Vehicle.position / heading from Rapier pose.
+    //    Skip the dragged vehicle.
     for (const v of Object.values(network.vehicles)) {
-      if (v.id === draggingId) continue;
-      const pose = rapierWorld.readPose(v.id);
-      if (!pose) continue;  // body not registered (skip — should not happen)
+      if (v.id === ctx.draggingId) continue;
+      const pose = ctx.rapierWorld.readPose(v.id);
+      if (!pose) continue;
       v.position.x = pose.position.x;
       v.position.y = pose.position.y;
       v.position.z = pose.position.z;
@@ -126,9 +154,7 @@ export const tick = (
       v.s = nearest.s;
     }
   } else {
-    // M1 fallback: no Rapier → keep hand-rolled move+s wrap.
-    // This branch only fires if Rapier failed to init; the page
-    // should still render (no physics, but no crash).
+    // M1 fallback: no Rapier → hand-rolled move+s wrap.
     for (const v of Object.values(network.vehicles)) {
       const road = network.roads[v.roadId];
       if (!road) continue;
@@ -147,7 +173,19 @@ export const tick = (
     }
   }
 
-  // 9. Update status (driving / waiting / crashed).
+  // 9. (M2-C) LiDAR scan — only when enabled (perf gate). 017 H1 fix:
+  //    scan() is actually called from inside tick.ts.
+  if (ctx.lidarEnabled && ctx.sensorRegistry && ctx.rapierWorld) {
+    ctx.sensorRegistry.scanAll(ctx.rapierWorld, simTime, ctx.getHostPose);
+  }
+
+  // 10. (M2-C) Trajectory export — per-tick 10Hz sampling, decoupled
+  //     from LiDAR (always runs unless the exporter is null).
+  if (ctx.trajectoryExporter) {
+    ctx.trajectoryExporter.record(network, simTime, TRAJECTORY_SAMPLE_INTERVAL);
+  }
+
+  // 11. Update status.
   for (const v of Object.values(network.vehicles)) {
     if (v.status !== 'crashed') {
       v.status = v.speed < 0.5 ? 'waiting' : 'driving';
@@ -155,7 +193,7 @@ export const tick = (
   }
 };
 
-/** M1.5 keep — stamp simTime on entering intersection. */
+/** M1.5 — stamp simTime on entering intersection. */
 const updateIntersectionEntry = (network: RoadNetwork, simTime: number): void => {
   for (const v of Object.values(network.vehicles)) {
     const road = network.roads[v.roadId];
@@ -232,11 +270,6 @@ const applyCarFollowingConstraint = (v: Vehicle, road: Road, network: RoadNetwor
   v.targetSpeed = leader.speed;
 };
 
-/** M2-A new — cross-road right-of-way via target speed.
- *  Replaces M1's applyBoxInAndCollisionAvoidance. Box-in on
- *  adjacent lanes is now Rapier's job (cars physically can't
- *  pass); cross-road yield stays as a target-speed heuristic
- *  (the car that should yield pulls targetSpeed to 0). */
 const applyCrossRoadYield = (network: RoadNetwork): void => {
   const cars = Object.values(network.vehicles);
   for (let i = 0; i < cars.length; i++) {
@@ -247,9 +280,7 @@ const applyCrossRoadYield = (network: RoadNetwork): void => {
       const b = cars[j]!;
       const roadB = network.roads[b.roadId];
       if (!roadB) continue;
-      if (a.roadId === b.roadId) continue;  // box-in is Rapier's job
-      // Cross-road only — if both in intersection, yield to the one
-      // that entered first (先到先行).
+      if (a.roadId === b.roadId) continue;
       if (a.enteredIntersectionAt !== null && b.enteredIntersectionAt === null) {
         b.targetSpeed = 0;
       } else if (b.enteredIntersectionAt !== null && a.enteredIntersectionAt === null) {
@@ -260,15 +291,11 @@ const applyCrossRoadYield = (network: RoadNetwork): void => {
         } else if (b.enteredIntersectionAt < a.enteredIntersectionAt) {
           a.targetSpeed = 0;
         }
-        // tie (impossible) — both keep going, Rapier handles.
       }
     }
   }
 };
 
-/** Rapier contact → crash classification. M2-A simple: any
- *  vehicle-vehicle contact → both 'crashed'. M2-B may refine
- *  with impulse threshold. */
 const classifyContacts = (network: RoadNetwork, events: ReadonlyArray<ContactEvent>): void => {
   for (const e of events) {
     const va = network.vehicles[e.colliderA];
@@ -279,3 +306,6 @@ const classifyContacts = (network: RoadNetwork, events: ReadonlyArray<ContactEve
   }
 };
 
+// DEFAULT_CONTROLLER_KIND re-exported so existing callers can still import
+// from this module without touching the shared constants path.
+export { DEFAULT_CONTROLLER_KIND };
