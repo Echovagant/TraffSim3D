@@ -18,6 +18,12 @@
       <span>Trajectory</span>
       <b>{{ store.trajectoryExporter.rowCount }} rows</b>
     </div>
+    <div class="row" :title="store.cameraEnabled ? 'PiP camera active' : 'PiP camera inactive'">
+      <span>Camera</span>
+      <b :class="store.cameraEnabled ? 'ok' : ''">
+        {{ store.cameraEnabled ? `on · ${store.cameraFrameCount} frames` : 'off' }}
+      </b>
+    </div>
     <div class="row backend" :title="backendTooltip">
       <span>Backend</span>
       <b :class="backendClass">

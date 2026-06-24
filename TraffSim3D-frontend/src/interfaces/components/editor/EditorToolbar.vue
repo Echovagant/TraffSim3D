@@ -72,6 +72,14 @@
       <input type="checkbox" :checked="world.lidarEnabled" @change="onLidarToggle" />
       <span>LiDAR</span>
     </label>
+    <label class="lidar-toggle" title="在 3D 场景中渲染 LiDAR 点云 (彩色, 按 intensity 渐变)">
+      <input type="checkbox" :checked="world.lidarCloudsEnabled" @change="onLidarCloudsToggle" />
+      <span>Clouds</span>
+    </label>
+    <label class="lidar-toggle" title="从选中车辆 POV 渲染 PiP 摄像头画面 (右下角)">
+      <input type="checkbox" :checked="world.cameraEnabled" @change="onCameraToggle" />
+      <span>📷 Camera</span>
+    </label>
 
     <span class="sep" />
     <button
@@ -139,6 +147,14 @@ const onControllerKindChange = (e: Event): void => {
 
 const onLidarToggle = (e: Event): void => {
   world.setLidarEnabled((e.target as HTMLInputElement).checked);
+};
+
+const onLidarCloudsToggle = (e: Event): void => {
+  world.setLidarCloudsEnabled((e.target as HTMLInputElement).checked);
+};
+
+const onCameraToggle = (e: Event): void => {
+  world.setCameraEnabled((e.target as HTMLInputElement).checked);
 };
 
 const exportTrajectoryCsv = (): void => {
