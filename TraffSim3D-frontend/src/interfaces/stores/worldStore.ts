@@ -469,6 +469,19 @@ export const useWorldStore = defineStore('world', () => {
     return result;
   };
 
+  // Plan 031: one-click spawn many vehicles for Rapier collision demo.
+  // Returns the number actually added; bails on first full lane so
+  // we don't spam the user with "lane full" flashes.
+  const spawnMany = (count: number): number => {
+    let ok = 0;
+    for (let i = 0; i < count; i++) {
+      const r = addVehicle();
+      if (r.ok) ok += 1;
+      else break;
+    }
+    return ok;
+  };
+
   const removeVehicle = (id: string): void => {
     pushHistory();
     // M2-C: unregister sensors BEFORE removing the Rapier body.
@@ -698,6 +711,7 @@ export const useWorldStore = defineStore('world', () => {
     getNetwork,
     addVehicle,
     removeVehicle,
+    spawnMany,
     setVehicleSpeed,
     updateVehicleType,
     requestLaneChange,

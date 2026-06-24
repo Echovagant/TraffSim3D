@@ -1,6 +1,12 @@
 <template>
-  <div class="toolbar">
-    <router-link to="/" class="link-home" title="返回首页">← Home</router-link>
+  <button
+    v-if="toolbarCollapsed"
+    class="toolbar-toggle-collapsed"
+    title="展开工具栏"
+    @click="toolbarCollapsed = false"
+  >⇱ 工具栏</button>
+  <div v-else class="toolbar">
+    <router-link to="/" class="link-home" title="返回首页">← 首页</router-link>
 
     <span class="sep" />
 
@@ -10,7 +16,7 @@
       :title="world.isRunning ? '暂停 (Space)' : '播放 (Space)'"
       @click="world.togglePause()"
     >
-      {{ world.isRunning ? '⏸ Pause' : '▶ Play' }}
+      {{ world.isRunning ? '⏸ 暂停' : '▶ 播放' }}
     </button>
 
     <div class="rate" title="仿真速率（+ / - 切换）">
@@ -31,10 +37,11 @@
 
     <span class="sep" />
 
-    <button title="添加车辆" @click="onAddVehicle">+ Vehicle</button>
-    <button title="添加信号灯" @click="world.addTrafficLight()">+ Light</button>
-    <button title="强制所有信号灯全红 (3s)" @click="world.forceAllRed()">🚨 All Red</button>
-    <button title="重置场景 (R)" @click="world.reset()">Reset</button>
+    <button title="添加车辆" @click="onAddVehicle">+ 车辆</button>
+    <button title="一键生成 50 辆车演示 Rapier 碰撞 (M2)" @click="onSpawnMany(50)">🚗 +50 车辆</button>
+    <button title="添加信号灯" @click="world.addTrafficLight()">+ 信号灯</button>
+    <button title="强制所有信号灯全红 (3s)" @click="world.forceAllRed()">🚨 全红</button>
+    <button title="重置场景 (R)" @click="world.reset()">重置</button>
 
     <label class="ctrl-kind" title="信号灯控制策略">
       <span class="ctrl-kind-label">控制</span>
@@ -51,20 +58,20 @@
       :disabled="!isCoordinatedKind"
       :title="isCoordinatedKind ? '配置协调偏移 (绿波带)' : '切换到协调控制器后可用'"
       @click="showCoordinated = true"
-    >🚦 Coordinated</button>
+    >🚦 协调配置</button>
 
-    <button title="撤销 (Ctrl+Z)" :disabled="!world.canUndo()" @click="world.undo()">↶ Undo</button>
-    <button title="重做 (Ctrl+Shift+Z)" :disabled="!world.canRedo()" @click="world.redo()">↷ Redo</button>
+    <button title="撤销 (Ctrl+Z)" :disabled="!world.canUndo()" @click="world.undo()">↶ 撤销</button>
+    <button title="重做 (Ctrl+Shift+Z)" :disabled="!world.canRedo()" @click="world.redo()">↷ 重做</button>
 
     <span class="sep" />
 
-    <button title="保存到 LocalStorage" @click="io.save">💾 Save</button>
-    <button title="从 LocalStorage 加载" @click="io.load">📂 Load</button>
-    <button title="清除 LocalStorage 中的场景" @click="io.clear">🗑️ Clear</button>
-    <button title="聚焦当前选中 (F)" @click="onFocusSelected">🎯 Focus</button>
+    <button title="保存到 LocalStorage" @click="io.save">💾 保存</button>
+    <button title="从 LocalStorage 加载" @click="io.load">📂 加载</button>
+    <button title="清除 LocalStorage 中的场景" @click="io.clear">🗑️ 清除</button>
+    <button title="聚焦当前选中 (F)" @click="onFocusSelected">🎯 聚焦</button>
 
-    <button title="导出场景为 JSON 文件" @click="io.exportFile">⬇ Export</button>
-    <button title="从 JSON 文件导入场景" @click="onImportFile">⬆ Import</button>
+    <button title="导出场景为 JSON 文件" @click="io.exportFile">⬇ 导出</button>
+    <button title="从 JSON 文件导入场景" @click="onImportFile">⬆ 导入</button>
     <input
       ref="fileInput"
       type="file"
@@ -75,18 +82,18 @@
 
     <span class="sep" />
 
-    <button title="下载轨迹 CSV (10Hz 采样)" @click="exportTrajectoryCsv">📥 Trajectory CSV</button>
+    <button title="下载轨迹 CSV (10Hz 采样)" @click="exportTrajectoryCsv">📥 轨迹 CSV</button>
     <label class="lidar-toggle" title="启用车载 16线 LiDAR (点云未渲染, 但 scan() 跑通; perf gate 验证)">
       <input type="checkbox" :checked="world.lidarEnabled" @change="onLidarToggle" />
-      <span>LiDAR</span>
+      <span>LiDAR (雷达)</span>
     </label>
     <label class="lidar-toggle" title="在 3D 场景中渲染 LiDAR 点云 (彩色, 按 intensity 渐变)">
       <input type="checkbox" :checked="world.lidarCloudsEnabled" @change="onLidarCloudsToggle" />
-      <span>Clouds</span>
+      <span>点云</span>
     </label>
     <label class="lidar-toggle" title="从选中车辆 POV 渲染 PiP 摄像头画面 (右下角)">
       <input type="checkbox" :checked="world.cameraEnabled" @change="onCameraToggle" />
-      <span>📷 Camera</span>
+      <span>📷 摄像头</span>
     </label>
 
     <span class="sep" />
@@ -95,6 +102,11 @@
       title="显示键盘快捷键 (?)"
       @click="showShortcuts = true"
     >?</button>
+    <button
+      class="toolbar-collapse"
+      title="折叠工具栏"
+      @click="toolbarCollapsed = true"
+    >⇲</button>
 
     <!-- Flash message: any code can call `showFlashMessage`; the
          toolbar always renders whatever's there for 3s. -->
@@ -113,7 +125,7 @@
 <script setup lang="ts">
 import { useEditor } from '@interfaces/composables/useEditor';
 import { useSceneIO } from '@interfaces/composables/useSceneIO';
-import { _flashMessageRef } from '@interfaces/composables/useFlashMessage';
+import { _flashMessageRef, showFlashMessage } from '@interfaces/composables/useFlashMessage';
 import { focusOnSelection } from '@interfaces/composables/useCameraFocus';
 import { useSelectionStore } from '@interfaces/stores/selectionStore';
 import type { ControllerKind } from '@application/services/signalController';
@@ -128,6 +140,7 @@ const flash = _flashMessageRef;
 const fileInput = ref<HTMLInputElement | null>(null);
 const showShortcuts = ref(false);
 const showCoordinated = ref(false);
+const toolbarCollapsed = ref(false);
 const selection = useSelectionStore();
 
 const onFocusSelected = (): void => {
@@ -149,6 +162,18 @@ const onAddVehicle = (): void => {
   // `addVehicle` returns `{ ok, ... }` in M1.5; we don't need the
   // result here because failures surface via the flash channel.
   world.addVehicle();
+};
+
+/** Plan 031: 一键生成 N 辆车演示 Rapier 碰撞. */
+const onSpawnMany = (count: number): void => {
+  const ok = world.spawnMany(count);
+  if (ok === 0) {
+    showFlashMessage('车道已满, 无法添加车辆', 'warn');
+  } else if (ok < count) {
+    showFlashMessage(`已添加 ${ok}/${count} 辆车 (车道已满)`, 'warn');
+  } else {
+    showFlashMessage(`已添加 ${ok} 辆车 — 看 Rapier 碰撞!`, 'info');
+  }
 };
 
 const onControllerKindChange = (e: Event): void => {
@@ -230,6 +255,7 @@ const isCoordinatedKind = computed(() => world.controllerKind === 'coordinated')
   /* Cap width so a tall toolbar wraps cleanly when the window is narrow. */
   max-width: calc(100vw - 24px);
   flex-wrap: wrap;
+  z-index: 5;
 }
 .sep {
   width: 1px;
@@ -263,6 +289,36 @@ button.danger:hover { background: #991b1b; }
 .coord-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .coord-btn:not(:disabled) { background: #1e3a8a; }
 .coord-btn:not(:disabled):hover { background: #1d4ed8; }
+
+/* Toolbar collapse button: lives at the end of the toolbar row. */
+.toolbar-collapse {
+  padding: 6px 8px;
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.toolbar-collapse:hover { background: rgba(148, 163, 184, 0.15); color: #f1f5f9; }
+
+/* Collapsed toolbar pill: replaces the full toolbar when folded. */
+.toolbar-toggle-collapsed {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 6px 12px;
+  background: rgba(15, 23, 42, 0.7);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  z-index: 5;
+}
+.toolbar-toggle-collapsed:hover { background: rgba(15, 23, 42, 0.9); color: #f1f5f9; }
 
 /* Rate cluster: [−] [1.00×] [+] sits flush together. */
 .rate {

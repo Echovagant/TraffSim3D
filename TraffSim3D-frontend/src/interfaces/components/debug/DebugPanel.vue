@@ -1,48 +1,48 @@
 <template>
   <div class="debug">
-    <div class="row"><span>FPS</span><b :class="fpsClass">{{ store.fps }}</b></div>
-    <div class="row"><span>Vehicles</span><b>{{ vehicleCount }}</b></div>
-    <div class="row"><span>Lights</span><b>{{ lightCount }} <small>(R:{{ counts.red }} Y:{{ counts.yellow }} G:{{ counts.green }})</small></b></div>
+    <div class="row"><span>帧率</span><b :class="fpsClass">{{ store.fps }}</b></div>
+    <div class="row"><span>车辆数</span><b>{{ vehicleCount }}</b></div>
+    <div class="row"><span>灯数</span><b>{{ lightCount }} <small>(R:{{ counts.red }} Y:{{ counts.yellow }} G:{{ counts.green }})</small></b></div>
     <div class="row" title="信号控制器类型">
-      <span>Signal</span>
+      <span>信号</span>
       <b>{{ controllerKindLabel }}</b>
     </div>
     <div v-if="isCoordinated" class="row" title="协调偏移表 (UI only, 028 生效)">
-      <span>Offset</span>
+      <span>偏移</span>
       <b>
         <span v-for="[pair, val] in coordinatedPairs" :key="pair" class="offset-chip">
-          {{ pair }}: {{ val }}s
+          {{ pair }}: {{ val }}秒
         </span>
-        <span v-if="!coordinatedPairs.length" class="warn">— no pairs</span>
+        <span v-if="!coordinatedPairs.length" class="warn">— 无路口对</span>
       </b>
     </div>
-    <div class="row"><span>Frame ms</span><b>{{ frameMin }}-{{ frameMax }} <small>avg {{ frameAvg }}</small></b></div>
+    <div class="row"><span>帧耗时</span><b>{{ frameMin }}-{{ frameMax }} <small>平均 {{ frameAvg }}</small></b></div>
     <div class="row" :class="{ paused: !store.isRunning }">
-      <span>Sim</span>
-      <b>{{ store.isRunning ? `running @ ${formatRate(store.tickRate)}` : 'paused' }}</b>
+      <span>仿真</span>
+      <b>{{ store.isRunning ? `运行 @ ${formatRate(store.tickRate)}` : '已暂停' }}</b>
     </div>
     <div class="row" :title="`LiDAR sensors active: ${store.sensorRegistry.sensorCount}`">
       <span>LiDAR</span>
       <b :class="store.lidarEnabled ? 'ok' : ''">
-        {{ store.lidarEnabled ? `on · ${store.lidarFrameCount} frames` : 'off' }}
+        {{ store.lidarEnabled ? `开 · ${store.lidarFrameCount} 帧` : '关' }}
       </b>
     </div>
     <div class="row" title="按 lane 分布的车辆数">
-      <span>Lane</span>
+      <span>车道</span>
       <b>{{ laneDistribution }}</b>
     </div>
     <div class="row" :title="`Trajectory buffer: ${store.trajectoryExporter.rowCount} / ${store.trajectoryExporter.maxBufferRows} rows`">
-      <span>Trajectory</span>
-      <b>{{ store.trajectoryExporter.rowCount }} rows</b>
+      <span>轨迹</span>
+      <b>{{ store.trajectoryExporter.rowCount }} 行</b>
     </div>
     <div class="row" :title="store.cameraEnabled ? 'PiP camera active' : 'PiP camera inactive'">
-      <span>Camera</span>
+      <span>摄像头</span>
       <b :class="store.cameraEnabled ? 'ok' : ''">
-        {{ store.cameraEnabled ? `on · ${store.cameraFrameCount} frames` : 'off' }}
+        {{ store.cameraEnabled ? `开 · ${store.cameraFrameCount} 帧` : '关' }}
       </b>
     </div>
     <div class="row backend" :title="backendTooltip">
-      <span>Backend</span>
+      <span>后端</span>
       <b :class="backendClass">
         <span class="dot" :class="backendDotClass"></span>
         {{ backendLabel }}
@@ -56,7 +56,7 @@
     </div>
     <label class="auto-poll" :title="autoPoll ? `每 ${POLL_INTERVAL_MS / 1000}s 自动探测` : '关闭自动探测'">
       <input type="checkbox" v-model="autoPoll" />
-      <span>auto-poll</span>
+      <span>自动探测</span>
     </label>
   </div>
 </template>
@@ -91,10 +91,10 @@ const fpsClass = computed(() => (store.fps >= M1_MIN_FPS ? 'ok' : 'warn'));
 // 027: controller kind label + coordinated offset list (read from worldStore).
 const controllerKindLabel = computed(() => {
   const k = store.controllerKind;
-  if (k === 'fixed-cycle') return 'fixed';
-  if (k === 'actuated') return 'actuated';
-  if (k === 'coordinated') return 'coordinated';
-  return 'rl';
+  if (k === 'fixed-cycle') return '固定';
+  if (k === 'actuated') return '感应';
+  if (k === 'coordinated') return '协调';
+  return 'RL';
 });
 const isCoordinated = computed(() => store.controllerKind === 'coordinated');
 const coordinatedPairs = computed(() =>
@@ -110,7 +110,7 @@ const laneDistribution = computed(() => {
   }
   if (lanes.size === 0) return '—';
   const base = Array.from(lanes.entries()).sort().map(([k, n]) => `${k}:${n}`).join(' ');
-  return changing > 0 ? `${base} · ${changing} changing` : base;
+  return changing > 0 ? `${base} · ${changing} 变道中` : base;
 });
 
 const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
@@ -187,15 +187,15 @@ onBeforeUnmount(() => {
 const backendClass = computed(() => (backendState.value === 'ok' ? 'ok' : backendState.value === 'error' ? 'warn' : ''));
 const backendDotClass = computed(() => `dot-${backendState.value}`);
 const backendLabel = computed(() => {
-  if (isProbing.value) return 'checking…';
-  if (backendState.value === 'ok') return 'online';
-  if (backendState.value === 'error') return 'offline';
-  return 'checking…';
+  if (isProbing.value) return '检查中…';
+  if (backendState.value === 'ok') return '在线';
+  if (backendState.value === 'error') return '离线';
+  return '检查中…';
 });
 const backendTooltip = computed(() => {
-  if (!backendCheckedAt.value) return 'Backend status unknown';
+  if (!backendCheckedAt.value) return '后端状态未知';
   const ago = Math.max(0, Math.round((Date.now() - backendCheckedAt.value) / 1000));
-  return `${backendDetail.value} (checked ${ago}s ago)`;
+  return `${backendDetail.value} (${ago}秒前检查)`;
 });
 </script>
 

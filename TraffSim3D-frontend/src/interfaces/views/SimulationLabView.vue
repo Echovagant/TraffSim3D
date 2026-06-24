@@ -120,6 +120,28 @@
           </div>
         </div>
       </section>
+
+      <!-- 5. M2 vs M1 对照 -->
+      <section class="card diff-card">
+        <h2>5. M2 vs M1 — 每个交互的影响差异</h2>
+        <table class="diff-table">
+          <thead>
+            <tr><th>交互</th><th>M1 (手算几何)</th><th>M2 (Rapier + 传感器)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>+ 车辆</td><td>直线 lane-following</td><td>Rapier RigidBody, 真质量/摩擦</td></tr>
+            <tr><td>🚗 +50 车辆</td><td>N/A (无物理)</td><td>一键演示 Rapier 碰撞 → 部分车变 💥 crashed</td></tr>
+            <tr><td>车辆相撞</td><td>不会 (无碰撞检测)</td><td>contact graph → status=crashed</td></tr>
+            <tr><td>信号灯切换</td><td>写死 30/3/30</td><td>4 种 controller 可选</td></tr>
+            <tr><td>协调偏移</td><td>N/A</td><td>🚦 协调配置 → 绿波带 (028)</td></tr>
+            <tr><td>变道</td><td>N/A</td><td>Inspector ◀▶ Change Lane (029)</td></tr>
+            <tr><td>LiDAR</td><td>无</td><td>16 线 raycast 实时扫描</td></tr>
+            <tr><td>摄像头</td><td>无</td><td>PiP POV 渲染 (右下角)</td></tr>
+            <tr><td>轨迹导出</td><td>无</td><td>10Hz 采样 → CSV (025)</td></tr>
+            <tr><td>性能</td><td>~30fps 写死上限</td><td>~165fps with Rapier + 传感器 (实测)</td></tr>
+          </tbody>
+        </table>
+      </section>
     </div>
 
     <footer class="lab-footer">
@@ -399,4 +421,28 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   margin-left: auto;
   margin-right: auto;
 }
+
+.diff-card { grid-column: 1 / -1; }
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.diff-table th,
+.diff-table td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+.diff-table th {
+  color: #94a3b8;
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.diff-table td:first-child { color: #93c5fd; }
+.diff-table td:nth-child(2) { color: #94a3b8; }
+.diff-table td:nth-child(3) { color: #86efac; }
 </style>
