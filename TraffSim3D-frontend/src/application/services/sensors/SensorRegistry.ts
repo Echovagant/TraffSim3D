@@ -8,6 +8,10 @@
 // vehicle's live pose from worldStore, returns the accumulated
 // LidarFrame[]. tick() (per m2-interface-contract.md §4 step f)
 // calls this when lidarEnabled is true.
+//
+// M2-D (plan 025): also caches the latest LidarFrame per vehicle,
+// so visualization consumers (LidarPointCloud) can read without
+// re-scanning.
 
 import type { LidarSensor, LidarFrame } from '@infrastructure/sensors';
 import type { RapierWorld, Vec3 } from '@infrastructure/physics';
@@ -22,6 +26,8 @@ export type HostPoseLookup = (
 export class SensorRegistry {
   private byVehicle: Map<VehicleId, Set<SensorId>> = new Map();
   private sensors: Map<SensorId, LidarSensor> = new Map();
+  /** Latest frame per host vehicle — overwritten every scanAll(). */
+  private latestFrames: Map<VehicleId, LidarFrame> = new Map();
 
   register(vehicleId: VehicleId, sensor: LidarSensor, sensorId: SensorId): void {
     let set = this.byVehicle.get(vehicleId);
@@ -35,18 +41,21 @@ export class SensorRegistry {
 
   unregisterAllFor(vehicleId: VehicleId): void {
     const ids = this.byVehicle.get(vehicleId);
-    if (!ids) return;
-    for (const sensorId of ids) {
-      const sensor = this.sensors.get(sensorId);
-      if (sensor) {
-        sensor.destroy();
-        this.sensors.delete(sensorId);
+    if (ids) {
+      for (const sensorId of ids) {
+        const sensor = this.sensors.get(sensorId);
+        if (sensor) {
+          sensor.destroy();
+          this.sensors.delete(sensorId);
+        }
       }
+      this.byVehicle.delete(vehicleId);
     }
-    this.byVehicle.delete(vehicleId);
+    this.latestFrames.delete(vehicleId);
   }
 
-  /** H1 fix: actually scan. Called per tick when LiDAR is enabled. */
+  /** H1 fix: actually scan. Called per tick when LiDAR is enabled.
+   *  Also caches the latest frame for visualization consumers. */
   scanAll(
     world: RapierWorld,
     simTime: number,
@@ -58,10 +67,20 @@ export class SensorRegistry {
       if (!pose) continue;
       for (const sensorId of ids) {
         const sensor = this.sensors.get(sensorId);
-        if (sensor) out.push(sensor.scan(world, simTime, pose));
+        if (!sensor) continue;
+        const frame = sensor.scan(world, simTime, pose);
+        out.push(frame);
+        this.latestFrames.set(vehicleId, frame);
       }
     }
     return out;
+  }
+
+  /** Returns the most recent LidarFrame for each vehicle that has
+   *  been scanned at least once. Read-only — consumers should not
+   *  mutate the frames. */
+  getLatestFrames(): ReadonlyMap<VehicleId, LidarFrame> {
+    return this.latestFrames;
   }
 
   getSensorsFor(vehicleId: VehicleId): LidarSensor[] {
@@ -79,6 +98,7 @@ export class SensorRegistry {
     for (const s of this.sensors.values()) s.destroy();
     this.sensors.clear();
     this.byVehicle.clear();
+    this.latestFrames.clear();
   }
 
   get sensorCount(): number {

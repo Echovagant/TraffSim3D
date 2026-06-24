@@ -123,3 +123,13 @@ export const LIDAR_NOISE_STDDEV = 0.02;
 export const TRAJECTORY_SAMPLE_INTERVAL = 0.1;
 /** Trajectory buffer cap (rows). 100k ≈ 30min @ 30车 × 10Hz. */
 export const TRAJECTORY_BUFFER_CAP = 100_000;
+
+// ===== M2-D — camera sensor constants =====
+/** Default offscreen camera resolution. Lower than viewport to
+ *  keep the per-frame GPU→CPU pixel-read cost manageable. */
+export const CAMERA_DEFAULT_WIDTH = 256;
+export const CAMERA_DEFAULT_HEIGHT = 192;
+/** Field of view (degrees). Matches main editor camera. */
+export const CAMERA_DEFAULT_FOV = 60;
+/** Throttle camera capture to 5 Hz to avoid GPU stalls. */
+export const CAMERA_SAMPLE_INTERVAL = 0.2;

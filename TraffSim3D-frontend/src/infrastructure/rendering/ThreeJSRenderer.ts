@@ -184,6 +184,18 @@ export class ThreeJSRenderer {
     if (this.built) this.built.root.remove(mesh);
   }
 
+  /** Read-only access to the Three.js scene (used by sensor rendering). */
+  getScene(): THREE.Scene {
+    return this.scene;
+  }
+
+  /** Read-only access to the WebGLRenderer (used by CameraSensor.render
+   *  to draw to an offscreen target). getCamera() already exists above
+   *  for OrbitControls attachment; we don't redefine it. */
+  getGl(): THREE.WebGLRenderer {
+    return this.renderer;
+  }
+
   /**
    * Provide a getter for the current tick policy (pause + rate). Called
    * every frame so the user can flip pause and change rate from anywhere.
