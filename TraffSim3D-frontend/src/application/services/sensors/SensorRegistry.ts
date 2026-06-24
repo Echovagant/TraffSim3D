@@ -15,6 +15,7 @@
 
 import type { LidarSensor, LidarFrame } from '@infrastructure/sensors';
 import type { RapierWorld, Vec3 } from '@infrastructure/physics';
+import { LIDAR_MAX_ACTIVE_SENSORS } from '@shared/constants/simulation';
 
 type SensorId = string;
 type VehicleId = string;
@@ -28,6 +29,12 @@ export class SensorRegistry {
   private sensors: Map<SensorId, LidarSensor> = new Map();
   /** Latest frame per host vehicle — overwritten every scanAll(). */
   private latestFrames: Map<VehicleId, LidarFrame> = new Map();
+  /** Plan 033: max sensors that actually scan per tick. */
+  private maxActiveSensors: number;
+
+  constructor(maxActiveSensors: number = LIDAR_MAX_ACTIVE_SENSORS) {
+    this.maxActiveSensors = maxActiveSensors;
+  }
 
   register(vehicleId: VehicleId, sensor: LidarSensor, sensorId: SensorId): void {
     let set = this.byVehicle.get(vehicleId);
@@ -55,22 +62,33 @@ export class SensorRegistry {
   }
 
   /** H1 fix: actually scan. Called per tick when LiDAR is enabled.
-   *  Also caches the latest frame for visualization consumers. */
+   *  Also caches the latest frame for visualization consumers.
+   *
+   *  Plan 033: cap at maxActiveSensors. Sort by vehicleId for stable
+   *  "first N" selection. Sensors past the cap keep their last frame
+   *  in latestFrames (UI consumers see stale data, not no data). */
   scanAll(
     world: RapierWorld,
     simTime: number,
     getHostPose: HostPoseLookup,
   ): LidarFrame[] {
     const out: LidarFrame[] = [];
-    for (const [vehicleId, ids] of this.byVehicle) {
+    // Sort by vehicleId for stable "first N" cap selection.
+    const sorted = Array.from(this.byVehicle.keys()).sort();
+    const activeIds = new Set(sorted.slice(0, this.maxActiveSensors));
+    for (const vehicleId of sorted) {
       const pose = getHostPose(vehicleId);
       if (!pose) continue;
+      const ids = this.byVehicle.get(vehicleId)!;
       for (const sensorId of ids) {
         const sensor = this.sensors.get(sensorId);
         if (!sensor) continue;
+        if (!activeIds.has(vehicleId)) continue;  // past the cap
         const frame = sensor.scan(world, simTime, pose);
-        out.push(frame);
-        this.latestFrames.set(vehicleId, frame);
+        if (frame) {  // null = throttled
+          out.push(frame);
+          this.latestFrames.set(vehicleId, frame);
+        }
       }
     }
     return out;

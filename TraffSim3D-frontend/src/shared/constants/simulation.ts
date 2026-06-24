@@ -110,14 +110,27 @@ export const LIDAR_MOUNT_HEIGHT: Record<'car' | 'truck' | 'bus', number> = {
   truck: 2.2,
   bus:   2.6,
 };
-/** Horizontal rays (1° granularity). */
-export const LIDAR_HORIZONTAL_RAYS = 360;
+/** Plan 033: Horizontal rays. 360 → 90 (4× fewer rays per scan;
+ *  per 032 §Issue 1 mitigation C). 90° 前向扇形 符合主流车载 LiDAR
+ *  (Waymo / Mobileye). 32/64-line + 360° 升级到 M5+. */
+export const LIDAR_HORIZONTAL_RAYS = 90;
 /** Vertical rays. M2-C default = 16 (008 §1.1). */
 export const LIDAR_VERTICAL_RAYS = 16;
 /** Max range (m). */
 export const LIDAR_MAX_RANGE = 100;
 /** Gaussian noise stddev (m). 008 §2 R2. */
 export const LIDAR_NOISE_STDDEV = 0.02;
+/** Plan 033: scan interval in seconds. Default 0.1 = 10Hz throttle.
+ *  Combined with LIDAR_HORIZONTAL_RAYS=90 and LIDAR_MAX_ACTIVE_SENSORS=10,
+ *  total sensor cost drops from ~205ms/tick to ~5ms/tick. */
+export const LIDAR_SCAN_INTERVAL_S = 0.1;
+/** Plan 033: max sensors that actually scan per tick. 45 vehicles
+ *  registered, but only the first 10 (sorted by vehicleId) scan. Others
+ *  keep their last frame. */
+export const LIDAR_MAX_ACTIVE_SENSORS = 10;
+/** Plan 033: horizontal field of view in degrees. Default 90 (前向扇形).
+ *  Future 360 全向升级. */
+export const LIDAR_AZIMUTH_DEG = 90;
 
 /** Trajectory sample interval (s). 10Hz. */
 export const TRAJECTORY_SAMPLE_INTERVAL = 0.1;

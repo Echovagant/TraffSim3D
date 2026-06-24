@@ -66,4 +66,25 @@ describe('SensorRegistry', () => {
     expect(reg.sensorCount).toBe(0);
     expect(reg.getLatestFrames().size).toBe(0);
   });
+
+  it('scanAll caps at maxActiveSensors (plan 033)', () => {
+    const reg = new SensorRegistry(2);  // cap = 2
+    for (let i = 0; i < 5; i++) {
+      const id = `v-${i}`;
+      const cfg = defaultLidarConfig(id, []);
+      cfg.horizontalRays = 2;
+      cfg.verticalRays = 1;
+      cfg.scanIntervalSec = 0;  // disable throttle for this test
+      reg.register(id, new LidarSensor(cfg), `lidar-${id}`);
+    }
+    const world = makeMockWorld({ point: { x: 1, y: 0, z: 0 }, distance: 5, colliderHandle: null });
+    const getPose: HostPoseLookup = (id) => id.startsWith('v-')
+      ? { position: { x: 0, y: 0, z: 0 }, heading: 0 }
+      : null;
+    const frames = reg.scanAll(world, 0, getPose);
+    // 5 sensors registered, but cap=2 actually scan.
+    expect(frames.length).toBe(2);
+    // All 5 are still registered (sensorCount unchanged).
+    expect(reg.sensorCount).toBe(5);
+  });
 });

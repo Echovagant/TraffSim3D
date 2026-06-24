@@ -15,7 +15,8 @@
 // take excludeColliders yet — future RapierWorld extension can push
 // filtering down for ~10% perf gain).
 
-import type { RapierWorld, Vec3, RayHit } from '@infrastructure/physics';
+import type { RapierWorld, Vec3 } from '@infrastructure/physics';
+import { LIDAR_SCAN_INTERVAL_S, LIDAR_AZIMUTH_DEG } from '@shared/constants/simulation';
 
 export interface LidarConfig {
   vehicleId: string;
@@ -27,6 +28,10 @@ export interface LidarConfig {
   noiseStddev: number;
   /** Collider handles to skip (host vehicle's own body). 008 §1 R-验证. */
   excludeColliderHandles: ReadonlyArray<string>;
+  /** Plan 033: 扫描间隔秒. Default 0.1 (10Hz). 设为 0 表示不 throttle. */
+  scanIntervalSec?: number;
+  /** Plan 033: 水平方位角 (度). Default 90 (前向扇形). */
+  azimuthDeg?: number;
 }
 
 export interface LidarFrame {
@@ -50,12 +55,15 @@ export const defaultLidarConfig = (
   maxRange: 100,
   noiseStddev: 0.02,
   excludeColliderHandles,
+  scanIntervalSec: LIDAR_SCAN_INTERVAL_S,
+  azimuthDeg: LIDAR_AZIMUTH_DEG,
 });
 
 export class LidarSensor {
   private cfg: LidarConfig;
   private points: Float32Array;
   private intensities: Float32Array;
+  private lastScanSimTime = -Infinity;
 
   constructor(cfg: LidarConfig) {
     this.cfg = cfg;
@@ -73,16 +81,28 @@ export class LidarSensor {
    * Scan once. Signature is `scan(world, simTime, hostPose)` per
    * 008 §1. mountHeight comes from LidarConfig (configured at mount,
    * not per-call).
+   *
+   * Returns `null` if the sensor is throttled (scanIntervalSec not yet
+   * elapsed). This lets the caller skip the latestFrame update while
+   * leaving the previous frame visible. (Plan 033.)
    */
   scan(
     world: RapierWorld,
     simTime: number,
     hostPose: { position: Vec3; heading: number },
-  ): LidarFrame {
+  ): LidarFrame | null {
+    const interval = this.cfg.scanIntervalSec ?? LIDAR_SCAN_INTERVAL_S;
+    if (simTime - this.lastScanSimTime < interval) {
+      return null;  // throttled
+    }
+    this.lastScanSimTime = simTime;
+
     const nH = this.cfg.horizontalRays;
     const nV = this.cfg.verticalRays;
     const vFovLo = (VERTICAL_FOV_LO_DEG * Math.PI) / 180;
     const vFovHi = (VERTICAL_FOV_HI_DEG * Math.PI) / 180;
+    const azimuth = (this.cfg.azimuthDeg ?? LIDAR_AZIMUTH_DEG) * Math.PI / 180;
+    const azHalf = azimuth / 2;
 
     // Build ray origins + directions.
     const origins: Vec3[] = [];
@@ -92,7 +112,8 @@ export class LidarSensor {
       const sinV = Math.sin(vAng);
       const cosV = Math.cos(vAng);
       for (let j = 0; j < nH; j++) {
-        const hAng = hostPose.heading + (2 * Math.PI * j) / nH;
+        // Plan 033: azimuth front扇形 (default -45° to +45°), centered on heading.
+        const hAng = hostPose.heading - azHalf + (azimuth * j) / Math.max(1, nH - 1);
         origins.push({
           x: hostPose.position.x,
           y: this.cfg.mountHeight,
