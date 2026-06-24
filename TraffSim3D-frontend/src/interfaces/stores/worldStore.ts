@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, shallowRef } from 'vue';
 import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
@@ -53,8 +53,17 @@ const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
 };
 
 export const useWorldStore = defineStore('world', () => {
-  // Plain object — see Plan 003 for why this is NOT a ref/shallowRef.
-  let network: RoadNetwork = buildCrossIntersectionNetwork();
+  // Plan 035 fix: `network` is now a `shallowRef`. Earlier we kept it
+  // as a plain closure variable mutated in place, but `replaceNetwork`
+  // reassigns the variable (`network = next`) — Pinia setup stores do
+  // not track plain reassignments, so consumers reading `world.network`
+  // (EntityOutline, Inspector) saw the stale initial reference. With
+  // shallowRef, Pinia auto-unwraps the ref on the store and re-runs
+  // dependents when `.value` changes. shallowRef (not ref) avoids the
+  // deep reactivity overhead — the store mutates the network in place
+  // per-tick (see tick.ts, addVehicle, etc.) and we don't want every
+  // Vehicle.position assignment to trigger a full re-render.
+  const network = shallowRef<RoadNetwork>(buildCrossIntersectionNetwork());
   const tickCount = ref(0);
   const fps = ref(0);
   const isRunning = ref(true);
@@ -125,7 +134,7 @@ export const useWorldStore = defineStore('world', () => {
    * direct mutation is fine and explicit.
    */
   const forceAllRed = (durationSeconds = 3): void => {
-    for (const inter of Object.values(network.intersections)) {
+    for (const inter of Object.values(network.value.intersections)) {
       for (const light of inter.trafficLights) {
         light.phase = LightPhase.AllRed;
         light.phaseRemaining = durationSeconds;
@@ -169,7 +178,7 @@ export const useWorldStore = defineStore('world', () => {
    *  the only writer of vehicle position, and the scan runs after
    *  Rapier step + position re-derivation in tick(). */
   const getHostPose: HostPoseLookup = (vehicleId) => {
-    const v = network.vehicles[vehicleId];
+    const v = network.value.vehicles[vehicleId];
     if (!v) return null;
     return { position: v.position, heading: v.heading };
   };
@@ -245,7 +254,7 @@ export const useWorldStore = defineStore('world', () => {
    * trail (standard undo/redo semantic).
    */
   const pushHistory = (): void => {
-    history.push(cloneScene(serializeNetwork(network)));
+    history.push(cloneScene(serializeNetwork(network.value)));
     if (history.length > HISTORY_LIMIT) {
       history.shift();  // drop oldest
     }
@@ -270,7 +279,7 @@ export const useWorldStore = defineStore('world', () => {
     vehicleId: string,
     position: { x: number; y: number; z: number },
   ): { ok: true } | { ok: false; reason: string } => {
-    const v = network.vehicles[vehicleId];
+    const v = network.value.vehicles[vehicleId];
     if (!v) return { ok: false, reason: 'vehicle not found' };
     pushHistory();
     v.position = { x: position.x, y: position.y, z: position.z };
@@ -282,7 +291,7 @@ export const useWorldStore = defineStore('world', () => {
     // no road near the cursor), keep the entity's existing roadId
     // / laneIndex / s — the next tick will derive a sensible
     // position via findNearestLane anyway.
-    const snap = findNearestLaneOnNetwork(network, v.position);
+    const snap = findNearestLaneOnNetwork(network.value, v.position);
     if (snap) {
       v.roadId = snap.roadId;
       v.laneIndex = snap.laneIndex;
@@ -334,7 +343,7 @@ export const useWorldStore = defineStore('world', () => {
     // 都用同一个值.
     const clampedDt = Math.max(0, Math.min(dt, 1 / 30));
     simTime += clampedDt;
-    tick(network, clampedDt, simTime, {
+    tick(network.value, clampedDt, simTime, {
       rapierWorld,
       signal: signalContext,
       trajectoryExporter,
@@ -358,7 +367,7 @@ export const useWorldStore = defineStore('world', () => {
     if (lidarCloudsEnabled.value) {
       for (const [vehicleId, frame] of sensorRegistry.getLatestFrames()) {
         const cloud = lidarPointClouds.get(vehicleId);
-        const v = network.vehicles[vehicleId];
+        const v = network.value.vehicles[vehicleId];
         if (cloud && v) {
           cloud.updateFromFrame(frame);
           cloud.setPose(v.position, v.heading);
@@ -400,7 +409,7 @@ export const useWorldStore = defineStore('world', () => {
   const reset = () => {
     // Reset physics: remove all bodies, rebuild network.
     if (rapierWorld) {
-      for (const id of Object.keys(network.vehicles)) {
+      for (const id of Object.keys(network.value.vehicles)) {
         rapierWorld.removeVehicle(id);
       }
     }
@@ -414,11 +423,11 @@ export const useWorldStore = defineStore('world', () => {
     lidarPointClouds = new Map();
     if (cameraSensor) { cameraSensor.destroy(); cameraSensor = null; }
     cameraFrameCount.value = 0;
-    network = buildCrossIntersectionNetwork();
+    network.value = buildCrossIntersectionNetwork();
     simTime = 0;
     // Re-register default vehicles.
     if (rapierWorld) {
-      for (const v of Object.values(network.vehicles)) {
+      for (const v of Object.values(network.value.vehicles)) {
         rapierWorld.registerVehicle(
           buildRigidBodySpec(v.id, v.type, v.position, v.heading),
         );
@@ -435,15 +444,15 @@ export const useWorldStore = defineStore('world', () => {
     tickCount.value += 1;
   };
 
-  const getNetwork = (): RoadNetwork => network;
+  const getNetwork = (): RoadNetwork => network.value;
 
   const bumpTick = () => {
     tickCount.value += 1;
   };
   const notifyChange = bumpTick;
 
-  let nextVehicleNum = Object.keys(network.vehicles).length + 1;
-  let nextLightNum = Object.values(network.intersections)
+  let nextVehicleNum = Object.keys(network.value.vehicles).length + 1;
+  let nextLightNum = Object.values(network.value.intersections)
     .reduce((s, i) => s + i.trafficLights.length, 0) + 1;
 
   const addVehicle = (overrides: Partial<Vehicle> & Partial<SpawnOptions> = {}): SpawnResult => {
@@ -459,12 +468,12 @@ export const useWorldStore = defineStore('world', () => {
       color: overrides.color,
       speed: overrides.speed,
     };
-    const result = spawnVehicle(network, id, spawnOpts);
+    const result = spawnVehicle(network.value, id, spawnOpts);
     if (!result.ok) {
       showFlashMessage('交通密度已满 — 现有车道都无法再放车了', 'error');
       return result;
     }
-    network.vehicles[result.vehicle.id] = result.vehicle;
+    network.value.vehicles[result.vehicle.id] = result.vehicle;
     // Register the new body in Rapier (no-op when Rapier is not yet
     // initialised — useWorldSimulation will re-register on init).
     if (rapierWorld) {
@@ -519,7 +528,7 @@ export const useWorldStore = defineStore('world', () => {
       lidarPointClouds.delete(id);
     }
     if (rapierWorld) rapierWorld.removeVehicle(id);
-    delete network.vehicles[id];
+    delete network.value.vehicles[id];
     bumpTick();
   };
 
@@ -534,7 +543,7 @@ export const useWorldStore = defineStore('world', () => {
    * not permanent speed override.
    */
   const setVehicleSpeed = (vehicleId: string, speedKmh: number): void => {
-    const v = network.vehicles[vehicleId];
+    const v = network.value.vehicles[vehicleId];
     if (!v) return;
     pushHistory();
     v.speed = speedKmh / 3.6;  // km/h → m/s
@@ -548,9 +557,9 @@ export const useWorldStore = defineStore('world', () => {
   // Returns the same shape as `requestLaneChange` (the domain function)
   // so the caller can flash the reason on rejection.
   const requestLaneChange = (vehicleId: string, direction: 'left' | 'right'): { ok: boolean; reason?: string } => {
-    const v = network.vehicles[vehicleId];
+    const v = network.value.vehicles[vehicleId];
     if (!v) return { ok: false, reason: 'not-found' };
-    const r = requestLaneChangeFn(v, direction, network, simTime);
+    const r = requestLaneChangeFn(v, direction, network.value, simTime);
     if (r.ok) {
       v.desiredLaneIndex = v.laneIndex + (direction === 'left' ? 1 : -1);
       v.laneChangeStartedAt = simTime;
@@ -565,7 +574,7 @@ export const useWorldStore = defineStore('world', () => {
    * new type's mass + halfExtents.
    */
   const updateVehicleType = (vehicleId: string, newType: Vehicle['type']): void => {
-    const v = network.vehicles[vehicleId];
+    const v = network.value.vehicles[vehicleId];
     if (!v) return;
     pushHistory();
     v.type = newType;
@@ -577,7 +586,7 @@ export const useWorldStore = defineStore('world', () => {
 
   const addTrafficLight = (overrides: Partial<TrafficLight> = {}): TrafficLight | null => {
     pushHistory();
-    const inter = Object.values(network.intersections)[0];
+    const inter = Object.values(network.value.intersections)[0];
     if (!inter) return null;
     const id = overrides.id ?? `tl-${nextLightNum++}`;
     const angle = (inter.trafficLights.length * Math.PI) / 2;  // N, E, S, W
@@ -600,7 +609,7 @@ export const useWorldStore = defineStore('world', () => {
 
   const removeTrafficLight = (id: string): void => {
     pushHistory();
-    for (const inter of Object.values(network.intersections)) {
+    for (const inter of Object.values(network.value.intersections)) {
       inter.trafficLights = inter.trafficLights.filter((l) => l.id !== id);
     }
     bumpTick();
@@ -610,7 +619,7 @@ export const useWorldStore = defineStore('world', () => {
 
   const serialize = (): { ok: true } | { ok: false; reason: string } => {
     try {
-      saveScene(network);
+      saveScene(network.value);
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -630,11 +639,13 @@ export const useWorldStore = defineStore('world', () => {
   const replaceNetwork = (next: RoadNetwork): { ok: true } => {
     // Remove old bodies
     if (rapierWorld) {
-      for (const id of Object.keys(network.vehicles)) {
+      for (const id of Object.keys(network.value.vehicles)) {
         rapierWorld.removeVehicle(id);
       }
     }
-    network = next;
+    // Plan 035: assign via .value so Pinia's auto-unwrap on the store
+    // surfaces the new network to EntityOutline, InspectorPanel, etc.
+    network.value = next;
     // Clear controller cache + sensors + exporter — new scene has
     // different light IDs and vehicle IDs.
     controllers = new Map();
@@ -647,7 +658,7 @@ export const useWorldStore = defineStore('world', () => {
     cameraFrameCount.value = 0;
     // Re-register new vehicles
     if (rapierWorld) {
-      for (const v of Object.values(network.vehicles)) {
+      for (const v of Object.values(network.value.vehicles)) {
         rapierWorld.registerVehicle(
           buildRigidBodySpec(v.id, v.type, v.position, v.heading),
         );
@@ -716,7 +727,7 @@ export const useWorldStore = defineStore('world', () => {
   const undo = (): boolean => {
     if (history.length === 0) return false;
     const previous = history.pop()!;
-    redoStack.push(cloneScene(serializeNetwork(network)));
+    redoStack.push(cloneScene(serializeNetwork(network.value)));
     if (redoStack.length > HISTORY_LIMIT) redoStack.shift();
     const restored = sceneToNetwork(previous);
     // Use loadNetwork to re-register Rapier bodies
@@ -730,7 +741,7 @@ export const useWorldStore = defineStore('world', () => {
   const redo = (): boolean => {
     if (redoStack.length === 0) return false;
     const next = redoStack.pop()!;
-    history.push(cloneScene(serializeNetwork(network)));
+    history.push(cloneScene(serializeNetwork(network.value)));
     if (history.length > HISTORY_LIMIT) history.shift();
     const restored = sceneToNetwork(next);
     loadNetwork(restored);
