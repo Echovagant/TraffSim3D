@@ -13,6 +13,7 @@ export default defineConfig({
       '@infrastructure': fileURLToPath(new URL('./src/infrastructure', import.meta.url)),
       '@interfaces': fileURLToPath(new URL('./src/interfaces', import.meta.url)),
       '@shared': fileURLToPath(new URL('./src/shared', import.meta.url)),
+      '@__fixtures__': fileURLToPath(new URL('./src/__fixtures__', import.meta.url)),
     },
   },
   test: {
