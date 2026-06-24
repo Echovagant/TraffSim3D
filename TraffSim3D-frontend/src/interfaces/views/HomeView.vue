@@ -67,7 +67,7 @@
             <div class="module-body">
               <div class="module-title-row">
                 <h3>SimulationLab</h3>
-                <span class="badge badge-planned">M2 · Planned</span>
+                <span class="badge badge-active">M2 · Active</span>
               </div>
               <p class="module-sub">物理 + 传感器仿真</p>
               <p class="module-desc">
