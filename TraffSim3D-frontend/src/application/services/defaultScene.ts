@@ -16,7 +16,7 @@ const EW_GREEN = NS_GREEN;
  * Pulls position + heading from the lane geometry so the rest of the
  * code can stay in world-space.
  */
-const at = (road: Road, laneIndex: number, s: number, speed: number, v: Omit<Vehicle, 'position' | 'heading' | 'lane' | 's' | 'speed' | 'targetSpeed' | 'roadId' | 'laneIndex' | 'enteredIntersectionAt' | 'desiredLaneIndex' | 'laneChangeStartedAt'>): Vehicle => {
+const at = (road: Road, laneIndex: number, s: number, speed: number, v: Omit<Vehicle, 'position' | 'heading' | 'lane' | 's' | 'speed' | 'targetSpeed' | 'roadId' | 'laneIndex' | 'enteredIntersectionAt' | 'desiredLaneIndex' | 'laneChangeStartedAt' | 'spawnedAt'>): Vehicle => {
   const lp = lanePoint(road, laneIndex, s);
   return {
     ...v,
@@ -31,6 +31,7 @@ const at = (road: Road, laneIndex: number, s: number, speed: number, v: Omit<Veh
     enteredIntersectionAt: null,
     desiredLaneIndex: null,
     laneChangeStartedAt: null,
+    spawnedAt: 0,
   };
 };
 

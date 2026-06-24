@@ -58,4 +58,11 @@ export interface Vehicle {
    * `requestLaneChange`; cleared on completion or timeout.
    */
   laneChangeStartedAt: number | null;
+  /**
+   * Plan 034: simTime at which the vehicle was spawned. Used by the
+   * OOB cleanup in tick.ts to skip vehicles that have just been
+   * spawned (their Rapier body may take a frame to align with s=0).
+   * Pre-existing vehicles default to 0 (treated as "infinitely old").
+   */
+  spawnedAt: number;
 }

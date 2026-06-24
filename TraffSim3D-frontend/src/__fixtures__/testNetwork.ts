@@ -58,6 +58,7 @@ export const makeTestVehicle = (overrides: Partial<Vehicle> = {}): Vehicle => ({
   enteredIntersectionAt: null,
   desiredLaneIndex: null,
   laneChangeStartedAt: null,
+  spawnedAt: 0,
   ...overrides,
 });
 

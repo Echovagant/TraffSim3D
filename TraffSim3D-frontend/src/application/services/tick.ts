@@ -18,6 +18,7 @@ import type { Road } from '@domain/entities/Road';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { inIntersectionBox, lanePoint, laneOffset, roadLength, laneForwardSign } from '@domain/services/laneGeometry';
 import { steerLateralVelocity, LANE_CHANGE_CONVERGED_M, perpendicularOffsetAlongRoad } from '@domain/services/laneChange';
+import { tickOobCleanup } from './oobCleanup';
 import {
   MAX_SPEED,
   MIN_GAP,
@@ -61,6 +62,10 @@ export interface TickContext {
    *  When non-null, tick() skips Rapier applyControl + position re-derivation
    *  for this vehicle so the drag handler can move it freely. */
   draggingId: string | null;
+  /** Plan 034: hard-delete a vehicle whose road is missing (e.g. sceneIO
+   *  load replaced the network while a vehicle still held a stale
+   *  roadId). Wired by worldStore.addTickContext(). */
+  removeVehicle: (vehicleId: string) => void;
 }
 
 export const tick = (
@@ -229,6 +234,23 @@ export const tick = (
       v.status = v.speed < 0.5 ? 'waiting' : 'driving';
     }
   }
+
+  // 12. (Plan 034) OOB cleanup. Vehicles that have drifted > 50m from
+  //     their (road, lane, s) geometry are respawned at s=0. Vehicles
+  //     whose road is missing (e.g. after a scene load) are hard-deleted.
+  //     See ADR-008 for the design.
+  tickOobCleanup(
+    {
+      getRoad: (id) => network.roads[id],
+      removeVehicle: (id) => ctx.removeVehicle(id),
+      snapVehicle: (id, pos, heading) => {
+        ctx.rapierWorld?.setVehiclePosition(id, pos);
+        ctx.rapierWorld?.setVehicleSpeed(id, 0, heading);
+      },
+    },
+    Object.values(network.vehicles),
+    simTime,
+  );
 };
 
 // ===== Plan 029 (M2 lane change) — control constants =====

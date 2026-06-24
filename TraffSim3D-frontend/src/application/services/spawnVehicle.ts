@@ -186,6 +186,7 @@ export const spawnVehicle = (
     enteredIntersectionAt: null,
     desiredLaneIndex: null,
     laneChangeStartedAt: null,
+    spawnedAt: 0,  // Plan 034: stamped by worldStore.addVehicle() at spawn time
   };
   return { ok: true, vehicle };
 };

@@ -319,6 +319,7 @@ export const useWorldStore = defineStore('world', () => {
       lidarEnabled: lidarEnabled.value,
       getHostPose,
       draggingId,
+      removeVehicle,  // Plan 034: OOB cleanup entry point
     });
     if (lidarEnabled.value && rapierWorld) {
       // Bump the frame counter for the DebugPanel readout. We can't

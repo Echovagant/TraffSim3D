@@ -146,3 +146,10 @@ export const CAMERA_DEFAULT_HEIGHT = 192;
 export const CAMERA_DEFAULT_FOV = 60;
 /** Throttle camera capture to 5 Hz to avoid GPU stalls. */
 export const CAMERA_SAMPLE_INTERVAL = 0.2;
+
+/**
+ * Plan 034: 车辆位置距其 (road, lane, s) 几何 > 此值 → respawn.
+ * 默认 50m. 道路长 60u, 50 远大于任何合法偏离 (lane change ~3.5m).
+ * tick.ts 的 OOB branch 用这个常量决定是否 respawn.
+ */
+export const OUT_OF_BOUNDS_M = 50;
