@@ -73,6 +73,58 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
       rate: store.tickRate,
     }));
     renderer.start();
+
+    // M2-D: when the user flips LiDAR point-cloud visibility on,
+    // backfill clouds for every existing vehicle and add them to
+    // the scene. When flipped off, remove them. The worldStore owns
+    // the cloud objects; this composable just routes them through
+    // the renderer's auxiliary layer.
+    watch(
+      () => store.lidarCloudsEnabled,
+      (enabled) => {
+        if (!renderer) return;
+        const clouds = store.getLidarPointClouds();
+        if (enabled) {
+          for (const v of Object.values(store.getNetwork().vehicles)) {
+            const cloud = store.ensureLidarCloud(v.id);
+            if (!cloud.mesh.parent) renderer.addAuxiliary(cloud.mesh);
+          }
+        } else {
+          for (const cloud of clouds.values()) {
+            renderer.removeAuxiliary(cloud.mesh);
+          }
+        }
+      },
+    );
+
+    // M2-D: when new vehicles arrive after clouds are enabled,
+    // attach a cloud mesh for each. The store already created the
+    // LidarPointCloud object in addVehicle; here we just add the
+    // mesh to the scene.
+    watch(
+      () => Object.keys(store.getNetwork().vehicles).length,
+      () => {
+        if (!renderer || !store.lidarCloudsEnabled) return;
+        for (const [id, cloud] of store.getLidarPointClouds()) {
+          if (!cloud.mesh.parent) renderer.addAuxiliary(cloud.mesh);
+        }
+      },
+    );
+
+    // M2-D: when camera is enabled, lazily create the CameraSensor
+    // instance on first enable. The host vehicle is the user's
+    // selection if it's a vehicle, else the first vehicle.
+    watch(
+      () => store.cameraEnabled,
+      (enabled) => {
+        if (!enabled) return;
+        if (store.getCameraSensor()) return;
+        const hostId = selection.kind === 'vehicle' && selection.id
+          ? selection.id
+          : Object.keys(store.getNetwork().vehicles)[0] ?? 'v-1';
+        store.initCameraSensor(hostId);
+      },
+    );
     const container = canvas.parentElement;
     if (container) {
       renderer.resize(container.clientWidth, container.clientHeight);

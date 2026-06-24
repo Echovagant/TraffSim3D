@@ -10,12 +10,21 @@ import { findNearestLaneOnNetwork } from '@application/services/laneFrameSync';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { createSignalController, type SignalController, type ControllerKind } from '@application/services/signalController';
 import { SensorRegistry, type HostPoseLookup } from '@application/services/sensors';
-import { LidarSensor, defaultLidarConfig } from '@infrastructure/sensors';
+import {
+  LidarSensor,
+  LidarPointCloud,
+  defaultLidarConfig,
+  CameraSensor,
+  defaultCameraConfig,
+} from '@infrastructure/sensors';
 import { TrajectoryExporter } from '@infrastructure/export';
 import {
   DEFAULT_CONTROLLER_KIND,
   LIDAR_MOUNT_HEIGHT,
   TRAJECTORY_BUFFER_CAP,
+  CAMERA_DEFAULT_WIDTH,
+  CAMERA_DEFAULT_HEIGHT,
+  CAMERA_DEFAULT_FOV,
 } from '@shared/constants/simulation';
 import { saveScene, loadScene, clearScene } from '@application/use-cases';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
@@ -115,6 +124,59 @@ export const useWorldStore = defineStore('world', () => {
     const v = network.vehicles[vehicleId];
     if (!v) return null;
     return { position: v.position, heading: v.heading };
+  };
+
+  // M2-D (plan 025): LiDAR point cloud visualization + camera sensor.
+  // The point cloud meshes are added to the scene by the renderer
+  // (via addAuxiliary) when lidarCloudsEnabled is true. The cloud
+  // map is keyed by vehicleId; meshes are destroyed on removeVehicle.
+  let lidarPointClouds: Map<string, LidarPointCloud> = new Map();
+  const lidarCloudsEnabled = ref(false);
+  const setLidarCloudsEnabled = (enabled: boolean): void => {
+    lidarCloudsEnabled.value = enabled;
+    bumpTick();
+  };
+  const toggleLidarClouds = (): void => setLidarCloudsEnabled(!lidarCloudsEnabled.value);
+  const getLidarPointClouds = (): Map<string, LidarPointCloud> => lidarPointClouds;
+
+  /** Lazily create a LidarPointCloud for a vehicle. The renderer
+   *  (in useWorldSimulation) calls this when lidarCloudsEnabled
+   *  flips true to backfill clouds for vehicles that already exist. */
+  const ensureLidarCloud = (vehicleId: string): LidarPointCloud => {
+    let cloud = lidarPointClouds.get(vehicleId);
+    if (!cloud) {
+      cloud = new LidarPointCloud(5760);
+      lidarPointClouds.set(vehicleId, cloud);
+    }
+    return cloud;
+  };
+
+  /** M2-D: camera sensor. Lazily created on first enable so the
+   *  WebGLRenderTarget is only allocated when actually used. */
+  let cameraSensor: CameraSensor | null = null;
+  const cameraEnabled = ref(false);
+  const cameraFrameCount = ref(0);
+  const setCameraEnabled = (enabled: boolean): void => {
+    cameraEnabled.value = enabled;
+    if (!enabled) {
+      if (cameraSensor) {
+        cameraSensor.destroy();
+        cameraSensor = null;
+      }
+      cameraFrameCount.value = 0;
+    }
+    bumpTick();
+  };
+  const toggleCamera = (): void => setCameraEnabled(!cameraEnabled.value);
+  const getCameraSensor = (): CameraSensor | null => cameraSensor;
+
+  /** Lazily create the CameraSensor instance for `vehicleId`. Called
+   *  by useWorldSimulation when the user enables the camera toggle.
+   *  Idempotent — returns the existing instance if already created. */
+  const initCameraSensor = (vehicleId: string): CameraSensor => {
+    if (cameraSensor) return cameraSensor;
+    cameraSensor = new CameraSensor(defaultCameraConfig(vehicleId));
+    return cameraSensor;
   };
 
   // History for undo/redo. Each entry is a full SerializedScene JSON
@@ -240,6 +302,21 @@ export const useWorldStore = defineStore('world', () => {
       // a good enough proxy for "frames produced".
       lidarFrameCount.value += 1;
     }
+
+    // M2-D: refresh LidarPointCloud meshes from the latest frames
+    // cached by sensorRegistry.scanAll(). Each cloud is positioned
+    // at its host vehicle's current pose (which is post-Rapier-step).
+    if (lidarCloudsEnabled.value) {
+      for (const [vehicleId, frame] of sensorRegistry.getLatestFrames()) {
+        const cloud = lidarPointClouds.get(vehicleId);
+        const v = network.vehicles[vehicleId];
+        if (cloud && v) {
+          cloud.updateFromFrame(frame);
+          cloud.setPose(v.position, v.heading);
+        }
+      }
+    }
+
     tickCount.value += 1;
 
     // Frame-time stats
@@ -283,6 +360,11 @@ export const useWorldStore = defineStore('world', () => {
     controllers = new Map();
     sensorRegistry.destroyAll();
     trajectoryExporter.clear();
+    // M2-D: tear down point clouds + camera sensor.
+    for (const cloud of lidarPointClouds.values()) cloud.destroy();
+    lidarPointClouds = new Map();
+    if (cameraSensor) { cameraSensor.destroy(); cameraSensor = null; }
+    cameraFrameCount.value = 0;
     network = buildDefaultNetwork();
     simTime = 0;
     // Re-register default vehicles.
@@ -297,6 +379,8 @@ export const useWorldStore = defineStore('world', () => {
         const sensor = new LidarSensor(defaultLidarConfig(v.id, excludes));
         sensor.configure({ mountHeight: LIDAR_MOUNT_HEIGHT[v.type] });
         sensorRegistry.register(v.id, sensor, `lidar-${v.id}`);
+        // M2-D: backfill point clouds.
+        if (lidarCloudsEnabled.value) ensureLidarCloud(v.id);
       }
     }
     tickCount.value += 1;
@@ -351,6 +435,10 @@ export const useWorldStore = defineStore('world', () => {
       const sensor = new LidarSensor(defaultLidarConfig(result.vehicle.id, excludes));
       sensor.configure({ mountHeight: LIDAR_MOUNT_HEIGHT[result.vehicle.type] });
       sensorRegistry.register(result.vehicle.id, sensor, `lidar-${result.vehicle.id}`);
+      // M2-D: lazily create a LidarPointCloud if clouds are enabled.
+      if (lidarCloudsEnabled.value) {
+        ensureLidarCloud(result.vehicle.id);
+      }
     }
     bumpTick();
     return result;
@@ -362,6 +450,12 @@ export const useWorldStore = defineStore('world', () => {
     // The body removal deletes the collider handle that the sensor
     // needs for excludeColliders, so the order is critical.
     sensorRegistry.unregisterAllFor(id);
+    // M2-D: tear down the LidarPointCloud mesh.
+    const cloud = lidarPointClouds.get(id);
+    if (cloud) {
+      cloud.destroy();
+      lidarPointClouds.delete(id);
+    }
     if (rapierWorld) rapierWorld.removeVehicle(id);
     delete network.vehicles[id];
     bumpTick();
@@ -469,6 +563,11 @@ export const useWorldStore = defineStore('world', () => {
     controllers = new Map();
     sensorRegistry.destroyAll();
     trajectoryExporter.clear();
+    // M2-D: tear down point clouds + camera sensor.
+    for (const cloud of lidarPointClouds.values()) cloud.destroy();
+    lidarPointClouds = new Map();
+    if (cameraSensor) { cameraSensor.destroy(); cameraSensor = null; }
+    cameraFrameCount.value = 0;
     // Re-register new vehicles
     if (rapierWorld) {
       for (const v of Object.values(network.vehicles)) {
@@ -481,6 +580,8 @@ export const useWorldStore = defineStore('world', () => {
         const sensor = new LidarSensor(defaultLidarConfig(v.id, excludes));
         sensor.configure({ mountHeight: LIDAR_MOUNT_HEIGHT[v.type] });
         sensorRegistry.register(v.id, sensor, `lidar-${v.id}`);
+        // M2-D: backfill point clouds.
+        if (lidarCloudsEnabled.value) ensureLidarCloud(v.id);
       }
     }
     bumpTick();  // signal Vue watchers; the renderer will rebuild via identity change
@@ -595,5 +696,17 @@ export const useWorldStore = defineStore('world', () => {
     lidarFrameCount,
     setLidarEnabled,
     toggleLidar,
+    // M2-D point cloud + camera surface
+    lidarCloudsEnabled,
+    setLidarCloudsEnabled,
+    toggleLidarClouds,
+    getLidarPointClouds,
+    ensureLidarCloud,
+    cameraEnabled,
+    cameraFrameCount,
+    setCameraEnabled,
+    toggleCamera,
+    getCameraSensor,
+    initCameraSensor,
   };
 });
