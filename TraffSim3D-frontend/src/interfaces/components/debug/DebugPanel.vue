@@ -3,6 +3,19 @@
     <div class="row"><span>FPS</span><b :class="fpsClass">{{ store.fps }}</b></div>
     <div class="row"><span>Vehicles</span><b>{{ vehicleCount }}</b></div>
     <div class="row"><span>Lights</span><b>{{ lightCount }} <small>(R:{{ counts.red }} Y:{{ counts.yellow }} G:{{ counts.green }})</small></b></div>
+    <div class="row" title="信号控制器类型">
+      <span>Signal</span>
+      <b>{{ controllerKindLabel }}</b>
+    </div>
+    <div v-if="isCoordinated" class="row" title="协调偏移表 (UI only, 028 生效)">
+      <span>Offset</span>
+      <b>
+        <span v-for="[pair, val] in coordinatedPairs" :key="pair" class="offset-chip">
+          {{ pair }}: {{ val }}s
+        </span>
+        <span v-if="!coordinatedPairs.length" class="warn">— no pairs</span>
+      </b>
+    </div>
     <div class="row"><span>Frame ms</span><b>{{ frameMin }}-{{ frameMax }} <small>avg {{ frameAvg }}</small></b></div>
     <div class="row" :class="{ paused: !store.isRunning }">
       <span>Sim</span>
@@ -13,6 +26,10 @@
       <b :class="store.lidarEnabled ? 'ok' : ''">
         {{ store.lidarEnabled ? `on · ${store.lidarFrameCount} frames` : 'off' }}
       </b>
+    </div>
+    <div class="row" title="按 lane 分布的车辆数">
+      <span>Lane</span>
+      <b>{{ laneDistribution }}</b>
     </div>
     <div class="row" :title="`Trajectory buffer: ${store.trajectoryExporter.rowCount} / ${store.trajectoryExporter.maxBufferRows} rows`">
       <span>Trajectory</span>
@@ -70,6 +87,31 @@ const frameMin = computed(() => (store.frameMsMin === Infinity ? 0 : store.frame
 const frameMax = computed(() => (store.frameMsMax === -Infinity ? 0 : store.frameMsMax.toFixed(1)));
 const frameAvg = computed(() => store.frameMsAvg.toFixed(1));
 const fpsClass = computed(() => (store.fps >= M1_MIN_FPS ? 'ok' : 'warn'));
+
+// 027: controller kind label + coordinated offset list (read from worldStore).
+const controllerKindLabel = computed(() => {
+  const k = store.controllerKind as string;
+  if (k === 'fixed-cycle') return 'fixed';
+  if (k === 'actuated') return 'actuated';
+  if (k === 'coordinated') return 'coordinated';
+  return 'rl';
+});
+const isCoordinated = computed(() => (store.controllerKind as string) === 'coordinated');
+const coordinatedPairs = computed(() =>
+  Array.from(store.coordinatedOffsets.entries()).filter(([, v]) => v !== 0).sort());
+const laneDistribution = computed(() => {
+  void store.tickCount;
+  const lanes = new Map<string, number>();
+  for (const v of Object.values(store.network.vehicles)) {
+    const key = `${v.roadId}#${v.laneIndex}`;
+    lanes.set(key, (lanes.get(key) ?? 0) + 1);
+  }
+  if (lanes.size === 0) return '—';
+  return Array.from(lanes.entries())
+    .sort()
+    .map(([k, n]) => `${k}:${n}`)
+    .join(' ');
+});
 
 const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
 
@@ -206,6 +248,17 @@ const backendTooltip = computed(() => {
 }
 .debug button.refresh:hover:not(:disabled) { background: #334155; }
 .debug button.refresh:disabled { opacity: 0.4; cursor: wait; }
+
+.debug .offset-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 4px;
+  background: #1e3a8a;
+  color: #dbeafe;
+  border-radius: 3px;
+  font-size: 10px;
+}
+.debug b.warn { color: #fbbf24; }
 
 .debug .auto-poll {
   display: flex;

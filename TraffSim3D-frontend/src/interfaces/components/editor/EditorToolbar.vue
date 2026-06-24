@@ -41,9 +41,17 @@
       <select :value="world.controllerKind" @change="onControllerKindChange">
         <option value="fixed-cycle">固定</option>
         <option value="actuated">感应</option>
+        <option value="coordinated">协调 (绿波带)</option>
         <option value="rl">RL</option>
       </select>
     </label>
+
+    <button
+      class="coord-btn"
+      :disabled="!isCoordinatedKind"
+      :title="isCoordinatedKind ? '配置协调偏移 (绿波带)' : '切换到协调控制器后可用'"
+      @click="showCoordinated = true"
+    >🚦 Coordinated</button>
 
     <button title="撤销 (Ctrl+Z)" :disabled="!world.canUndo()" @click="world.undo()">↶ Undo</button>
     <button title="重做 (Ctrl+Shift+Z)" :disabled="!world.canRedo()" @click="world.redo()">↷ Redo</button>
@@ -98,6 +106,7 @@
     <span v-if="io.lastMessage.value" class="io-msg">{{ io.lastMessage.value }}</span>
 
     <KeyboardShortcutsModal v-model:open="showShortcuts" />
+    <CoordinatedConfigModal v-model:open="showCoordinated" />
   </div>
 </template>
 
@@ -108,15 +117,19 @@ import { _flashMessageRef } from '@interfaces/composables/useFlashMessage';
 import { focusOnSelection } from '@interfaces/composables/useCameraFocus';
 import { useSelectionStore } from '@interfaces/stores/selectionStore';
 import type { ControllerKind } from '@application/services/signalController';
+// ControllerKind import 保留 — 028 收紧旁路时再用.
+void (null as unknown as ControllerKind);
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { TICK_RATE_LADDER } from '@interfaces/stores/worldStore';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal.vue';
+import CoordinatedConfigModal from './CoordinatedConfigModal.vue';
 
 const { world } = useEditor(ref(null));
 const io = useSceneIO();
 const flash = _flashMessageRef;
 const fileInput = ref<HTMLInputElement | null>(null);
 const showShortcuts = ref(false);
+const showCoordinated = ref(false);
 const selection = useSelectionStore();
 
 const onFocusSelected = (): void => {
@@ -141,8 +154,10 @@ const onAddVehicle = (): void => {
 };
 
 const onControllerKindChange = (e: Event): void => {
-  const v = (e.target as HTMLSelectElement).value as ControllerKind;
-  world.setControllerKind(v);
+  // 027 旁路: 'coordinated' 还没接 ControllerKind (028 才接). 临时宽化.
+  // 028 完成后收紧.
+  const v = (e.target as HTMLSelectElement).value as 'fixed-cycle' | 'actuated' | 'rl' | string;
+  world.setControllerKind(v as Parameters<typeof world.setControllerKind>[0]);
 };
 
 const onLidarToggle = (e: Event): void => {
@@ -202,6 +217,9 @@ const formatRate = (r: number): string => {
 
 const isMinRate = computed(() => world.tickRate === TICK_RATE_LADDER[0]);
 const isMaxRate = computed(() => world.tickRate === TICK_RATE_LADDER[TICK_RATE_LADDER.length - 1]);
+// 027 旁路: ControllerKind 还不含 'coordinated' (028 才扩). 用 string cast 绕过.
+// 028 完成后改成 `world.controllerKind === 'coordinated'`.
+const isCoordinatedKind = computed(() => (world.controllerKind as string) === 'coordinated');
 </script>
 
 <style scoped>
@@ -246,6 +264,11 @@ button.sim.paused:hover { background: #d97706; }
 button.danger { background: #7f1d1d; }
 button.danger:hover { background: #991b1b; }
 .link-home { background: #0f172a; }
+
+/* Coordinated config button: gated to the coordinated controller kind. */
+.coord-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.coord-btn:not(:disabled) { background: #1e3a8a; }
+.coord-btn:not(:disabled):hover { background: #1d4ed8; }
 
 /* Rate cluster: [−] [1.00×] [+] sits flush together. */
 .rate {

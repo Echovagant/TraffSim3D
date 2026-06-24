@@ -116,6 +116,25 @@ export const useWorldStore = defineStore('world', () => {
   };
   const toggleLidar = (): void => setLidarEnabled(!lidarEnabled.value);
 
+  // M2-B Coordinated UI hooks (plan 027). The offsets are consulted by
+  // CoordinatedController (plan 028) — until then they are pure UI state
+  // that the modal reads / writes without effect on the running sim.
+  const coordinatedOffsets = ref<Map<string, number>>(new Map([
+    // Key: 'roadA-id|roadB-id' (the pair, smaller first). Value: seconds
+    // the B-axis green lags the A-axis green. Default 0 = no offset.
+    ['r-ns|r-ew', 0],
+  ]));
+  const coordinatedOffsetsEnabled = ref(false);
+
+  const setCoordinatedOffset = (pair: string, seconds: number): void => {
+    const next = new Map(coordinatedOffsets.value);
+    next.set(pair, Math.max(-30, Math.min(30, seconds)));
+    coordinatedOffsets.value = next;
+  };
+  const toggleCoordinatedOffsets = (on: boolean): void => {
+    coordinatedOffsetsEnabled.value = on;
+  };
+
   /** Lookup host vehicle's live pose — used by SensorRegistry.scanAll.
    *  Reads from the (mutating) network object; safe because tick() is
    *  the only writer of vehicle position, and the scan runs after
@@ -708,5 +727,10 @@ export const useWorldStore = defineStore('world', () => {
     toggleCamera,
     getCameraSensor,
     initCameraSensor,
+    // M2-B Coordinated UI hooks (plan 027)
+    coordinatedOffsets,
+    coordinatedOffsetsEnabled,
+    setCoordinatedOffset,
+    toggleCoordinatedOffsets,
   };
 });

@@ -33,6 +33,7 @@
           >
             <span class="row-id">{{ v.id }}</span>
             <span class="row-type">{{ v.type }}</span>
+            <span class="row-lane" :title="`lane ${v.laneIndex}`">L{{ v.laneIndex }}</span>
             <span class="row-status" :title="`status: ${v.status}`">
               {{ statusIcon(v.status) }}
             </span>
@@ -192,6 +193,14 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   font-size: 10px;
   opacity: 0.7;
   text-transform: uppercase;
+}
+.row-lane {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.15);
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .row-status {
   font-size: 10px;

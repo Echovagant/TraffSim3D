@@ -16,6 +16,19 @@
         </select>
       </label>
       <label>Speed (km/h) <input type="number" :value="Speed.toKmh((entity as Vehicle).speed).toFixed(0)" min="0" max="120" @change="updateSpeed(Number(($event.target as HTMLInputElement).value))" /></label>
+      <label>Lane <b>{{ laneDisplay }}</b></label>
+      <div class="lane-actions">
+        <button
+          class="ghost"
+          :disabled="!canChangeLaneLeft"
+          :title="canChangeLaneLeft ? '向左变道 (plan 029 实现)' : '已在最左道'"
+        >◀ Change Lane</button>
+        <button
+          class="ghost"
+          :disabled="!canChangeLaneRight"
+          :title="canChangeLaneRight ? '向右变道 (plan 029 实现)' : '已在最右道'"
+        >Change Lane ▶</button>
+      </div>
     </div>
     <div v-else-if="selection.kind === 'light'">
       <label>Phase
@@ -56,6 +69,31 @@ const entity = computed(() => {
     }
   }
   return null;
+});
+
+const laneDisplay = computed(() => {
+  if (selection.kind !== 'vehicle' || !entity.value) return '—';
+  const v = entity.value as Vehicle;
+  const road = world.network.roads[v.roadId];
+  if (!road) return `${v.laneIndex}`;
+  return `${v.laneIndex} / 0–${road.laneCount - 1}`;
+});
+
+const canChangeLaneLeft = computed(() => {
+  if (selection.kind !== 'vehicle' || !entity.value) return false;
+  const v = entity.value as Vehicle;
+  // Lane 0 is the rightmost (slow) lane by convention (see
+  // laneGeometry.ts: laneForwardSign). "Left" = higher index
+  // (toward center of road). UI here is informal; plan 029
+  // will replace with a real action.
+  return v.laneIndex > 0;
+});
+const canChangeLaneRight = computed(() => {
+  if (selection.kind !== 'vehicle' || !entity.value) return false;
+  const v = entity.value as Vehicle;
+  const road = world.network.roads[v.roadId];
+  if (!road) return false;
+  return v.laneIndex < road.laneCount - 1;
 });
 
 const deselect = (): void => {
@@ -128,6 +166,8 @@ const deleteSelected = () => {
 .inspector .id { flex: 1; font-weight: 600; }
 .inspector label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11px; }
 .inspector input, .inspector select { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-radius: 4px; padding: 2px 4px; font-family: inherit; font-size: 11px; }
+.inspector .lane-actions { display: flex; gap: 6px; margin: 6px 0; }
+.inspector .lane-actions button { flex: 1; }
 .inspector button {
   padding: 3px 6px;
   background: #1e293b;
