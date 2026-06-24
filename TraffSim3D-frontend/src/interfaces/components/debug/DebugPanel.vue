@@ -102,15 +102,15 @@ const coordinatedPairs = computed(() =>
 const laneDistribution = computed(() => {
   void store.tickCount;
   const lanes = new Map<string, number>();
+  let changing = 0;
   for (const v of Object.values(store.network.vehicles)) {
     const key = `${v.roadId}#${v.laneIndex}`;
     lanes.set(key, (lanes.get(key) ?? 0) + 1);
+    if (v.desiredLaneIndex !== null) changing += 1;
   }
   if (lanes.size === 0) return '—';
-  return Array.from(lanes.entries())
-    .sort()
-    .map(([k, n]) => `${k}:${n}`)
-    .join(' ');
+  const base = Array.from(lanes.entries()).sort().map(([k, n]) => `${k}:${n}`).join(' ');
+  return changing > 0 ? `${base} · ${changing} changing` : base;
 });
 
 const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;

@@ -45,4 +45,17 @@ export interface Vehicle {
    * right-of-way.
    */
   enteredIntersectionAt: number | null;
+  /**
+   * Plan 029 (M2 lane change): if non-null, vehicle is mid lane-change
+   * to this lane. Tick advances the lateral position and clears this
+   * when the body reaches the target lane. Inspector / debugging read
+   * this to show "changing" state. Set by `requestLaneChange`.
+   */
+  desiredLaneIndex: number | null;
+  /**
+   * Simulation time at which the current lane-change started. Used by
+   * tick to abort stuck lane-changes after a timeout (5s). Set by
+   * `requestLaneChange`; cleared on completion or timeout.
+   */
+  laneChangeStartedAt: number | null;
 }

@@ -27,6 +27,7 @@
             :class="{
               active: isSelected('vehicle', v.id),
               crashed: v.status === 'crashed',
+              changing: v.desiredLaneIndex !== null,
             }"
             :style="{ borderLeftColor: v.status === 'crashed' ? '#ef4444' : v.color }"
             @click="onSelect('vehicle', v.id)"
@@ -229,6 +230,17 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
 @keyframes crash-pulse {
   0%, 100% { background: rgba(239, 68, 68, 0.10); }
   50%      { background: rgba(239, 68, 68, 0.30); }
+}
+
+/* Plan 029 (M2 lane change): vehicles mid lane-change get a blue
+ *  pulse so the user can see what's moving sideways. */
+.row.changing {
+  background: rgba(59, 130, 246, 0.18);
+  animation: lane-change-pulse 0.8s ease-in-out infinite;
+}
+@keyframes lane-change-pulse {
+  0%, 100% { background: rgba(59, 130, 246, 0.12); }
+  50%      { background: rgba(59, 130, 246, 0.32); }
 }
 
 .empty {

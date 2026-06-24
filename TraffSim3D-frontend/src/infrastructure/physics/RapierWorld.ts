@@ -212,6 +212,39 @@ export class RapierWorld {
   }
 
   /**
+   * Plan 029: apply a lateral (perpendicular-to-current-linvel) velocity
+   * nudge to a vehicle body. Used during lane-change to slide the body
+   * sideways without disturbing forward motion. The caller combines
+   * this with the longitudinal linvel that `applyControl` already set
+   * for this tick.
+   *
+   * `lateralMs` is signed: positive = vehicle's left (in world XZ
+   * relative to current linvel direction), negative = right. Magnitude
+   * is capped by the caller (tick.ts passes clamp(±MAX_LATERAL_MS)).
+   *
+   * If the body is currently stationary (no linvel), this method is
+   * a no-op — there's no forward direction to be perpendicular to.
+   * The lane-change controller skips such vehicles (its decision
+   * requires `MIN_LANE_CHANGE_SPEED`).
+   */
+  setVehicleLateralVelocity(vehicleId: string, lateralMs: number): void {
+    if (!this.world) return;
+    const bodyHandle = this.bodies.get(vehicleId);
+    if (bodyHandle === undefined) return;
+    const body = this.world.getRigidBody(bodyHandle);
+    if (!body) return;
+    const lv = body.linvel();
+    const speed = Math.hypot(lv.x, lv.z);
+    if (speed < 0.01) return;  // no forward dir → can't compute perp
+    const dirX = lv.x / speed;
+    const dirZ = lv.z / speed;
+    // Perpendicular in XZ (rotate 90° CCW): (-dirZ, dirX)
+    const perpX = -dirZ;
+    const perpZ = dirX;
+    body.setLinvel({ x: lv.x + perpX * lateralMs, y: 0, z: lv.z + perpZ * lateralMs }, true);
+  }
+
+  /**
    * Teleport a vehicle's rigid body to `position` (world-space, metres).
    * Used by the editor's drag-to-move: while dragging, the position
    * is updated every frame; on drag end, the body is teleported to

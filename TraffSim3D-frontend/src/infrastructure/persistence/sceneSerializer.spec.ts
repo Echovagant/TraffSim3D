@@ -26,4 +26,14 @@ describe('sceneSerializer round-trip', () => {
     expect(scene.schemaVersion).toBe(4);
     expect(typeof scene.savedAtMs).toBe('number');
   });
+
+  it('preserves desiredLaneIndex + laneChangeStartedAt across round-trip (plan 029)', () => {
+    const net = buildTestNetwork(1);
+    net.vehicles['v-1']!.desiredLaneIndex = 1;
+    net.vehicles['v-1']!.laneChangeStartedAt = 12.5;
+    const scene = serializeNetwork(net);
+    const restored = sceneToNetwork(scene);
+    expect(restored.vehicles['v-1']!.desiredLaneIndex).toBe(1);
+    expect(restored.vehicles['v-1']!.laneChangeStartedAt).toBe(12.5);
+  });
 });

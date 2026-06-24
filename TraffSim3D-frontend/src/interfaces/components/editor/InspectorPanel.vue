@@ -21,12 +21,14 @@
         <button
           class="ghost"
           :disabled="!canChangeLaneLeft"
-          :title="canChangeLaneLeft ? '向左变道 (plan 029 实现)' : '已在最左道'"
+          :title="canChangeLaneLeft ? '向左变道' : '已在最左道'"
+          @click="onChangeLane('left')"
         >◀ Change Lane</button>
         <button
           class="ghost"
           :disabled="!canChangeLaneRight"
-          :title="canChangeLaneRight ? '向右变道 (plan 029 实现)' : '已在最右道'"
+          :title="canChangeLaneRight ? '向右变道' : '已在最右道'"
+          @click="onChangeLane('right')"
         >Change Lane ▶</button>
       </div>
     </div>
@@ -52,6 +54,7 @@
 import { computed, ref } from 'vue';
 import { useEditor } from '@interfaces/composables/useEditor';
 import { Speed } from '@domain/value-objects/Speed';
+import { _flashMessageRef } from '@interfaces/composables/useFlashMessage';
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
 
@@ -95,6 +98,18 @@ const canChangeLaneRight = computed(() => {
   if (!road) return false;
   return v.laneIndex < road.laneCount - 1;
 });
+
+const flash = _flashMessageRef;
+const onChangeLane = (dir: 'left' | 'right'): void => {
+  if (selection.kind === 'vehicle' && selection.id) {
+    const r = world.requestLaneChange(selection.id, dir);
+    if (r.ok) {
+      flash.value = { text: `变道: ${dir === 'left' ? '左' : '右'}`, level: 'info', ts: Date.now() };
+    } else {
+      flash.value = { text: `变道拒绝: ${r.reason ?? 'unknown'}`, level: 'error', ts: Date.now() };
+    }
+  }
+};
 
 const deselect = (): void => {
   selection.clear();

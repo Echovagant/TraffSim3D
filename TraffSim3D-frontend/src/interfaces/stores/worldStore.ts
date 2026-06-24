@@ -9,6 +9,7 @@ import { spawnVehicle, type SpawnOptions, type SpawnResult } from '@application/
 import { findNearestLaneOnNetwork } from '@application/services/laneFrameSync';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { createSignalController, type SignalController, type ControllerKind } from '@application/services/signalController';
+import { requestLaneChange as requestLaneChangeFn } from '@domain/services/laneChange';
 import { SensorRegistry, type HostPoseLookup } from '@application/services/sensors';
 import {
   LidarSensor,
@@ -506,6 +507,21 @@ export const useWorldStore = defineStore('world', () => {
     bumpTick();
   };
 
+  // Plan 029 (M2 lane change): domain decision + state mutation.
+  // Returns the same shape as `requestLaneChange` (the domain function)
+  // so the caller can flash the reason on rejection.
+  const requestLaneChange = (vehicleId: string, direction: 'left' | 'right'): { ok: boolean; reason?: string } => {
+    const v = network.vehicles[vehicleId];
+    if (!v) return { ok: false, reason: 'not-found' };
+    const r = requestLaneChangeFn(v, direction, network, simTime);
+    if (r.ok) {
+      v.desiredLaneIndex = v.laneIndex + (direction === 'left' ? 1 : -1);
+      v.laneChangeStartedAt = simTime;
+      bumpTick();
+    }
+    return r;
+  };
+
   /**
    * User-edited a vehicle's type via the Inspector. Mutate the
    * entity field, then ask Rapier to re-register the body with the
@@ -684,6 +700,7 @@ export const useWorldStore = defineStore('world', () => {
     removeVehicle,
     setVehicleSpeed,
     updateVehicleType,
+    requestLaneChange,
     addTrafficLight,
     removeTrafficLight,
     notifyChange,

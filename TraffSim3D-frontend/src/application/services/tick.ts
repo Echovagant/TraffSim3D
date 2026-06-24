@@ -16,7 +16,8 @@ import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { Road } from '@domain/entities/Road';
 import { LightPhase } from '@domain/value-objects/Phase';
-import { inIntersectionBox, lanePoint, roadLength, laneForwardSign } from '@domain/services/laneGeometry';
+import { inIntersectionBox, lanePoint, laneOffset, roadLength, laneForwardSign } from '@domain/services/laneGeometry';
+import { steerLateralVelocity, LANE_CHANGE_CONVERGED_M, perpendicularOffsetAlongRoad } from '@domain/services/laneChange';
 import {
   MAX_SPEED,
   MIN_GAP,
@@ -180,6 +181,36 @@ export const tick = (
     }
   }
 
+  // Plan 029 (M2 lane change): per-vehicle lane-change branch.
+  // Runs after both Rapier and hand-rolled paths so position/heading
+  // are fresh. For vehicles with desiredLaneIndex set, applies a
+  // lateral linvel toward the target lane and clears state when
+  // converged (or aborts after a 5s timeout).
+  for (const v of Object.values(network.vehicles)) {
+    if (v.desiredLaneIndex === null) continue;
+    const road = network.roads[v.roadId];
+    if (!road) { v.desiredLaneIndex = null; v.laneChangeStartedAt = null; continue; }
+    const targetLane = v.desiredLaneIndex;
+    const currentLat = perpendicularOffsetAlongRoad(road, v.position);
+    const targetLat = laneOffset(targetLane, road.laneCount);
+    const lat = steerLateralVelocity(currentLat, targetLat, STEER_GAIN, MAX_LATERAL_MS);
+    ctx.rapierWorld?.setVehicleLateralVelocity(v.id, lat);
+    if (Math.abs(targetLat - currentLat) < LANE_CHANGE_CONVERGED_M) {
+      // Converged — commit target lane, snap to lane geometry.
+      v.laneIndex = targetLane;
+      v.desiredLaneIndex = null;
+      v.laneChangeStartedAt = null;
+      const lp = lanePoint(road, v.laneIndex, v.s);
+      v.position = { x: lp.position.x, y: v.position.y, z: lp.position.z };
+      v.heading = lp.heading;
+      ctx.rapierWorld?.setVehicleSpeed(v.id, v.speed, v.heading);
+    } else if (v.laneChangeStartedAt !== null && simTime - v.laneChangeStartedAt > LANE_CHANGE_TIMEOUT_S) {
+      // Stuck — abort.
+      v.desiredLaneIndex = null;
+      v.laneChangeStartedAt = null;
+    }
+  }
+
   // 9. (M2-C) LiDAR scan — only when enabled (perf gate). 017 H1 fix:
   //    scan() is actually called from inside tick.ts.
   if (ctx.lidarEnabled && ctx.sensorRegistry && ctx.rapierWorld) {
@@ -199,6 +230,15 @@ export const tick = (
     }
   }
 };
+
+// ===== Plan 029 (M2 lane change) — control constants =====
+/** P-controller gain for lateral linvel (1/s). 2.0 means a 1m gap
+ *  gets 2 m/s of lateral velocity. */
+const STEER_GAIN = 2.0;
+/** Cap on lateral linvel (m/s). 4 m/s ≈ 14 km/h sideways. */
+const MAX_LATERAL_MS = 4.0;
+/** Stuck-lane-change abort timeout (seconds). */
+const LANE_CHANGE_TIMEOUT_S = 5.0;
 
 /** M1.5 — stamp simTime on entering intersection. */
 const updateIntersectionEntry = (network: RoadNetwork, simTime: number): void => {

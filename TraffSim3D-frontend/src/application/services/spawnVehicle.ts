@@ -184,6 +184,8 @@ export const spawnVehicle = (
     lane: LaneId.make(spot.roadId, spot.laneIndex),
     status: speed < 0.5 ? 'waiting' : 'driving',
     enteredIntersectionAt: null,
+    desiredLaneIndex: null,
+    laneChangeStartedAt: null,
   };
   return { ok: true, vehicle };
 };
