@@ -8,6 +8,16 @@
       <span>Sim</span>
       <b>{{ store.isRunning ? `running @ ${formatRate(store.tickRate)}` : 'paused' }}</b>
     </div>
+    <div class="row" :title="`LiDAR sensors active: ${store.sensorRegistry.sensorCount}`">
+      <span>LiDAR</span>
+      <b :class="store.lidarEnabled ? 'ok' : ''">
+        {{ store.lidarEnabled ? `on · ${store.lidarFrameCount} frames` : 'off' }}
+      </b>
+    </div>
+    <div class="row" :title="`Trajectory buffer: ${store.trajectoryExporter.rowCount} / ${store.trajectoryExporter.maxBufferRows} rows`">
+      <span>Trajectory</span>
+      <b>{{ store.trajectoryExporter.rowCount }} rows</b>
+    </div>
     <div class="row backend" :title="backendTooltip">
       <span>Backend</span>
       <b :class="backendClass">

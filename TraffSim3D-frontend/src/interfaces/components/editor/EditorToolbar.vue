@@ -66,6 +66,14 @@
     />
 
     <span class="sep" />
+
+    <button title="下载轨迹 CSV (10Hz 采样)" @click="exportTrajectoryCsv">📥 Trajectory CSV</button>
+    <label class="lidar-toggle" title="启用车载 16线 LiDAR (点云未渲染, 但 scan() 跑通; perf gate 验证)">
+      <input type="checkbox" :checked="world.lidarEnabled" @change="onLidarToggle" />
+      <span>LiDAR</span>
+    </label>
+
+    <span class="sep" />
     <button
       class="help-btn"
       title="显示键盘快捷键 (?)"
@@ -127,6 +135,24 @@ const onAddVehicle = (): void => {
 const onControllerKindChange = (e: Event): void => {
   const v = (e.target as HTMLSelectElement).value as ControllerKind;
   world.setControllerKind(v);
+};
+
+const onLidarToggle = (e: Event): void => {
+  world.setLidarEnabled((e.target as HTMLInputElement).checked);
+};
+
+const exportTrajectoryCsv = (): void => {
+  const blob = world.trajectoryExporter.exportAsBlob({
+    kind: 'csv',
+    includeCrashed: true,
+    sampleInterval: 0.1,
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `trajectory-${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 };
 
 /**
@@ -254,6 +280,22 @@ button.danger:hover { background: #991b1b; }
   cursor: pointer;
 }
 .ctrl-kind select:focus { outline: 1px solid #475569; }
+
+/* LiDAR toggle: a checkbox + label, sits next to the Trajectory CSV button. */
+.lidar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: #1e293b;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.lidar-toggle input { cursor: pointer; }
+.lidar-toggle:hover { background: #334155; }
 
 .io-msg {
   margin-left: 6px;
