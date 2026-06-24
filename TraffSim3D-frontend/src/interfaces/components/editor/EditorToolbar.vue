@@ -33,7 +33,17 @@
 
     <button title="添加车辆" @click="onAddVehicle">+ Vehicle</button>
     <button title="添加信号灯" @click="world.addTrafficLight()">+ Light</button>
+    <button title="强制所有信号灯全红 (3s)" @click="world.forceAllRed()">🚨 All Red</button>
     <button title="重置场景 (R)" @click="world.reset()">Reset</button>
+
+    <label class="ctrl-kind" title="信号灯控制策略">
+      <span class="ctrl-kind-label">控制</span>
+      <select :value="world.controllerKind" @change="onControllerKindChange">
+        <option value="fixed-cycle">固定</option>
+        <option value="actuated">感应</option>
+        <option value="rl">RL</option>
+      </select>
+    </label>
 
     <button title="撤销 (Ctrl+Z)" :disabled="!world.canUndo()" @click="world.undo()">↶ Undo</button>
     <button title="重做 (Ctrl+Shift+Z)" :disabled="!world.canRedo()" @click="world.redo()">↷ Redo</button>
@@ -81,6 +91,7 @@ import { useSceneIO } from '@interfaces/composables/useSceneIO';
 import { _flashMessageRef } from '@interfaces/composables/useFlashMessage';
 import { focusOnSelection } from '@interfaces/composables/useCameraFocus';
 import { useSelectionStore } from '@interfaces/stores/selectionStore';
+import type { ControllerKind } from '@application/services/signalController';
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { TICK_RATE_LADDER } from '@interfaces/stores/worldStore';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal.vue';
@@ -111,6 +122,11 @@ const onAddVehicle = (): void => {
   // `addVehicle` returns `{ ok, ... }` in M1.5; we don't need the
   // result here because failures surface via the flash channel.
   world.addVehicle();
+};
+
+const onControllerKindChange = (e: Event): void => {
+  const v = (e.target as HTMLSelectElement).value as ControllerKind;
+  world.setControllerKind(v);
 };
 
 /**
@@ -214,6 +230,30 @@ button.danger:hover { background: #991b1b; }
   color: #fbbf24;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* Controller-kind dropdown sits next to the Reset button. */
+.ctrl-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px 0 8px;
+  background: #0f172a;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ctrl-kind-label { opacity: 0.7; }
+.ctrl-kind select {
+  background: transparent;
+  color: #fbbf24;
+  border: none;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 4px;
+  cursor: pointer;
+}
+.ctrl-kind select:focus { outline: 1px solid #475569; }
 
 .io-msg {
   margin-left: 6px;

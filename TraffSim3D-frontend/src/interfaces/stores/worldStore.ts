@@ -8,6 +8,8 @@ import { tick } from '@application/services/tick';
 import { spawnVehicle, type SpawnOptions, type SpawnResult } from '@application/services/spawnVehicle';
 import { findNearestLaneOnNetwork } from '@application/services/laneFrameSync';
 import { LightPhase } from '@domain/value-objects/Phase';
+import { createSignalController, type SignalController, type ControllerKind } from '@application/services/signalController';
+import { DEFAULT_CONTROLLER_KIND } from '@shared/constants/simulation';
 import { saveScene, loadScene, clearScene } from '@application/use-cases';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
 import { RapierWorld, buildRigidBodySpec } from '@infrastructure/physics';
@@ -52,6 +54,39 @@ export const useWorldStore = defineStore('world', () => {
     draggingId = id;
   };
   const getDraggingId = (): string | null => draggingId;
+
+  // M2-B: per-light signal controller cache (plan 010). One
+  // SignalController instance per traffic light; lazy-created on
+  // first encounter. Switching controllerKind clears the cache so
+  // the new kind's `decide()` semantics take effect immediately.
+  let controllers: Map<string, SignalController> = new Map();
+  const controllerKind = ref<ControllerKind>(DEFAULT_CONTROLLER_KIND);
+  const setControllerKind = (kind: ControllerKind): void => {
+    controllerKind.value = kind;
+    // Force rebuild — different kinds have different `decide()` behavior,
+    // so retaining stale controllers would silently mix semantics.
+    controllers = new Map();
+    bumpTick();
+  };
+  const getControllerKind = (): ControllerKind => controllerKind.value;
+  const getControllers = (): Map<string, SignalController> => controllers;
+
+  /**
+   * Force every traffic light to AllRed for `durationSeconds`.
+   * Preemption path — bypasses the controllers and writes the
+   * light state directly. M4 RL agents will get a similar API via
+   * `controller.applyAction('force_all_red')`; for M2-B the
+   * direct mutation is fine and explicit.
+   */
+  const forceAllRed = (durationSeconds = 3): void => {
+    for (const inter of Object.values(network.intersections)) {
+      for (const light of inter.trafficLights) {
+        light.phase = LightPhase.AllRed;
+        light.phaseRemaining = durationSeconds;
+      }
+    }
+    bumpTick();
+  };
 
   // History for undo/redo. Each entry is a full SerializedScene JSON
   // string. Bounded to 50 entries to keep memory predictable; oldest
@@ -153,14 +188,14 @@ export const useWorldStore = defineStore('world', () => {
   let frameWindowMs = 0;
   let frameWindowCount = 0;
 
-  const step = (dt: number) => {
+  const step = (dt: number): number => {
     // Clamp dt (I5): 防止卡顿后大跳跃穿模, AND 防止 rAF 边界
     // 偶发的负 dt 进入 frame-time 统计 (会把 min 拉到 -0.x ms,
     // 看起来像 bug). 上下界都 clamp 后 simTime/tick/frame 统计
     // 都用同一个值.
     const clampedDt = Math.max(0, Math.min(dt, 1 / 30));
     simTime += clampedDt;
-    tick(network, clampedDt, simTime, rapierWorld, draggingId);
+    tick(network, clampedDt, simTime, rapierWorld, draggingId, controllers, controllerKind.value);
     tickCount.value += 1;
 
     // Frame-time stats
@@ -185,6 +220,11 @@ export const useWorldStore = defineStore('world', () => {
       fpsAcc = 0;
       lastFpsUpdateMs = now;
     }
+
+    // Returned to the renderer so it can drive flashing light phases
+    // (FlashingYellow 1Hz / FlashingRed 0.5Hz) without the renderer
+    // holding its own clock — there is one sim time in the system.
+    return simTime;
   };
 
   const reset = () => {
@@ -196,6 +236,7 @@ export const useWorldStore = defineStore('world', () => {
     }
     history = [];
     redoStack = [];
+    controllers = new Map();
     network = buildDefaultNetwork();
     simTime = 0;
     // Re-register default vehicles.
@@ -359,6 +400,8 @@ export const useWorldStore = defineStore('world', () => {
       }
     }
     network = next;
+    // Clear controller cache — new scene has different light IDs.
+    controllers = new Map();
     // Re-register new vehicles
     if (rapierWorld) {
       for (const v of Object.values(network.vehicles)) {
@@ -466,5 +509,11 @@ export const useWorldStore = defineStore('world', () => {
     redo,
     canUndo,
     canRedo,
+    // M2-B signal controller surface
+    controllerKind,
+    setControllerKind,
+    getControllerKind,
+    getControllers,
+    forceAllRed,
   };
 });

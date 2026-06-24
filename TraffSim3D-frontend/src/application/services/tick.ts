@@ -33,6 +33,8 @@ import {
 } from '@shared/constants/simulation';
 import type { RapierWorld, ContactEvent } from '@infrastructure/physics';
 import { findNearestLane } from './laneFrameSync';
+import { createSignalController, type SignalController, type ControllerKind } from './signalController';
+import { DEFAULT_CONTROLLER_KIND } from '@shared/constants/simulation';
 
 /** SimTime clock — caller passes the current sim time so
  *  `enteredIntersectionAt` can be stamped. */
@@ -42,25 +44,25 @@ export const tick = (
   simTime: number,
   rapierWorld: RapierWorld | null,
   draggingId: string | null,
+  controllers: Map<string, SignalController>,
+  controllerKind: ControllerKind = DEFAULT_CONTROLLER_KIND,
 ): void => {
-  // 1. Advance traffic-light phases (M1 30/3/30 — M2-B replaces).
-  //    For M2-A we keep the hard-coded cycle so the perf gate
-  //    measures a known quantity.
+  // 1. Advance traffic-light phases via per-light SignalController
+  //    (M2-B, plan 010). Replaces M1's hard-coded 30/3/30 loop.
+  //    Controller cache (lightId → SignalController) is owned by
+  //    worldStore and shared across ticks — see plan 010 §9.
   for (const inter of Object.values(network.intersections)) {
     for (const light of inter.trafficLights) {
       light.phaseRemaining -= dt;
-      if (light.phaseRemaining <= 0) {
-        if (light.phase === LightPhase.Green) {
-          light.phase = LightPhase.Yellow;
-          light.phaseRemaining = 3;
-        } else if (light.phase === LightPhase.Yellow) {
-          light.phase = LightPhase.Red;
-          light.phaseRemaining = light.cycleSeconds - 33;
-        } else {
-          light.phase = LightPhase.Green;
-          light.phaseRemaining = 30;
-        }
+      let controller = controllers.get(light.id);
+      if (!controller) {
+        // Lazy create (covers lights added after reset/hydrate).
+        controller = createSignalController(controllerKind);
+        controllers.set(light.id, controller);
       }
+      const decision = controller.decide(light, network, simTime);
+      light.phase = decision.phase;
+      light.phaseRemaining = decision.duration;
     }
   }
 
@@ -181,12 +183,25 @@ const applyTrafficLightConstraint = (v: Vehicle, road: Road, network: RoadNetwor
       const roadIsNS = Math.abs(road.endNode.z - road.startNode.z) > Math.abs(road.endNode.x - road.startNode.x);
       const lightAxisMatches = (roadIsNS && light.axis === 'ns') || (!roadIsNS && light.axis === 'ew');
       if (!lightAxisMatches) continue;
-      if (light.phase === LightPhase.Red || light.phase === LightPhase.Yellow) {
+      // M2-B (plan 016 H3): exhaustive phase set.
+      // Red-family phases (Red / RedLeft / AllRed / FlashingRed) = full stop.
+      // Yellow-family (Yellow / YellowLeft) = prepare to stop.
+      // FlashingYellow = slow down (not stop). FlashingRed = stop (4-way).
+      // Dark / Green-family = no constraint here.
+      if (light.phase === LightPhase.Red
+        || light.phase === LightPhase.Yellow
+        || light.phase === LightPhase.RedLeft
+        || light.phase === LightPhase.YellowLeft
+        || light.phase === LightPhase.AllRed
+        || light.phase === LightPhase.FlashingRed) {
         const braking = (v.speed * v.speed) / 20 + STOP_LINE_BUFFER;
         if (distToStopLine <= braking) {
           v.targetSpeed = 0;
           return;
         }
+      } else if (light.phase === LightPhase.FlashingYellow) {
+        // Slow approach: targetSpeed halved against the speed limit.
+        v.targetSpeed = Math.min(v.targetSpeed, road.speedLimit * 0.5);
       }
       return;
     }

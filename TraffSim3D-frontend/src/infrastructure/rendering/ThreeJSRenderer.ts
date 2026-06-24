@@ -10,8 +10,15 @@ import {
 import { MAX_DPR } from '@shared/constants/simulation';
 
 export interface RendererCallbacks {
-  /** Called once per frame with the elapsed seconds since the last call. */
-  onTick: (dt: number) => void;
+  /**
+   * Called once per frame with the elapsed seconds since the last call.
+   * Returns the current simulation time in seconds — the renderer uses
+   * this to drive flashing traffic-light phases (FlashingYellow 1Hz,
+   * FlashingRed 0.5Hz). If the callback returns `undefined`, the
+   * renderer falls back to `0` (the light still renders, just without
+   * blink modulation — fine for paused / no-sim scenarios).
+   */
+  onTick: (dt: number) => number | undefined;
 }
 
 export type SelectionGetter = () => { kind: 'vehicle' | 'light'; id: string } | null;
@@ -183,8 +190,11 @@ export class ThreeJSRenderer {
       const policy = this.getTickPolicy
         ? this.getTickPolicy()
         : { paused: false, rate: 1 };
+      let simTime = 0;
       if (!policy.paused) {
-        this.callbacks.onTick(rawDt * policy.rate);
+        // The store returns the current simulation time so the renderer
+        // can route it to traffic-light flashing logic.
+        simTime = this.callbacks.onTick(rawDt * policy.rate) ?? 0;
       }
 
       // Reconcile the scene with the current network. `onTick` above has
@@ -206,7 +216,7 @@ export class ThreeJSRenderer {
           this.scene.add(this.built.root);
           this.currentNetwork = network;
         } else if (this.built) {
-          syncMeshTransforms(network, this.built);
+          syncMeshTransforms(network, this.built, simTime);
           syncSceneContents(network, this.built);
         }
       }

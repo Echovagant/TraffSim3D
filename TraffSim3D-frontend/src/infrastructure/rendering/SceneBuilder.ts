@@ -3,15 +3,14 @@ import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
 import type { Road } from '@domain/entities/Road';
-import { LightPhase } from '@domain/value-objects/Phase';
 import { createGroundMesh } from './GroundMesh';
 import { createRoadMesh } from './RoadMesh';
 import { createRoadMarkings } from './RoadMarkingsMesh';
 import { createVehicleMesh, getVehicleBodyMesh } from './VehicleMesh';
 import { createVehicleTrail, type VehicleTrail } from './VehicleTrailMesh';
-import { createTrafficLightNode, PHASE_COLOR, type TrafficLightNode } from './TrafficLightNode';
+import { createTrafficLightNode, updateTrafficLightNode, type TrafficLightNode } from './TrafficLightNode';
 import { createSelectionRing } from './SelectionRingMesh';
-import { PHASE_DURATIONS, TRAIL_LENGTH } from '@shared/constants/simulation';
+import { TRAIL_LENGTH } from '@shared/constants/simulation';
 
 const WRAP_THRESHOLD = 20;     // |Δpos| greater than this on a tick is treated as a wrap-reset
 const Y_SELECTION_RING_BASE = 0.05;
@@ -98,22 +97,15 @@ const updateVehicleNode = (v: Vehicle, node: VehicleNode): void => {
   node.trail.attribute.needsUpdate = true;
 };
 
-/** Per-frame update for a traffic light: recolor sphere+bar, scale the countdown bar. */
-const updateLightNode = (light: TrafficLight, node: TrafficLightNode): void => {
-  const phaseColor = PHASE_COLOR[light.phase];
-  node.sphereMaterial.color.setHex(phaseColor);
-  node.sphereMaterial.emissive.setHex(phaseColor);
-  node.barMaterial.color.setHex(phaseColor);
-  node.barMaterial.emissive.setHex(phaseColor);
-  const phaseTotal =
-    light.phase === LightPhase.Green
-      ? PHASE_DURATIONS.green
-      : light.phase === LightPhase.Yellow
-        ? PHASE_DURATIONS.yellow
-        : PHASE_DURATIONS.red;
-  // Clamp to a small positive value so the bar stays visible (not zero-width) on a fresh phase.
-  const ratio = Math.max(0.02, Math.min(1, light.phaseRemaining / phaseTotal));
-  node.bar.scale.x = ratio;
+/** Per-frame update for a traffic light: delegated to TrafficLightNode
+ *  which now owns all phase-specific logic (color, emissive, flashing,
+ *  countdown bar). */
+const updateLightNode = (
+  light: TrafficLight,
+  node: TrafficLightNode,
+  simTime: number,
+): void => {
+  updateTrafficLightNode(node, light, simTime);
 };
 
 const disposeVehicleNode = (node: VehicleNode): void => {
@@ -208,8 +200,12 @@ export const buildScene = (network: RoadNetwork): BuiltScene => {
  * Sync mesh transforms (positions, colors, trail buffers, phase bars) from
  * a mutated network to an already-built scene. Cheaper than rebuilding —
  * called every frame after `onTick` has mutated the network in place.
+ *
+ * `simTime` is the world-store simulation time in seconds; used by
+ * TrafficLightNode for FlashingYellow / FlashingRed blink modulation
+ * (1Hz / 0.5Hz). Vehicles don't need it.
  */
-export const syncMeshTransforms = (network: RoadNetwork, built: BuiltScene): void => {
+export const syncMeshTransforms = (network: RoadNetwork, built: BuiltScene, simTime: number): void => {
   for (const v of Object.values(network.vehicles)) {
     const node = built.vehicleNodes.get(v.id);
     if (node) updateVehicleNode(v, node);
@@ -217,7 +213,7 @@ export const syncMeshTransforms = (network: RoadNetwork, built: BuiltScene): voi
   for (const inter of Object.values(network.intersections)) {
     for (const light of inter.trafficLights) {
       const node = built.lightNodes.get(light.id);
-      if (node) updateLightNode(light, node);
+      if (node) updateLightNode(light, node, simTime);
     }
   }
 };

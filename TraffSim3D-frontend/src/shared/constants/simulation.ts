@@ -81,3 +81,21 @@ export const VEHICLE_BODY_SPEC: Record<
   truck: { length: 6.5, width: 2.2, mass: 4500 },
   bus:   { length: 9.0, width: 2.5, mass: 8000 },
 };
+
+// ===== M2-B — signal controller constants =====
+//
+// Defaults match M1's hard-coded cycle (30/3/30) so the M1 perf
+// gate is reproducible when controllerKind='fixed-cycle'.
+
+/** Max green duration for ActuatedController (s). After this the
+ *  light MUST cycle to yellow even with queue. */
+export const MAX_GREEN_SECS = 60;
+/** Green extension step when queue > 0 (s). */
+export const GREEN_EXTENSION_STEP = 5;
+/** Min red duration for ActuatedController (s). Below this the
+ *  light won't go green even with empty opposite axis. */
+export const MIN_RED_SECS = 10;
+/** Yellow clearance (s) — fixed, not shortened. */
+export const YELLOW_CLEAR_SECS = 3;
+/** Default controller kind at app startup. */
+export const DEFAULT_CONTROLLER_KIND = 'actuated' as const;
