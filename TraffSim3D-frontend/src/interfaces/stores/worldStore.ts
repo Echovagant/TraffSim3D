@@ -4,12 +4,19 @@ import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
 import { buildDefaultNetwork } from '@application/services/defaultScene';
-import { tick } from '@application/services/tick';
+import { tick, type SignalContext } from '@application/services/tick';
 import { spawnVehicle, type SpawnOptions, type SpawnResult } from '@application/services/spawnVehicle';
 import { findNearestLaneOnNetwork } from '@application/services/laneFrameSync';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { createSignalController, type SignalController, type ControllerKind } from '@application/services/signalController';
-import { DEFAULT_CONTROLLER_KIND } from '@shared/constants/simulation';
+import { SensorRegistry, type HostPoseLookup } from '@application/services/sensors';
+import { LidarSensor, defaultLidarConfig } from '@infrastructure/sensors';
+import { TrajectoryExporter } from '@infrastructure/export';
+import {
+  DEFAULT_CONTROLLER_KIND,
+  LIDAR_MOUNT_HEIGHT,
+  TRAJECTORY_BUFFER_CAP,
+} from '@shared/constants/simulation';
 import { saveScene, loadScene, clearScene } from '@application/use-cases';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
 import { RapierWorld, buildRigidBodySpec } from '@infrastructure/physics';
@@ -70,6 +77,7 @@ export const useWorldStore = defineStore('world', () => {
   };
   const getControllerKind = (): ControllerKind => controllerKind.value;
   const getControllers = (): Map<string, SignalController> => controllers;
+  const signalContext: SignalContext = { controllers, get controllerKind() { return controllerKind.value; } };
 
   /**
    * Force every traffic light to AllRed for `durationSeconds`.
@@ -86,6 +94,27 @@ export const useWorldStore = defineStore('world', () => {
       }
     }
     bumpTick();
+  };
+
+  // M2-C: per-vehicle sensor + per-tick trajectory export.
+  const sensorRegistry = new SensorRegistry();
+  const trajectoryExporter = new TrajectoryExporter(TRAJECTORY_BUFFER_CAP);
+  const lidarEnabled = ref(false);
+  const lidarFrameCount = ref(0);
+  const setLidarEnabled = (enabled: boolean): void => {
+    lidarEnabled.value = enabled;
+    bumpTick();
+  };
+  const toggleLidar = (): void => setLidarEnabled(!lidarEnabled.value);
+
+  /** Lookup host vehicle's live pose — used by SensorRegistry.scanAll.
+   *  Reads from the (mutating) network object; safe because tick() is
+   *  the only writer of vehicle position, and the scan runs after
+   *  Rapier step + position re-derivation in tick(). */
+  const getHostPose: HostPoseLookup = (vehicleId) => {
+    const v = network.vehicles[vehicleId];
+    if (!v) return null;
+    return { position: v.position, heading: v.heading };
   };
 
   // History for undo/redo. Each entry is a full SerializedScene JSON
@@ -195,7 +224,22 @@ export const useWorldStore = defineStore('world', () => {
     // 都用同一个值.
     const clampedDt = Math.max(0, Math.min(dt, 1 / 30));
     simTime += clampedDt;
-    tick(network, clampedDt, simTime, rapierWorld, draggingId, controllers, controllerKind.value);
+    tick(network, clampedDt, simTime, {
+      rapierWorld,
+      signal: signalContext,
+      trajectoryExporter,
+      sensorRegistry,
+      lidarEnabled: lidarEnabled.value,
+      getHostPose,
+      draggingId,
+    });
+    if (lidarEnabled.value && rapierWorld) {
+      // Bump the frame counter for the DebugPanel readout. We can't
+      // count scanAll's output length from here (tick is opaque to
+      // it), but incrementing once per tick when LiDAR is on is
+      // a good enough proxy for "frames produced".
+      lidarFrameCount.value += 1;
+    }
     tickCount.value += 1;
 
     // Frame-time stats
@@ -237,6 +281,8 @@ export const useWorldStore = defineStore('world', () => {
     history = [];
     redoStack = [];
     controllers = new Map();
+    sensorRegistry.destroyAll();
+    trajectoryExporter.clear();
     network = buildDefaultNetwork();
     simTime = 0;
     // Re-register default vehicles.
@@ -245,6 +291,12 @@ export const useWorldStore = defineStore('world', () => {
         rapierWorld.registerVehicle(
           buildRigidBodySpec(v.id, v.type, v.position, v.heading),
         );
+        // Re-mount LiDAR for the default vehicles.
+        const colliderHandle = rapierWorld.getColliderHandle(v.id);
+        const excludes = colliderHandle ? [colliderHandle] : [];
+        const sensor = new LidarSensor(defaultLidarConfig(v.id, excludes));
+        sensor.configure({ mountHeight: LIDAR_MOUNT_HEIGHT[v.type] });
+        sensorRegistry.register(v.id, sensor, `lidar-${v.id}`);
       }
     }
     tickCount.value += 1;
@@ -291,6 +343,14 @@ export const useWorldStore = defineStore('world', () => {
           result.vehicle.heading,
         ),
       );
+      // M2-C: mount a LiDAR sensor. The collider handle is needed
+      // for self-occlusion filtering (017 H4). If Rapier didn't
+      // create a collider, the sensor still works (no exclusions).
+      const colliderHandle = rapierWorld.getColliderHandle(result.vehicle.id);
+      const excludes = colliderHandle ? [colliderHandle] : [];
+      const sensor = new LidarSensor(defaultLidarConfig(result.vehicle.id, excludes));
+      sensor.configure({ mountHeight: LIDAR_MOUNT_HEIGHT[result.vehicle.type] });
+      sensorRegistry.register(result.vehicle.id, sensor, `lidar-${result.vehicle.id}`);
     }
     bumpTick();
     return result;
@@ -298,6 +358,10 @@ export const useWorldStore = defineStore('world', () => {
 
   const removeVehicle = (id: string): void => {
     pushHistory();
+    // M2-C: unregister sensors BEFORE removing the Rapier body.
+    // The body removal deletes the collider handle that the sensor
+    // needs for excludeColliders, so the order is critical.
+    sensorRegistry.unregisterAllFor(id);
     if (rapierWorld) rapierWorld.removeVehicle(id);
     delete network.vehicles[id];
     bumpTick();
@@ -400,14 +464,23 @@ export const useWorldStore = defineStore('world', () => {
       }
     }
     network = next;
-    // Clear controller cache — new scene has different light IDs.
+    // Clear controller cache + sensors + exporter — new scene has
+    // different light IDs and vehicle IDs.
     controllers = new Map();
+    sensorRegistry.destroyAll();
+    trajectoryExporter.clear();
     // Re-register new vehicles
     if (rapierWorld) {
       for (const v of Object.values(network.vehicles)) {
         rapierWorld.registerVehicle(
           buildRigidBodySpec(v.id, v.type, v.position, v.heading),
         );
+        // Re-mount LiDAR.
+        const colliderHandle = rapierWorld.getColliderHandle(v.id);
+        const excludes = colliderHandle ? [colliderHandle] : [];
+        const sensor = new LidarSensor(defaultLidarConfig(v.id, excludes));
+        sensor.configure({ mountHeight: LIDAR_MOUNT_HEIGHT[v.type] });
+        sensorRegistry.register(v.id, sensor, `lidar-${v.id}`);
       }
     }
     bumpTick();  // signal Vue watchers; the renderer will rebuild via identity change
@@ -515,5 +588,12 @@ export const useWorldStore = defineStore('world', () => {
     getControllerKind,
     getControllers,
     forceAllRed,
+    // M2-C sensor + exporter surface
+    sensorRegistry,
+    trajectoryExporter,
+    lidarEnabled,
+    lidarFrameCount,
+    setLidarEnabled,
+    toggleLidar,
   };
 });
