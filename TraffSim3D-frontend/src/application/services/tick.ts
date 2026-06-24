@@ -196,7 +196,7 @@ export const tick = (
     const road = network.roads[v.roadId];
     if (!road) { v.desiredLaneIndex = null; v.laneChangeStartedAt = null; continue; }
     const targetLane = v.desiredLaneIndex;
-    const currentLat = perpendicularOffsetAlongRoad(road, v.position);
+    const currentLat = perpendicularOffsetAlongRoad(road, v.s, v.position);
     const targetLat = laneOffset(targetLane, road.laneCount);
     const lat = steerLateralVelocity(currentLat, targetLat, STEER_GAIN, MAX_LATERAL_MS);
     ctx.rapierWorld?.setVehicleLateralVelocity(v.id, lat);
@@ -267,7 +267,13 @@ const updateIntersectionEntry = (network: RoadNetwork, simTime: number): void =>
   for (const v of Object.values(network.vehicles)) {
     const road = network.roads[v.roadId];
     if (!road) continue;
-    if (inIntersectionBox(road, v.s)) {
+    // Plan 035: pick the per-intersection radius when the vehicle's
+    // road is connected to one (T / corner intersections may have
+    // different radii than the 4-way default). Falls back to the
+    // STOP_LINE_DISTANCE*2 default if no connected intersection matches.
+    const inter = Object.values(network.intersections).find((i) => i.connectedRoads.includes(road.id));
+    const radius = inter?.intersectionRadius ?? STOP_LINE_DISTANCE * 2;
+    if (inIntersectionBox(road, v.s, radius)) {
       if (v.enteredIntersectionAt === null) {
         v.enteredIntersectionAt = simTime;
       }
@@ -280,12 +286,16 @@ const updateIntersectionEntry = (network: RoadNetwork, simTime: number): void =>
 /** M1 复制 — 红灯/黄灯 prepare-to-stop 逻辑 (M2-B 仍要用). */
 const applyTrafficLightConstraint = (v: Vehicle, road: Road, network: RoadNetwork): void => {
   const len = roadLength(road);
-  const stopLineS = len / 2 - STOP_LINE_DISTANCE;
-  if (v.s >= stopLineS) return;
-  const distToStopLine = stopLineS - v.s;
-  if (distToStopLine <= 0) return;
   for (const inter of Object.values(network.intersections)) {
     if (!inter.connectedRoads.includes(road.id)) continue;
+    // Plan 035: stop-line distance follows the per-intersection radius
+    // (T路口 6, corner 4) instead of the fixed STOP_LINE_DISTANCE=5.
+    // This keeps the brake-trigger window consistent with the visual
+    // stop line drawn by createRoadMarkings.
+    const stopLineS = len / 2 - inter.intersectionRadius;
+    if (v.s >= stopLineS) return;
+    const distToStopLine = stopLineS - v.s;
+    if (distToStopLine <= 0) return;
     for (const light of inter.trafficLights) {
       const roadIsNS = Math.abs(road.endNode.z - road.startNode.z) > Math.abs(road.endNode.x - road.startNode.x);
       const lightAxisMatches = (roadIsNS && light.axis === 'ns') || (!roadIsNS && light.axis === 'ew');

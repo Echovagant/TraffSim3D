@@ -13,7 +13,12 @@ import { createRoadNetwork } from '@domain/entities/RoadNetwork';
 // (GreenLeft, YellowLeft, RedLeft, FlashingYellow, FlashingRed, AllRed, Dark).
 // hydrateNetwork must accept v3 + v4 scenes; v3 scenes with unknown
 // phase values fall back to Red (per plan 007 R1).
-export const SCENE_SCHEMA_VERSION = 4;
+// Bumped to v5 in plan 035: Road gained optional `waypoints: Position[]`
+// (polyline support). Intersection gained `intersectionRadius: number`.
+// v5 scenes are direct supersets of v4 — old v4 scenes load transparently
+// with `waypoints === undefined` (geometry helpers fall back to straight
+// 2-point roads) and `intersectionRadius` defaults to 8 in code.
+export const SCENE_SCHEMA_VERSION = 5;
 
 export interface SerializedScene {
   schemaVersion: number;
@@ -83,6 +88,12 @@ const migrateScene = (d: unknown): SerializedScene | null => {
       // v1, v2, v3 all upgrade to v4. If we add more versions,
       // add cases here. Missing cases fall through to the default
       // which returns null.
+      return { ...obj, schemaVersion: SCENE_SCHEMA_VERSION } as SerializedScene;
+    case 4:
+      // Plan 035: v4 → v5. Road gains optional waypoints, Intersection
+      // gains intersectionRadius. Old v4 scenes load as-is — geometry
+      // helpers fall back to straight 2-point roads, intersection box
+      // uses the per-intersection radius (default 8 in code).
       return { ...obj, schemaVersion: SCENE_SCHEMA_VERSION } as SerializedScene;
     case SCENE_SCHEMA_VERSION:
       return obj as unknown as SerializedScene;

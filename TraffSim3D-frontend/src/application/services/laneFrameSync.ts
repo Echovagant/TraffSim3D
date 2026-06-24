@@ -18,6 +18,7 @@ import {
   roadForward,
   roadLength,
   roadRight,
+  worldToLaneS,
 } from '@domain/services/laneGeometry';
 
 export interface NearestLane {
@@ -40,12 +41,13 @@ const perpendicularDistSq = (
   return dx * dx + dz * dz;
 };
 
-/** Heading in radians, aligned with the lane forward direction. */
+/** Heading in radians, aligned with the lane forward direction at `s`. */
 const laneForwardHeading = (
   road: import('@domain/entities/Road').Road,
   laneIndex: number,
+  s: number,
 ): number => {
-  const fwd = roadForward(road);
+  const fwd = roadForward(road, s);
   const sign = laneForwardSign(laneIndex, road.laneCount);
   return Math.atan2(fwd.uz * sign, fwd.ux * sign);
 };
@@ -64,16 +66,10 @@ const projectOntoLane = (
   x: number,
   z: number,
 ): number => {
-  const fwd = roadForward(road);
-  const rgt = roadRight(road);
-  const off = laneOffset(laneIndex, road.laneCount);
-  const sign = laneForwardSign(laneIndex, road.laneCount);
-  // Use any reference point on the lane — the lane start (s=0).
-  const startX = (sign === 1 ? road.startNode.x : road.endNode.x) + rgt.ux * off;
-  const startZ = (sign === 1 ? road.startNode.z : road.endNode.z) + rgt.uz * off;
-  const dx = x - startX;
-  const dz = z - startZ;
-  return dx * fwd.ux * sign + dz * fwd.uz * sign;
+  // Plan 035: delegate to the polyline-aware `worldToLaneS` from
+  // laneGeometry. This picks the segment closest to (x, z) and
+  // projects onto that segment's tangent, returning the arc-length s.
+  return worldToLaneS(road, laneIndex, x, z);
 };
 
 const PERPENDICULAR_LIMIT_SQ = 5.0 * 5.0;  // metres
@@ -91,10 +87,14 @@ export const findNearestLane = (v: Vehicle, network: RoadNetwork): NearestLane =
 
   for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
     // 1. heading 偏差预检: 反向 (|Δheading| > π/2) 跳过.
-    const lh = laneForwardHeading(road, laneIndex);
-    if (Math.abs(normalizeAngle(v.heading - lh)) > Math.PI / 2) continue;
+    //    Polyline-aware: use current s (when we know it) so the heading
+    //    check uses the LOCAL tangent. For the first lane we don't know
+    //    s yet, so we use the midpoint; once we find a candidate we
+    //    refine.
+    const initialLH = laneForwardHeading(road, laneIndex, len / 2);
+    if (Math.abs(normalizeAngle(v.heading - initialLH)) > Math.PI / 2) continue;
 
-    // 2. 沿车道 forward 投影 position → s.
+    // 2. 沿车道 forward 投影 position → s. (polyline-aware via worldToLaneS)
     const s = projectOntoLane(road, laneIndex, v.position.x, v.position.z);
     if (s < 0 || s > len) continue;  // off-road
 
@@ -146,18 +146,10 @@ export const findNearestLaneOnNetwork = (
   for (const road of Object.values(network.roads)) {
     const len = roadLength(road);
     for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
-      // Project (position.x, position.z) onto (road, laneIndex) forward
-      // axis → s. This is the lane's `projectOntoLane` formula exposed
-      // locally so we don't re-export the file-private helper.
-      const fwd = roadForward(road);
-      const rgt = roadRight(road);
-      const off = laneOffset(laneIndex, road.laneCount);
-      const sign = laneForwardSign(laneIndex, road.laneCount);
-      const laneStartX = (sign === 1 ? road.startNode.x : road.endNode.x) + rgt.ux * off;
-      const laneStartZ = (sign === 1 ? road.startNode.z : road.endNode.z) + rgt.uz * off;
-      const dx = position.x - laneStartX;
-      const dz = position.z - laneStartZ;
-      const s = dx * fwd.ux * sign + dz * fwd.uz * sign;
+      // Plan 035: polyline-aware via worldToLaneS. Picks the segment
+      // closest to (position.x, position.z) and projects onto that
+      // segment's tangent.
+      const s = worldToLaneS(road, laneIndex, position.x, position.z);
       if (s < 0 || s > len) continue;  // off-road
       // Perpendicular distance squared.
       const lp = lanePoint(road, laneIndex, s);

@@ -3,7 +3,11 @@ import { ref } from 'vue';
 import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
-import { buildDefaultNetwork } from '@application/services/defaultScene';
+import {
+  buildCrossIntersectionNetwork,
+  buildTJunctionNetwork,
+  buildRectangularLoopNetwork,
+} from '@application/services/defaultScene';
 import { tick, type SignalContext } from '@application/services/tick';
 import { spawnVehicle, type SpawnOptions, type SpawnResult } from '@application/services/spawnVehicle';
 import { findNearestLaneOnNetwork } from '@application/services/laneFrameSync';
@@ -34,12 +38,31 @@ import { serializeNetwork, cloneScene, sceneToNetwork, type SerializedScene } fr
 
 export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const;
 
+/**
+ * Plan 035: scene-selector enum. The toolbar dropdown binds to this.
+ * Adding a new scene = add a factory + an entry here.
+ */
+export type SceneKind = 'cross' | 't' | 'loop';
+
+const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
+  switch (kind) {
+    case 'cross': return buildCrossIntersectionNetwork();
+    case 't':     return buildTJunctionNetwork();
+    case 'loop':  return buildRectangularLoopNetwork();
+  }
+};
+
 export const useWorldStore = defineStore('world', () => {
   // Plain object — see Plan 003 for why this is NOT a ref/shallowRef.
-  let network: RoadNetwork = buildDefaultNetwork();
+  let network: RoadNetwork = buildCrossIntersectionNetwork();
   const tickCount = ref(0);
   const fps = ref(0);
   const isRunning = ref(true);
+
+  // Plan 035: which demo scene is currently loaded. Default 'cross'
+  // (the original 4-way intersection). Drives the toolbar dropdown
+  // and is read by `switchScene()` to know which factory to call.
+  const currentSceneKind = ref<SceneKind>('cross');
 
   // Discrete tick rate ladder. +/- keys (and the toolbar buttons) cycle
   // through this list. The ladder lives at module scope so the toolbar
@@ -391,7 +414,7 @@ export const useWorldStore = defineStore('world', () => {
     lidarPointClouds = new Map();
     if (cameraSensor) { cameraSensor.destroy(); cameraSensor = null; }
     cameraFrameCount.value = 0;
-    network = buildDefaultNetwork();
+    network = buildCrossIntersectionNetwork();
     simTime = 0;
     // Re-register default vehicles.
     if (rapierWorld) {
@@ -667,6 +690,22 @@ export const useWorldStore = defineStore('world', () => {
   };
 
   /**
+   * Plan 035: switch the loaded scene to one of the three demo
+   * factories. Clears the Rapier body / sensor / controller caches
+   * via the existing `loadNetwork` path (which removes old bodies
+   * and re-registers the new vehicles' bodies). Also clears undo
+   * history — switching scenes is not a small enough mutation that
+   * undo across the boundary would be meaningful.
+   */
+  const switchScene = (kind: SceneKind): { ok: true } => {
+    const next = buildNetworkByKind(kind);
+    history = [];
+    redoStack = [];
+    currentSceneKind.value = kind;
+    return loadNetwork(next);
+  };
+
+  /**
    * Undo the last user-initiated mutation. Pops the current state to
    * the redo stack, then restores the network from the popped history
    * entry. If history is empty, no-op (returns false).
@@ -722,6 +761,8 @@ export const useWorldStore = defineStore('world', () => {
     serialize,
     hydrate,
     loadNetwork,
+    switchScene,
+    currentSceneKind,
     clearStorage,
     frameMsMin,
     frameMsMax,

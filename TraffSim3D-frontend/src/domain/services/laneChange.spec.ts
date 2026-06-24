@@ -68,17 +68,33 @@ describe('steerLateralVelocity', () => {
 });
 
 describe('perpendicularOffsetAlongRoad', () => {
-  it('returns 0 for a point on the road centerline', () => {
+  it('returns 0 for a point on the road centerline (legacy 2-arg signature)', () => {
     const road = { startNode: { x: 0, z: 0 }, endNode: { x: 30, z: 0 } };
-    expect(perpendicularOffsetAlongRoad(road, { x: 10, z: 0 })).toBe(0);
+    expect(perpendicularOffsetAlongRoad(road as never, { x: 10, z: 0 })).toBe(0);
   });
-  it('returns positive for a point on the right side (perpendicular convention)', () => {
+  it('returns a signed offset for a point off the road centerline', () => {
+    // Pre-035 test: (10, -1) on road (0,0)-(30,0) used to be -1 (negative).
+    // New convention: rotate tangent -90° = (uz, -ux) = (0, -1). Dot with
+    // (10, -1) - (0,0) = (10, -1) gives 10*0 + (-1)*(-1) = +1.
     const road = { startNode: { x: 0, z: 0 }, endNode: { x: 30, z: 0 } };
-    // 1m to the right of x=10 → (10, -1)
-    // perp = rx*(-dz) + rz*dx = (10/30)*0 + (-1/30)*30 = -1
-    // (M2 convention: positive = lane 0 side, which is "left" in
-    //  XZ with road pointing +X. sign depends on perp rotation
-    //  direction; we only assert non-zero here.)
-    expect(perpendicularOffsetAlongRoad(road, { x: 10, z: -1 })).toBeCloseTo(-1);
+    expect(perpendicularOffsetAlongRoad(road as never, { x: 10, z: -1 })).toBeCloseTo(1);
+  });
+  it('polyline-aware: passes (road, s, position) and uses local segment tangent', () => {
+    // Plan 035 new signature. Right-angle road: at s=10 we're in seg 0
+    // (0,0,-30)→(0,0,0), tangent = (0, 1). Right-perp = (uz, -ux) = (1, 0).
+    // Point (5, -20) is 5 units to +x of seg 0 centerline, so offset = 5.
+    const road = {
+      id: 'r-L',
+      startNode: { x: 0, y: 0, z: -30 },
+      endNode: { x: 0, y: 0, z: 30 },
+      waypoints: [
+        { x: 0, y: 0, z: -30 },
+        { x: 0, y: 0, z: 0 },
+        { x: 30, y: 0, z: 0 },
+      ],
+      laneCount: 2,
+      speedLimit: 20,
+    };
+    expect(perpendicularOffsetAlongRoad(road, 10, { x: 5, z: -20 })).toBeCloseTo(5, 6);
   });
 });

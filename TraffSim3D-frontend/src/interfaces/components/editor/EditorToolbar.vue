@@ -53,6 +53,15 @@
       </select>
     </label>
 
+    <label class="ctrl-kind scene-kind" title="演示场景 (M2 道路几何)">
+      <span class="ctrl-kind-label">场景</span>
+      <select :value="world.currentSceneKind" @change="onSceneKindChange">
+        <option value="cross">十字路口</option>
+        <option value="t">T 路口</option>
+        <option value="loop">矩形环</option>
+      </select>
+    </label>
+
     <button
       class="coord-btn"
       :disabled="!isCoordinatedKind"
@@ -129,6 +138,7 @@ import { _flashMessageRef, showFlashMessage } from '@interfaces/composables/useF
 import { focusOnSelection } from '@interfaces/composables/useCameraFocus';
 import { useSelectionStore } from '@interfaces/stores/selectionStore';
 import type { ControllerKind } from '@application/services/signalController';
+import type { SceneKind } from '@interfaces/stores/worldStore';
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { TICK_RATE_LADDER } from '@interfaces/stores/worldStore';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal.vue';
@@ -179,6 +189,20 @@ const onSpawnMany = (count: number): void => {
 const onControllerKindChange = (e: Event): void => {
   const v = (e.target as HTMLSelectElement).value as ControllerKind;
   world.setControllerKind(v);
+};
+
+const onSceneKindChange = (e: Event): void => {
+  const v = (e.target as HTMLSelectElement).value as SceneKind;
+  world.switchScene(v);
+  showFlashMessage(`已切换场景: ${sceneLabel(v)}`, 'info');
+};
+
+const sceneLabel = (k: SceneKind): string => {
+  switch (k) {
+    case 'cross': return '十字路口';
+    case 't':     return 'T 路口';
+    case 'loop':  return '矩形环';
+  }
 };
 
 const onLidarToggle = (e: Event): void => {
@@ -369,6 +393,11 @@ button.danger:hover { background: #991b1b; }
   cursor: pointer;
 }
 .ctrl-kind select:focus { outline: 1px solid #475569; }
+
+/* Scene-kind dropdown: same shell as ctrl-kind but visually distinct so
+   the user can tell them apart at a glance. */
+.scene-kind { background: #1e293b; }
+.scene-kind select { color: #34d399; }
 
 /* LiDAR toggle: a checkbox + label, sits next to the Trajectory CSV button. */
 .lidar-toggle {

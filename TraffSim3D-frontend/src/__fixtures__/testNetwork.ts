@@ -30,6 +30,7 @@ export const makeTestIntersection = (id: string, light: TrafficLight): Intersect
   position: { x: 0, y: 0, z: 0 },
   connectedRoads: ['r-ns', 'r-ew'],
   trafficLights: [light],
+  intersectionRadius: 8,
 });
 
 export const makeTestLight = (overrides: Partial<TrafficLight> = {}): TrafficLight => ({
@@ -77,4 +78,27 @@ export const buildTestNetwork = (
     });
   }
   return net;
+};
+
+/**
+ * Plan 035: helper for tests that need a polyline road. Constructs a
+ * Road with `waypoints` populated; `startNode`/`endNode` mirror the
+ * first/last waypoint per the data invariant.
+ */
+export const makePolylineRoad = (
+  id: string,
+  waypoints: Array<{ x: number; y?: number; z: number }>,
+  laneCount = 2,
+): Road => {
+  if (waypoints.length < 2) {
+    throw new Error('makePolylineRoad requires at least 2 waypoints');
+  }
+  return {
+    id,
+    startNode: { x: waypoints[0]!.x, y: waypoints[0]!.y ?? 0, z: waypoints[0]!.z },
+    endNode: { x: waypoints[waypoints.length - 1]!.x, y: waypoints[waypoints.length - 1]!.y ?? 0, z: waypoints[waypoints.length - 1]!.z },
+    waypoints: waypoints.map((w) => ({ x: w.x, y: w.y ?? 0, z: w.z })),
+    laneCount,
+    speedLimit: 20,
+  };
 };

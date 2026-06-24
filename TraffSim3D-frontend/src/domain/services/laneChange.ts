@@ -9,6 +9,8 @@
 // geometry helpers used by `tick.ts` to advance the lane-change.
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { RoadNetwork } from '@domain/entities/RoadNetwork';
+import type { Road } from '@domain/entities/Road';
+import { roadForward, roadLength } from '@domain/services/laneGeometry';
 import { MIN_GAP } from '@shared/constants/simulation';
 
 export type LaneChangeDirection = 'left' | 'right';
@@ -88,17 +90,44 @@ export const LANE_CHANGE_CONVERGED_M = 0.3;
 
 /** Perpendicular offset (metres, signed) of `position` relative to
  *  the road's centerline in the XZ plane. Positive = "right" side
- *  (lane 0 in the M2 convention). */
+ *  (lane 0 in the M2 convention).
+ *
+ *  Plan 035: polyline-aware. Pass the vehicle's current `s` so the
+ *  perpendicular uses the LOCAL segment tangent at that arc-length —
+ *  a vehicle halfway through a corner road gets the corner's tangent,
+ *  not the average over the whole polyline. */
 export const perpendicularOffsetAlongRoad = (
-  road: { startNode: { x: number; z: number }; endNode: { x: number; z: number } },
-  position: { x: number; z: number },
+  road: Road,
+  positionOrS: number | { x: number; z: number },
+  positionParam?: { x: number; z: number },
 ): number => {
-  const dx = road.endNode.x - road.startNode.x;
-  const dz = road.endNode.z - road.startNode.z;
-  const len = Math.hypot(dx, dz);
-  if (len === 0) return 0;
-  // Perpendicular in XZ (rotate (dx,dz) 90° CCW): (-dz, dx) / len
-  const rx = (position.x - road.startNode.x) / len;
-  const rz = (position.z - road.startNode.z) / len;
-  return rx * (-dz) + rz * dx;
+  // Overload: legacy callers pass (road, position). New callers pass
+  // (road, s, position). Detect which shape by the second argument type.
+  let s: number;
+  let position: { x: number; z: number };
+  if (typeof positionOrS === 'number') {
+    s = positionOrS;
+    position = positionParam ?? { x: 0, z: 0 };
+  } else {
+    // Legacy signature. Use the road's midpoint as the default s — the
+    // pre-035 caller had no `s`, so the perpendicular was always the
+    // straight-line perp from startNode to endNode. For 2-point roads
+    // this is exact; for N-point polylines this is "the perp at the
+    // middle segment", which is what the legacy tests expect (they use
+    // midpoint of the (0,0)-(30,0) road).
+    s = roadLength(road) / 2;
+    position = positionOrS;
+  }
+  const fwd = roadForward(road, s);
+  if (fwd.ux === 0 && fwd.uz === 0) return 0;
+  // Lane reference point: forward = startNode, backward = endNode.
+  // We use startNode here because "perpendicular offset from centerline"
+  // is geometric, not motion-relative; the centerline runs startNode→endNode.
+  const refX = road.startNode.x;
+  const refZ = road.startNode.z;
+  const dx = position.x - refX;
+  const dz = position.z - refZ;
+  // Right-perpendicular: rotate fwd -90° → (uz, -ux). Dot with (dx, dz)
+  // gives signed distance from centerline (positive = right of geometric forward).
+  return dx * fwd.uz + dz * (-fwd.ux);
 };

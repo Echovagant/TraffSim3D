@@ -1,7 +1,16 @@
 import * as THREE from 'three';
 import type { Road } from '@domain/entities/Road';
 import { ROAD_LANE_WIDTH, STOP_LINE_DISTANCE } from '@shared/constants/simulation';
-import { roadLength, laneOffset, roadForward, roadRight, laneForwardSign } from '@domain/services/laneGeometry';
+import {
+  laneOffset,
+  laneForwardSign,
+  roadForward,
+  roadLength,
+  roadPolylineLengths,
+  roadRight,
+  roadWaypoints,
+  segmentAt,
+} from '@domain/services/laneGeometry';
 
 const CENTERLINE_COLOR = 0xfacc15;  // yellow
 const DIVIDER_COLOR = 0xe2e8f0;    // near-white
@@ -16,24 +25,17 @@ const GAP = 0.6;
  * Build a small "↑" arrow in a lane's center, pointing in the
  * road's *forward* direction (local +z). For backward lanes the
  * caller rotates the returned group by 180° around y.
- *
- * `arrowSize` controls the overall size of the arrow (in world
- * units). The arrow is a 6-point chevron: two shaft segments + a
- * V-shaped head, all in the xz plane.
  */
 const buildArrow = (arrowSize: number): THREE.LineSegments => {
   const a = arrowSize;
-  // Vertex pairs (x, z) in local frame. Local +z = arrow's forward.
-  // Shaft: two parallel lines from y=-a to y=+a*0.6.
-  // Head: V from y=+a*0.4 out to y=+a, then back to y=+a*0.4.
   const pts: Array<[number, number]> = [
     [-a * 0.5, -a * 1.0],
     [-a * 0.5,  a * 0.6],
     [-a * 0.5,  a * 0.6],
     [ a * 0.5,  a * 0.6],
     [-a * 0.7,  a * 0.4],
-    [ 0,        a * 1.0],
-    [ 0,        a * 1.0],
+    [0,         a * 1.0],
+    [0,         a * 1.0],
     [ a * 0.7,  a * 0.4],
   ];
   const positions: number[] = [];
@@ -47,136 +49,112 @@ const buildArrow = (arrowSize: number): THREE.LineSegments => {
 };
 
 /**
- * Build a Group of road markings: a solid yellow centerline (if the
- * road has an even number of lanes) plus a pair of white dashed lane
- * dividers between adjacent lanes. Stop lines mark where vehicles
- * must halt at the intersection.
+ * Plan 035: polyline-aware road markings. Centerline follows the
+ * polyline (N-1 segments). Dashed dividers distribute along the
+ * polyline arc length, snapping to the local segment tangent at each
+ * dash. Stop lines are perpendicular to the LOCAL tangent at the
+ * intersection midpoints (one per road end). Arrows are placed at
+ * `s = 0.2·len` and `0.8·len`, rotated to the local tangent.
  *
- * Road markings are drawn slightly above the road plane to avoid z-fighting
- * (RoadMesh sits at y=0.01, we sit at y=0.02).
+ * For 2-point roads (N=2), the result is mathematically the same as
+ * the pre-035 single-segment road.
  */
 export const createRoadMarkings = (road: Road): THREE.Group => {
   const group = new THREE.Group();
-
+  const wps = roadWaypoints(road);
   const length = roadLength(road);
-  if (length < 1e-6) return group;  // degenerate, skip
-  // Unit vector along the road, and a perpendicular unit vector in the xz plane.
-  const f = roadForward(road);
-  const r = roadRight(road);
-  const midX = (road.startNode.x + road.endNode.x) / 2;
-  const midZ = (road.startNode.z + road.endNode.z) / 2;
+  if (length < 1e-6 || wps.length < 2) return group;
 
   const laneWidth = ROAD_LANE_WIDTH;
+  const halfWidth = (road.laneCount * laneWidth) / 2;
 
-  // Centerline — only when there's an even number of lanes (so a true
-  // center line exists between opposing directions).
+  // Centerline: solid yellow line from waypoints[0] → waypoints[N-1].
   if (road.laneCount % 2 === 0) {
-    const a = new THREE.Vector3(
-      midX + f.ux * (-length / 2),
-      0.02,
-      midZ + f.uz * (-length / 2),
-    );
-    const b = new THREE.Vector3(
-      midX + f.ux * (length / 2),
-      0.02,
-      midZ + f.uz * (length / 2),
-    );
-    const geom = new THREE.BufferGeometry().setFromPoints([a, b]);
+    const positions = new Float32Array(wps.length * 3);
+    for (let i = 0; i < wps.length; i++) {
+      positions[i * 3 + 0] = wps[i]!.x;
+      positions[i * 3 + 1] = 0.02;
+      positions[i * 3 + 2] = wps[i]!.z;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const mat = new THREE.LineBasicMaterial({ color: CENTERLINE_COLOR });
     group.add(new THREE.Line(geom, mat));
   }
 
-  // Lane dividers — between each pair of adjacent lanes.
-  // Lane index 0..N-1. Boundary between lane i and lane i+1 sits at
-  // offset (i - (N-1)/2) * laneWidth, but easier to just enumerate the
-  // boundary offsets that are not the centerline.
+  // Lane divider offsets (perpendicular distance from centerline).
   const dividerOffsets: number[] = [];
   for (let i = 0; i < road.laneCount - 1; i++) {
-    // Midpoint between lane i and lane i+1 in (laneIndex + 0.5) terms.
-    // We want the offset from road center of the boundary line.
     const offset = laneOffset(i, road.laneCount) + laneWidth / 2;
     if (Math.abs(offset) > 1e-3) dividerOffsets.push(offset);
   }
   if (dividerOffsets.length === 0) return group;
 
-  // Build all dashed segments into one BufferGeometry so we get a single
-  // draw call for the entire road's lane dividers.
+  // Distribute dashes evenly along the polyline arc length.
   const segLen = DASH + GAP;
-  const dashCount = Math.max(0, Math.floor((length + GAP) / segLen));
-  const totalVertices = dashCount * dividerOffsets.length * 2;  // 2 endpoints per segment
-  const positions = new Float32Array(totalVertices * 3);
-  let cursor = 0;
+  const totalDashes = Math.max(0, Math.floor((length + GAP) / segLen));
+
+  // Per-offset, walk the polyline and emit a dash at each `s`.
+  const dashSegments: Array<{ offset: number; sStart: number; sEnd: number }> = [];
   for (const offset of dividerOffsets) {
-    // Center of the dash line in the xz plane.
-    const cx = midX + r.ux * offset;
-    const cz = midZ + r.uz * offset;
-    for (let i = 0; i < dashCount; i++) {
-      const t0 = -length / 2 + i * segLen;
-      const t1 = t0 + DASH;
-      positions[cursor++] = cx + f.ux * t0;
-      positions[cursor++] = 0.02;
-      positions[cursor++] = cz + f.uz * t0;
-      positions[cursor++] = cx + f.ux * t1;
-      positions[cursor++] = 0.02;
-      positions[cursor++] = cz + f.uz * t1;
+    for (let i = 0; i < totalDashes; i++) {
+      const sCenter = i * segLen;
+      const sStart = sCenter;
+      const sEnd = Math.min(length, sCenter + DASH);
+      if (sEnd <= sStart) continue;
+      dashSegments.push({ offset, sStart, sEnd });
     }
   }
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const mat = new THREE.LineBasicMaterial({ color: DIVIDER_COLOR });
-  group.add(new THREE.LineSegments(geom, mat));
 
-  // Stop lines: one at each end of the road, at the intersection. The
-  // line spans the full road width and is drawn thicker than the
-  // dashed lane dividers. It sits at `±length/2 - STOP_LINE_DISTANCE`
-  // along the road, and runs perpendicular to it.
+  if (dashSegments.length > 0) {
+    // Emit each dash as a line segment in world space.
+    const positions = new Float32Array(dashSegments.length * 2 * 3);
+    let cursor = 0;
+    for (const d of dashSegments) {
+      const pStart = pointAt(road, d.offset, d.sStart);
+      const pEnd = pointAt(road, d.offset, d.sEnd);
+      positions[cursor++] = pStart.x;
+      positions[cursor++] = 0.02;
+      positions[cursor++] = pStart.z;
+      positions[cursor++] = pEnd.x;
+      positions[cursor++] = 0.02;
+      positions[cursor++] = pEnd.z;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.LineBasicMaterial({ color: DIVIDER_COLOR });
+    group.add(new THREE.LineSegments(geom, mat));
+  }
+
+  // Stop lines at the two ends of the road (intersection areas).
   for (const sign of [-1, 1]) {
-    // Skip the stop line if it would sit past the road end.
-    if (STOP_LINE_DISTANCE >= length / 2) continue;
     const along = sign * (length / 2 - STOP_LINE_DISTANCE);
-    const cx = midX + f.ux * along;
-    const cz = midZ + f.uz * along;
-    const halfWidth = (road.laneCount * laneWidth) / 2;
-    const a = new THREE.Vector3(
-      cx + r.ux * (-halfWidth) + f.ux * 0,
-      0.03,
-      cz + r.uz * (-halfWidth) + f.uz * 0,
-    );
-    const b = new THREE.Vector3(
-      cx + r.ux * halfWidth,
-      0.03,
-      cz + r.uz * halfWidth,
-    );
+    if (Math.abs(along) > length) continue;
+    const sClamped = Math.max(0, Math.min(length, length / 2 + along));
+    const fwd = roadForward(road, sClamped);
+    const rgt = roadRight(road, sClamped);
+    const cx = pointAt(road, 0, sClamped).x;
+    const cz = pointAt(road, 0, sClamped).z;
+    const a = new THREE.Vector3(cx + rgt.ux * (-halfWidth), 0.03, cz + rgt.uz * (-halfWidth));
+    const b = new THREE.Vector3(cx + rgt.ux * halfWidth, 0.03, cz + rgt.uz * halfWidth);
     const lineGeom = new THREE.BufferGeometry().setFromPoints([a, b]);
     const lineMat = new THREE.LineBasicMaterial({ color: STOPLINE_COLOR });
     group.add(new THREE.Line(lineGeom, lineMat));
   }
 
-  // Lane direction arrows: paint a small "↑" in each lane's center,
-  // pointing in the lane's forward direction. We draw two arrows per
-  // lane — one in each half of the road, far enough from the stop
-  // line that they don't visually conflict. For roads with very
-  // few lanes (≤2) we skip — the road is too narrow to fit readable
-  // arrows without crowding the dashed dividers.
+  // Lane direction arrows at s = 0.2·len and 0.8·len, per lane.
   if (road.laneCount >= 3) {
     const arrowSize = 0.55;
-    // Position arrows at s = length * (0.20) and (0.80) — visible from
-    // a top-down camera, but well clear of the intersection area.
     const arrowSlots = [length * 0.20, length * 0.80];
     for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
       const sign = laneForwardSign(laneIndex, road.laneCount);
       const off = laneOffset(laneIndex, road.laneCount);
       for (const s of arrowSlots) {
         const arrow = buildArrow(arrowSize);
-        // Center of this arrow in the xz plane.
-        const cx = midX + f.ux * (s - length / 2) + r.ux * off;
-        const cz = midZ + f.uz * (s - length / 2) + r.uz * off;
-        arrow.position.set(cx, 0.025, cz);
-        // The arrow's local +z is its "forward" direction. Align
-        // that with the lane's forward: rotation.y = -yaw where
-        // yaw = atan2(f.uz, f.ux). For backward lanes (sign=-1)
-        // we add π so the arrow points in the lane's -fwd direction.
-        const yaw = Math.atan2(f.uz, f.ux);
+        const p = pointAt(road, off, s);
+        arrow.position.set(p.x, 0.025, p.z);
+        const fwd = roadForward(road, s);
+        const yaw = Math.atan2(fwd.uz, fwd.ux);
         arrow.rotation.y = -yaw + (sign === -1 ? Math.PI : 0);
         group.add(arrow);
       }
@@ -184,4 +162,31 @@ export const createRoadMarkings = (road: Road): THREE.Group => {
   }
 
   return group;
+};
+
+/**
+ * Helper: world position of a point at perpendicular offset from
+ * centerline, at arc-length `s` along the polyline. Mirrors
+ * `lanePoint()` but takes the perpendicular offset directly (not a
+ * laneIndex) so markings can pick any offset (e.g. divider lines that
+ * sit between lanes).
+ */
+const pointAt = (road: Road, perpOffset: number, s: number): { x: number; y: number; z: number } => {
+  const wps = roadWaypoints(road);
+  const sClamped = Math.max(0, Math.min(roadLength(road), s));
+  const seg = segmentAt(road, sClamped);
+  const a = wps[seg.segIdx]!;
+  const b = wps[seg.segIdx + 1]!;
+  const localT = seg.segLen < 1e-6 ? 0 : (sClamped - seg.segStartS) / seg.segLen;
+  const baseX = a.x + (b.x - a.x) * localT;
+  const baseZ = a.z + (b.z - a.z) * localT;
+  // Right-perpendicular at this s.
+  const fwd = roadForward(road, sClamped);
+  const rx = fwd.uz;
+  const rz = -fwd.ux;
+  return {
+    x: baseX + rx * perpOffset,
+    y: (a.y ?? 0) + ((b.y ?? 0) - (a.y ?? 0)) * localT,
+    z: baseZ + rz * perpOffset,
+  };
 };
