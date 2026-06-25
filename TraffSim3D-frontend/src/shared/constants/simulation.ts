@@ -98,6 +98,22 @@ export const VEHICLE_DYN: Record<
 };
 
 /**
+ * Plan 037c: per-type Pure Pursuit parameters.
+ * `wheelbase` affects the turning radius (larger = wider turns).
+ * `lookahead` affects responsiveness (larger = smoother but slower).
+ *
+ * Values are empirical — calibration for real-world feel is future work.
+ */
+export const VEHICLE_PURE_PURSUIT: Record<
+  'car' | 'truck' | 'bus',
+  { wheelbase: number; lookahead: number }
+> = {
+  car:   { wheelbase: 2.5, lookahead: 8 },
+  truck: { wheelbase: 4.0, lookahead: 12 },
+  bus:   { wheelbase: 3.0, lookahead: 10 },
+};
+
+/**
  * Plan 037: crash impulse threshold (N·s). Below this, a contact is
  * considered a tap (e.g. cars nudging in stop-and-go traffic) and
  * the involved vehicles stay `driving`. Above, both vehicles flip

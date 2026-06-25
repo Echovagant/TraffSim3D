@@ -268,6 +268,28 @@ export class RapierWorld {
   }
 
   /**
+   * Plan 037c: directly set a rigid body's angular velocity around the
+   * Y-axis (in world-space). Used by the Pure Pursuit steering loop
+   * to turn the vehicle toward the lookahead point.
+   *
+   * @param omega  Angular velocity (rad/s):
+   *               positive → counter-clockwise (left turn in XZ)
+   *               negative → clockwise (right turn in XZ)
+   *               0 → straight ahead (or coast)
+   *
+   * Rapier bodies have `angularDamping` set at construction time so
+   * that angular velocity naturally decays without explicit damping code.
+   */
+  setVehicleAngularVelocity(vehicleId: string, omega: number): void {
+    if (!this.world) return;
+    const bodyHandle = this.bodies.get(vehicleId);
+    if (bodyHandle === undefined) return;
+    const body = this.world.getRigidBody(bodyHandle);
+    if (!body) return;
+    body.setAngvel({ x: 0, y: omega, z: 0 }, true);
+  }
+
+  /**
    * Re-register a vehicle with a new type's body spec (mass + collider
    * halfExtents). Used by the inspector when the user changes
    * car → bus etc. The body keeps its current position, heading, and

@@ -19,6 +19,7 @@ import { LightPhase } from '@domain/value-objects/Phase';
 import { inIntersectionBox, lanePoint, laneOffset, roadLength, laneForwardSign } from '@domain/services/laneGeometry';
 import { steerLateralVelocity, LANE_CHANGE_CONVERGED_M, perpendicularOffsetAlongRoad } from '@domain/services/laneChange';
 import { smoothAccel, statusFromHysteresis, safeGapGipps } from '@domain/services/vehicleDynamics';
+import { computeSteeringAngle, steeringAngleToOmega } from '@domain/services/purePursuit';
 import { tickOobCleanup } from './oobCleanup';
 import {
   CRASH_IMPULSE_THRESHOLD,
@@ -30,6 +31,7 @@ import {
   TIME_HEADWAY,
   TRAJECTORY_SAMPLE_INTERVAL,
   DEFAULT_CONTROLLER_KIND,
+  VEHICLE_PURE_PURSUIT,
 } from '@shared/constants/simulation';
 import type { RapierWorld, ContactEvent, Vec3 } from '@infrastructure/physics';
 import { findNearestLane } from './laneFrameSync';
@@ -191,6 +193,27 @@ export const tick = (
       const nearest = findNearestLane(v, network);
       v.laneIndex = nearest.laneIndex;
       v.s = nearest.s;
+    }
+
+    // Plan 037c: Pure Pursuit steering — turn toward the lookahead
+    // point on the lane. Runs after step 8 (position re-derived) so
+    // v.position / heading are fresh. Applies angular velocity to Rapier
+    // bodies before the lane-change branch (which handles lateral slide).
+    for (const v of Object.values(network.vehicles)) {
+      if (v.id === ctx.draggingId) continue;
+      const road = network.roads[v.roadId];
+      if (!road) continue;
+      const delta = computeSteeringAngle(
+        v.position.x,
+        v.position.z,
+        v.heading,
+        road,
+        v.laneIndex,
+        v.s,
+        VEHICLE_PURE_PURSUIT[v.type],
+      );
+      const omega = steeringAngleToOmega(delta);
+      ctx.rapierWorld.setVehicleAngularVelocity(v.id, omega);
     }
   } else {
     // M1 fallback: no Rapier → hand-rolled move+s wrap. Plan 037
