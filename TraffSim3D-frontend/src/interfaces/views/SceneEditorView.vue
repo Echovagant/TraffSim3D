@@ -1,5 +1,5 @@
 <template>
-  <div class="scene-editor">
+  <div class="scene-editor" data-testid="scene-canvas">
     <WorldCanvas />
     <DebugPanel />
     <EditorToolbar />

@@ -37,6 +37,11 @@ dist-ssr/
 coverage/
 .nyc_output/
 
+# Plan 042 — Playwright e2e + screenshots
+e2e-output/current/
+TraffSim3D-frontend/test-results/
+TraffSim3D-frontend/playwright-report/
+
 # Environment / secrets
 .env
 .env.local

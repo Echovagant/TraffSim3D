@@ -2,6 +2,7 @@
   <div ref="containerRef" class="world-canvas">
     <canvas
       ref="canvasRef"
+      data-testid="world-canvas"
       @mousedown="handleMouseDown"
       @mousemove="handleMouseMove"
       @mouseup="handleMouseUp"

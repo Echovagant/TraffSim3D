@@ -831,3 +831,19 @@ export const useWorldStore = defineStore('world', () => {
     toggleCoordinatedOffsets,
   };
 });
+
+// Plan 042: dev-only window.__world introspection for Playwright e2e tests.
+// `import.meta.env.DEV` is replaced with `false` in production builds by Vite,
+// so this block is tree-shaken out of the production bundle.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  const w = window as unknown as { __world?: ReturnType<typeof useWorldStore> };
+  Object.defineProperty(w, '__world', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      // The store is created lazily on first access. By the time Playwright
+      // runs tests, /scene-editor is mounted and the store is live.
+      return useWorldStore();
+    },
+  });
+}

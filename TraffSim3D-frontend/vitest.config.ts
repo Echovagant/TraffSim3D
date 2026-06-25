@@ -21,6 +21,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.spec.ts', 'src/**/*.spec.ts'],
+    // Plan 042: exclude e2e specs (they run under Playwright, not vitest).
+    exclude: ['node_modules', 'dist', 'tests/e2e/**'],
     // The Rapier WASM + Three.js + Pinia stack is heavy; let Vite
     // pre-bundle it once for all tests.
     deps: {

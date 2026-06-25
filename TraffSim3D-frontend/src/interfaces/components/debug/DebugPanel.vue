@@ -1,7 +1,7 @@
 <template>
   <div class="debug">
     <div class="row"><span>帧率</span><b :class="fpsClass">{{ store.fps }}</b></div>
-    <div class="row"><span>车辆数</span><b>{{ vehicleCount }}</b></div>
+    <div class="row" data-testid="vehicle-count"><span>车辆数</span><b>{{ vehicleCount }}</b></div>
     <div class="row"><span>灯数</span><b>{{ lightCount }} <small>(R:{{ counts.red }} Y:{{ counts.yellow }} G:{{ counts.green }})</small></b></div>
     <div class="row" title="信号控制器类型">
       <span>信号</span>

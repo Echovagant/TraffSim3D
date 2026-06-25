@@ -41,7 +41,7 @@
     <button title="一键生成 50 辆车演示 Rapier 碰撞 (M2)" @click="onSpawnMany(50)">🚗 +50 车辆</button>
     <button title="添加信号灯" @click="world.addTrafficLight()">+ 信号灯</button>
     <button title="强制所有信号灯全红 (3s)" @click="world.forceAllRed()">🚨 全红</button>
-    <button title="重置场景 (R)" @click="world.reset()">重置</button>
+    <button title="重置场景 (R)" data-testid="reset-button" @click="world.reset()">重置</button>
 
     <label class="ctrl-kind" title="信号灯控制策略">
       <span class="ctrl-kind-label">控制</span>
@@ -55,7 +55,11 @@
 
     <label class="ctrl-kind scene-kind" title="演示场景 (M2 道路几何)">
       <span class="ctrl-kind-label">场景</span>
-      <select :value="world.currentSceneKind" @change="onSceneKindChange">
+      <select
+        :value="world.currentSceneKind"
+        @change="onSceneKindChange"
+        data-testid="scene-kind-select"
+      >
         <option value="cross">十字路口</option>
         <option value="t">T 路口</option>
         <option value="loop">矩形环</option>
