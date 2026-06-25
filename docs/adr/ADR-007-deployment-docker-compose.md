@@ -39,3 +39,9 @@ questions below. No compose file is committed in M1.
 - **Single-host deploy without containers** — viable for M5 but loses
   parity with the rest of the team's workflow.
 - **Kubernetes** — overkill at this stage.
+
+## Last reviewed
+
+- 2026-06-25: Postponed to M5. Reason: M3/M4 backend work is local-venv
+  driven; no CI yet. Plan 044 (CI/CD pipeline, planned) will revisit this
+  ADR alongside the first compose file write.
