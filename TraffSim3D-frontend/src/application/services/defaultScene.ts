@@ -1,5 +1,6 @@
 import { createRoadNetwork, type RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
+import type { SpawnPoint } from '@domain/entities/SpawnPoint';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
 import type { Intersection } from '@domain/entities/Intersection';
 import type { Road } from '@domain/entities/Road';
@@ -12,11 +13,27 @@ const NS_GREEN = DEFAULT_CYCLE_SECONDS * (30 / 63);  // ~30s
 const EW_GREEN = NS_GREEN;
 
 /**
+ * Plan 037: register a spawn point for `road` on its outer forward
+ * lane (lane 0). The returned spawn point is open (`occupiedBy = null`)
+ * unless `occupiedBy` is supplied.
+ */
+const defaultSpawnPoint = (
+  road: Road,
+  occupiedBy: string | null = null,
+): SpawnPoint => ({
+  id: `sp-${road.id}-0`,
+  roadId: road.id,
+  laneIndex: 0,
+  s: 0,
+  occupiedBy,
+});
+
+/**
  * Place a vehicle on (road, laneIndex) at distance `s` along the lane.
  * Pulls position + heading from the lane geometry so the rest of the
  * code can stay in world-space.
  */
-const at = (road: Road, laneIndex: number, s: number, speed: number, v: Omit<Vehicle, 'position' | 'heading' | 'lane' | 's' | 'speed' | 'targetSpeed' | 'roadId' | 'laneIndex' | 'enteredIntersectionAt' | 'desiredLaneIndex' | 'laneChangeStartedAt' | 'spawnedAt'>): Vehicle => {
+const at = (road: Road, laneIndex: number, s: number, speed: number, v: Omit<Vehicle, 'position' | 'heading' | 'lane' | 's' | 'speed' | 'targetSpeed' | 'roadId' | 'laneIndex' | 'enteredIntersectionAt' | 'desiredLaneIndex' | 'laneChangeStartedAt' | 'spawnedAt' | 'desiredStatus'>): Vehicle => {
   const lp = lanePoint(road, laneIndex, s);
   return {
     ...v,
@@ -32,6 +49,7 @@ const at = (road: Road, laneIndex: number, s: number, speed: number, v: Omit<Veh
     desiredLaneIndex: null,
     laneChangeStartedAt: null,
     spawnedAt: 0,
+    desiredStatus: 'driving',  // Plan 037: intent-based state
   };
 };
 
@@ -108,6 +126,12 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
     at(roadEW, 1, ewLen * 0.15, 6, { id: 'v-6', type: 'bus', color: '#22c55e', status: 'driving' }),
   ];
   for (const v of defaults) net.vehicles[v.id] = v;
+  // Plan 037: register one open spawn point per road. Default vehicles
+  // sit at s=15–25 (not s=0), so they don't conflict with spawn traffic.
+  for (const road of [roadNS, roadEW]) {
+    const sp = defaultSpawnPoint(road);
+    net.spawnPoints[sp.id] = sp;
+  }
   return net;
 };
 
@@ -173,6 +197,12 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
     at(roadEW, 1, ewLen * 0.7, 8, { id: 'v-t4', type: 'bus', color: '#fbbf24', status: 'driving' }),
   ];
   for (const v of defaults) net.vehicles[v.id] = v;
+  // Plan 037: spawn points on each of the 3 roads. EW gets the entry
+  // from each side; NS arms each get one.
+  for (const road of [roadEW, roadN, roadS]) {
+    const sp = defaultSpawnPoint(road);
+    net.spawnPoints[sp.id] = sp;
+  }
   return net;
 };
 
@@ -233,5 +263,11 @@ export const buildRectangularLoopNetwork = (): RoadNetwork => {
     );
   }
   for (const v of defaults) net.vehicles[v.id] = v;
+  // Plan 037: 1 spawn point per road (4 total).
+  for (let i = 0; i < 4; i++) {
+    const road = net.roads[`r-loop-${i}`]!;
+    const sp = defaultSpawnPoint(road);
+    net.spawnPoints[sp.id] = sp;
+  }
   return net;
 };

@@ -18,7 +18,12 @@ import { createRoadNetwork } from '@domain/entities/RoadNetwork';
 // v5 scenes are direct supersets of v4 — old v4 scenes load transparently
 // with `waypoints === undefined` (geometry helpers fall back to straight
 // 2-point roads) and `intersectionRadius` defaults to 8 in code.
-export const SCENE_SCHEMA_VERSION = 5;
+// Bumped to v6 in plan 037: Vehicle gained `desiredStatus: VehicleStatus`
+// (intent-based state for the bug-2 hysteresis). RoadNetwork gained
+// `spawnPoints: Record<string, SpawnPoint>`. Old v5 scenes load with
+// `desiredStatus` defaulted to the vehicle's current `status` and an
+// empty `spawnPoints` map (tick treats empty as "no spawn limits").
+export const SCENE_SCHEMA_VERSION = 6;
 
 export interface SerializedScene {
   schemaVersion: number;
@@ -27,8 +32,12 @@ export interface SerializedScene {
     roads: Road[];
     intersections: SerializedIntersection[];
     vehicles: Vehicle[];
+    /** Plan 037: optional on v5 → v6+ scenes; absent on older payloads. */
+    spawnPoints?: SpawnPoint[];
   };
 }
+
+import type { SpawnPoint } from '@domain/entities/SpawnPoint';
 
 interface SerializedIntersection extends Omit<Intersection, 'trafficLights'> {
   trafficLights: TrafficLight[];
@@ -95,6 +104,12 @@ const migrateScene = (d: unknown): SerializedScene | null => {
       // helpers fall back to straight 2-point roads, intersection box
       // uses the per-intersection radius (default 8 in code).
       return { ...obj, schemaVersion: SCENE_SCHEMA_VERSION } as SerializedScene;
+    case 5:
+      // Plan 037: v5 → v6. Vehicle gains desiredStatus (defaults to
+      // the vehicle's current status on load), RoadNetwork gains
+      // spawnPoints (empty on old scenes → no spawn limit). Same
+      // shape, just a version bump.
+      return { ...obj, schemaVersion: SCENE_SCHEMA_VERSION } as SerializedScene;
     case SCENE_SCHEMA_VERSION:
       return obj as unknown as SerializedScene;
     default:
@@ -160,7 +175,26 @@ export const hydrateNetwork = (raw: unknown): HydrationResult => {
   const net = createRoadNetwork();
   for (const r of n.roads as Array<Road>) net.roads[r.id] = r;
   for (const i of n.intersections as Array<SerializedIntersection>) net.intersections[i.id] = i;
-  for (const v of n.vehicles as Array<Vehicle>) net.vehicles[v.id] = v;
+  for (const v of n.vehicles as Array<Vehicle>) {
+    // Plan 037: v5 → v6 migration. Old scenes don't have desiredStatus;
+    // default it to the vehicle's current status so the hysteresis
+    // logic has a sensible "intent" value to start from.
+    if (v.desiredStatus === undefined || v.desiredStatus === null) {
+      v.desiredStatus = v.status;
+    }
+    net.vehicles[v.id] = v;
+  }
+  // Spawn points: optional field on v6 scenes; old scenes have an empty
+  // map (tick treats empty as "no spawn limit", so legacy spawning
+  // behaviour is preserved).
+  const spArr = (n as Record<string, unknown>).spawnPoints;
+  if (Array.isArray(spArr)) {
+    for (const sp of spArr as Array<{ id: string; roadId: string; laneIndex: number; s: number; occupiedBy: string | null }>) {
+      if (net.spawnPoints[sp.id] === undefined) {
+        net.spawnPoints[sp.id] = sp as never;
+      }
+    }
+  }
 
   return { ok: true, network: net };
 };

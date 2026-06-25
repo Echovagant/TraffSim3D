@@ -37,6 +37,20 @@ export interface Vehicle {
   color: string;  // hex string, e.g. '#3a86ff'
   status: VehicleStatus;
   /**
+   * Plan 037 (bug 2): intent-based state, separate from the observable
+   * `status`. `desiredStatus` is what the *controller* wants (e.g. a
+   * red-light approach means `desiredStatus='waiting'` while speed is
+   * still > 0). The hysteresis in tick.ts promotes `desiredStatus` to
+   * `status` only after the speed has crossed the threshold (and held
+   * there for at least one tick). This eliminates the flicker that the
+   * old `speed < 0.5 → waiting` rule produced at startup.
+   *
+   * Defaults to the same value as `status` for entities loaded from a
+   * saved scene that predates this field — see sceneSerializer v6
+   * migration.
+   */
+  desiredStatus: VehicleStatus;
+  /**
    * Simulation-time (seconds since the world was last reset) at which
    * the vehicle first crossed into an intersection box. `null` when
    * the vehicle is not currently inside any intersection. Used by the

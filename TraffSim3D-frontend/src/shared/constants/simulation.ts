@@ -36,6 +36,80 @@ export const PHASE_DURATIONS = {
 
 /** Maximum forward acceleration in m/s² (≈ 0–100 km/h in 8s, gentle). */
 export const MAX_ACCEL = 3.5;
+
+// ===== Plan 037: vehicle dynamics hierarchy =====
+//
+// Three-tier accel / decel model: `comfy` is what the controller aims
+// for under normal conditions; `limit` is the hard cap before
+// collision avoidance overrides; `hard_stop` is the panic-brake
+// ceiling used only when the controller needs to stop NOW (e.g. on
+// contact). All tiers are per-type scaled in VEHICLE_DYN below.
+//
+// Pre-037 had a single MAX_ACCEL=3.5 and MAX_DECEL=10 used for every
+// vehicle regardless of intent, which produced the "instant stop"
+// behaviour the user reported in bug 1.
+
+/** Comfortable acceleration in m/s² (≈ 0–100 km/h in 14s). */
+export const MAX_ACCEL_COMFY = 2.0;
+/** Acceleration ceiling before collision-avoidance overrides. */
+export const MAX_ACCEL_LIMIT = 3.5;
+/** Comfortable deceleration in m/s² (≈ 0.25g). */
+export const MAX_DECEL_COMFY = 2.5;
+/** Hard brake ceiling for emergency stops (≈ 0.6g, below ABS). */
+export const MAX_DECEL_LIMIT = 6.0;
+/** Panic brake (e.g. contact response); only used by the safety layer. */
+export const HARD_STOP_DECEL = 10.0;
+
+// ===== Plan 037: state-machine hysteresis =====
+//
+// Pre-037 used a single 0.5 m/s threshold for `waiting ↔ driving`,
+// which produced the flicker at startup (speed ∈ [0, 0.5) flipped
+// status back to waiting even after the controller had commanded
+// throttle). Now the entry and exit thresholds are separated, so a
+// vehicle that has begun accelerating won't flicker back to waiting
+// just because it briefly dipped under 0.5 m/s during startup.
+
+/** Speed (m/s) above which a vehicle is eligible to enter `driving`. */
+export const DRIVING_SPEED_THRESHOLD = 1.0;
+/** Speed (m/s) below which a vehicle drops back to `waiting`. */
+export const WAITING_SPEED_THRESHOLD = 0.3;
+
+// ===== Plan 037: spawn-point release =====
+//
+// Distance past the spawn arc-length at which a spawn point is
+// considered "released" — the next spawn is free to reuse it.
+export const SPAWN_POINT_RELEASE_DISTANCE = 20;
+
+/**
+ * Plan 037: per-type dynamics parameters. Cars are baseline; trucks
+ * and buses have lower accel ceilings and lower decel ceilings
+ * because they're heavier (the per-type mass in VEHICLE_BODY_SPEC
+ * already makes Rapier collision response heavier, but the
+ * controller also slows down because the user perceives a truck
+ * accelerating briskly as unrealistic).
+ */
+export const VEHICLE_DYN: Record<
+  'car' | 'truck' | 'bus',
+  { accel: number; decel: number }
+> = {
+  car:   { accel: MAX_ACCEL_COMFY,       decel: MAX_DECEL_COMFY },
+  truck: { accel: MAX_ACCEL_COMFY * 0.7, decel: MAX_DECEL_LIMIT * 0.8 },
+  bus:   { accel: MAX_ACCEL_COMFY * 0.6, decel: MAX_DECEL_LIMIT * 0.7 },
+};
+
+/**
+ * Plan 037: crash impulse threshold (N·s). Below this, a contact is
+ * considered a tap (e.g. cars nudging in stop-and-go traffic) and
+ * the involved vehicles stay `driving`. Above, both vehicles flip
+ * to `crashed`.
+ *
+ * NOTE: Rapier's `ContactForceEvent` reading is deferred to a follow-up
+ * plan — currently `ContactEvent.impulse` is always 0, so this
+ * threshold is set to 0 to keep the previous "any contact = crash"
+ * behaviour. When Rapier contact-force wiring lands, raising this to
+ * e.g. 50 N·s becomes a real filter.
+ */
+export const CRASH_IMPULSE_THRESHOLD = 0;
 /**
  * Maximum braking deceleration in m/s² (≈ 1.0 g, hard-but-not-panic).
  * Real-world emergency braking with ABS is ~9–10 m/s², so this is

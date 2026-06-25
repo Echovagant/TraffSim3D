@@ -1,3 +1,20 @@
+// Plan 037: spawnVehicle prefers SpawnPoints over random free-lane scan.
+//
+// New behaviour:
+//   1. If `network.spawnPoints` has any free entry, take the first
+//      one (`occupiedBy === null`), compute the world position from
+//      (roadId, laneIndex, s), and place the vehicle there.
+//   2. If all spawn points are occupied, return `{ ok: false,
+//      reason: 'no free spawn point' }` so the toolbar can flash
+//      "no entry available".
+//   3. **Back-compat**: when `network.spawnPoints` is empty (a pre-037
+//      scene that hasn't been migrated), fall back to the old
+//      `findFreeLanes` random scan. This keeps old saved scenes
+//      working without forcing a re-save.
+//
+// The mark-and-release cycle is handled in tick.ts: spawnVehicle sets
+// `sp.occupiedBy = nextId`; tick clears it once the vehicle has
+// driven past SPAWN_POINT_RELEASE_DISTANCE along the lane.
 import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle, VehicleType } from '@domain/entities/Vehicle';
 import { LaneId } from '@domain/value-objects/LaneId';
@@ -50,16 +67,6 @@ interface SpawnCandidate {
   s: number;
 }
 
-export type SpawnResult =
-  | { ok: true; vehicle: Vehicle }
-  | { ok: false; reason: 'traffic density full' };
-
-export interface SpawnOptions {
-  type?: VehicleType;
-  color?: string;
-  speed?: number;
-}
-
 /**
  * True if no existing vehicle on (roadId, laneIndex) is within
  * `requiredGap` of the candidate's world position. M2-A: we compare
@@ -102,6 +109,9 @@ const isSpotFree = (
  * M = candidate positions), we do a coarse scan: sample a handful
  * of candidate positions per lane and check if at least one is free.
  * For the M1 demo scale (<30 vehicles, <8 lanes) this is plenty.
+ *
+ * **Deprecated in 037**: only used as a back-compat fallback when
+ * `network.spawnPoints` is empty (pre-037 saved scenes).
  */
 const findFreeLanes = (network: RoadNetwork, minGap: number): SpawnCandidate[] => {
   const candidates: SpawnCandidate[] = [];
@@ -136,18 +146,54 @@ const findFreeLanes = (network: RoadNetwork, minGap: number): SpawnCandidate[] =
 };
 
 /**
+ * Plan 037: pick the first free spawn point. If `s` itself is blocked
+ * by an existing vehicle (e.g. a still-spawning one), reject this
+ * spawn point and try the next one. Returns `null` if every spawn
+ * point is either occupied or blocked.
+ */
+const pickFreeSpawnPoint = (network: RoadNetwork, minGap: number): SpawnCandidate | null => {
+  for (const sp of Object.values(network.spawnPoints)) {
+    if (sp.occupiedBy !== null) continue;
+    const candidate: SpawnCandidate = {
+      roadId: sp.roadId,
+      laneIndex: sp.laneIndex,
+      s: sp.s,
+    };
+    if (isSpotFree(network, candidate, minGap)) return candidate;
+  }
+  return null;
+};
+
+export type SpawnResult =
+  | { ok: true; vehicle: Vehicle }
+  | { ok: false; reason: 'traffic density full' | 'no free spawn point' };
+
+export interface SpawnOptions {
+  type?: VehicleType;
+  color?: string;
+  speed?: number;
+}
+
+/**
  * Build a new Vehicle ready to be added to `network.vehicles`.
  *
- * Behaviour (M1.5):
- *   - Enumerate every (road, lane) pair on the network.
- *   - Filter to lanes that have at least one free window of `minGap`.
- *   - If at least one is free, pick one (weighted by lane count × road
- *     length, so longer busier roads spawn more) and place a vehicle
- *     of `type` there.
- *   - If NO lane has a free window, return `{ ok: false, reason:
- *     'traffic density full' }`. The caller surfaces this to the user
- *     (toolbar flash, etc.) — we never silently fall back to a
- *     collision-prone position.
+ * Behaviour (plan 037):
+ *   1. **Spawn-point path** (default): pick the first free spawn
+ *      point; if no spawn point is free AND clear of nearby
+ *      vehicles, fall through to step 2.
+ *   2. **Back-compat fallback**: if `network.spawnPoints` is empty,
+ *      use the old random `findFreeLanes` scan (this preserves
+ *      behaviour for scenes saved before 037).
+ *   3. **Speed / status**: spawn speed is `road.speedLimit * 0.7`
+ *      (plan 037 bug 3.4 — vehicles start with intent to drive, not
+ *      at 0 with status='waiting'). `desiredStatus` is set to
+ *      `'driving'` so the hysteresis in tick.ts immediately considers
+ *      the vehicle active.
+ *   4. On success, mark the chosen spawn point's `occupiedBy` to the
+ *      new vehicle id. tick.ts will release it once the vehicle has
+ *      driven past SPAWN_POINT_RELEASE_DISTANCE metres.
+ *   5. If both paths fail, return `{ ok: false, reason: ... }`. The
+ *      caller surfaces this to the user via a flash message.
  */
 export const spawnVehicle = (
   network: RoadNetwork,
@@ -159,34 +205,59 @@ export const spawnVehicle = (
   const speed = options.speed ?? 0;
   const minGap = MIN_FREE_GAP + vehicleFootprintRadius(type);
 
-  const candidates = findFreeLanes(network, minGap);
-  if (candidates.length === 0) {
-    return { ok: false, reason: 'traffic density full' };
+  // Plan 037: prefer the first free spawn point that is also clear of
+  // nearby vehicles. Empty spawnPoints → fall through to back-compat.
+  let spot: SpawnCandidate | null = null;
+  if (Object.keys(network.spawnPoints).length > 0) {
+    spot = pickFreeSpawnPoint(network, minGap);
+    if (!spot) {
+      return { ok: false, reason: 'no free spawn point' };
+    }
+  } else {
+    // Back-compat: pre-037 saved scenes with no spawn points.
+    const candidates = findFreeLanes(network, minGap);
+    if (candidates.length === 0) {
+      return { ok: false, reason: 'traffic density full' };
+    }
+    spot = candidates[Math.floor(Math.random() * candidates.length)]!;
   }
 
-  // Pick uniformly from the candidate list. (Could weight by length
-  // for a "longer roads get more traffic" feel, but uniform is fine
-  // for M1 and matches user expectations when they click + Vehicle.)
-  const spot = candidates[Math.floor(Math.random() * candidates.length)]!;
   const road = network.roads[spot.roadId]!;
   const lp = lanePoint(road, spot.laneIndex, spot.s);
+  // Plan 037 bug 3.4: spawn speed default is 70% of road limit, but
+  // callers can override (e.g. `+ Vehicle` with explicit `speed: 0`
+  // yields a parked car). `status` mirrors the speed — a freshly
+  // spawned car at rest is `waiting` until the controller commands
+  // it to drive.
+  const spawnSpeed = options.speed ?? Math.min(road.speedLimit * 0.7, road.speedLimit);
+  const initialStatus = spawnSpeed < 0.5 ? 'waiting' : 'driving';
   const vehicle: Vehicle = {
     id: nextId,
     type,
     color,
     position: lp.position,
     heading: lp.heading,
-    speed,
+    speed: spawnSpeed,
     targetSpeed: road.speedLimit,
     roadId: spot.roadId,
     laneIndex: spot.laneIndex,
     s: spot.s,
     lane: LaneId.make(spot.roadId, spot.laneIndex),
-    status: speed < 0.5 ? 'waiting' : 'driving',
+    status: initialStatus,
+    desiredStatus: initialStatus,
     enteredIntersectionAt: null,
     desiredLaneIndex: null,
     laneChangeStartedAt: null,
     spawnedAt: 0,  // Plan 034: stamped by worldStore.addVehicle() at spawn time
   };
+
+  // Mark the spawn point as taken (no-op in back-compat path).
+  for (const sp of Object.values(network.spawnPoints)) {
+    if (sp.roadId === spot.roadId && sp.laneIndex === spot.laneIndex && sp.s === spot.s && sp.occupiedBy === null) {
+      sp.occupiedBy = nextId;
+      break;
+    }
+  }
+
   return { ok: true, vehicle };
 };

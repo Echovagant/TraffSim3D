@@ -30,7 +30,7 @@ describe('sceneSerializer round-trip', () => {
     const net = buildTestNetwork(0);
     const scene = serializeNetwork(net);
     expect(scene.schemaVersion).toBe(SCENE_SCHEMA_VERSION);
-    expect(scene.schemaVersion).toBe(5);  // plan 035 bumped to v5
+    expect(scene.schemaVersion).toBe(6);  // plan 037 bumped to v6 (was v5 in 035)
     expect(typeof scene.savedAtMs).toBe('number');
   });
 

@@ -18,10 +18,13 @@ import type { Road } from '@domain/entities/Road';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { inIntersectionBox, lanePoint, laneOffset, roadLength, laneForwardSign } from '@domain/services/laneGeometry';
 import { steerLateralVelocity, LANE_CHANGE_CONVERGED_M, perpendicularOffsetAlongRoad } from '@domain/services/laneChange';
+import { smoothAccel, statusFromHysteresis, safeGapGipps } from '@domain/services/vehicleDynamics';
 import { tickOobCleanup } from './oobCleanup';
 import {
+  CRASH_IMPULSE_THRESHOLD,
   MAX_SPEED,
   MIN_GAP,
+  SPAWN_POINT_RELEASE_DISTANCE,
   STOP_LINE_BUFFER,
   STOP_LINE_DISTANCE,
   TIME_HEADWAY,
@@ -127,6 +130,22 @@ export const tick = (
     applyCarFollowingConstraint(v, road, network);
   }
 
+  // 3.5. (Plan 037 bug 2) Controller → desiredStatus. We compute the
+  //      controller's intent here (separately from `status`) so the
+  //      hysteresis in step 11 has a stable target to converge to.
+  //      `crashed` is sticky: nothing in the controller overrides it.
+  for (const v of Object.values(network.vehicles)) {
+    if (v.status === 'crashed') {
+      v.desiredStatus = 'crashed';
+      continue;
+    }
+    // Controller intent = the slower of (road speed limit) and
+    // (targetSpeed the constraint layer just set). targetSpeed == 0
+    // means a red-light approach or a car-following distance hit,
+    // both of which mean the vehicle wants to stop.
+    v.desiredStatus = v.targetSpeed < 0.5 ? 'waiting' : 'driving';
+  }
+
   // 4. Cross-road yield (先到先行) — M1.5 right-of-way priority.
   applyCrossRoadYield(network);
 
@@ -167,12 +186,13 @@ export const tick = (
       v.s = nearest.s;
     }
   } else {
-    // M1 fallback: no Rapier → hand-rolled move+s wrap.
+    // M1 fallback: no Rapier → hand-rolled move+s wrap. Plan 037
+    // replaces the previous hard-coded accel=3.5 / decel=10 with
+    // smoothAccel (per-type dynamics).
     for (const v of Object.values(network.vehicles)) {
       const road = network.roads[v.roadId];
       if (!road) continue;
-      if (v.speed < v.targetSpeed) v.speed = Math.min(v.targetSpeed, v.speed + 3.5 * dt);
-      else if (v.speed > v.targetSpeed) v.speed = Math.max(v.targetSpeed, v.speed - 10.0 * dt);
+      v.speed = smoothAccel(v.speed, v.targetSpeed, dt, v.type);
       v.speed = Math.max(0, Math.min(MAX_SPEED, v.speed));
       const sign = laneForwardSign(v.laneIndex, road.laneCount);
       v.s += v.speed * sign * dt;
@@ -228,10 +248,31 @@ export const tick = (
     ctx.trajectoryExporter.record(network, simTime, TRAJECTORY_SAMPLE_INTERVAL);
   }
 
-  // 11. Update status.
+  // 11. Update status (Plan 037 bug 2 — hysteresis).
   for (const v of Object.values(network.vehicles)) {
-    if (v.status !== 'crashed') {
-      v.status = v.speed < 0.5 ? 'waiting' : 'driving';
+    v.status = statusFromHysteresis(v.status, v.desiredStatus, v.speed);
+  }
+
+  // 11.5. (Plan 037 bug 3) Release spawn points when the occupying
+  //      vehicle has driven past SPAWN_POINT_RELEASE_DISTANCE metres
+  //      along its lane. Empty spawnPoints map → no-op (back-compat).
+  if (Object.keys(network.spawnPoints).length > 0) {
+    for (const sp of Object.values(network.spawnPoints)) {
+      if (sp.occupiedBy === null) continue;
+      const v = network.vehicles[sp.occupiedBy];
+      if (!v || v.roadId !== sp.roadId || v.laneIndex !== sp.laneIndex) {
+        // Vehicle no longer matches the spawn point — release.
+        sp.occupiedBy = null;
+        continue;
+      }
+      const ds = v.s - sp.s;
+      // Wrap-safe distance: the road is a polyline / loop. Treat the
+      // spawn point as released when the vehicle has moved
+      // SPAWN_POINT_RELEASE_DISTANCE forward along the lane (s
+      // increasing).
+      if (ds > SPAWN_POINT_RELEASE_DISTANCE || ds < -SPAWN_POINT_RELEASE_DISTANCE) {
+        sp.occupiedBy = null;
+      }
     }
   }
 
@@ -344,7 +385,11 @@ const applyCarFollowingConstraint = (v: Vehicle, road: Road, network: RoadNetwor
   }
   if (!leader) return;
   const gap = Math.max(0, bestGap - 4);
-  const safeGap = leader.speed * TIME_HEADWAY + MIN_GAP;
+  // Plan 037 bug 1.3: simplified Gipps — adds a relative-velocity
+  // braking component to the safe gap so the follower preempts the
+  // leader's deceleration. Without it, Newell's `speed*TIME_HEADWAY +
+  // MIN_GAP` under-protects when the leader is braking hard.
+  const safeGap = safeGapGipps(v.speed, leader.speed, gap, TIME_HEADWAY, MIN_GAP);
   if (gap >= safeGap) return;
   v.targetSpeed = leader.speed;
 };
@@ -380,6 +425,12 @@ const classifyContacts = (network: RoadNetwork, events: ReadonlyArray<ContactEve
     const va = network.vehicles[e.colliderA];
     const vb = network.vehicles[e.colliderB];
     if (!va || !vb) continue;
+    // Plan 037 bug 2.3: respect impulse threshold. Taps below the
+    // threshold (e.g. cars nudging in stop-and-go) leave both
+    // vehicles `driving`. Currently Rapier reports impulse=0 on
+    // every contact, so the threshold defaults to 0 and every
+    // contact still triggers `crashed` (back-compat with 009).
+    if (e.impulse < CRASH_IMPULSE_THRESHOLD) continue;
     va.status = 'crashed';
     vb.status = 'crashed';
   }
