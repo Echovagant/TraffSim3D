@@ -3,6 +3,7 @@ import { ref, shallowRef } from 'vue';
 import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
+import { FixedStepScheduler } from '@application/services/fixedStepScheduler';
 import {
   buildCrossIntersectionNetwork,
   buildTJunctionNetwork,
@@ -153,6 +154,11 @@ export const useWorldStore = defineStore('world', () => {
     bumpTick();
   };
   const toggleLidar = (): void => setLidarEnabled(!lidarEnabled.value);
+
+  // Plan 038: fixed-step scheduler driving the trajectory exporter
+  // at 10 Hz. Lives as a plain closure var (not a ref) — the renderer
+  // doesn't need to react to it; only tick() reads its state.
+  const fixedStepScheduler = new FixedStepScheduler({ fixedStepSec: 0.1 });
 
   // M2-B Coordinated UI hooks (plan 027). The offsets are consulted by
   // CoordinatedController (plan 028) — until then they are pure UI state
@@ -352,6 +358,7 @@ export const useWorldStore = defineStore('world', () => {
       getHostPose,
       draggingId,
       removeVehicle,  // Plan 034: OOB cleanup entry point
+      fixedStepScheduler,  // Plan 038: drives trajectory export at 10 Hz
     });
     if (lidarEnabled.value && rapierWorld) {
       // Bump the frame counter for the DebugPanel readout. We can't
@@ -425,6 +432,7 @@ export const useWorldStore = defineStore('world', () => {
     cameraFrameCount.value = 0;
     network.value = buildCrossIntersectionNetwork();
     simTime = 0;
+    fixedStepScheduler.reset();  // Plan 038: zero out the 10 Hz cadence
     // Re-register default vehicles.
     if (rapierWorld) {
       for (const v of Object.values(network.value.vehicles)) {

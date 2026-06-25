@@ -33,6 +33,7 @@ import {
 } from '@shared/constants/simulation';
 import type { RapierWorld, ContactEvent, Vec3 } from '@infrastructure/physics';
 import { findNearestLane } from './laneFrameSync';
+import { FixedStepScheduler } from './fixedStepScheduler';
 import {
   createSignalController,
   type SignalController,
@@ -61,6 +62,12 @@ export interface TickContext {
   lidarEnabled: boolean;
   /** Lookup host vehicle's live pose (used by sensor scan). */
   getHostPose: (vehicleId: string) => { position: Vec3; heading: number } | null;
+  /** Plan 038: optional fixed-step scheduler. When non-null, the
+   *  trajectory exporter is only invoked on fixed-step boundaries
+   *  (10 Hz by default), regardless of how fast the render loop
+   *  fires. When null, the exporter runs per-frame (back-compat
+   *  for tests and the legacy M2-C path). */
+  fixedStepScheduler: FixedStepScheduler | null;
   /** Vehicle currently being dragged on the 3D canvas (M1.5, plan 023).
    *  When non-null, tick() skips Rapier applyControl + position re-derivation
    *  for this vehicle so the drag handler can move it freely. */
@@ -242,10 +249,28 @@ export const tick = (
     ctx.sensorRegistry.scanAll(ctx.rapierWorld, simTime, ctx.getHostPose);
   }
 
-  // 10. (M2-C) Trajectory export — per-tick 10Hz sampling, decoupled
-  //     from LiDAR (always runs unless the exporter is null).
+  // 10. (M2-C / Plan 038) Trajectory export — fixed-step rate.
+  //     Plan 038: when a FixedStepScheduler is provided, only call
+  //     record() on fixed-step boundaries (default 10 Hz). Without
+  //     a scheduler, fall back to per-frame (the M2-C default).
   if (ctx.trajectoryExporter) {
-    ctx.trajectoryExporter.record(network, simTime, TRAJECTORY_SAMPLE_INTERVAL);
+    if (ctx.fixedStepScheduler) {
+      // Drain any extra steps accumulated by a long wallDt (e.g.
+      // browser pause). Each fixed-step boundary writes one
+      // trajectory sample.
+      let fired = ctx.fixedStepScheduler.advance(dt);
+      while (fired) {
+        ctx.trajectoryExporter.record(
+          network,
+          ctx.fixedStepScheduler.getSimTime(),
+          TRAJECTORY_SAMPLE_INTERVAL,
+        );
+        fired = ctx.fixedStepScheduler.advance(0);  // drain remainder
+      }
+    } else {
+      // Back-compat: per-frame record (older tests).
+      ctx.trajectoryExporter.record(network, simTime, TRAJECTORY_SAMPLE_INTERVAL);
+    }
   }
 
   // 11. Update status (Plan 037 bug 2 — hysteresis).

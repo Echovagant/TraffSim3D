@@ -23,12 +23,12 @@ describe('TrajectoryExporter', () => {
     expect(exp.rowCount).toBe(3);
   });
 
-  it('CSV header has 10 columns', async () => {
+  it('CSV header has 11 columns (plan 038 added dt)', async () => {
     const net = buildTestNetwork(0);
     exp.record(net, 0, 0.1);
     const blob = exp.exportAsBlob({ kind: 'csv', includeCrashed: true, sampleInterval: 0.1 });
     const text = await blob.text();
-    expect(text.split('\n')[0]).toBe('t,vehicleId,roadId,laneIndex,type,x,z,heading,speed,status');
+    expect(text.split('\n')[0]).toBe('t,dt,vehicleId,roadId,laneIndex,type,x,z,heading,speed,status');
   });
 
   it('CSV includes crashed vehicles when includeCrashed=true', async () => {
@@ -64,5 +64,41 @@ describe('TrajectoryExporter', () => {
     exp.record(net, 0, 0.1);
     exp.clear();
     expect(exp.rowCount).toBe(0);
+  });
+
+  // ===== Plan 038: dirty-data filter + dt field =====
+
+  it('plan 038: every row carries dt = sampleInterval', async () => {
+    const net = buildTestNetwork(2);
+    exp.record(net, 0, 0.1);
+    exp.record(net, 0.1, 0.1);
+    const blob = exp.exportAsBlob({ kind: 'json', includeCrashed: true, sampleInterval: 0.1 });
+    const body = JSON.parse(await blob.text());
+    expect(body.rows.length).toBe(4);
+    for (const row of body.rows) {
+      expect(row.dt).toBe(0.1);
+    }
+  });
+
+  it('plan 038: dirty-data filter drops samples with speed > 50 m/s', () => {
+    const net = buildTestNetwork(1);
+    exp.record(net, 0, 0.1);  // baseline (speed=0 from makeTestVehicle)
+    const teleporting = net.vehicles['v-1']!;
+    teleporting.speed = 200;  // 720 km/h, impossible
+    exp.record(net, 0.1, 0.1);
+    // First row from baseline made it in; second row should be dropped.
+    expect(exp.rowCount).toBe(1);
+  });
+
+  it('plan 038: dirty-data filter drops collision-response frames (Δpos=0, speed>5)', () => {
+    const net = buildTestNetwork(1);
+    exp.record(net, 0, 0.1);
+    // First sample OK. Now Rapier reports the body hasn't moved but
+    // `speed` is suddenly 20 m/s — typical collision response frame.
+    const v = net.vehicles['v-1']!;
+    v.position = { x: 0, y: 0, z: -20 };  // same as baseline
+    v.speed = 20;
+    exp.record(net, 0.1, 0.1);
+    expect(exp.rowCount).toBe(1);  // dirty sample dropped
   });
 });
