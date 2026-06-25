@@ -56,14 +56,16 @@ const at = (road: Road, laneIndex: number, s: number, speed: number, v: Omit<Veh
 /**
  * Plan 035: helper for the common case of a straight 2-point road. Saves
  * typing `startNode`, `endNode`, `laneCount`, `speedLimit` separately
- * when the road is just a single segment.
+ * when the road is just a single segment. Plan 039: `level` parameter
+ * defaults to 0 (ground). High-level roads pass `level: 1` etc.
  */
-const roadStraight = (id: string, start: { x: number; y?: number; z: number }, end: { x: number; y?: number; z: number }, laneCount: number, speedLimit: number): Road => ({
+const roadStraight = (id: string, start: { x: number; y?: number; z: number }, end: { x: number; y?: number; z: number }, laneCount: number, speedLimit: number, level: number = 0): Road => ({
   id,
   startNode: { x: start.x, y: start.y ?? 0, z: start.z },
   endNode: { x: end.x, y: end.y ?? 0, z: end.z },
   laneCount,
   speedLimit,
+  level,
 });
 
 /**
@@ -269,5 +271,130 @@ export const buildRectangularLoopNetwork = (): RoadNetwork => {
     const sp = defaultSpawnPoint(road);
     net.spawnPoints[sp.id] = sp;
   }
+  return net;
+};
+
+/**
+ * Plan 039: 高架桥 demo scene.
+ *
+ * 布局 (俯视):
+ *          N (level=0)
+ *           |
+ *           |
+ *  W-low ───X──── ramp ──────X──── E-high (level=1)
+ *           |      (↑ Y 渐变)         (level=1)
+ *           |
+ *          S (level=0)
+ *
+ * - r-ns: NS 60u, level=0 (接 r-ew-low)
+ * - r-ew-low: EW 西段 -30..0, level=0 (接 r-ns 在地面十字路口)
+ * - r-ramp: EW 段 0..20, level 0→1, polyline waypoints 让 Y 平滑上升
+ * - r-ew-high: EW 东段 20..50, level=1 (高架直行)
+ *
+ * ramp 的 Y 用 5 段折线均匀爬升 (避免瞬间跳变导致穿模). Pure Pursuit
+ * 已通过 037c 验证能在 polyline 上正常转向 — ramp 自然被走完.
+ */
+export const buildElevatedScene = (): RoadNetwork => {
+  const net = createRoadNetwork();
+  const LEVEL_HEIGHT = 4;  // 每个 level 抬 4 米
+  const EW_LEN_HALF = 30;  // 地面层 EW 半段长度
+  const RAMP_END_X = 20;   // ramp 在 x=20 处到达 level=1
+  const HIGH_END_X = 50;   // 高架 EW 在 x=50 处结束
+  const NS_HALF = 30;      // NS 道路半长度
+
+  // 地面层 NS (level=0, Y=0)
+  const roadNS: Road = roadStraight(
+    'r-ns',
+    { x: 0, z: -NS_HALF },
+    { x: 0, z: NS_HALF },
+    4, 16.67,
+  );
+  net.roads[roadNS.id] = roadNS;
+
+  // 地面层 EW 西段 (level=0, Y=0) — 从 x=-EW_LEN_HALF 到 x=0
+  const roadEWLow: Road = roadStraight(
+    'r-ew-low',
+    { x: -EW_LEN_HALF, z: 0 },
+    { x: 0, z: 0 },
+    4, 16.67,
+  );
+  net.roads[roadEWLow.id] = roadEWLow;
+
+  // Ramp: x=0..RAMP_END_X, Y 从 0 渐变到 LEVEL_HEIGHT. 5 段 polyline.
+  const RAMP_SEGMENTS = 5;
+  const rampWps: { x: number; y: number; z: number }[] = [];
+  for (let i = 0; i <= RAMP_SEGMENTS; i++) {
+    const t = i / RAMP_SEGMENTS;
+    rampWps.push({
+      x: RAMP_END_X * t,
+      y: LEVEL_HEIGHT * t,  // 均匀爬升
+      z: 0,
+    });
+  }
+  const roadRamp: Road = {
+    id: 'r-ramp',
+    startNode: { x: rampWps[0]!.x, y: rampWps[0]!.y, z: rampWps[0]!.z },
+    endNode: { x: rampWps[rampWps.length - 1]!.x, y: rampWps[rampWps.length - 1]!.y, z: rampWps[rampWps.length - 1]!.z },
+    waypoints: rampWps,
+    laneCount: 4,
+    speedLimit: 13.89,  // 高架慢一点 (50 km/h)
+    level: 1,
+  };
+  net.roads[roadRamp.id] = roadRamp;
+
+  // 高架 EW 东段 (level=1, Y=LEVEL_HEIGHT)
+  const roadEWHigh: Road = roadStraight(
+    'r-ew-high',
+    { x: RAMP_END_X, y: LEVEL_HEIGHT, z: 0 },
+    { x: HIGH_END_X, y: LEVEL_HEIGHT, z: 0 },
+    4, 13.89,
+    1,  // level=1 (Plan 039)
+  );
+  net.roads[roadEWHigh.id] = roadEWHigh;
+
+  // 地面十字路口 (r-ns × r-ew-low) — 跟 cross scene 同样的样式
+  const intersectionLow: Intersection = {
+    id: 'i-low',
+    position: { x: 0, y: 0, z: 0 },
+    trafficLights: [
+      { id: 'tl-ns', position: { x: -3, y: 0, z: 0 }, phase: LightPhase.Green, phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ns' },
+      { id: 'tl-ew', position: { x: 0, y: 0, z: -3 }, phase: LightPhase.Red, phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ew' },
+    ],
+    connectedRoads: ['r-ns', 'r-ew-low'],
+    intersectionRadius: 6,
+  };
+  net.intersections[intersectionLow.id] = intersectionLow;
+
+  // 高架 T 接 (r-ew-low+r-ramp 端点 + r-ew-high+r-ramp 端点 在 r-ramp 起点/终点处)
+  // 这里不放红绿灯 — ramp 端点是直通点, 不算正式路口.
+  // 但为了 net.roads 完整, 我们仍注册一个无灯的 intersection 作为连接点.
+  const intersectionHighStart: Intersection = {
+    id: 'i-high-start',
+    position: { x: RAMP_END_X, y: LEVEL_HEIGHT, z: 0 },
+    trafficLights: [],
+    connectedRoads: ['r-ramp', 'r-ew-high'],
+    intersectionRadius: 4,
+  };
+  net.intersections[intersectionHighStart.id] = intersectionHighStart;
+
+  // 4 辆默认车: 1 在 NS 南半, 1 在 EW 西段, 1 在 ramp 中, 1 在高架东段
+  const nsLen = roadLength(roadNS);
+  const ewLowLen = roadLength(roadEWLow);
+  const rampLen = roadLength(roadRamp);
+  const ewHighLen = roadLength(roadEWHigh);
+  const defaults: Vehicle[] = [
+    at(roadNS, 0, nsLen * 0.25, 8, { id: 'v-e1', type: 'car', color: '#3a86ff', status: 'driving' }),
+    at(roadEWLow, 0, ewLowLen * 0.6, 7, { id: 'v-e2', type: 'car', color: '#22c55e', status: 'driving' }),
+    at(roadRamp, 0, rampLen * 0.5, 6, { id: 'v-e3', type: 'truck', color: '#fbbf24', status: 'driving' }),
+    at(roadEWHigh, 0, ewHighLen * 0.5, 8, { id: 'v-e4', type: 'car', color: '#ef4444', status: 'driving' }),
+  ];
+  for (const v of defaults) net.vehicles[v.id] = v;
+
+  // 每条 road 一个 spawn point
+  for (const road of [roadNS, roadEWLow, roadRamp, roadEWHigh]) {
+    const sp = defaultSpawnPoint(road);
+    net.spawnPoints[sp.id] = sp;
+  }
+
   return net;
 };

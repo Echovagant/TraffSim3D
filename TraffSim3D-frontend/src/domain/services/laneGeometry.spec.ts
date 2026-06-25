@@ -226,3 +226,50 @@ describe('intersectionSRange', () => {
     expect(hi).toBeCloseTo(21, 6);
   });
 });
+// Plan 039: ramp / level-tagged road geometry tests.
+describe('Plan 039 elevated road geometry', () => {
+  const makeRamp = (): Road => ({
+    id: 'r-ramp-test',
+    startNode: { x: 0, y: 0, z: 0 },
+    endNode: { x: 20, y: 4, z: 0 },
+    waypoints: [
+      { x: 0, y: 0, z: 0 },
+      { x: 4, y: 0.8, z: 0 },
+      { x: 8, y: 1.6, z: 0 },
+      { x: 12, y: 2.4, z: 0 },
+      { x: 16, y: 3.2, z: 0 },
+      { x: 20, y: 4, z: 0 },
+    ],
+    laneCount: 4,
+    speedLimit: 13.89,
+    level: 1,
+  });
+
+  it('lanePoint Y interpolates monotonically along ramp', () => {
+    const r = makeRamp();
+    const len = roadLength(r);
+    // Sample 5 points along the ramp — Y should strictly increase.
+    let prevY = -Infinity;
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+      const lp = lanePoint(r, 0, len * t);
+      expect(lp.position.y).toBeGreaterThan(prevY);
+      prevY = lp.position.y;
+    }
+    expect(lanePoint(r, 0, 0).position.y).toBeCloseTo(0, 6);
+    expect(lanePoint(r, 0, len).position.y).toBeCloseTo(4, 6);
+  });
+
+  it('roadPolylineLengths includes Y component (ramp longer than horizontal flat)', () => {
+    const r = makeRamp();
+    // Horizontal flat of same X range (Y always 0): length = 20.
+    const flat: Road = {
+      id: 'r-flat',
+      startNode: { x: 0, y: 0, z: 0 },
+      endNode: { x: 20, y: 0, z: 0 },
+      laneCount: 4,
+      speedLimit: 13.89,
+      level: 0,
+    };
+    expect(roadLength(r)).toBeGreaterThan(roadLength(flat));
+  });
+});

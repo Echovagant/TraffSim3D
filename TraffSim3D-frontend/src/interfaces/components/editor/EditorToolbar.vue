@@ -63,6 +63,7 @@
         <option value="cross">十字路口</option>
         <option value="t">T 路口</option>
         <option value="loop">矩形环</option>
+        <option value="elevated">高架桥</option>
       </select>
     </label>
 
@@ -203,9 +204,10 @@ const onSceneKindChange = (e: Event): void => {
 
 const sceneLabel = (k: SceneKind): string => {
   switch (k) {
-    case 'cross': return '十字路口';
-    case 't':     return 'T 路口';
-    case 'loop':  return '矩形环';
+    case 'cross':    return '十字路口';
+    case 't':        return 'T 路口';
+    case 'loop':     return '矩形环';
+    case 'elevated': return '高架桥';
   }
 };
 

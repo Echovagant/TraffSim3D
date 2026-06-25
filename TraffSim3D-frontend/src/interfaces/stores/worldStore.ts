@@ -8,6 +8,7 @@ import {
   buildCrossIntersectionNetwork,
   buildTJunctionNetwork,
   buildRectangularLoopNetwork,
+  buildElevatedScene,
 } from '@application/services/defaultScene';
 import { tick, type SignalContext } from '@application/services/tick';
 import { spawnVehicle, type SpawnOptions, type SpawnResult } from '@application/services/spawnVehicle';
@@ -41,15 +42,17 @@ export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const;
 
 /**
  * Plan 035: scene-selector enum. The toolbar dropdown binds to this.
+ * Plan 039: added 'elevated' (高架桥 — Y-axis ramps + level tagging).
  * Adding a new scene = add a factory + an entry here.
  */
-export type SceneKind = 'cross' | 't' | 'loop';
+export type SceneKind = 'cross' | 't' | 'loop' | 'elevated';
 
 const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
   switch (kind) {
-    case 'cross': return buildCrossIntersectionNetwork();
-    case 't':     return buildTJunctionNetwork();
-    case 'loop':  return buildRectangularLoopNetwork();
+    case 'cross':    return buildCrossIntersectionNetwork();
+    case 't':        return buildTJunctionNetwork();
+    case 'loop':     return buildRectangularLoopNetwork();
+    case 'elevated': return buildElevatedScene();
   }
 };
 

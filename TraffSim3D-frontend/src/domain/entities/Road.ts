@@ -27,4 +27,11 @@ export interface Road {
   laneCount: number;
   /** Speed limit in m/s. */
   speedLimit: number;
+  /**
+   * Plan 039: 道路高程标签 (整数米). Polyline waypoints 的 Y 起点
+   * 应等于 level × LEVEL_HEIGHT (4m), ramp 段 waypoints 的 Y 自然渐变.
+   * 默认 0 — 老 scene 序列化无此字段, sceneSerializer.deserialize
+   * 缺字段时填 0.
+   */
+  level: number;
 }

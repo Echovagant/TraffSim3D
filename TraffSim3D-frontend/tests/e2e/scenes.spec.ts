@@ -1,6 +1,7 @@
 /**
  * Plan 042 / Plan 035 verification: scene switch screenshots.
- * Captures each of the three demo scenes to e2e-output/current/.
+ * Captures each demo scene to e2e-output/current/.
+ * Plan 039 added 'elevated' (高架桥) — covered here too.
  */
 import { test, expect } from '@playwright/test';
 import { waitForSceneReady, switchScene, SCREENSHOT_DIR } from './helpers/wait';
@@ -21,5 +22,11 @@ test.describe('Scene switch screenshots', () => {
     await waitForSceneReady(page);
     await switchScene(page, 'loop');
     await page.screenshot({ path: `${SCREENSHOT_DIR}/loop-scene.png`, fullPage: false });
+  });
+
+  test('elevated bridge scene (Plan 039)', async ({ page }) => {
+    await waitForSceneReady(page);
+    await switchScene(page, 'elevated');
+    await page.screenshot({ path: `${SCREENSHOT_DIR}/elevated-scene.png`, fullPage: false });
   });
 });

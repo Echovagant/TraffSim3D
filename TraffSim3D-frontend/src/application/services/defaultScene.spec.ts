@@ -6,7 +6,7 @@
 //   - loop:  4 roads + 4 corner intersections + 8 vehicles
 
 import { describe, it, expect } from 'vitest';
-import { buildCrossIntersectionNetwork, buildTJunctionNetwork, buildRectangularLoopNetwork } from './defaultScene';
+import { buildCrossIntersectionNetwork, buildTJunctionNetwork, buildRectangularLoopNetwork, buildElevatedScene } from './defaultScene';
 
 describe('buildCrossIntersectionNetwork', () => {
   it('produces 2 roads, 1 (4-way) intersection, 6 vehicles', () => {
@@ -43,5 +43,40 @@ describe('buildRectangularLoopNetwork', () => {
       expect(inter.connectedRoads.length).toBe(2);
       expect(inter.intersectionRadius).toBe(4);
     }
+  });
+});
+
+// Plan 039: elevated roads (Y-axis ramps + level tagging).
+describe('buildElevatedScene', () => {
+  it('produces 4 roads, 2 intersections (1 signal + 1 ramp-end), 4 vehicles', () => {
+    const net = buildElevatedScene();
+    expect(Object.keys(net.roads).length).toBe(4);
+    expect(Object.keys(net.intersections).length).toBe(2);
+    expect(Object.keys(net.vehicles).length).toBe(4);
+  });
+
+  it('ramp road has level=1 and waypoints Y climbing 0 -> 4', () => {
+    const net = buildElevatedScene();
+    const ramp = net.roads['r-ramp']!;
+    expect(ramp.level).toBe(1);
+    expect(ramp.waypoints).toBeDefined();
+    expect(ramp.waypoints!.length).toBeGreaterThanOrEqual(3);
+    const yFirst = ramp.waypoints![0]!.y;
+    const yLast = ramp.waypoints![ramp.waypoints!.length - 1]!.y;
+    expect(yFirst).toBeCloseTo(0, 6);
+    expect(yLast).toBeCloseTo(4, 6);
+    // Monotonically increasing Y
+    let prevY = -Infinity;
+    for (const wp of ramp.waypoints!) {
+      expect(wp.y).toBeGreaterThanOrEqual(prevY);
+      prevY = wp.y;
+    }
+  });
+
+  it('r-ew-high is level=1 (elevated straight), r-ns and r-ew-low are level=0', () => {
+    const net = buildElevatedScene();
+    expect(net.roads['r-ew-high']!.level).toBe(1);
+    expect(net.roads['r-ns']!.level).toBe(0);
+    expect(net.roads['r-ew-low']!.level).toBe(0);
   });
 });

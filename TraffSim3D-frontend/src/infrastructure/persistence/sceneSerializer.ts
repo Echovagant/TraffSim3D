@@ -173,7 +173,16 @@ export const hydrateNetwork = (raw: unknown): HydrationResult => {
 
   // Build network
   const net = createRoadNetwork();
-  for (const r of n.roads as Array<Road>) net.roads[r.id] = r;
+  for (const r of n.roads as Array<Road>) {
+    // Plan 039: pre-v7 scenes don't have `level`. Default to 0 so
+    // older localStorage payloads deserialize without error — they
+    // simply render at ground level (existing behaviour). Will be
+    // persisted with the field on next save.
+    if (typeof (r as Record<string, unknown>).level !== 'number') {
+      (r as Record<string, unknown>).level = 0;
+    }
+    net.roads[r.id] = r;
+  }
   for (const i of n.intersections as Array<SerializedIntersection>) net.intersections[i.id] = i;
   for (const v of n.vehicles as Array<Vehicle>) {
     // Plan 037: v5 → v6 migration. Old scenes don't have desiredStatus;
