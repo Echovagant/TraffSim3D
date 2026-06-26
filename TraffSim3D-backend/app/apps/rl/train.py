@@ -14,6 +14,13 @@ GPU support (Plan 044 extension):
 - `auto` selects GPU if CUDA available AND VRAM ≥ MIN_VRAM_GB (2.0),
   else CPU; falls back to dry_run if SB3 is missing entirely.
 - The resolved device is recorded in status.json `device` field.
+
+Multi-agent + checkpoints (Plan 045 extension):
+- `--n-agents INT` (default 2): stack N TrafficEnvs in lockstep,
+  share one PPO policy (parameter sharing).
+- `--save-every INT` (default 5000): save PPO model checkpoint to
+  /tmp/ppo_checkpoints/pid{os.getpid()}/ every N steps. Auto-prune
+  old checkpoints per process (keep latest 5).
 """
 from __future__ import annotations
 
@@ -22,20 +29,24 @@ import math
 from typing import Any
 
 
-def dry_run(total_steps: int = 1000) -> None:
+def dry_run(total_steps: int = 1000, n_agents: int = 2) -> None:
     """Write synthetic training status (no PPO)."""
     from . import status as st
 
     st.init_status(total_steps)
     n_episodes = max(1, total_steps // 200)
     for i in range(n_episodes):
-        # Fake reward trending up (linear + noise)
-        reward = 0.5 + 0.5 * i + 0.1 * math.sin(i)
+        # Fake reward trending up (linear + noise), scaled by n_agents
+        reward = (0.5 + 0.5 * i + 0.1 * math.sin(i)) * n_agents
         st.append_reward(reward)
+    s = st.read_status()
+    s["latest_checkpoint"] = f"ppo_step_{total_steps:07d}.zip (dry_run)"
+    s["n_agents"] = n_agents
+    st.write_status(s)
     st.finalize_status("dry_run_completed")
 
 
-def real_train(total_steps: int, device: str) -> None:
+def real_train(total_steps: int, device: str, n_agents: int, save_every: int) -> None:
     """Real PPO training via stable-baselines3 on the resolved device."""
     from . import capabilities as caps
     from . import status as st
@@ -43,35 +54,55 @@ def real_train(total_steps: int, device: str) -> None:
     resolved_device, reason = caps.resolve_device(device)
 
     st.init_status(total_steps)
-    # Record the resolved device in the status so the UI can show it.
     s = st.read_status()
     s["device"] = resolved_device
     s["device_reason"] = reason
+    s["n_agents"] = n_agents
+    s["latest_checkpoint"] = ""
     st.write_status(s)
 
     if resolved_device == "dry_run":
-        # SB3 unavailable or device couldn't be resolved — degrade to
-        # synthetic history so the UI still has something to render.
         st.append_reward(0.0)
+        s = st.read_status()
+        s["latest_checkpoint"] = "dry_run_fallback"
+        st.write_status(s)
         st.finalize_status(f"dry_run_fallback ({reason})")
         return
 
     from stable_baselines3 import PPO
 
-    from .env import TrafficEnv
+    from .checkpoint import save_checkpoint
+    from .multi_env import MultiTrafficEnv
 
-    env = TrafficEnv()
+    env = MultiTrafficEnv(n_agents=n_agents)
+
+    latest_ckpt = ""
 
     def on_step(_locals: dict[str, Any], _globals: dict[str, Any]) -> None:  # SB3 callback
-        # Every ~200 steps, count as one episode and log reward
-        if _locals["self"].num_timesteps % 200 == 0:
-            st.append_reward(_locals["self"].ep_info_buffer[-1]["r"]
-                             if _locals["self"].ep_info_buffer else 0.0)
+        nonlocal latest_ckpt
+        # SB3 calls this every n_steps env steps (default 2048 → every
+        # rollout). We save on every save_every global step.
+        step = int(_locals["self"].num_timesteps)
+        if step % save_every == 0 and step > 0:
+            path = save_checkpoint(_locals["self"].model, step)
+            latest_ckpt = str(path)
+            ss = st.read_status()
+            ss["latest_checkpoint"] = path.name
+            ss["step"] = step
+            st.write_status(ss)
+        # Episode reward logging
+        if step % 200 == 0:
+            ep_buf = _locals["self"].ep_info_buffer
+            if ep_buf:
+                st.append_reward(float(ep_buf[-1]["r"]))
 
     model = PPO("MlpPolicy", env, verbose=0, device=resolved_device)
     model.learn(total_timesteps=total_steps, callback=on_step)
-    model.save("/tmp/traffic_ppo.zip")
-    st.finalize_status(f"ppo_completed on {resolved_device}")
+    final_path = save_checkpoint(model, total_steps)
+    s = st.read_status()
+    s["latest_checkpoint"] = final_path.name
+    st.write_status(s)
+    st.finalize_status(f"ppo_completed on {resolved_device} ({n_agents} agents)")
 
 
 def main() -> None:
@@ -85,18 +116,26 @@ def main() -> None:
         help="Training device (Plan 044 GPU extension). "
              "'auto' picks GPU if available + ≥2GB VRAM, else CPU.",
     )
+    parser.add_argument(
+        "--n-agents", type=int, default=2,
+        help="Number of parallel agents sharing the PPO policy (Plan 045).",
+    )
+    parser.add_argument(
+        "--save-every", type=int, default=5000,
+        help="Save checkpoint every N env steps (Plan 045).",
+    )
     args = parser.parse_args()
 
     if args.dry_run:
-        dry_run(args.steps)
+        dry_run(args.steps, args.n_agents)
         return
 
     try:
-        real_train(args.steps, args.device)
+        real_train(args.steps, args.device, args.n_agents, args.save_every)
     except ImportError as e:
         # Fallback: stable-baselines3 / torch not installed.
         print(f"SB3 unavailable ({e}); falling back to dry-run path.")
-        dry_run(args.steps)
+        dry_run(args.steps, args.n_agents)
 
 
 if __name__ == "__main__":

@@ -57,3 +57,38 @@ async def test_status_returns_empty_when_no_training(client: AsyncClient) -> Non
     s = r.json()
     for key in ("running", "step", "episode_count", "last_reward", "reward_history"):
         assert key in s
+
+
+@pytest.mark.asyncio
+async def test_checkpoints_endpoint_returns_list_shape(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """GET /api/v1/rl/checkpoints returns {checkpoints: [...]}."""
+    # Redirect checkpoint dir to tmp so list returns []
+    from app.apps.rl import checkpoint as ckpt
+    monkeypatch.setattr(ckpt, "_DEFAULT_DIR", tmp_path / "nonexistent")
+    r = await client.get("/api/v1/rl/checkpoints")
+    assert r.status_code == 200
+    body = r.json()
+    assert "checkpoints" in body
+    assert isinstance(body["checkpoints"], list)
+
+
+@pytest.mark.asyncio
+async def test_train_accepts_n_agents_and_save_every(client: AsyncClient) -> None:
+    """POST /api/v1/rl/train with n_agents=3, save_every=2000 in dry-run."""
+    r = await client.post(
+        "/api/v1/rl/train",
+        json={"steps": 600, "dry_run": True, "device": "auto",
+              "n_agents": 3, "save_every": 2000},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["n_agents"] == 3
+    # Status should now reflect n_agents
+    r2 = await client.get("/api/v1/rl/status")
+    s = r2.json()
+    assert s["n_agents"] == 3
+    # 600 steps / 200 per episode = 3 episodes
+    assert s["episode_count"] == 3

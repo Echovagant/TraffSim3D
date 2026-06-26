@@ -36,6 +36,17 @@
           </select>
         </label>
         <label class="ctrl">
+          Agent 数
+          <input
+            v-model.number="nAgents"
+            type="number"
+            min="1"
+            max="8"
+            step="1"
+            data-testid="n-agents-input"
+          />
+        </label>
+        <label class="ctrl">
           <input v-model="dryRun" type="checkbox" data-testid="dry-run-checkbox" />
           Dry-run (跳过 PPO，写假历史)
         </label>
@@ -53,6 +64,17 @@
           data-testid="refresh-status-button"
           @click="refreshStatus"
         >刷新</button>
+        <button
+          class="ghost"
+          data-testid="list-checkpoints-button"
+          @click="listCheckpoints"
+        >列出 checkpoints</button>
+        <button
+          class="ghost"
+          :disabled="checkpoints.length === 0"
+          data-testid="prune-checkpoints-button"
+          @click="pruneCheckpoints"
+        >清理旧 checkpoints</button>
       </div>
       <p v-if="capabilitiesNote" class="cap-note" data-testid="cap-note">
         {{ capabilitiesNote }}
@@ -65,8 +87,18 @@
       <div class="metrics">
         <div class="metric"><span>总步数</span><strong data-testid="metric-step">{{ status.step }}</strong></div>
         <div class="metric"><span>Episode</span><strong data-testid="metric-episode">{{ status.episode_count }}</strong></div>
+        <div class="metric"><span>Agent 数</span><strong data-testid="metric-n-agents">{{ status.n_agents ?? '—' }}</strong></div>
         <div class="metric"><span>最近 reward</span><strong data-testid="metric-last-reward">{{ formatNumber(status.last_reward, 2) }}</strong></div>
-        <div class="metric"><span>状态</span><strong data-testid="metric-running">{{ status.running ? '运行中' : '已结束' }}</strong></div>
+        <div class="metric" style="grid-column: span 2">
+          <span>最新 checkpoint</span>
+          <strong data-testid="metric-checkpoint" :title="status.latest_checkpoint || ''">
+            {{ status.latest_checkpoint || '—' }}
+          </strong>
+        </div>
+        <div class="metric" style="grid-column: span 2">
+          <span>状态</span>
+          <strong data-testid="metric-running">{{ status.running ? '运行中' : '已结束' }}</strong>
+        </div>
       </div>
     </section>
 
@@ -100,6 +132,17 @@
         {{ status.reward_history.length }} 个 episode · max {{ formatNumber(maxReward, 2) }} · min {{ formatNumber(minReward, 2) }}
       </p>
     </section>
+
+    <section v-if="checkpoints.length > 0 || checkpointsVisible" class="card">
+      <h2>Checkpoints</h2>
+      <p v-if="checkpoints.length === 0" class="muted">暂无 checkpoint — 跑一次训练试试。</p>
+      <ul v-else class="ckpt-list" data-testid="ckpt-list">
+        <li v-for="c in checkpoints" :key="c.name">
+          <code data-testid="ckpt-name">{{ c.name }}</code>
+          <span class="ckpt-meta">{{ c.process }} · {{ c.size_kb }} KB · {{ formatTime(c.mtime_ms) }}</span>
+        </li>
+      </ul>
+    </section>
   </main>
 </template>
 
@@ -124,6 +167,15 @@ interface Status {
   finished_at_ms: number | null;
   device?: string;
   device_reason?: string;
+  n_agents?: number;
+  latest_checkpoint?: string;
+}
+
+interface Checkpoint {
+  name: string;
+  process: string;
+  size_kb: number;
+  mtime_ms: number;
 }
 
 interface Capabilities {
@@ -141,6 +193,7 @@ const BACKEND_URL =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8000';
 
 const steps = ref(200);
+const nAgents = ref(2);
 const device = ref<'auto' | 'gpu' | 'cpu'>('auto');
 const dryRun = ref(true);
 const running = ref(false);
@@ -148,7 +201,12 @@ const error = ref<string | null>(null);
 const status = ref<Status>({
   running: false, step: 0, episode_count: 0, last_reward: 0,
   reward_history: [], started_at_ms: 0, finished_at_ms: null,
+  n_agents: undefined,
+  latest_checkpoint: '',
 });
+
+const checkpoints = ref<Checkpoint[]>([]);
+const checkpointsVisible = ref(false);
 
 const caps = ref<Capabilities | null>(null);
 const gpuAvailable = computed(() => caps.value?.cuda_available === true);
@@ -229,7 +287,10 @@ const onStart = async (): Promise<void> => {
     const r = await fetch(`${BACKEND_URL}/api/v1/rl/train`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ steps: steps.value, dry_run: dryRun.value, device: device.value }),
+      body: JSON.stringify({
+        steps: steps.value, dry_run: dryRun.value,
+        device: device.value, n_agents: nAgents.value, save_every: 5000,
+      }),
     });
     if (!r.ok) {
       error.value = `train ${r.status}`;
@@ -237,13 +298,49 @@ const onStart = async (): Promise<void> => {
     }
     running.value = true;
     showFlashMessage(
-      `训练已启动 (${steps.value} 步, dry_run=${dryRun.value}, device=${device.value})`,
+      `训练已启动 (${steps.value} 步, ${nAgents.value} agents, dry_run=${dryRun.value})`,
       'info',
     );
     await refreshStatus();
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
+};
+
+const listCheckpoints = async (): Promise<void> => {
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/v1/rl/checkpoints`);
+    if (!r.ok) {
+      error.value = `checkpoints ${r.status}`;
+      return;
+    }
+    const body = (await r.json()) as { checkpoints: Checkpoint[] };
+    checkpoints.value = body.checkpoints;
+    checkpointsVisible.value = true;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+};
+
+const pruneCheckpoints = async (): Promise<void> => {
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/v1/rl/checkpoints`, { method: 'DELETE' });
+    if (!r.ok) {
+      error.value = `prune ${r.status}`;
+      return;
+    }
+    const body = (await r.json()) as { deleted: number; remaining: number };
+    showFlashMessage(`清理了 ${body.deleted} 个旧 checkpoint (剩 ${body.remaining})`, 'info');
+    await listCheckpoints();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+};
+
+const formatTime = (mtime_ms: number): string => {
+  if (!mtime_ms) return '—';
+  const d = new Date(mtime_ms);
+  return d.toLocaleString('zh-CN', { hour12: false });
 };
 
 const refreshCapabilities = async (): Promise<void> => {
@@ -302,6 +399,11 @@ button.ghost:disabled { opacity: 0.4; cursor: not-allowed; }
 .err { color: #fca5a5; font-size: 13px; margin: 8px 0 0; }
 .cap-note { color: #cbd5e1; font-size: 12px; margin: 8px 0 0;
             background: rgba(15, 23, 42, 0.5); padding: 6px 10px; border-radius: 4px; }
+.ckpt-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.ckpt-list li { display: flex; gap: 12px; align-items: baseline;
+                 font-size: 12px; padding: 6px 8px; background: #1e293b; border-radius: 4px; }
+.ckpt-list code { font-size: 12px; color: #fbbf24; }
+.ckpt-meta { color: #94a3b8; font-size: 11px; }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .metric { background: #1e293b; padding: 12px; border-radius: 6px; display: flex;
           flex-direction: column; gap: 4px; }
