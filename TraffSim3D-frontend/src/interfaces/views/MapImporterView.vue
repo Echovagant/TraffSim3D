@@ -52,6 +52,23 @@
       </p>
       <button class="ghost" @click="loadFixture">载入示例 fixture</button>
     </section>
+
+    <!--
+      ODbL attribution footer (Plan 041 acceptance criteria + 045
+      follow-up "OSM真实数据" addition).
+      OSM data is © OpenStreetMap contributors, licensed under ODbL.
+      Required for any UI displaying OSM-derived maps.
+    -->
+    <footer class="osm-attribution" data-testid="osm-attribution">
+      路网数据 ©
+      <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">
+        OpenStreetMap 贡献者
+      </a>
+      · ODbL 协议 ·
+      <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">
+        许可详情
+      </a>
+    </footer>
   </main>
 </template>
 
@@ -218,4 +235,21 @@ button.ghost:hover { background: rgba(148, 163, 184, 0.08); }
 .stats { display: flex; gap: 16px; font-size: 12px; color: #94a3b8; margin-top: 8px; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
        background: rgba(2, 6, 23, 0.7); padding: 1px 6px; border-radius: 4px; color: #93c5fd; }
+
+/* ODbL attribution footer — required when displaying OSM-derived maps. */
+.osm-attribution {
+  max-width: 880px;
+  margin: 24px auto 0;
+  padding: 12px 20px;
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: center;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+.osm-attribution a {
+  color: #93c5fd;
+  text-decoration: underline;
+  text-decoration-color: rgba(147, 197, 253, 0.4);
+}
+.osm-attribution a:hover { color: #bfdbfe; }
 </style>

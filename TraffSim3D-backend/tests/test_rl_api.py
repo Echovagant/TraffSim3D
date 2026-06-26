@@ -1,94 +1,59 @@
-"""Plan 044: API endpoint tests (subprocess uvicorn + urllib, mirrors 041)."""
+"""Plan 044: API endpoint tests for /api/v1/rl/*.
+
+Uses httpx2 + ASGITransport (in-process, no subprocess overhead).
+`status.get_status_path()` is bound at module-import time, so we
+use a shared file path and clear it per test (simpler than reloading
+modules).
+"""
 from __future__ import annotations
 
-import json
-import os
-import socket
-import subprocess
-import tempfile
-import time
-import urllib.error
-import urllib.request
-from contextlib import contextmanager
-from pathlib import Path
+import pytest
+from httpx2 import ASGITransport, AsyncClient
 
-BACKEND_ROOT = Path(__file__).parent.parent
+from app.apps.rl import status as rl_status
+from app.main import app
+
+STATUS_PATH = rl_status.get_status_path()
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+@pytest.fixture
+async def client():
+    # Clean slate per test
+    if STATUS_PATH.exists():
+        STATUS_PATH.unlink()
+    rl_status.write_status({})  # ensure fresh empty status
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        yield c
+    if STATUS_PATH.exists():
+        STATUS_PATH.unlink()
 
 
-@contextmanager
-def _uvicorn_server():
-    # Use a per-test status file so runs don't collide.
-    tmpdir = tempfile.mkdtemp(prefix="ppo_test_")
-    env = os.environ.copy()
-    env["TRAFFIC_PPO_STATUS"] = str(Path(tmpdir) / "status.json")
+@pytest.mark.asyncio
+async def test_dry_run_train_writes_status(client: AsyncClient) -> None:
+    r0 = await client.get("/api/v1/rl/status")
+    assert r0.status_code == 200
+    assert r0.json()["step"] == 0
 
-    port = _free_port()
-    proc = subprocess.Popen(
-        [
-            "uv", "run", "uvicorn", "app.main:app",
-            "--port", str(port), "--log-level", "warning",
-        ],
-        cwd=BACKEND_ROOT,
-        env=env,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    r1 = await client.post(
+        "/api/v1/rl/train",
+        json={"steps": 200, "dry_run": True},
     )
-    base = f"http://127.0.0.1:{port}"
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        try:
-            urllib.request.urlopen(f"{base}/health", timeout=0.5).read()
-            break
-        except (urllib.error.URLError, ConnectionError):
-            time.sleep(0.2)
-    else:
-        proc.terminate()
-        raise RuntimeError("uvicorn did not start within 10s")
-    try:
-        yield base, env
-    finally:
-        proc.terminate()
-        proc.wait(timeout=5)
+    assert r1.status_code == 200
+    assert "ok" in r1.text
+
+    r2 = await client.get("/api/v1/rl/status")
+    s2 = r2.json()
+    assert s2["running"] is False
+    assert s2["episode_count"] == 1
+    assert len(s2["reward_history"]) == 1
 
 
-def _post_json(url: str, payload: dict) -> tuple[int, str]:
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode(),
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        return resp.status, resp.read().decode()
-
-
-def test_dry_run_train_writes_status() -> None:
-    with _uvicorn_server() as (base, env):
-        # Start with clean status
-        status_url = f"{base}/api/v1/rl/status"
-        s0 = json.loads(urllib.request.urlopen(status_url).read())
-        assert s0.get("step", 0) == 0
-        # Train (dry run, 200 steps → 1 episode)
-        status_code, body = _post_json(
-            f"{base}/api/v1/rl/train", {"steps": 200, "dry_run": True},
-        )
-        assert status_code == 200
-        assert "ok" in body
-        # Status should now reflect 1 episode
-        s1 = json.loads(urllib.request.urlopen(status_url).read())
-        assert s1["running"] is False
-        assert s1["episode_count"] == 1
-        assert len(s1["reward_history"]) == 1
-
-
-def test_status_returns_empty_when_no_training() -> None:
-    with _uvicorn_server() as (base, _env):
-        s = json.loads(urllib.request.urlopen(f"{base}/api/v1/rl/status").read())
-        # Either pre-existing default OR from previous test in same session.
-        # We just assert it's a valid shape.
-        for key in ("running", "step", "episode_count", "last_reward", "reward_history"):
-            assert key in s
+@pytest.mark.asyncio
+async def test_status_returns_empty_when_no_training(client: AsyncClient) -> None:
+    r = await client.get("/api/v1/rl/status")
+    assert r.status_code == 200
+    s = r.json()
+    for key in ("running", "step", "episode_count", "last_reward", "reward_history"):
+        assert key in s

@@ -23,6 +23,19 @@
           />
         </label>
         <label class="ctrl">
+          设备
+          <select
+            v-model="device"
+            data-testid="device-select"
+          >
+            <option value="auto">自动 (推荐)</option>
+            <option value="gpu" :disabled="!gpuAvailable">
+              GPU ({{ gpuDeviceName || '不可用' }})
+            </option>
+            <option value="cpu">CPU</option>
+          </select>
+        </label>
+        <label class="ctrl">
           <input v-model="dryRun" type="checkbox" data-testid="dry-run-checkbox" />
           Dry-run (跳过 PPO，写假历史)
         </label>
@@ -41,6 +54,9 @@
           @click="refreshStatus"
         >刷新</button>
       </div>
+      <p v-if="capabilitiesNote" class="cap-note" data-testid="cap-note">
+        {{ capabilitiesNote }}
+      </p>
       <p v-if="error" class="err" data-testid="train-error">{{ error }}</p>
     </section>
 
@@ -106,18 +122,50 @@ interface Status {
   reward_history: number[];
   started_at_ms: number;
   finished_at_ms: number | null;
+  device?: string;
+  device_reason?: string;
+}
+
+interface Capabilities {
+  torch_version: string;
+  cuda_available: boolean;
+  device_count: number;
+  device_name: string;
+  vram_gb: number;
+  sb3_available: boolean;
+  min_vram_gb: number;
+  device_fallback_reason: string;
 }
 
 const BACKEND_URL =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8000';
 
 const steps = ref(200);
+const device = ref<'auto' | 'gpu' | 'cpu'>('auto');
 const dryRun = ref(true);
 const running = ref(false);
 const error = ref<string | null>(null);
 const status = ref<Status>({
   running: false, step: 0, episode_count: 0, last_reward: 0,
   reward_history: [], started_at_ms: 0, finished_at_ms: null,
+});
+
+const caps = ref<Capabilities | null>(null);
+const gpuAvailable = computed(() => caps.value?.cuda_available === true);
+const gpuDeviceName = computed(() => caps.value?.device_name ?? '');
+const capabilitiesNote = computed(() => {
+  const c = caps.value;
+  if (!c) return '检测后端能力中…';
+  if (!c.sb3_available) {
+    return '⚠ stable-baselines3 未安装（未跑 `uv sync --extra rl`），将自动 fallback 到 dry-run。';
+  }
+  if (!c.cuda_available) {
+    return `ℹ 未检测到 CUDA（torch ${c.torch_version || '未装'}），将使用 CPU。`;
+  }
+  if (c.vram_gb < c.min_vram_gb) {
+    return `⚠ GPU 显存仅 ${c.vram_gb.toFixed(1)} GB < ${c.min_vram_gb} GB 阈值，auto 会 fallback CPU。`;
+  }
+  return `✓ GPU 可用: ${c.device_name} (${c.vram_gb.toFixed(1)} GB)`;
 });
 
 const chartW = 600;
@@ -181,21 +229,35 @@ const onStart = async (): Promise<void> => {
     const r = await fetch(`${BACKEND_URL}/api/v1/rl/train`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ steps: steps.value, dry_run: dryRun.value }),
+      body: JSON.stringify({ steps: steps.value, dry_run: dryRun.value, device: device.value }),
     });
     if (!r.ok) {
       error.value = `train ${r.status}`;
       return;
     }
     running.value = true;
-    showFlashMessage(`训练已启动 (${steps.value} 步, dry_run=${dryRun.value})`, 'info');
+    showFlashMessage(
+      `训练已启动 (${steps.value} 步, dry_run=${dryRun.value}, device=${device.value})`,
+      'info',
+    );
     await refreshStatus();
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
 };
 
+const refreshCapabilities = async (): Promise<void> => {
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/v1/rl/capabilities`);
+    if (!r.ok) return;
+    caps.value = (await r.json()) as Capabilities;
+  } catch {
+    // Backend not reachable — leave caps null; UI shows "检测中..."
+  }
+};
+
 onMounted(() => {
+  refreshCapabilities();
   refreshStatus();
   pollHandle = window.setInterval(refreshStatus, 2000);
 });
@@ -238,6 +300,8 @@ button.ghost { background: transparent; border: 1px solid rgba(148, 163, 184, 0.
 button.ghost:hover:not(:disabled) { background: rgba(148, 163, 184, 0.08); }
 button.ghost:disabled { opacity: 0.4; cursor: not-allowed; }
 .err { color: #fca5a5; font-size: 13px; margin: 8px 0 0; }
+.cap-note { color: #cbd5e1; font-size: 12px; margin: 8px 0 0;
+            background: rgba(15, 23, 42, 0.5); padding: 6px 10px; border-radius: 4px; }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .metric { background: #1e293b; padding: 12px; border-radius: 6px; display: flex;
           flex-direction: column; gap: 4px; }

@@ -8,6 +8,12 @@ If PPO is available (stable-baselines3 + torch installed via
 `uv sync --extra rl`), the user can call:
     python -m app.apps.rl.train 1000
 to do real training.
+
+GPU support (Plan 044 extension):
+- `--device {auto,gpu,cpu}` picks the torch device.
+- `auto` selects GPU if CUDA available AND VRAM ≥ MIN_VRAM_GB (2.0),
+  else CPU; falls back to dry_run if SB3 is missing entirely.
+- The resolved device is recorded in status.json `device` field.
 """
 from __future__ import annotations
 
@@ -29,14 +35,31 @@ def dry_run(total_steps: int = 1000) -> None:
     st.finalize_status("dry_run_completed")
 
 
-def real_train(total_steps: int) -> None:
-    """Real PPO training via stable-baselines3."""
-    from stable_baselines3 import PPO
-
+def real_train(total_steps: int, device: str) -> None:
+    """Real PPO training via stable-baselines3 on the resolved device."""
+    from . import capabilities as caps
     from . import status as st
-    from .env import TrafficEnv
+
+    resolved_device, reason = caps.resolve_device(device)
 
     st.init_status(total_steps)
+    # Record the resolved device in the status so the UI can show it.
+    s = st.read_status()
+    s["device"] = resolved_device
+    s["device_reason"] = reason
+    st.write_status(s)
+
+    if resolved_device == "dry_run":
+        # SB3 unavailable or device couldn't be resolved — degrade to
+        # synthetic history so the UI still has something to render.
+        st.append_reward(0.0)
+        st.finalize_status(f"dry_run_fallback ({reason})")
+        return
+
+    from stable_baselines3 import PPO
+
+    from .env import TrafficEnv
+
     env = TrafficEnv()
 
     def on_step(_locals: dict[str, Any], _globals: dict[str, Any]) -> None:  # SB3 callback
@@ -45,16 +68,23 @@ def real_train(total_steps: int) -> None:
             st.append_reward(_locals["self"].ep_info_buffer[-1]["r"]
                              if _locals["self"].ep_info_buffer else 0.0)
 
-    model = PPO("MlpPolicy", env, verbose=0)
+    model = PPO("MlpPolicy", env, verbose=0, device=resolved_device)
     model.learn(total_timesteps=total_steps, callback=on_step)
     model.save("/tmp/traffic_ppo.zip")
-    st.finalize_status("ppo_completed")
+    st.finalize_status(f"ppo_completed on {resolved_device}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("steps", nargs="?", type=int, default=1000)
     parser.add_argument("--dry-run", action="store_true", help="Skip PPO, write fake history")
+    parser.add_argument(
+        "--device",
+        choices=["auto", "gpu", "cpu"],
+        default="auto",
+        help="Training device (Plan 044 GPU extension). "
+             "'auto' picks GPU if available + ≥2GB VRAM, else CPU.",
+    )
     args = parser.parse_args()
 
     if args.dry_run:
@@ -62,7 +92,7 @@ def main() -> None:
         return
 
     try:
-        real_train(args.steps)
+        real_train(args.steps, args.device)
     except ImportError as e:
         # Fallback: stable-baselines3 / torch not installed.
         print(f"SB3 unavailable ({e}); falling back to dry-run path.")

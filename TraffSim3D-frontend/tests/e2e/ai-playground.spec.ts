@@ -31,6 +31,23 @@ test('AI Playground: training chart renders with reward history', async ({ page 
   await page.route('**/api/v1/rl/train', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"dry_run":true}' });
   });
+  // Stub capabilities — CPU only (no CUDA), so the GPU option is disabled.
+  await page.route('**/api/v1/rl/capabilities', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        torch_version: '2.12.1+cpu',
+        cuda_available: false,
+        device_count: 0,
+        device_name: '',
+        vram_gb: 0.0,
+        sb3_available: true,
+        min_vram_gb: 2.0,
+        device_fallback_reason: 'cuda_not_available',
+      }),
+    });
+  });
 
   // Load the AI Playground view.
   await page.goto('/ai-playground');
