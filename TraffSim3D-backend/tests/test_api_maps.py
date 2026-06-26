@@ -61,3 +61,30 @@ async def test_parse_osm_handles_xml_without_highways(client: AsyncClient) -> No
     body = r.json()
     assert body["roads"] == []
     assert body["intersections"] == []
+
+
+@pytest.mark.asyncio
+async def test_parse_pbf_returns_200_with_roads(client: AsyncClient) -> None:
+    pbf = Path(__file__).parent / "fixtures" / "sample-4way.osm.pbf"
+    if not pbf.exists():
+        pytest.skip("PBF fixture not yet generated")
+    with pbf.open("rb") as f:
+        r = await client.post(
+            "/api/v1/maps/parse-pbf",
+            files={"file": ("sample.osm.pbf", f, "application/octet-stream")},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert "roads" in body
+    assert len(body["roads"]) >= 2
+
+
+@pytest.mark.asyncio
+async def test_parse_pbf_rejects_truncated(client: AsyncClient) -> None:
+    r = await client.post(
+        "/api/v1/maps/parse-pbf",
+        files={"file": ("bad.pbf", b"\x00\x01\x02 not a pbf",
+                        "application/octet-stream")},
+    )
+    assert r.status_code == 400
+    assert "Invalid OSM PBF" in r.text

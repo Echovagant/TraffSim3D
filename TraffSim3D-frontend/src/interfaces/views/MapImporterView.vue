@@ -19,7 +19,7 @@
         <input
           ref="fileInput"
           type="file"
-          accept=".osm,application/xml,text/xml"
+          accept=".osm,.osm.pbf,.xml,application/xml,application/octet-stream"
           data-testid="osm-file-input"
           @change="onFileSelected"
         />
@@ -120,7 +120,12 @@ const onUpload = async (): Promise<void> => {
   try {
     const fd = new FormData();
     fd.append('file', file.value);
-    const r = await fetch(`${BACKEND_URL}/api/v1/maps/parse-osm`, {
+    // Route to PBF or XML endpoint based on file extension.
+    const isPbf = file.value.name.toLowerCase().endsWith('.pbf');
+    const endpoint = isPbf
+      ? `${BACKEND_URL}/api/v1/maps/parse-pbf`
+      : `${BACKEND_URL}/api/v1/maps/parse-osm`;
+    const r = await fetch(endpoint, {
       method: 'POST',
       body: fd,
     });

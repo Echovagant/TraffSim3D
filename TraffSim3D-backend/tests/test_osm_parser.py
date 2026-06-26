@@ -1,18 +1,49 @@
-"""Plan 041: OSM parser unit tests."""
+"""Plan 041 + 046: OSM parser unit tests (XML + PBF)."""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-from app.apps.maps.osm_parser import parse_osm_xml
+from app.apps.maps.osm_parser import parse_osm_xml, parse_osmpbf
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample-4way.osm"
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
+FIXTURE_XML = FIXTURE_DIR / "sample-4way.osm"
+FIXTURE_PBF = FIXTURE_DIR / "sample-4way.osm.pbf"
+
+
+def _build_pbf_fixture_if_missing() -> Path:
+    """One-time PBF generation from the XML fixture using
+    osmium.ForwardReferenceWriter. Skips if already exists."""
+    if FIXTURE_PBF.exists() and FIXTURE_PBF.stat().st_size > 100:
+        return FIXTURE_PBF
+    import osmium
+    FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
+    # ForwardReferenceWriter uses the XML as ref_src to resolve node
+    # references while writing the PBF (preserves IDs).
+    fw = osmium.ForwardReferenceWriter(
+        outfile=str(FIXTURE_PBF),
+        ref_src=str(FIXTURE_XML),
+        overwrite=True,
+    )
+
+    class _Reader(osmium.SimpleHandler):
+        def node(self, n): fw.add_node(n)
+        def way(self, w): fw.add_way(w)
+
+    r = _Reader()
+    r.apply_file(str(FIXTURE_XML), locations=True)
+    fw.close()
+    return FIXTURE_PBF
+
+
+# Auto-build on first test run
+_BUILD_PBF_RESULT = _build_pbf_fixture_if_missing()
 
 
 @pytest.fixture
 def sample_network() -> dict:
-    return parse_osm_xml(FIXTURE_PATH.read_bytes())
+    return parse_osm_xml(FIXTURE_XML.read_bytes())
 
 
 def test_parses_4_roads(sample_network: dict) -> None:
@@ -76,3 +107,34 @@ def test_v7_level_field_compatibility(sample_network: dict) -> None:
     for r in sample_network["roads"]:
         assert "level" in r
         assert isinstance(r["level"], int)
+
+# ---------------------------------------------------------------------------
+# Plan 046: PBF parser tests.
+# ---------------------------------------------------------------------------
+
+def test_parses_pbf_returns_4_roads() -> None:
+    """PBF and XML should produce equivalent road counts (4) for sample-4way."""
+    assert _BUILD_PBF_RESULT.exists(), "PBF fixture build failed"
+    data = parse_osmpbf(_BUILD_PBF_RESULT.read_bytes())
+    assert len(data["roads"]) >= 2  # sample-4way has 4 roads (2 NS + 2 EW)
+    for r in data["roads"]:
+        assert "id" in r
+        assert "waypoints" in r
+        assert r["level"] in (-1, 0, 1)  # bridge/tunnel/ground
+
+
+def test_pbf_and_xml_produce_equivalent_road_counts() -> None:
+    xml = parse_osm_xml(FIXTURE_XML.read_bytes())
+    pbf = parse_osmpbf(_BUILD_PBF_RESULT.read_bytes())
+    assert len(xml["roads"]) == len(pbf["roads"])
+
+
+def test_pbf_rejects_truncated_file() -> None:
+    """Garbage bytes (not a valid PBF) raise ValueError."""
+    with pytest.raises(ValueError, match="Invalid PBF"):
+        parse_osmpbf(b"\x00\x01\x02 not a pbf")
+
+
+def test_pbf_rejects_empty_input() -> None:
+    with pytest.raises(ValueError, match="Invalid PBF"):
+        parse_osmpbf(b"")

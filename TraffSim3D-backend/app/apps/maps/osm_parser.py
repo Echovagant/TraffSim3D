@@ -202,3 +202,179 @@ def parse_osm_xml(xml_bytes: bytes) -> dict[str, Any]:
         "vehicles": [],
         "spawnPoints": [],
     }
+
+# ---------------------------------------------------------------------------
+# Plan 046: OSM PBF parser (.osm.pbf -> RoadNetwork).
+#
+# Uses libosmium (osmium Python bindings) for streaming PBF parsing.
+# The shared projection + way-to-road + intersection logic is the
+# same as parse_osm_xml; we extract the intermediate (raw_nodes,
+# raw_ways, traffic_signal_node_ids) from the PBF stream and feed
+# it through the same pipeline.
+# ---------------------------------------------------------------------------
+
+def _build_network(
+    raw_nodes: dict[int, tuple[float, float]],
+    raw_ways: list[tuple[int, list[int], dict[str, str]]],
+    traffic_signal_node_ids: set[int],
+) -> dict[str, Any]:
+    """Shared pipeline: project + ways -> roads + intersections.
+
+    `raw_nodes`: node id -> (lat, lon)
+    `raw_ways`: list of (way_id, [node_id, ...], {tag_k: tag_v, ...})
+    `traffic_signal_node_ids`: node ids with highway=traffic_signals
+    """
+    if not raw_nodes:
+        return {"roads": [], "intersections": [], "vehicles": [], "spawnPoints": []}
+
+    # ---- 2) Project to world coords (meters, centered) ----
+    center_lat = sum(n[0] for n in raw_nodes.values()) / len(raw_nodes)
+    center_lon = sum(n[1] for n in raw_nodes.values()) / len(raw_nodes)
+    cos_lat = math.cos(center_lat * math.pi / 180.0)
+    nodes: dict[int, _Node] = {}
+    for nid, (lat, lon) in raw_nodes.items():
+        if abs(lat - center_lat) > MAX_BBOX_DEG or abs(lon - center_lon) > MAX_BBOX_DEG:
+            continue
+        x = (lon - center_lon) * 111000.0 * cos_lat
+        z = (lat - center_lat) * 111000.0
+        nodes[nid] = _Node(id=nid, lat=lat, lon=lon, x=x, z=z)
+
+    # ---- 3) Ways -> roads (same logic as XML pipeline) ----
+    roads: list[dict[str, Any]] = []
+    way_node_ids: list[list[int]] = []
+    used_node_ids: set[int] = set()
+
+    for way_id, nd_refs, tags in raw_ways:
+        highway = tags.get("highway")
+        if highway not in DEFAULT_HIGHWAY_TYPES:
+            continue
+        nd_refs = [nid for nid in nd_refs if nid in nodes]
+        if len(nd_refs) < 2:
+            continue
+
+        used_node_ids.update(nd_refs)
+        way_node_ids.append(nd_refs)
+
+        waypoints = [
+            {"x": nodes[nid].x, "y": 0.0, "z": nodes[nid].z} for nid in nd_refs
+        ]
+        a, b = waypoints[0], waypoints[-1]
+
+        try:
+            lanes = max(1, int(tags.get("lanes", "2")))
+        except ValueError:
+            lanes = 2
+        oneway = tags.get("oneway", "no").lower() in ("yes", "true", "1")
+        if oneway:
+            lanes = max(1, lanes // 2)
+
+        if tags.get("bridge") == "yes":
+            level = 1
+        elif tags.get("tunnel") == "yes":
+            level = -1
+        else:
+            level = 0
+
+        speed_limit = HIGHWAY_SPEED_LIMIT[highway]
+        road_id = f"w-pbf-{way_id}"
+        roads.append({
+            "id": road_id,
+            "startNode": a,
+            "endNode": b,
+            "waypoints": waypoints,
+            "laneCount": lanes,
+            "speedLimit": speed_limit,
+            "level": level,
+        })
+
+    # ---- 5) Find intersections (shared nodes between >= 2 ways) ----
+    node_to_ways: dict[int, list[int]] = {}
+    for ridx, nids in enumerate(way_node_ids):
+        for nid in nids:
+            node_to_ways.setdefault(nid, []).append(ridx)
+
+    intersections: list[dict[str, Any]] = []
+    used_intersection_node_ids: set[int] = set()
+    inter_counter = 0
+    for nid, way_idxs in node_to_ways.items():
+        if len(way_idxs) < 2:
+            continue
+        if nid not in used_node_ids:
+            continue
+        node = nodes[nid]
+        inter_id = f"i-pbf-{inter_counter}"
+        inter_counter += 1
+        traffic_lights: list[dict[str, Any]] = []
+        if nid in traffic_signal_node_ids:
+            primary_road = roads[way_idxs[0]]
+            dx = primary_road["endNode"]["x"] - primary_road["startNode"]["x"]
+            axis = "ew" if abs(dx) > 0.1 else "ns"
+            traffic_lights.append({
+                "id": f"tl-{inter_counter}-{axis}",
+                "position": {"x": node.x - 3 if axis == "ew" else node.x,
+                             "y": 0.0,
+                             "z": node.z if axis == "ew" else node.z - 3},
+                "phase": "green" if axis == "ns" else "red",
+                "phaseRemaining": 30,
+                "cycleSeconds": 63,
+                "axis": axis,
+            })
+        intersections.append({
+            "id": inter_id,
+            "position": {"x": node.x, "y": 0.0, "z": node.z},
+            "trafficLights": traffic_lights,
+            "connectedRoads": [roads[i]["id"] for i in way_idxs],
+            "intersectionRadius": 8,
+        })
+        used_intersection_node_ids.add(nid)
+
+    return {
+        "roads": roads,
+        "intersections": intersections,
+        "vehicles": [],
+        "spawnPoints": [],
+    }
+
+
+def parse_osmpbf(pbf_bytes: bytes) -> dict[str, Any]:
+    """Streaming PBF parser using libosmium. Same return shape as
+    parse_osm_xml — frontend's `loadNetwork` accepts either.
+
+    Raises ValueError on malformed PBF (e.g. invalid magic, corrupt
+    block, missing required fields).
+    """
+    import osmium  # libosmium Python bindings (already in pyproject)
+
+    class _Handler(osmium.SimpleHandler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.raw_nodes: dict[int, tuple[float, float]] = {}
+            self.raw_ways: list[tuple[int, list[int], dict[str, str]]] = []
+            self.traffic_signal_node_ids: set[int] = set()
+
+        def node(self, n: osmium.osm.Node) -> None:
+            self.raw_nodes[n.id] = (n.location.lat, n.location.lon)
+
+        def way(self, w: osmium.osm.Way) -> None:
+            tags = {t.k: t.v for t in w.tags}
+            self.raw_ways.append((w.id, [n.ref for n in w.nodes], tags))
+            if tags.get("highway") == "traffic_signals":
+                # The way's first node is the traffic-signal location
+                if w.nodes:
+                    self.traffic_signal_node_ids.add(w.nodes[0].ref)
+
+    handler = _Handler()
+    try:
+        # osmium 4.x: SimpleHandler.apply_buffer(buffer, format, locations).
+        # We pass 'pbf' explicitly so osmium doesn't need to sniff from
+        # file extension (we're passing bytes, not a path).
+        import osmium
+        handler.apply_buffer(pbf_bytes, "pbf", locations=True)
+    except Exception as e:
+        raise ValueError(f"Invalid PBF: {e}") from e
+
+    return _build_network(
+        handler.raw_nodes,
+        handler.raw_ways,
+        handler.traffic_signal_node_ids,
+    )
