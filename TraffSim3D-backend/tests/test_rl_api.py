@@ -92,3 +92,28 @@ async def test_train_accepts_n_agents_and_save_every(client: AsyncClient) -> Non
     assert s["n_agents"] == 3
     # 600 steps / 200 per episode = 3 episodes
     assert s["episode_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_train_independent_writes_agent_rewards(client: AsyncClient) -> None:
+    """Plan 047: independent dry-run produces per-agent reward dict."""
+    r = await client.post(
+        "/api/v1/rl/train",
+        json={"steps": 600, "dry_run": True, "device": "auto",
+              "n_agents": 2, "independent_agents": True},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["independent_agents"] is True
+    # Status should reflect per-agent rewards
+    r2 = await client.get("/api/v1/rl/status")
+    s = r2.json()
+    assert s["independent_agents"] is True
+    assert "agent_rewards" in s
+    assert set(s["agent_rewards"].keys()) == {"0", "1"}
+    # Each agent has 600/200 = 3 episodes
+    assert len(s["agent_rewards"]["0"]) == 3
+    assert len(s["agent_rewards"]["1"]) == 3
+    # Latest checkpoint string lists per-agent files
+    assert "agent0" in s["latest_checkpoint"]
+    assert "agent1" in s["latest_checkpoint"]

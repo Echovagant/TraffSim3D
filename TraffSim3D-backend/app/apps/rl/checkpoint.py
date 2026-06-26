@@ -24,34 +24,56 @@ def _per_process_dir() -> Path:
     return _DEFAULT_DIR / f"pid{os.getpid()}"
 
 
-def save_checkpoint(model: Any, step: int) -> Path:
-    """Save PPO model to a per-process subdirectory and prune old ones."""
+def save_checkpoint(
+    model: Any, step: int, agent_id: int | None = None,
+) -> Path:
+    """Save PPO model to a per-process subdirectory and prune old ones.
+
+    If `agent_id` is provided (Plan 047 true multi-agent), the filename
+    includes `agent{id}` so per-agent checkpoints don't collide.
+    """
     pdir = _per_process_dir()
     pdir.mkdir(parents=True, exist_ok=True)
-    path = pdir / f"ppo_step_{step:07d}.zip"
+    name = (
+        f"ppo_agent{agent_id}_step_{step:07d}.zip" if agent_id is not None
+        else f"ppo_step_{step:07d}.zip"
+    )
+    path = pdir / name
     model.save(str(path))
     _prune_old(pdir, CHECKPOINT_KEEP)
     return path
 
 
 def list_checkpoints() -> list[dict[str, Any]]:
-    """List all checkpoints across all per-process subdirs, newest first."""
+    """List all checkpoints across all per-process subdirs, newest first.
+
+    Each entry includes `agent_id` (parsed from filename; null for
+    shared-policy checkpoints): ppo_agent0_step_*.zip → 0,
+    ppo_step_*.zip → None.
+    """
+    import re
+    pattern = re.compile(r"^ppo(?:_agent(\d+))?_step_\d+\.zip$")
     if not _DEFAULT_DIR.exists():
         return []
     files: list[Path] = []
     for sub in _DEFAULT_DIR.iterdir():
         if sub.is_dir():
-            files.extend(sub.glob("ppo_step_*.zip"))
+            for p in sub.iterdir():
+                if pattern.match(p.name):
+                    files.append(p)
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return [
-        {
+    out: list[dict[str, Any]] = []
+    for p in files:
+        m = pattern.match(p.name)
+        agent_id: int | None = int(m.group(1)) if (m and m.group(1)) else None
+        out.append({
             "name": p.name,
-            "process": p.parent.name,  # 'pid12345'
+            "process": p.parent.name,
+            "agent_id": agent_id,
             "size_kb": round(p.stat().st_size / 1024, 1),
             "mtime_ms": int(p.stat().st_mtime * 1000),
-        }
-        for p in files
-    ]
+        })
+    return out
 
 
 def prune_all_checkpoints(keep_total: int = CHECKPOINT_KEEP) -> int:

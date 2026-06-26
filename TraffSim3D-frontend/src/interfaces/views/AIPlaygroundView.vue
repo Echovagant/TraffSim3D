@@ -47,6 +47,14 @@
           />
         </label>
         <label class="ctrl">
+          <input
+            v-model="independentAgents"
+            type="checkbox"
+            data-testid="independent-agents-checkbox"
+          />
+          独立训练 (per-agent PPO)
+        </label>
+        <label class="ctrl">
           <input v-model="dryRun" type="checkbox" data-testid="dry-run-checkbox" />
           Dry-run (跳过 PPO，写假历史)
         </label>
@@ -116,7 +124,20 @@
         data-testid="reward-chart"
         preserveAspectRatio="none"
       >
+        <!-- Plan 047: when independent_agents, draw one polyline per agent -->
+        <template v-if="hasAgentRewards">
+          <polyline
+            v-for="(color, agentId) in agentColors"
+            :key="`agent-${agentId}`"
+            :points="pointsForAgent(agentId)"
+            fill="none"
+            :stroke="color"
+            stroke-width="2"
+            :data-testid="`reward-line-agent-${agentId}`"
+          />
+        </template>
         <polyline
+          v-else
           :points="rewardPoints"
           fill="none"
           stroke="#34d399"
@@ -168,7 +189,11 @@ interface Status {
   device?: string;
   device_reason?: string;
   n_agents?: number;
+  independent_agents?: boolean;
   latest_checkpoint?: string;
+  /** Plan 047: per-agent reward history (only when independent_agents=true).
+   *  Keys are stringified int agent_ids ("0", "1", ...). */
+  agent_rewards?: Record<string, number[]>;
 }
 
 interface Checkpoint {
@@ -194,6 +219,7 @@ const BACKEND_URL =
 
 const steps = ref(200);
 const nAgents = ref(2);
+const independentAgents = ref(false);
 const device = ref<'auto' | 'gpu' | 'cpu'>('auto');
 const dryRun = ref(true);
 const running = ref(false);
@@ -252,6 +278,36 @@ const rewardPoints = computed(() => {
     .join(' ');
 });
 
+// Plan 047: per-agent reward history rendering.
+const AGENT_COLOR_PALETTE = ['#34d399', '#60a5fa', '#fbbf24', '#f472b6', '#a78bfa', '#fb7185', '#22d3ee', '#facc15'];
+const agentColors = computed<Record<string, string>>(() => {
+  const out: Record<string, string> = {};
+  if (!status.value.agent_rewards) return out;
+  Object.keys(status.value.agent_rewards)
+    .sort((a, b) => Number(a) - Number(b))
+    .forEach((agentId, i) => {
+      out[agentId] = AGENT_COLOR_PALETTE[i % AGENT_COLOR_PALETTE.length]!;
+    });
+  return out;
+});
+const hasAgentRewards = computed(
+  () => Object.keys(status.value.agent_rewards ?? {}).length > 0,
+);
+const pointsForAgent = (agentId: string): string => {
+  const h = status.value.agent_rewards?.[agentId] ?? [];
+  if (h.length === 0) return '';
+  const lo = minReward.value;
+  const hi = maxReward.value;
+  const range = Math.max(0.001, hi - lo);
+  return h
+    .map((r, i) => {
+      const x = (i / Math.max(1, h.length - 1)) * chartW;
+      const y = chartH - ((r - lo) / range) * (chartH - 4) - 1;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+};
+
 const formatNumber = (n: number, digits = 2): string => {
   if (Number.isNaN(n) || !Number.isFinite(n)) return '0';
   return Number(n).toFixed(digits);
@@ -289,7 +345,8 @@ const onStart = async (): Promise<void> => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         steps: steps.value, dry_run: dryRun.value,
-        device: device.value, n_agents: nAgents.value, save_every: 5000,
+        device: device.value, n_agents: nAgents.value,
+        save_every: 5000, independent_agents: independentAgents.value,
       }),
     });
     if (!r.ok) {
