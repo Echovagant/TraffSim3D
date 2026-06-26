@@ -1,0 +1,207 @@
+"""Plan 044: minimal Python sim core (mirror of TS tick.ts).
+
+A research-quality reimplementation of the 4-way intersection scene
+from frontend Plan 005/035. NOT a full port — only the subset needed
+for PPO to learn. The frontend TS sim is authoritative for visual
+quality; this Python sim is authoritative for training.
+
+Layout (matches Plan 035 cross scene):
+- NS road: x=0, z ∈ [-30, 30], heading north = +Z (heading=π/2 in
+  heading-from-+X convention)
+- EW road: z=0, x ∈ [-30, 30], heading east = +X (heading=0)
+- Intersection: |x|<8 AND |z|<8
+- NS traffic light: green when ego on NS road
+- EW traffic light: green when ego on EW road
+
+Ego starts south of intersection at (0, -25), heading north (π/2).
+Four NPCs travel at constant speed on their respective lanes.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+
+# Geometry constants (match frontend @shared/constants/simulation where applicable)
+NS_HALF = 30.0          # NS road extends 60u total (-30 .. +30)
+EW_HALF = 30.0          # EW road same
+INTERSECTION_RADIUS = 8.0
+SPEED_LIMIT = 16.67     # m/s (60 km/h)
+NPC_SPEED = 8.0         # m/s (29 km/h, slower than speed limit)
+EGO_WHEELBASE = 2.5     # m (approximate car wheelbase)
+COLLISION_DISTANCE = 2.0  # m — closer than this = collision
+MAX_STEPS_DEFAULT = 200
+OBS_DIM = 13
+
+# Pure Pursuit (Coulter 1992) — see ADR-004
+LOOKAHEAD_DISTANCE = 8.0
+MAX_STEER = 0.4         # rad
+DT = 0.1                # seconds per sim step (matches frontend 10Hz)
+
+
+@dataclass
+class Vehicle:
+    x: float = 0.0
+    z: float = 0.0
+    heading: float = 0.0  # rad, 0 = +X, π/2 = +Z (north)
+    speed: float = 0.0    # m/s
+
+
+@dataclass
+class TrafficLight:
+    """Single intersection with two axes; one green at a time."""
+    ns_green: bool = True
+    ew_green: bool = False
+    cycle_timer: float = 0.0
+    cycle_duration: float = 30.0  # seconds per phase
+
+
+@dataclass
+class SimCore:
+    ego: Vehicle = field(default_factory=lambda: Vehicle(x=0.0, z=-25.0, heading=math.pi / 2))
+    npcs: list[Vehicle] = field(default_factory=list)
+    light: TrafficLight = field(default_factory=TrafficLight)
+    sim_time: float = 0.0
+    step_count: int = 0
+    max_steps: int = MAX_STEPS_DEFAULT
+    _terminated: bool = False
+    _terminated_reason: str = ""
+
+    def reset(self, seed: int | None = None) -> np.ndarray:
+        self.ego = Vehicle(x=0.0, z=-25.0, heading=math.pi / 2, speed=0.0)
+        # 4 NPCs at varying positions on each cardinal direction
+        # NPC 1: NS northbound, far ahead of ego
+        # NPC 2: NS southbound
+        # NPC 3: EW eastbound
+        # NPC 4: EW westbound
+        self.npcs = [
+            Vehicle(x=0.0, z=15.0, heading=math.pi / 2, speed=NPC_SPEED),       # NB
+            Vehicle(x=3.5, z=-15.0, heading=-math.pi / 2, speed=NPC_SPEED),      # SB
+            Vehicle(x=-15.0, z=0.0, heading=0.0, speed=NPC_SPEED),              # EB
+            Vehicle(x=15.0, z=3.5, heading=math.pi, speed=NPC_SPEED),           # WB
+        ]
+        self.light = TrafficLight()
+        self.sim_time = 0.0
+        self.step_count = 0
+        self._terminated = False
+        self._terminated_reason = ""
+        return self._obs()
+
+    def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        """One 0.1s step. Returns (obs, reward, terminated, truncated, info)."""
+        if self._terminated:
+            return self._obs(), 0.0, True, False, {"reason": self._terminated_reason}
+
+        # 1) Apply ego control via accel + Pure Pursuit steer
+        accel_cmd = float(np.clip(action[0], -1.0, 1.0)) * 3.0   # m/s²
+        # Pure Pursuit: aim at intersection center
+        target = (0.0, 0.0)
+        dx = target[0] - self.ego.x
+        dz = target[1] - self.ego.z
+        target_angle = math.atan2(dz, dx)
+        alpha = self.ego.heading - target_angle
+        # Wrap alpha to [-π, π]
+        alpha = (alpha + math.pi) % (2 * math.pi) - math.pi
+        steer = math.atan2(2.0 * EGO_WHEELBASE * math.sin(alpha), LOOKAHEAD_DISTANCE)
+        steer = float(np.clip(steer, -MAX_STEER, MAX_STEER))
+
+        # 2) Update ego kinematics (Euler)
+        prev_z = self.ego.z
+        self.ego.speed = max(0.0, min(SPEED_LIMIT, self.ego.speed + accel_cmd * DT))
+        self.ego.heading += steer * DT  # simplified bicycle model
+        self.ego.x += self.ego.speed * math.cos(self.ego.heading) * DT
+        self.ego.z += self.ego.speed * math.sin(self.ego.heading) * DT
+
+        # 3) Advance NPCs (constant speed, straight)
+        for npc in self.npcs:
+            npc.x += npc.speed * math.cos(npc.heading) * DT
+            npc.z += npc.speed * math.sin(npc.heading) * DT
+            # NPC respawn at opposite end when out of bounds
+            if abs(npc.x) > 40 or abs(npc.z) > 40:
+                npc.x = -npc.x * 0.8
+                npc.z = -npc.z * 0.8
+
+        # 4) Traffic light cycle
+        self.light.cycle_timer += DT
+        if self.light.cycle_timer >= self.light.cycle_duration:
+            self.light.cycle_timer = 0.0
+            self.light.ns_green, self.light.ew_green = (
+                self.light.ew_green, self.light.ns_green,
+            )
+
+        self.sim_time += DT
+        self.step_count += 1
+
+        # 5) Compute reward + termination
+        reward = 0.05  # alive bonus
+        progress = max(0.0, self.ego.z - prev_z)
+        reward += 1.0 * progress
+
+        # Check collision
+        for npc in self.npcs:
+            d = math.hypot(self.ego.x - npc.x, self.ego.z - npc.z)
+            if d < COLLISION_DISTANCE:
+                self._terminated = True
+                self._terminated_reason = "collision"
+                reward -= 10.0
+                break
+
+        # Check red-light running
+        if not self._terminated and self._check_red_light_run():
+            self._terminated = True
+            self._terminated_reason = "red_light"
+            reward -= 5.0
+
+        # Check success (passed through intersection)
+        if not self._terminated and self.ego.z > 25.0:
+            self._terminated = True
+            self._terminated_reason = "success"
+            reward += 5.0
+
+        # Check max steps
+        truncated = False
+        if self.step_count >= self.max_steps and not self._terminated:
+            truncated = True
+
+        info = {"reason": self._terminated_reason, "progress": progress}
+        return self._obs(), float(reward), self._terminated, truncated, info
+
+    def _check_red_light_run(self) -> bool:
+        """Ego is in intersection AND light is red for its direction."""
+        in_intersection = abs(self.ego.x) < INTERSECTION_RADIUS and abs(self.ego.z) < INTERSECTION_RADIUS
+        if not in_intersection:
+            return False
+        # Simpler heuristic: ego heading near north/south (π/2 ± 0.5) => NS
+        heading_ns = abs((self.ego.heading % (2 * math.pi)) - math.pi / 2) < 0.5
+        if heading_ns and not self.light.ns_green:
+            return True
+        if not heading_ns and not self.light.ew_green:
+            return True
+        return False
+
+    def _obs(self) -> np.ndarray:
+        """Build the 13-dim observation vector."""
+        obs = np.zeros(OBS_DIM, dtype=np.float32)
+        # [0:3] ego pose normalized
+        obs[0] = np.clip(self.ego.x / 50.0, -1.0, 1.0)
+        obs[1] = np.clip(self.ego.z / 50.0, -1.0, 1.0)
+        obs[2] = self.ego.heading / math.pi  # [-1, 1]
+        # [3:6] ego motion
+        obs[3] = self.ego.speed / SPEED_LIMIT  # [0, 1]
+        obs[4] = 0.0  # accel placeholder
+        obs[5] = 0.0  # steering placeholder
+        # [6:8] traffic light
+        obs[6] = 1.0 if self.light.ns_green else 0.0
+        obs[7] = 1.0 if self.light.ew_green else 0.0
+        # [8:13] distances to 5 nearest NPCs (sorted ascending)
+        distances = sorted(
+            math.hypot(self.ego.x - n.x, self.ego.z - n.z) for n in self.npcs
+        )
+        # Pad to 5 entries (we only have 4 NPCs)
+        while len(distances) < 5:
+            distances.append(50.0)
+        for i, d in enumerate(distances[:5]):
+            obs[8 + i] = min(d / 50.0, 1.0)
+        return obs

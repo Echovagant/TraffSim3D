@@ -1,0 +1,83 @@
+"""Plan 044: training status persistence (status.json)."""
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import time
+from pathlib import Path
+from typing import Any
+
+# Default status file — overridable via env var for tests.
+_DEFAULT_PATH = Path(os.environ.get("TRAFFIC_PPO_STATUS", "/tmp/traffic_ppo_status.json"))
+
+
+def get_status_path() -> Path:
+    return _DEFAULT_PATH
+
+
+def read_status() -> dict[str, Any]:
+    """Return current training status. Empty dict if no training has run."""
+    path = get_status_path()
+    if not path.exists():
+        return {}
+    try:
+        result: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return result
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def write_status(d: dict[str, Any]) -> None:
+    """Atomic write — write to tmp file then rename."""
+    path = get_status_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".status_", suffix=".json", dir=path.parent,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(tmp_path, path)
+    except Exception:
+        # Best-effort cleanup of tmp
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+
+def init_status(total_steps: int) -> None:
+    """Initialize status.json at the start of a training run."""
+    write_status({
+        "running": True,
+        "step": 0,
+        "total_steps": total_steps,
+        "episode_count": 0,
+        "last_reward": 0.0,
+        "reward_history": [],
+        "started_at_ms": int(time.time() * 1000),
+        "finished_at_ms": None,
+        "reason": "",
+    })
+
+
+def append_reward(reward: float, max_history: int = 200) -> None:
+    """Append an episode reward to the history (bounded)."""
+    s = read_status()
+    history = s.get("reward_history", [])
+    history.append(float(reward))
+    if len(history) > max_history:
+        history = history[-max_history:]
+    s["reward_history"] = history
+    s["last_reward"] = float(reward)
+    s["step"] = int(s.get("step", 0)) + 1
+    s["episode_count"] = int(s.get("episode_count", 0)) + 1
+    write_status(s)
+
+
+def finalize_status(reason: str = "completed") -> None:
+    s = read_status()
+    s["running"] = False
+    s["finished_at_ms"] = int(time.time() * 1000)
+    s["reason"] = reason
+    write_status(s)
