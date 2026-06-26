@@ -64,6 +64,7 @@
         <option value="t">T 路口</option>
         <option value="loop">矩形环</option>
         <option value="elevated">高架桥</option>
+        <option value="corridor">多路口走廊</option>
       </select>
     </label>
 
@@ -208,6 +209,7 @@ const sceneLabel = (k: SceneKind): string => {
     case 't':        return 'T 路口';
     case 'loop':     return '矩形环';
     case 'elevated': return '高架桥';
+    case 'corridor': return '多路口走廊';
   }
 };
 

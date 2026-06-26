@@ -6,7 +6,7 @@
 //   - loop:  4 roads + 4 corner intersections + 8 vehicles
 
 import { describe, it, expect } from 'vitest';
-import { buildCrossIntersectionNetwork, buildTJunctionNetwork, buildRectangularLoopNetwork, buildElevatedScene } from './defaultScene';
+import { buildCrossIntersectionNetwork, buildTJunctionNetwork, buildRectangularLoopNetwork, buildElevatedScene, buildCorridorScene } from './defaultScene';
 
 describe('buildCrossIntersectionNetwork', () => {
   it('produces 2 roads, 1 (4-way) intersection, 6 vehicles', () => {
@@ -78,5 +78,30 @@ describe('buildElevatedScene', () => {
     expect(net.roads['r-ew-high']!.level).toBe(1);
     expect(net.roads['r-ns']!.level).toBe(0);
     expect(net.roads['r-ew-low']!.level).toBe(0);
+  });
+});
+
+// Plan 040: multi-intersection corridor.
+describe('buildCorridorScene', () => {
+  it('produces 3 roads, 2 intersections, 6 vehicles', () => {
+    const net = buildCorridorScene();
+    expect(Object.keys(net.roads).length).toBe(3);
+    expect(Object.keys(net.intersections).length).toBe(2);
+    expect(Object.keys(net.vehicles).length).toBe(6);
+  });
+
+  it('NS corridor road connects to both intersections (line graph)', () => {
+    const net = buildCorridorScene();
+    const iNorth = net.intersections['i-north']!;
+    const iSouth = net.intersections['i-south']!;
+    expect(iNorth.connectedRoads).toContain('r-ns-corridor');
+    expect(iSouth.connectedRoads).toContain('r-ns-corridor');
+  });
+
+  it('each intersection has 2 traffic lights (NS + EW axes)', () => {
+    const net = buildCorridorScene();
+    for (const inter of Object.values(net.intersections)) {
+      expect(inter.trafficLights.length).toBe(2);
+    }
   });
 });

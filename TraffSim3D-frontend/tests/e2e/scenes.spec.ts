@@ -29,4 +29,10 @@ test.describe('Scene switch screenshots', () => {
     await switchScene(page, 'elevated');
     await page.screenshot({ path: `${SCREENSHOT_DIR}/elevated-scene.png`, fullPage: false });
   });
+
+  test('multi-intersection corridor scene (Plan 040)', async ({ page }) => {
+    await waitForSceneReady(page);
+    await switchScene(page, 'corridor');
+    await page.screenshot({ path: `${SCREENSHOT_DIR}/corridor-scene.png`, fullPage: false });
+  });
 });

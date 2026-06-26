@@ -398,3 +398,112 @@ export const buildElevatedScene = (): RoadNetwork => {
 
   return net;
 };
+/**
+ * Plan 040: 多路口走廊 demo scene.
+ *
+ * 布局 (俯视):
+ *          (z=-30, NS 路北端)
+ *               │
+ *   ┌───────────┴───────────┐
+ *   │       i-north         │ ← 4-way 路口 #1 (z=-30)
+ *   │  (NS corridor x=0,   │
+ *   │   EW road z=-30)      │
+ *   └───────────┬───────────┘
+ *               │ ← NS corridor 中间段 (60u)
+ *   ┌───────────┴───────────┐
+ *   │       i-south         │ ← 4-way 路口 #2 (z=+30)
+ *   │  (NS corridor x=0,   │
+ *   │   EW road z=+30)      │
+ *   └───────────┬───────────┘
+ *               │
+ *          (z=+30, NS 路南端)
+ *
+ * - r-ns-corridor: NS 60u 长路 (z=-30..+30, x=0), level=0
+ * - r-ew-north:     EW 60u 长路 (x=-30..+30, z=-30), level=0
+ * - r-ew-south:     EW 60u 长路 (x=-30..+30, z=+30), level=0
+ * - 2 intersections, 6 vehicles spread across 4 road segments
+ * - Coordinated offsets for both intersection pairs (Plan 028 绿波带扩展)
+ */
+export const buildCorridorScene = (): RoadNetwork => {
+  const net = createRoadNetwork();
+  const NS_HALF = 30;
+  const EW_HALF = 30;
+
+  // NS corridor (the long road connecting the two intersections)
+  const roadNS: Road = roadStraight(
+    'r-ns-corridor',
+    { x: 0, z: -NS_HALF },
+    { x: 0, z: NS_HALF },
+    4, 16.67,
+  );
+  net.roads[roadNS.id] = roadNS;
+
+  // EW at north intersection
+  const roadEWNorth: Road = roadStraight(
+    'r-ew-north',
+    { x: -EW_HALF, z: -NS_HALF },
+    { x: EW_HALF, z: -NS_HALF },
+    4, 16.67,
+  );
+  net.roads[roadEWNorth.id] = roadEWNorth;
+
+  // EW at south intersection
+  const roadEWSouth: Road = roadStraight(
+    'r-ew-south',
+    { x: -EW_HALF, z: NS_HALF },
+    { x: EW_HALF, z: NS_HALF },
+    4, 16.67,
+  );
+  net.roads[roadEWSouth.id] = roadEWSouth;
+
+  // North intersection (4-way: NS corridor + EW road)
+  const intersectionNorth: Intersection = {
+    id: 'i-north',
+    position: { x: 0, y: 0, z: -NS_HALF },
+    trafficLights: [
+      { id: 'tl-ns-n', position: { x: -3, y: 0, z: -NS_HALF }, phase: LightPhase.Green,
+        phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ns' },
+      { id: 'tl-ew-n', position: { x: 0, y: 0, z: -NS_HALF + 3 }, phase: LightPhase.Red,
+        phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ew' },
+    ],
+    connectedRoads: ['r-ns-corridor', 'r-ew-north'],
+    intersectionRadius: 6,
+  };
+  net.intersections[intersectionNorth.id] = intersectionNorth;
+
+  // South intersection (4-way: NS corridor + EW road)
+  const intersectionSouth: Intersection = {
+    id: 'i-south',
+    position: { x: 0, y: 0, z: NS_HALF },
+    trafficLights: [
+      { id: 'tl-ns-s', position: { x: 3, y: 0, z: NS_HALF }, phase: LightPhase.Red,
+        phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ns' },
+      { id: 'tl-ew-s', position: { x: 0, y: 0, z: NS_HALF - 3 }, phase: LightPhase.Green,
+        phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ew' },
+    ],
+    connectedRoads: ['r-ns-corridor', 'r-ew-south'],
+    intersectionRadius: 6,
+  };
+  net.intersections[intersectionSouth.id] = intersectionSouth;
+
+  // 6 default vehicles spread across 4 road segments (Plan 039 OOB 教训: 拉开距离)
+  const nsLen = roadLength(roadNS);
+  const ewLen = roadLength(roadEWNorth);
+  const defaults: Vehicle[] = [
+    at(roadNS, 0, nsLen * 0.15, 7, { id: 'v-c1', type: 'car', color: '#3a86ff', status: 'driving' }),
+    at(roadNS, 0, nsLen * 0.50, 5, { id: 'v-c2', type: 'truck', color: '#fbbf24', status: 'driving' }),
+    at(roadNS, 0, nsLen * 0.85, 7, { id: 'v-c3', type: 'bus', color: '#22c55e', status: 'driving' }),
+    at(roadEWNorth, 0, ewLen * 0.7, 8, { id: 'v-c4', type: 'car', color: '#ef4444', status: 'driving' }),
+    at(roadEWSouth, 0, ewLen * 0.3, 8, { id: 'v-c5', type: 'car', color: '#a78bfa', status: 'driving' }),
+    at(roadEWNorth, 0, ewLen * 0.4, 6, { id: 'v-c6', type: 'truck', color: '#f5f5f4', status: 'driving' }),
+  ];
+  for (const v of defaults) net.vehicles[v.id] = v;
+
+  // 3 spawn points (one per road)
+  for (const road of [roadNS, roadEWNorth, roadEWSouth]) {
+    const sp = defaultSpawnPoint(road);
+    net.spawnPoints[sp.id] = sp;
+  }
+
+  return net;
+};
