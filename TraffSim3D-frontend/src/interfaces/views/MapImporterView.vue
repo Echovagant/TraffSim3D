@@ -9,9 +9,44 @@
     </header>
 
     <section class="card">
-      <h2>上传 .osm 文件</h2>
+      <h2>① 在 Overpass Turbo 导出 .osm</h2>
       <p class="muted">
-        选择 OpenStreetMap XML 文件 (.osm)，后端解析后直接载入到 SceneLab。
+        打开 <a href="https://overpass-turbo.eu" target="_blank" rel="noopener">overpass-turbo.eu</a>,
+        粘贴下面任一查询(已限定 <code>highway</code> + 排除 <code>area=yes</code>),
+        点右上角 <strong>Export → Raw OSM data</strong>,保存为 <code>.osm</code>。
+      </p>
+      <div class="overpass-tabs">
+        <button
+          v-for="(q, idx) in overpassQueries"
+          :key="q.name"
+          :class="['tab', overpassTab === idx ? 'tab-active' : '']"
+          :data-testid="`overpass-tab-${idx}`"
+          @click="overpassTab = idx"
+        >{{ q.name }}</button>
+      </div>
+      <pre class="overpass-code" data-testid="overpass-code">{{ overpassQueries[overpassTab]?.query }}</pre>
+      <div class="overpass-actions">
+        <button
+          class="ghost"
+          data-testid="overpass-copy-button"
+          @click="onCopyOverpass"
+        >{{ overpassCopied ? '✓ 已复制' : '复制查询' }}</button>
+        <button
+          class="ghost"
+          data-testid="overpass-open-button"
+          @click="onOpenOverpass"
+        >在 Overpass Turbo 打开 ↗</button>
+      </div>
+      <p class="muted small">
+        ⚠ bbox 限制:TraffSim3D parser 只接受 <code>±0.5°</code> (~55 km) 以内的节点,大区会过滤远点。
+        整个深圳市请分片区导(福田/南山/罗湖)。
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>② 上传 .osm 文件</h2>
+      <p class="muted">
+        选择刚才导出的 OpenStreetMap XML 文件 (.osm)，后端解析后直接载入到 SceneLab。
         解析结果支持 bridge/tunnel (level 标签)、oneway、traffic_signals 节点。
       </p>
 
@@ -42,6 +77,10 @@
         <span>路口 {{ lastResult.stats.intersections }}</span>
         <span>红绿灯 {{ lastResult.stats.lights }}</span>
       </div>
+      <p v-if="backendUrl" class="muted small">
+        Backend: <code>{{ backendUrl }}</code>
+        <span v-if="!backendUrl.startsWith('http')">(走 vite proxy → :{{ backendPort }})</span>
+      </p>
     </section>
 
     <section class="card">
@@ -50,7 +89,7 @@
         Plan 041 自带 <code>sample-4way.osm</code>（4 路口 + 1 高架桥段）位于
         <code>tests/e2e/fixtures/</code>。
       </p>
-      <button class="ghost" @click="loadFixture">载入示例 fixture</button>
+      <button class="ghost" data-testid="load-fixture-button" @click="loadFixture">载入示例 fixture</button>
     </section>
 
     <!--
@@ -75,16 +114,21 @@
 <script setup lang="ts">
 /**
  * Plan 041: MapLab — OSM file importer.
+ * Plan 052 follow-up: Overpass query templates + backend port env var.
  *
- * Uploads an .osm XML file to POST /api/v1/maps/parse-osm,
- * receives a RoadNetwork-shaped dict, and feeds it to
- * worldStore.loadNetwork() before routing to the scene editor.
+ * The import flow:
+ *   1. Copy an Overpass query from the templates below into
+ *      https://overpass-turbo.eu, run it, click "Export → Raw OSM data",
+ *      save the .osm file.
+ *   2. Upload it here; the backend POSTs /api/v1/maps/parse-osm and
+ *      returns a RoadNetwork-shaped dict. We feed it to
+ *      worldStore.loadNetwork() before routing to the scene editor.
  *
- * Backend URL comes from VITE_BACKEND_URL (default http://localhost:8000).
- * The backend is optional — Playwright e2e can stub the response with
- * page.route() if running frontend-only.
+ * Backend URL: vite proxy forwards `/api/*` → `localhost:VITE_BACKEND_PORT`
+ * (default 8000). The frontend uses the same env var so direct fetches
+ * (this upload) target the same port the proxy uses.
  */
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useWorldStore } from '@interfaces/stores/worldStore';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
@@ -104,8 +148,95 @@ interface UploadResult {
 
 const lastResult = ref<UploadResult | null>(null);
 
-const BACKEND_URL =
-  (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8000';
+// Plan 052: VITE_BACKEND_URL overrides the default port for users who
+// run uvicorn on a non-default port (the proxy in vite.config.js reads
+// the same env var). When VITE_BACKEND_URL is unset we use a relative
+// URL ("") so the request goes through the vite proxy at /api/v1 —
+// this avoids CORS preflights in dev.
+const BACKEND_PORT = (import.meta.env.VITE_BACKEND_PORT as string | undefined) ?? '8000';
+const BACKEND_URL_EXPLICIT = import.meta.env.VITE_BACKEND_URL as string | undefined;
+const backendUrl = computed(() =>
+  BACKEND_URL_EXPLICIT ?? `http://localhost:${BACKEND_PORT}`,
+);
+const backendPort = BACKEND_PORT;
+
+// Overpass Turbo query templates — copy-paste ready, excluding the
+// bbox limits the TraffSim3D parser can handle (MAX_BBOX_DEG = 0.5).
+// Overpass bbox order: (south, west, north, east).
+interface OverpassQuery { name: string; query: string; }
+
+const overpassQueries: OverpassQuery[] = [
+  {
+    name: '天安门 (北京)',
+    query: `[out:xml][timeout:120];
+(
+  way["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified)$"]
+     ["area"!="yes"]
+     (39.85, 116.30, 39.95, 116.45);
+  node["highway"="traffic_signals"](39.85, 116.30, 39.95, 116.45);
+);
+(._; >;);
+out body;`,
+  },
+  {
+    name: '福田中心 (深圳)',
+    query: `[out:xml][timeout:120];
+(
+  way["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified)$"]
+     ["area"!="yes"]
+     (22.49, 113.95, 22.59, 114.15);
+  node["highway"="traffic_signals"](22.49, 113.95, 22.59, 114.15);
+);
+(._; >;);
+out body;`,
+  },
+  {
+    name: '南山 (深圳)',
+    query: `[out:xml][timeout:120];
+(
+  way["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified)$"]
+     ["area"!="yes"]
+     (22.45, 113.85, 22.55, 114.00);
+  node["highway"="traffic_signals"](22.45, 113.85, 22.55, 114.00);
+);
+(._; >;);
+out body;`,
+  },
+  {
+    name: '陆家嘴 (上海)',
+    query: `[out:xml][timeout:120];
+(
+  way["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified)$"]
+     ["area"!="yes"]
+     (31.20, 121.48, 31.30, 121.58);
+  node["highway"="traffic_signals"](31.20, 121.48, 31.30, 121.58);
+);
+(._; >;);
+out body;`,
+  },
+];
+const overpassTab = ref(0);
+const overpassCopied = ref(false);
+
+const onCopyOverpass = async (): Promise<void> => {
+  const q = overpassQueries[overpassTab.value]?.query ?? '';
+  try {
+    await navigator.clipboard.writeText(q);
+    overpassCopied.value = true;
+    showFlashMessage('Overpass 查询已复制', 'info');
+    setTimeout(() => { overpassCopied.value = false; }, 2000);
+  } catch {
+    showFlashMessage('复制失败 — 请手动选中查询文本', 'error');
+  }
+};
+
+const onOpenOverpass = (): void => {
+  // Overpass Turbo URL: ?Q=<encoded query> opens the editor with the
+  // query preloaded (no auto-run). User clicks "Run" themselves.
+  const q = overpassQueries[overpassTab.value]?.query ?? '';
+  const url = `https://overpass-turbo.eu/?Q=${encodeURIComponent(q)}`;
+  window.open(url, '_blank', 'noopener');
+};
 
 const onFileSelected = (e: Event): void => {
   const target = e.target as HTMLInputElement;
@@ -123,8 +254,8 @@ const onUpload = async (): Promise<void> => {
     // Route to PBF or XML endpoint based on file extension.
     const isPbf = file.value.name.toLowerCase().endsWith('.pbf');
     const endpoint = isPbf
-      ? `${BACKEND_URL}/api/v1/maps/parse-pbf`
-      : `${BACKEND_URL}/api/v1/maps/parse-osm`;
+      ? `${backendUrl.value}/api/v1/maps/parse-pbf`
+      : `${backendUrl.value}/api/v1/maps/parse-osm`;
     const r = await fetch(endpoint, {
       method: 'POST',
       body: fd,
@@ -225,6 +356,7 @@ const loadFixture = (): void => {
 .card h2 { margin: 0 0 8px; font-size: 15px; color: #cbd5e1; }
 .card p { color: #cbd5e1; font-size: 14px; line-height: 1.7; margin: 0 0 12px; }
 .muted { color: #94a3b8 !important; font-size: 13px !important; }
+.muted.small { font-size: 11px !important; }
 .upload-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
 input[type="file"] { flex: 1; min-width: 220px; font-size: 13px; color: #cbd5e1; }
 button.primary { background: #2563eb; color: white; padding: 8px 16px; border: none;
@@ -240,6 +372,38 @@ button.ghost:hover { background: rgba(148, 163, 184, 0.08); }
 .stats { display: flex; gap: 16px; font-size: 12px; color: #94a3b8; margin-top: 8px; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
        background: rgba(2, 6, 23, 0.7); padding: 1px 6px; border-radius: 4px; color: #93c5fd; }
+
+/* Plan 052: Overpass query templates. */
+.overpass-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.overpass-tabs .tab {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #cbd5e1;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.overpass-tabs .tab:hover { background: rgba(30, 41, 59, 0.9); }
+.overpass-tabs .tab-active {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #86efac;
+}
+.overpass-code {
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 6px;
+  padding: 12px 14px;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 8px 0;
+}
+.overpass-actions { display: flex; gap: 8px; margin-top: 4px; }
+.overpass-actions button { font-size: 12px; }
 
 /* ODbL attribution footer — required when displaying OSM-derived maps. */
 .osm-attribution {

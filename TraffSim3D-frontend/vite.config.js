@@ -22,13 +22,19 @@ export default defineConfig({
     // can call `/api/v1/ping` and `/health` without CORS preflights in dev.
     // Production builds serve the API from the same origin (or a reverse
     // proxy) — this block is dev-only.
+    //
+    // Plan 052 follow-up: read the backend port from `VITE_BACKEND_PORT`
+    // env (default 8000) so users who launch uvicorn on a non-default
+    // port don't need to edit this file. Frontend's `BACKEND_URL`
+    // (`MapImporterView`, `AIPlaygroundView`) mirrors this env var so
+    // direct fetches target the same port the proxy uses.
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: `http://localhost:${process.env.VITE_BACKEND_PORT || 8000}`,
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:8000',
+        target: `http://localhost:${process.env.VITE_BACKEND_PORT || 8000}`,
         changeOrigin: true,
       },
     },

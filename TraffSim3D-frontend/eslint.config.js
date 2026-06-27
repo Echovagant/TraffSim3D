@@ -18,10 +18,13 @@ export default defineConfig([
     // Plain .js files — use tseslint parser for proper ESM + TS-flavored
     // syntax (even though .js doesn't have type annotations, tseslint
     // parser is the same JS parser vue uses for its script blocks).
+    // Plan 052: vite.config.js reads `process.env.VITE_BACKEND_PORT`,
+    // so add the `node` globals to the whole JS family.
     files: ['**/*.{js,mjs,jsx,ts}'],
     languageOptions: {
       globals: {
         ...globals.browser,
+        ...globals.node,
       },
       parser: tseslint.parser,
       parserOptions: {

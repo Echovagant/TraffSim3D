@@ -73,7 +73,7 @@ test('OSM import: stubbed backend → scene-editor shows parsed network', async 
   // Step 2: click "载入示例 fixture" (uses the frontend's hard-coded
   // sample, bypassing the fetch). This is the path that doesn't need
   // a live backend — same UX as the OSM upload but client-side.
-  await page.locator('button.ghost').click();
+  await page.locator('[data-testid="load-fixture-button"]').click();
 
   // Step 3: wait for navigation to scene-editor.
   await page.waitForURL('**/scene-editor', { timeout: 5_000 });
