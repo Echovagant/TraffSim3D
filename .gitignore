@@ -42,6 +42,9 @@ e2e-output/current/
 TraffSim3D-frontend/test-results/
 TraffSim3D-frontend/playwright-report/
 
+# Plan 050 — cross-language contract test snapshots (regenerated each run)
+TraffSim3D-backend/tests/contract/snapshots/
+
 # Environment / secrets
 .env
 .env.local
