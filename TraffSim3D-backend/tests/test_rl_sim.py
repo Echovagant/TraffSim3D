@@ -73,3 +73,64 @@ def test_action_out_of_range_clamped() -> None:
     s.reset()
     # Should not raise
     s.step(np.array([10.0, 10.0], dtype=np.float32))
+
+
+# Plan 048: corridor scene tests.
+def test_corridor_scene_ego_drives_through_2_intersections() -> None:
+    """Corridor: ego starts at z=-25, target (0, 30). After driving
+    forward, ego should reach z > 25 within max_steps, terminating
+    with reason 'success_corridor'.
+    """
+    s = SimCore(scene_kind="corridor", max_steps=300)
+    s.reset()
+    assert s.ego.z == -25.0
+    for _ in range(300):
+        _, _, terminated, _, info = s.step(np.array([0.8, 0.0], dtype=np.float32))
+        if terminated:
+            assert info["reason"] == "success_corridor"
+            assert s.ego.z > 25.0
+            return
+    raise AssertionError(
+        f"corridor did not terminate within 300 steps (z={s.ego.z:.2f})"
+    )
+
+
+def test_corridor_scene_collision_still_terminates() -> None:
+    """Inject ego into NPC NB path — should still terminate with reason
+    'collision', regardless of scene_kind."""
+    s = SimCore(scene_kind="corridor")
+    s.reset()
+    # NPC NB is at (0, +10). Move ego into its path.
+    s.ego.x = 0.0
+    s.ego.z = 9.5
+    s.ego.speed = 16.67
+    _, _, terminated, _, info = s.step(np.array([0.0, 0.0], dtype=np.float32))
+    assert terminated
+    assert info["reason"] == "collision"
+
+
+def test_corridor_success_grants_bonus_reward() -> None:
+    """Corridor success rewards +10 (vs cross +5)."""
+    s = SimCore(scene_kind="corridor", max_steps=200)
+    s.reset()
+    final_reward = 0.0
+    for _ in range(200):
+        _, r, term, trunc, info = s.step(np.array([0.8, 0.0], dtype=np.float32))
+        final_reward = r
+        if term or trunc:
+            break
+    assert info["reason"] == "success_corridor"
+    assert final_reward > 5.0, f"expected > 5 bonus, got {final_reward}"
+
+
+def test_cross_scene_unchanged_after_corridor_added() -> None:
+    """Default scene_kind='cross' must preserve Plan 044 behavior."""
+    s = SimCore()  # default cross
+    s.reset()
+    # Drive forward; should reach z > 25 in ~150 steps and terminate with 'success'
+    for _ in range(300):
+        _, _, term, _, info = s.step(np.array([0.8, 0.0], dtype=np.float32))
+        if term:
+            assert info["reason"] == "success"
+            return
+    raise AssertionError(f"cross did not terminate (z={s.ego.z:.2f})")

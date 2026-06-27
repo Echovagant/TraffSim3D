@@ -117,3 +117,25 @@ async def test_train_independent_writes_agent_rewards(client: AsyncClient) -> No
     # Latest checkpoint string lists per-agent files
     assert "agent0" in s["latest_checkpoint"]
     assert "agent1" in s["latest_checkpoint"]
+
+
+@pytest.mark.asyncio
+async def test_scenes_endpoint_returns_list(client: AsyncClient) -> None:
+    """Plan 048: GET /api/v1/rl/scenes returns the supported scene kinds."""
+    r = await client.get("/api/v1/rl/scenes")
+    assert r.status_code == 200
+    assert r.json() == {"scenes": ["cross", "corridor"]}
+
+
+@pytest.mark.asyncio
+async def test_train_accepts_scene_kind_corridor(client: AsyncClient) -> None:
+    """Plan 048: dry-run with scene_kind='corridor' persists the field."""
+    r = await client.post(
+        "/api/v1/rl/train",
+        json={"steps": 200, "dry_run": True, "scene_kind": "corridor"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["scene_kind"] == "corridor"
+    r2 = await client.get("/api/v1/rl/status")
+    assert r2.json()["scene_kind"] == "corridor"

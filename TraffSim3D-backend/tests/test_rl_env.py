@@ -58,3 +58,24 @@ def test_repeated_random_actions_eventually_terminates() -> None:
             done = True
             break
     assert done
+
+
+def test_env_accepts_scene_kind_parameter() -> None:
+    """Plan 048: TrafficEnv accepts scene_kind='corridor' or 'cross'."""
+    env_cross = TrafficEnv(scene_kind="cross")
+    env_corr = TrafficEnv(scene_kind="corridor")
+    assert env_cross.core.scene_kind == "cross"
+    assert env_corr.core.scene_kind == "corridor"
+
+
+def test_env_corridor_drives_through_2_intersections() -> None:
+    """Plan 048: corridor env terminates with success_corridor."""
+    env = TrafficEnv(scene_kind="corridor", max_steps=300)
+    env.reset(seed=42)
+    for _ in range(300):
+        _, _, terminated, truncated, info = env.step(
+            np.array([0.8, 0.0], dtype=np.float32),
+        )
+        if terminated or truncated:
+            break
+    assert info["reason"] == "success_corridor"

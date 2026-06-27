@@ -68,14 +68,20 @@ class SimCore:
     max_steps: int = MAX_STEPS_DEFAULT
     _terminated: bool = False
     _terminated_reason: str = ""
+    # Plan 048: scene_kind determines road topology and Pure Pursuit target.
+    # 'cross' (default, 044 behavior): single 4-way intersection.
+    # 'corridor' (048): 2 4-way intersections + 60m NS corridor between.
+    scene_kind: str = "cross"
 
     def reset(self, seed: int | None = None) -> np.ndarray:
+        if self.scene_kind == "corridor":
+            return self._reset_corridor()
+        return self._reset_cross()
+
+    def _reset_cross(self) -> np.ndarray:
+        """Original cross scene (Plan 044). Single 4-way intersection."""
         self.ego = Vehicle(x=0.0, z=-25.0, heading=math.pi / 2, speed=0.0)
         # 4 NPCs at varying positions on each cardinal direction
-        # NPC 1: NS northbound, far ahead of ego
-        # NPC 2: NS southbound
-        # NPC 3: EW eastbound
-        # NPC 4: EW westbound
         self.npcs = [
             Vehicle(x=0.0, z=15.0, heading=math.pi / 2, speed=NPC_SPEED),       # NB
             Vehicle(x=3.5, z=-15.0, heading=-math.pi / 2, speed=NPC_SPEED),      # SB
@@ -89,6 +95,36 @@ class SimCore:
         self._terminated_reason = ""
         return self._obs()
 
+    def _reset_corridor(self) -> np.ndarray:
+        """Plan 048: 2 4-way intersections + 60m NS corridor (mirror
+        frontend buildCorridorScene).
+
+        NPC positions are spread to avoid immediate collisions with ego.
+        Traffic lights at both intersections start NS-green so ego
+        can pass through (corridor coordination).
+        """
+        # Ego starts south, heading north, on the NS corridor.
+        self.ego = Vehicle(x=0.0, z=-25.0, heading=math.pi / 2, speed=0.0)
+        # 4 NPCs spaced so they're not in ego's immediate path:
+        #   NB at z=+10 (35u ahead of ego) heading north (same dir, won't catch up)
+        #   SB at z=-10 (15u behind) heading south (opposite dir, won't collide)
+        #   EB at x=-20 (EW road, far left of ego's x=0)
+        #   WB at x=+20 (EW road, far right of ego's x=0)
+        self.npcs = [
+            Vehicle(x=0.0,    z=10.0,  heading=math.pi / 2,    speed=NPC_SPEED),  # NB
+            Vehicle(x=3.5,    z=-10.0, heading=-math.pi / 2,   speed=NPC_SPEED),  # SB
+            Vehicle(x=-20.0,  z=0.0,   heading=0.0,           speed=NPC_SPEED),  # EB
+            Vehicle(x=20.0,   z=3.5,   heading=math.pi,       speed=NPC_SPEED),  # WB
+        ]
+        # Both intersections start NS-green (corridor coordination);
+        # cycle flips NS↔EW like cross scene.
+        self.light = TrafficLight(ns_green=True, ew_green=False)
+        self.sim_time = 0.0
+        self.step_count = 0
+        self._terminated = False
+        self._terminated_reason = ""
+        return self._obs()
+
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         """One 0.1s step. Returns (obs, reward, terminated, truncated, info)."""
         if self._terminated:
@@ -96,8 +132,14 @@ class SimCore:
 
         # 1) Apply ego control via accel + Pure Pursuit steer
         accel_cmd = float(np.clip(action[0], -1.0, 1.0)) * 3.0   # m/s²
-        # Pure Pursuit: aim at intersection center
-        target = (0.0, 0.0)
+        # Pure Pursuit target:
+        #   cross: intersection center (0, 0)
+        #   corridor: north end of corridor (0, +30), so ego passes
+        #     both intersections instead of stalling at the first one
+        if self.scene_kind == "corridor":
+            target = (0.0, 30.0)
+        else:
+            target = (0.0, 0.0)
         dx = target[0] - self.ego.x
         dz = target[1] - self.ego.z
         target_angle = math.atan2(dz, dx)
@@ -154,11 +196,22 @@ class SimCore:
             self._terminated_reason = "red_light"
             reward -= 5.0
 
-        # Check success (passed through intersection)
-        if not self._terminated and self.ego.z > 25.0:
-            self._terminated = True
-            self._terminated_reason = "success"
-            reward += 5.0
+        # Plan 048: corridor has TWO intersections and a "pass through
+        # both" success condition.
+        if not self._terminated:
+            if self.scene_kind == "corridor":
+                # Both intersections green = ego can pass through corridor
+                # successfully when ego reaches z=+30 (north of i-south)
+                if self.ego.z > 25.0:
+                    self._terminated = True
+                    self._terminated_reason = "success_corridor"
+                    reward += 10.0  # larger bonus for 2-intersection pass
+            else:
+                # Cross scene single-intersection success (original 044)
+                if self.ego.z > 25.0:
+                    self._terminated = True
+                    self._terminated_reason = "success"
+                    reward += 5.0
 
         # Check max steps
         truncated = False

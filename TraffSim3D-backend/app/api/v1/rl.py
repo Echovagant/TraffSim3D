@@ -22,6 +22,7 @@ class TrainRequest(BaseModel):
     n_agents: int = 2     # Plan 045: stacked TrafficEnvs sharing PPO
     save_every: int = 5000  # Plan 045: checkpoint save interval
     independent_agents: bool = False  # Plan 047: per-agent PPO policies
+    scene_kind: str = "cross"  # Plan 048: 'cross' | 'corridor'
 
 
 @router.post("/rl/train", tags=["rl"])
@@ -30,10 +31,11 @@ async def train(req: TrainRequest) -> dict[str, Any]:
     if req.dry_run:
         # Synchronous dry-run — write fake status immediately.
         from app.apps.rl.train import dry_run
-        dry_run(req.steps, req.n_agents, req.independent_agents)
+        dry_run(req.steps, req.n_agents, req.independent_agents, req.scene_kind)
         return {"ok": True, "dry_run": True, "steps": req.steps,
                 "device": req.device, "n_agents": req.n_agents,
-                "independent_agents": req.independent_agents}
+                "independent_agents": req.independent_agents,
+                "scene_kind": req.scene_kind}
 
     # Real training — spawn subprocess, return PID.
     # noqa: ASYNC240 (fire-and-forget Path is OK in endpoint), ASYNC220 (Popen is OK here)
@@ -42,7 +44,8 @@ async def train(req: TrainRequest) -> dict[str, Any]:
     args = [sys.executable, "-m", "app.apps.rl.train",
             str(req.steps), "--device", req.device,
             "--n-agents", str(req.n_agents),
-            "--save-every", str(req.save_every)]
+            "--save-every", str(req.save_every),
+            "--scene-kind", req.scene_kind]
     if req.independent_agents:
         args.append("--independent")
     proc = subprocess.Popen(  # noqa: ASYNC220
@@ -53,7 +56,8 @@ async def train(req: TrainRequest) -> dict[str, Any]:
             "steps": req.steps, "device": req.device,
             "n_agents": req.n_agents,
             "independent_agents": req.independent_agents,
-            "save_every": req.save_every}
+            "save_every": req.save_every,
+            "scene_kind": req.scene_kind}
 
 
 @router.get("/rl/status", tags=["rl"])
@@ -86,3 +90,9 @@ async def prune_checkpoints() -> dict[str, Any]:
     """Delete old checkpoints, keeping only the newest 5 overall."""
     deleted = rl_ckpt.prune_all_checkpoints()
     return {"deleted": deleted, "remaining": len(rl_ckpt.list_checkpoints())}
+
+
+@router.get("/rl/scenes", tags=["rl"])
+async def list_scenes() -> dict[str, Any]:
+    """List supported sim scene kinds (Plan 048)."""
+    return {"scenes": ["cross", "corridor"]}

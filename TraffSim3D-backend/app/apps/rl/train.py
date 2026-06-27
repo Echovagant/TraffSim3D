@@ -33,6 +33,7 @@ from typing import Any
 
 def dry_run(
     total_steps: int = 1000, n_agents: int = 2, independent: bool = False,
+    scene_kind: str = "cross",
 ) -> None:
     """Write synthetic training status (no PPO)."""
     from . import status as st
@@ -41,6 +42,7 @@ def dry_run(
     s = st.read_status()
     s["independent_agents"] = independent
     s["n_agents"] = n_agents
+    s["scene_kind"] = scene_kind
     st.write_status(s)
 
     n_episodes = max(1, total_steps // 200)
@@ -82,13 +84,16 @@ def dry_run(
 
 def real_train(
     total_steps: int, device: str, n_agents: int, save_every: int,
-    independent: bool = False,
+    independent: bool = False, scene_kind: str = "cross",
 ) -> None:
     """Real PPO training via stable-baselines3 on the resolved device.
 
     `independent=True`: each agent trains with its own PPO policy
     (Plan 047 true multi-agent). Otherwise, one PPO on MultiTrafficEnv
     (Plan 045 parameter sharing).
+
+    `scene_kind='corridor'` (Plan 048): ego drives through 2
+    4-way intersections. Default 'cross' = 044 single-intersection.
     """
     from . import capabilities as caps
     from . import checkpoint as ckpt
@@ -102,6 +107,7 @@ def real_train(
     s["device_reason"] = reason
     s["n_agents"] = n_agents
     s["independent_agents"] = independent
+    s["scene_kind"] = scene_kind
     s["latest_checkpoint"] = ""
     st.write_status(s)
 
@@ -135,7 +141,7 @@ def real_train(
         # Plan 047: each agent trains with its own PPO. Serial (MVP);
         # GPU can run multiple models in parallel via SubprocVecEnv
         # but that's a follow-up.
-        envs = [TrafficEnv() for _ in range(n_agents)]
+        envs = [TrafficEnv(scene_kind=scene_kind) for _ in range(n_agents)]
         models = [
             PPO("MlpPolicy", env, verbose=0, device=resolved_device)
             for env in envs
@@ -171,6 +177,9 @@ def real_train(
 
     # Shared policy (Plan 045)
     env = MultiTrafficEnv(n_agents=n_agents)
+    # MultiTrafficEnv stacks obs from each sub-env; scene_kind applies to all
+    for sub_env in env.envs:
+        sub_env.core.scene_kind = scene_kind
     model = PPO("MlpPolicy", env, verbose=0, device=resolved_device)
 
     def on_step(_locals: dict[str, Any], _globals: dict[str, Any]) -> None:  # SB3 callback
@@ -213,19 +222,24 @@ def main() -> None:
         "--independent", action="store_true",
         help="Train each agent with its own PPO policy (Plan 047 true multi-agent).",
     )
+    parser.add_argument(
+        "--scene-kind", choices=["cross", "corridor"], default="cross",
+        help="Sim topology (Plan 048). 'corridor' = 2 4-way intersections + 60m corridor.",
+    )
     args = parser.parse_args()
 
     if args.dry_run:
-        dry_run(args.steps, args.n_agents, args.independent)
+        dry_run(args.steps, args.n_agents, args.independent, args.scene_kind)
         return
 
     try:
         real_train(
-            args.steps, args.device, args.n_agents, args.save_every, args.independent,
+            args.steps, args.device, args.n_agents, args.save_every,
+            args.independent, args.scene_kind,
         )
     except ImportError as e:
         print(f"SB3 unavailable ({e}); falling back to dry-run path.")
-        dry_run(args.steps, args.n_agents, args.independent)
+        dry_run(args.steps, args.n_agents, args.independent, args.scene_kind)
 
 
 if __name__ == "__main__":

@@ -12,16 +12,23 @@ from .sim_core import MAX_STEPS_DEFAULT, OBS_DIM, SimCore
 
 class TrafficEnv(gym.Env[np.ndarray, np.ndarray]):
     """Single-agent traffic env — drive the ego vehicle through a 4-way
-    intersection while respecting the traffic light and avoiding NPCs."""
+    intersection while respecting the traffic light and avoiding NPCs.
+
+    Plan 048: `scene_kind='corridor'` switches to a 2-intersection
+    corridor topology for multi-intersection training.
+    """
 
     metadata = {"render_modes": []}
 
     observation_space = spaces.Box(low=-1.0, high=1.0, shape=(OBS_DIM,), dtype=np.float32)
     action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
 
-    def __init__(self, max_steps: int = MAX_STEPS_DEFAULT) -> None:
+    def __init__(
+        self, max_steps: int = MAX_STEPS_DEFAULT,
+        scene_kind: str = "cross",  # Plan 048: 'cross' | 'corridor'
+    ) -> None:
         super().__init__()
-        self.core = SimCore(max_steps=max_steps)
+        self.core = SimCore(max_steps=max_steps, scene_kind=scene_kind)
 
     def reset(
         self,

@@ -47,6 +47,13 @@
           />
         </label>
         <label class="ctrl">
+          场景
+          <select v-model="sceneKind" data-testid="scene-kind-select">
+            <option value="cross">单路口</option>
+            <option value="corridor">走廊 (2 路口)</option>
+          </select>
+        </label>
+        <label class="ctrl">
           <input
             v-model="independentAgents"
             type="checkbox"
@@ -219,6 +226,7 @@ const BACKEND_URL =
 
 const steps = ref(200);
 const nAgents = ref(2);
+const sceneKind = ref<'cross' | 'corridor'>('cross');
 const independentAgents = ref(false);
 const device = ref<'auto' | 'gpu' | 'cpu'>('auto');
 const dryRun = ref(true);
@@ -347,6 +355,7 @@ const onStart = async (): Promise<void> => {
         steps: steps.value, dry_run: dryRun.value,
         device: device.value, n_agents: nAgents.value,
         save_every: 5000, independent_agents: independentAgents.value,
+        scene_kind: sceneKind.value,
       }),
     });
     if (!r.ok) {
