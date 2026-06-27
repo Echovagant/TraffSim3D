@@ -16,6 +16,9 @@ import { useWorldSimulation } from '@interfaces/composables/useWorldSimulation';
 import { useCameraControls } from '@interfaces/composables/useCameraControls';
 import { useEditor } from '@interfaces/composables/useEditor';
 import type { ThreeJSRenderer } from '@infrastructure/rendering';
+import { useWorldStore } from '@interfaces/stores/worldStore';
+import { computeNetworkBounds } from '@domain/services/networkBounds';
+import { requestFitToNetwork } from '@interfaces/composables/useCameraFocus';
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const containerRef = ref<HTMLDivElement | null>(null);
@@ -30,6 +33,27 @@ watch(isReady, (ready) => {
 });
 useCameraControls(canvasRef, rendererRef);
 const { handleMouseDown, handleMouseMove, handleMouseUp } = useEditor(rendererRef);
+
+// Plan 053: whenever the worldStore requests a fit (network loaded,
+// scene switched, OSM imported, undo/redo, manual button), ask the
+// camera composable to frame the new network. The 200ms debounce
+// guards against rapid back-to-back network changes (e.g. reset
+// + immediate OSM load) piling up fit animations.
+const world = useWorldStore();
+let fitTimer: number | null = null;
+const requestFitForCurrent = (): void => {
+  if (fitTimer !== null) clearTimeout(fitTimer);
+  fitTimer = window.setTimeout(() => {
+    fitTimer = null;
+    const bounds = computeNetworkBounds(world.network);
+    if (bounds.diagonal === 0) return;  // empty network, nothing to frame
+    const aspect = canvasRef.value
+      ? canvasRef.value.clientWidth / Math.max(1, canvasRef.value.clientHeight)
+      : 16 / 9;
+    requestFitToNetwork({ bounds, aspect, durationMs: 600 });
+  }, 200);
+};
+watch(() => world.fitRequestTick, () => requestFitForCurrent());
 </script>
 
 <style scoped>

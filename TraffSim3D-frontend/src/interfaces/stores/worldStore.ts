@@ -40,6 +40,7 @@ import { RapierWorld, buildRigidBodySpec } from '@infrastructure/physics';
 import { serializeNetwork, cloneScene, sceneToNetwork, type SerializedScene } from '@infrastructure/persistence';
 import { defaultRLWeights } from '@infrastructure/api';
 import type { PolicyWeights } from '@infrastructure/rl/types';
+import { computeNetworkBounds } from '@domain/services/networkBounds';
 
 export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const;
 
@@ -86,6 +87,15 @@ export const useWorldStore = defineStore('world', () => {
   // through this list. The ladder lives at module scope so the toolbar
   // and shortcut composable can share the same array.
   const tickRate = ref<number>(1);
+
+  // Plan 053: increments every time the network is replaced (initial
+  // load, scene switch, OSM import, undo/redo). Views watch this and
+  // call `requestFitToNetwork()` so the camera frames the new scene
+  // without the user manually panning. Kept as a separate ref so the
+  // fit logic can distinguish "fit because scene changed" from
+  // "fit because user pressed the button" — the latter doesn't need
+  // to re-debounce.
+  const fitRequestTick = ref(0);
 
   // Plan 049: RL replay surface. `policy` is the loaded SB3 PPO weights
   // (null until loadPolicy() succeeds); `replayTargetId` is the vehicle
@@ -153,6 +163,13 @@ export const useWorldStore = defineStore('world', () => {
     replayStep.value = 0;
     replayLastObs.value = [];
     replayLastAction.value = [0, 0];
+  };
+
+  /** Plan 053: bump the fit tick so the editor view asks the camera
+   *  to re-frame the current network. Idempotent — repeated calls
+   *  just reset the same animation. */
+  const requestFit = (): void => {
+    fitRequestTick.value += 1;
   };
 
   // Monotonic simulation time in seconds. Reset to 0 on `reset()`. Used
@@ -770,6 +787,8 @@ export const useWorldStore = defineStore('world', () => {
       }
     }
     bumpTick();  // signal Vue watchers; the renderer will rebuild via identity change
+    // Plan 053: bump fit request so the editor view re-frames the camera.
+    fitRequestTick.value += 1;
     return { ok: true };
   };
 
@@ -930,6 +949,9 @@ export const useWorldStore = defineStore('world', () => {
     startReplay,
     stopReplay,
     clearPolicy,
+    // Plan 053: camera fit
+    fitRequestTick,
+    requestFit,
   };
 });
 

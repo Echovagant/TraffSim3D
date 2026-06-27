@@ -18,6 +18,7 @@ import { focusOnSelection } from './useCameraFocus';
  *   - / _               → tick rate down
  *   Escape              → clear selection
  *   F                   → focus camera on currently selected entity
+ *   Shift+F             → fit camera to entire network (Plan 053)
  *   ?                   → toggle keyboard-shortcuts modal
  */
 export const useEditorShortcuts = (): void => {
@@ -100,7 +101,11 @@ export const useEditorShortcuts = (): void => {
       case 'f':
       case 'F':
         e.preventDefault();
-        if (selection.kind && selection.id) {
+        if (e.shiftKey) {
+          // Plan 053: Shift+F = fit whole network (recover from
+          // getting lost after dragging the camera far away).
+          world.requestFit();
+        } else if (selection.kind && selection.id) {
           focusOnSelection(selection.kind, selection.id, world);
         }
         break;

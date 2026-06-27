@@ -77,6 +77,14 @@
 
     <button title="撤销 (Ctrl+Z)" :disabled="!world.canUndo()" @click="world.undo()">↶ 撤销</button>
     <button title="重做 (Ctrl+Shift+Z)" :disabled="!world.canRedo()" @click="world.redo()">↷ 重做</button>
+    <!-- Plan 053: manual camera-fit. Useful after the user has
+         panned / orbited far from the network and wants to recover,
+         or after importing a new OSM region that auto-fit missed. -->
+    <button
+      title="重新框选整个场景 (F)"
+      data-testid="fit-scene-button"
+      @click="onFitScene"
+    >🎯 适配场景</button>
 
     <span class="sep" />
 
@@ -201,6 +209,14 @@ const onSceneKindChange = (e: Event): void => {
   const v = (e.target as HTMLSelectElement).value as SceneKind;
   world.switchScene(v);
   showFlashMessage(`已切换场景: ${sceneLabel(v)}`, 'info');
+};
+
+/** Plan 053: manual re-fit trigger. Bumps `worldStore.fitRequestTick`,
+ *  which `WorldCanvas` watches and forwards to `requestFitToNetwork`.
+ *  Useful when the user has panned/orbited far from the network
+ *  (e.g. after dragging to inspect a corner) and wants to recover. */
+const onFitScene = (): void => {
+  world.requestFit();
 };
 
 const sceneLabel = (k: SceneKind): string => {
