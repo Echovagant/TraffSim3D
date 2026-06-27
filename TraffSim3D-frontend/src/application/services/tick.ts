@@ -32,6 +32,7 @@ import {
   TRAJECTORY_SAMPLE_INTERVAL,
   DEFAULT_CONTROLLER_KIND,
   VEHICLE_PURE_PURSUIT,
+  PYTHON_SIM_SPEED_LIMIT,
 } from '@shared/constants/simulation';
 import type { RapierWorld, ContactEvent, Vec3 } from '@infrastructure/physics';
 import { findNearestLane } from './laneFrameSync';
@@ -43,6 +44,8 @@ import {
 } from './signalController';
 import type { TrajectoryExporter } from '@infrastructure/export';
 import type { SensorRegistry } from './sensors/SensorRegistry';
+import { mlpForwardMean } from '@infrastructure/rl/mlpInference';
+import type { PolicyAction, PolicyWeights } from '@infrastructure/rl/types';
 
 /** Signal-controller cache + active kind. Built once by worldStore,
  *  passed by reference each tick. tick() never mutates this object —
@@ -78,6 +81,16 @@ export interface TickContext {
    *  load replaced the network while a vehicle still held a stale
    *  roadId). Wired by worldStore.addTickContext(). */
   removeVehicle: (vehicleId: string) => void;
+  /** Plan 049: optional loaded RL policy (SB3 PPO MlpPolicy weights).
+   *  When non-null AND `replayTargetId` is set, tick() drives the
+   *  target vehicle's `targetSpeed` from a PPO inference each step.
+   *  When null, replay is disabled regardless of `replayTargetId`. */
+  policy: PolicyWeights | null;
+  /** Plan 049: id of the vehicle currently being controlled by the
+   *  loaded policy. When null, no replay this tick. When non-null,
+   *  the constraint layers (light / car-follow) skip this vehicle —
+   *  PPO learned to handle them via its obs. */
+  replayTargetId: string | null;
 }
 
 export const tick = (
@@ -130,13 +143,43 @@ export const tick = (
   // 2. Stamp each vehicle's intersection-entry time (M1.5 — keep).
   updateIntersectionEntry(network, simTime);
 
+  // 2.5. (Plan 049) RL replay override. When a policy + replay target
+  //      are set, build a 13-dim obs matching Python's `SimCore._obs()`,
+  //      run the in-browser MlpPolicy forward pass, and write the
+  //      resulting accel straight into the target's `targetSpeed`. The
+  //      constraint layer below skips the target (it would otherwise
+  //      veto PPO's accel at red lights / follower distances — PPO
+  //      learned to handle these via the obs's [6:8] light bits and
+  //      [8:13] NPC-distance bits).
+  if (ctx.policy && ctx.replayTargetId) {
+    const replayV = network.vehicles[ctx.replayTargetId];
+    if (replayV) {
+      const obs = buildReplayObs(replayV, network);
+      const action = mlpForwardMean(obs, ctx.policy);
+      // Python maps action[0] ∈ [-1, 1] → accel_cmd ∈ [-3, 3] m/s².
+      const accelCmd = action[0] * 3.0;
+      const nextSpeed = Math.max(
+        0,
+        Math.min(PYTHON_SIM_SPEED_LIMIT, replayV.speed + accelCmd * dt),
+      );
+      replayV.targetSpeed = nextSpeed;
+      // Surface to the AI Playground UI on next refresh.
+      if (typeof window !== 'undefined') {
+        const w = window as unknown as {
+          __replayLast?: { obs: number[]; action: PolicyAction; step: number };
+        };
+        w.__replayLast = { obs, action, step: simTime };
+      }
+    }
+  }
+
   // 3. Compute each vehicle's target speed (light + leader).
   for (const v of Object.values(network.vehicles)) {
     const road = network.roads[v.roadId];
     if (!road) continue;
     v.targetSpeed = road.speedLimit;
-    applyTrafficLightConstraint(v, road, network);
-    applyCarFollowingConstraint(v, road, network);
+    applyTrafficLightConstraint(v, road, network, ctx);
+    applyCarFollowingConstraint(v, road, network, ctx);
   }
 
   // 3.5. (Plan 037 bug 2) Controller → desiredStatus. We compute the
@@ -373,7 +416,9 @@ const updateIntersectionEntry = (network: RoadNetwork, simTime: number): void =>
 };
 
 /** M1 复制 — 红灯/黄灯 prepare-to-stop 逻辑 (M2-B 仍要用). */
-const applyTrafficLightConstraint = (v: Vehicle, road: Road, network: RoadNetwork): void => {
+const applyTrafficLightConstraint = (v: Vehicle, road: Road, network: RoadNetwork, ctx: TickContext) => {
+  // Plan 049: replay target handles lights itself via obs.
+  if (ctx.replayTargetId && v.id === ctx.replayTargetId) return;
   const len = roadLength(road);
   for (const inter of Object.values(network.intersections)) {
     if (!inter.connectedRoads.includes(road.id)) continue;
@@ -415,7 +460,9 @@ const applyTrafficLightConstraint = (v: Vehicle, road: Road, network: RoadNetwor
 };
 
 /** M1 复制 — Newell car-following. */
-const applyCarFollowingConstraint = (v: Vehicle, road: Road, network: RoadNetwork): void => {
+const applyCarFollowingConstraint = (v: Vehicle, road: Road, network: RoadNetwork, ctx: TickContext) => {
+  // Plan 049: replay target handles follower distance via obs.
+  if (ctx.replayTargetId && v.id === ctx.replayTargetId) return;
   const sign = laneForwardSign(v.laneIndex, road.laneCount);
   let bestGap = Infinity;
   let leader: Vehicle | null = null;
@@ -487,3 +534,71 @@ const classifyContacts = (network: RoadNetwork, events: ReadonlyArray<ContactEve
 // DEFAULT_CONTROLLER_KIND re-exported so existing callers can still import
 // from this module without touching the shared constants path.
 export { DEFAULT_CONTROLLER_KIND };
+
+// ===== Plan 049: RL replay obs builder =====
+//
+// Mirror of Python `SimCore._obs()` so the in-browser MlpPolicy sees
+// the same 13-dim input it was trained against. Offsets (50m for
+// positions, π for heading, 16.67 m/s for speed, 50m for NPC distance)
+// MUST stay in sync with the Python sim — PPO is sensitive to scaling
+// and will drive erratically if they diverge.
+
+const OBS_DIM = 13;
+const NORMALIZE_DIST = 50.0;
+
+/** Build the 13-dim observation vector for the replay target.
+ *
+ *  Layout (matches Python `SimCore._obs()`):
+ *    [0:3] ego pose normalized  (x/50, z/50, heading/π)
+ *    [3:6] ego motion           (speed/16.67, 0, 0)
+ *    [6:8] traffic light        (NS-green, EW-green)
+ *    [8:13] 5 nearest NPC distances / 50, padded with 1.0
+ */
+const buildReplayObs = (ego: Vehicle, network: RoadNetwork): number[] => {
+  const obs = new Array<number>(OBS_DIM).fill(0);
+  obs[0] = Math.max(-1, Math.min(1, ego.position.x / NORMALIZE_DIST));
+  obs[1] = Math.max(-1, Math.min(1, ego.position.z / NORMALIZE_DIST));
+  obs[2] = ego.heading / Math.PI;
+  obs[3] = Math.max(0, Math.min(1, ego.speed / PYTHON_SIM_SPEED_LIMIT));
+  obs[4] = 0;  // accel placeholder (Python: not used by PPO)
+  obs[5] = 0;  // steer placeholder (Python: not used by PPO)
+
+  // Traffic light: pick the controlling light for ego's axis.
+  const egoRoad = network.roads[ego.roadId];
+  if (egoRoad) {
+    for (const inter of Object.values(network.intersections)) {
+      if (!inter.connectedRoads.includes(egoRoad.id)) continue;
+      // roadIsNS = NS road if z-extent > x-extent (Plan 035).
+      const roadIsNS = Math.abs(egoRoad.endNode.z - egoRoad.startNode.z)
+        > Math.abs(egoRoad.endNode.x - egoRoad.startNode.x);
+      for (const light of inter.trafficLights) {
+        const matchesAxis = (roadIsNS && light.axis === 'ns')
+          || (!roadIsNS && light.axis === 'ew');
+        if (!matchesAxis) continue;
+        if (roadIsNS) {
+          obs[6] = light.phase === LightPhase.Green ? 1 : 0;
+        } else {
+          obs[7] = light.phase === LightPhase.Green ? 1 : 0;
+        }
+        break;
+      }
+      break;  // first intersection matching ego's road
+    }
+  }
+
+  // 5 nearest NPC distances, sorted ascending, padded with 50 (so /50=1.0).
+  const distances: number[] = [];
+  for (const v of Object.values(network.vehicles)) {
+    if (v.id === ego.id) continue;
+    distances.push(Math.hypot(
+      ego.position.x - v.position.x,
+      ego.position.z - v.position.z,
+    ));
+  }
+  distances.sort((a, b) => a - b);
+  while (distances.length < 5) distances.push(NORMALIZE_DIST);
+  for (let i = 0; i < 5; i++) {
+    obs[8 + i] = Math.min(1, (distances[i] ?? NORMALIZE_DIST) / NORMALIZE_DIST);
+  }
+  return obs;
+};

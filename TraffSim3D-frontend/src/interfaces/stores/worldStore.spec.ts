@@ -13,11 +13,16 @@
 // test pins the contract: `switchScene('t')` must produce a network
 // whose `roads` / `intersections` / `vehicles` come from the T
 // factory, and `currentSceneKind` must update.
+//
+// Plan 049: adds RL replay surface tests (loadPolicy / startReplay /
+// stopReplay / clearPolicy) below.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useWorldStore } from './worldStore';
 import { buildCrossIntersectionNetwork, buildTJunctionNetwork, buildRectangularLoopNetwork } from '@application/services/defaultScene';
+import fixture from '@infrastructure/rl/fixtures/mlp-policy-fixture.json';
+import type { PolicyWeights } from '@infrastructure/rl/types';
 
 describe('worldStore.switchScene', () => {
   beforeEach(() => {
@@ -59,5 +64,112 @@ describe('worldStore.switchScene', () => {
     world.switchScene('loop');
     expect(world.currentSceneKind).toBe('loop');
     expect(Object.keys(world.network.vehicles).length).toBe(8);
+  });
+});
+
+describe('worldStore.replay (Plan 049)', () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    fetchSpy = vi.fn();
+    (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const fakeWeights: PolicyWeights = {
+    name: 'ppo_step_0005000.zip',
+    obs_dim: 13,
+    action_dim: 2,
+    hidden_sizes: [64, 64],
+    layers: fixture.weights as PolicyWeights['layers'],
+  };
+
+  /** Mock Response for httpClient — httpClient calls `res.text()`
+   *  first (not `res.json()`), so we need to provide a text() too. */
+  const mockResponse = (body: unknown, status = 200): Response => {
+    const text = JSON.stringify(body);
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? 'OK' : 'Err',
+      text: async () => text,
+      json: async () => body,
+    } as unknown as Response;
+  };
+
+  it('loadPolicy fetches /weights endpoint and stores the weights', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(fakeWeights));
+    const world = useWorldStore();
+    const r = await world.loadPolicy('ppo_step_0005000.zip');
+    if (!r.ok) {
+      throw new Error(`loadPolicy failed: ${r.reason}`);
+    }
+    expect(r.ok).toBe(true);
+    expect(r.obs_dim).toBe(13);
+    expect(r.action_dim).toBe(2);
+    expect(world.policy?.name).toBe('ppo_step_0005000.zip');
+    const callArgs = fetchSpy.mock.calls[0] ?? [];
+    expect(String(callArgs[0])).toContain(
+      '/api/v1/rl/checkpoints/ppo_step_0005000.zip/weights',
+    );
+  });
+
+  it('loadPolicy returns ok=false when fetch 404s', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse({}, 404));
+    const world = useWorldStore();
+    const r = await world.loadPolicy('missing.zip');
+    expect(r.ok).toBe(false);
+    expect(world.policy).toBeNull();
+  });
+
+  it('startReplay requires both policy + target vehicle', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(fakeWeights));
+    const world = useWorldStore();
+    // No policy, no target → reject.
+    expect(world.startReplay().ok).toBe(false);
+    // Load policy, but no target → still reject.
+    await world.loadPolicy('ppo_step_0005000.zip');
+    expect(world.startReplay().ok).toBe(false);
+    // Set target → start succeeds.
+    world.setReplayTarget('v-1');
+    expect(world.startReplay().ok).toBe(true);
+    expect(world.replayActive).toBe(true);
+  });
+
+  it('stopReplay flips replayActive off', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(fakeWeights));
+    const world = useWorldStore();
+    await world.loadPolicy('ppo_step_0005000.zip');
+    world.setReplayTarget('v-1');
+    world.startReplay();
+    world.stopReplay();
+    expect(world.replayActive).toBe(false);
+  });
+
+  it('clearPolicy wipes policy + target + active flag', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(fakeWeights));
+    const world = useWorldStore();
+    await world.loadPolicy('ppo_step_0005000.zip');
+    world.setReplayTarget('v-1');
+    world.startReplay();
+    world.clearPolicy();
+    expect(world.policy).toBeNull();
+    expect(world.replayTargetId).toBeNull();
+    expect(world.replayActive).toBe(false);
+  });
+
+  it('switchScene clears any loaded policy (no stale target drives new scene)', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(fakeWeights));
+    const world = useWorldStore();
+    await world.loadPolicy('ppo_step_0005000.zip');
+    world.setReplayTarget('v-1');
+    world.startReplay();
+    world.switchScene('t');
+    expect(world.policy).toBeNull();
+    expect(world.replayActive).toBe(false);
   });
 });

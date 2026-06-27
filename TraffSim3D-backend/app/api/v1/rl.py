@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.apps.rl import capabilities as rl_caps
@@ -96,3 +96,33 @@ async def prune_checkpoints() -> dict[str, Any]:
 async def list_scenes() -> dict[str, Any]:
     """List supported sim scene kinds (Plan 048)."""
     return {"scenes": ["cross", "corridor"]}
+
+
+@router.get("/rl/checkpoints/{name}/weights", tags=["rl"])
+async def get_checkpoint_weights(name: str) -> dict[str, Any]:
+    """Plan 049: export a saved PPO checkpoint as JSON-serializable weights.
+
+    The frontend uses this to instantiate an in-browser MlpPolicy for
+    replay (see `src/infrastructure/rl/mlpInference.ts`). Returns the
+    policy `state_dict()` flattened to nested lists + architecture
+    metadata (`obs_dim`, `action_dim`, `hidden_sizes`).
+
+    Errors:
+      - 404: checkpoint file not found
+      - 503: SB3 / torch not installed (run `uv sync --extra rl`)
+    """
+    from app.apps.rl.weights import WeightsUnavailableError, export_weights
+
+    # Look up the checkpoint across all per-process subdirs.
+    matches = [c for c in rl_ckpt.list_checkpoints() if c["name"] == name]
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"checkpoint not found: {name}")
+    ckpt_dir = rl_ckpt.get_checkpoint_dir()
+    path = ckpt_dir / matches[0]["process"] / name
+    if not path.exists():
+        # list_checkpoints returned stale metadata — surface 404 rather than 500.
+        raise HTTPException(status_code=404, detail=f"checkpoint file missing: {name}")
+    try:
+        return export_weights(path)
+    except WeightsUnavailableError as e:
+        raise HTTPException(status_code=503, detail=f"weights unavailable: {e}") from e

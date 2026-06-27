@@ -139,3 +139,83 @@ async def test_train_accepts_scene_kind_corridor(client: AsyncClient) -> None:
     assert body["scene_kind"] == "corridor"
     r2 = await client.get("/api/v1/rl/status")
     assert r2.json()["scene_kind"] == "corridor"
+
+
+@pytest.mark.asyncio
+async def test_weights_endpoint_404_for_missing_checkpoint(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    """Plan 049: GET /weights with a name not in the list returns 404."""
+    from app.apps.rl import checkpoint as ckpt
+    monkeypatch.setattr(ckpt, "_DEFAULT_DIR", tmp_path / "nonexistent")
+    r = await client.get("/api/v1/rl/checkpoints/nonexistent.zip/weights")
+    assert r.status_code == 404
+    assert "not found" in r.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_weights_endpoint_returns_json_for_existing_checkpoint(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    """Plan 049: GET /weights for a real SB3 .zip returns architecture + layers."""
+    # Save a tiny PPO model directly to tmp and point the checkpoint
+    # module at it. We use a fresh model (not the full train pipeline)
+    # because that takes seconds; the weights layout is identical.
+    from stable_baselines3 import PPO
+
+    from app.apps.rl import checkpoint as ckpt
+    from app.apps.rl.env import TrafficEnv
+    env = TrafficEnv()
+    model = PPO("MlpPolicy", env, verbose=0, n_steps=64)
+    target = tmp_path / "pid9999" / "ppo_step_0000064.zip"
+    target.parent.mkdir(parents=True)
+    model.save(str(target))
+
+    monkeypatch.setattr(ckpt, "_DEFAULT_DIR", tmp_path)
+    r = await client.get(
+        "/api/v1/rl/checkpoints/ppo_step_0000064.zip/weights"
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "ppo_step_0000064.zip"
+    assert body["obs_dim"] == 13
+    assert body["action_dim"] == 2
+    assert body["hidden_sizes"] == [64, 64]
+    layers = body["layers"]
+    # PyTorch nn.Linear stores (out, in); shapes match the verified layout.
+    assert len(layers["policy_net.0.weight"]) == 64
+    assert len(layers["policy_net.0.weight"][0]) == 13
+    assert len(layers["policy_net.0.bias"]) == 64
+    assert len(layers["policy_net.2.weight"]) == 64
+    assert len(layers["policy_net.2.weight"][0]) == 64
+    assert len(layers["action_net.weight"]) == 2
+    assert len(layers["action_net.weight"][0]) == 64
+    assert len(layers["action_net.bias"]) == 2
+    assert len(layers["log_std"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_weights_endpoint_503_when_sb3_missing(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    """Plan 049: when SB3 is uninstalled, GET /weights returns 503."""
+    from app.apps.rl import checkpoint as ckpt
+    # Drop a stub .zip in the checkpoint dir (no SB3 needed for the list),
+    # then monkeypatch export_weights to raise WeightsUnavailable.
+    target = tmp_path / "pid9999" / "ppo_step_0000064.zip"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"PK\x03\x04")  # zip magic header (will never be opened)
+    monkeypatch.setattr(ckpt, "_DEFAULT_DIR", tmp_path)
+
+    from app.apps.rl import weights as rl_weights
+    from app.apps.rl.weights import WeightsUnavailableError
+
+    def _raise(_p):
+        raise WeightsUnavailableError("stable-baselines3 not installed")
+    monkeypatch.setattr(rl_weights, "export_weights", _raise)
+
+    r = await client.get(
+        "/api/v1/rl/checkpoints/ppo_step_0000064.zip/weights"
+    )
+    assert r.status_code == 503
+    assert "unavailable" in r.json()["detail"].lower()

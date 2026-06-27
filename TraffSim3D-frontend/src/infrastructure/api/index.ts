@@ -11,9 +11,12 @@ export { createHttpClient, BackendError } from './httpClient';
 export type { HttpClient, HttpClientOptions } from './httpClient';
 export { createBackendService } from './backendService';
 export type { BackendService, HealthResponse, PingResponse } from './backendService';
+export { createRLWeightsClient } from './rlWeightsClient';
+export type { CheckpointWeightsResponse, RLWeightsClient } from './rlWeightsClient';
 
 import { createHttpClient } from './httpClient';
 import { createBackendService } from './backendService';
+import { createRLWeightsClient } from './rlWeightsClient';
 
 // Versioned API surface (proxied to FastAPI at /api/v1/*).
 export const defaultHttp = createHttpClient();
@@ -21,3 +24,5 @@ export const defaultHttp = createHttpClient();
 // No prefix so `health()` resolves to `/health`, not `/api/v1/health`.
 export const metaHttp = createHttpClient('');
 export const defaultBackend = createBackendService(defaultHttp, metaHttp);
+// Plan 049: default RL weights client — same /api/v1 prefix as the rest.
+export const defaultRLWeights = createRLWeightsClient(defaultHttp);

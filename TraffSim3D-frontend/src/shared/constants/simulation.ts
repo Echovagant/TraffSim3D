@@ -142,6 +142,14 @@ export const MAX_SPEED = 35;  // m/s ≈ 126 km/h
 /** Stop line offset from intersection center, in world units along the road. */
 export const STOP_LINE_DISTANCE = 5.0;
 /**
+ * Plan 049: Python sim speed limit (60 km/h, m/s). The Python RL sim
+ * (`app/apps/rl/sim_core.py`) normalizes obs[3] (ego speed) by this
+ * value. The TS replay must use the SAME denominator or PPO sees
+ * "smaller than trained" speeds and drives erratically. Differs from
+ * `MAX_SPEED` (126 km/h) which is the TS Rapier / hand-rolled cap.
+ */
+export const PYTHON_SIM_SPEED_LIMIT = 16.67;
+/**
  * How early the traffic-light brake kicks in, on top of the physical
  * braking distance `v²/(2a)`. Models the "I saw the light and
  * started slowing well before I had to" human behaviour, and gives a

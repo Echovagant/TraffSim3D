@@ -38,6 +38,8 @@ import { saveScene, loadScene, clearScene } from '@application/use-cases';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
 import { RapierWorld, buildRigidBodySpec } from '@infrastructure/physics';
 import { serializeNetwork, cloneScene, sceneToNetwork, type SerializedScene } from '@infrastructure/persistence';
+import { defaultRLWeights } from '@infrastructure/api';
+import type { PolicyWeights } from '@infrastructure/rl/types';
 
 export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const;
 
@@ -84,6 +86,74 @@ export const useWorldStore = defineStore('world', () => {
   // through this list. The ladder lives at module scope so the toolbar
   // and shortcut composable can share the same array.
   const tickRate = ref<number>(1);
+
+  // Plan 049: RL replay surface. `policy` is the loaded SB3 PPO weights
+  // (null until loadPolicy() succeeds); `replayTargetId` is the vehicle
+  // being driven by the policy; `replayActive` is the toggle so the user
+  // can load + dry-run without affecting the sim. `replayStep` counts
+  // inference ticks (debug readout for the AI Playground).
+  const policy = ref<PolicyWeights | null>(null);
+  const replayTargetId = ref<string | null>(null);
+  const replayActive = ref(false);
+  const replayStep = ref(0);
+  const replayLastObs = ref<number[]>([]);
+  const replayLastAction = ref<[number, number]>([0, 0]);
+
+  /** Fetch the named checkpoint's weights via the backend and store
+   *  them for replay. Returns `{ ok, ... }` so the caller can flash
+   *  an error on failure (e.g. 404 / 503 / network). */
+  const loadPolicy = async (
+    name: string,
+  ): Promise<
+    | { ok: true; obs_dim: number; action_dim: number }
+    | { ok: false; reason: string }
+  > => {
+    try {
+      const w = await defaultRLWeights.getCheckpointWeights(name);
+      // Type-narrowing via duck-typing — the backend shape is fixed
+      // by `app/apps/rl/weights.py::export_weights`.
+      policy.value = w;
+      replayStep.value = 0;
+      return { ok: true, obs_dim: w.obs_dim, action_dim: w.action_dim };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, reason: msg };
+    }
+  };
+
+  /** Set which vehicle the loaded policy will drive on the next
+   *  `startReplay()`. Does not auto-start replay — explicit user
+   *  click required. */
+  const setReplayTarget = (vehicleId: string | null): void => {
+    replayTargetId.value = vehicleId;
+  };
+
+  /** Begin driving `replayTargetId` with the loaded policy. Returns
+   *  `{ ok: false, reason }` if policy isn't loaded or no target is
+   *  set — caller should surface the reason via a flash message. */
+  const startReplay = (): { ok: true } | { ok: false; reason: string } => {
+    if (!policy.value) return { ok: false, reason: 'no_policy_loaded' };
+    if (!replayTargetId.value) return { ok: false, reason: 'no_target_vehicle' };
+    replayActive.value = true;
+    replayStep.value = 0;
+    return { ok: true };
+  };
+
+  /** Stop driving the replay target (falls back to normal Rapier control). */
+  const stopReplay = (): void => {
+    replayActive.value = false;
+  };
+
+  /** Drop the loaded policy + target + state. Called on scene switch
+   *  / reset so a stale policy never drives the wrong network. */
+  const clearPolicy = (): void => {
+    policy.value = null;
+    replayActive.value = false;
+    replayTargetId.value = null;
+    replayStep.value = 0;
+    replayLastObs.value = [];
+    replayLastAction.value = [0, 0];
+  };
 
   // Monotonic simulation time in seconds. Reset to 0 on `reset()`. Used
   // by tick() to stamp `Vehicle.enteredIntersectionAt` so the cross-road
@@ -365,6 +435,12 @@ export const useWorldStore = defineStore('world', () => {
       draggingId,
       removeVehicle,  // Plan 034: OOB cleanup entry point
       fixedStepScheduler,  // Plan 038: drives trajectory export at 10 Hz
+      // Plan 049: pass policy + replay target to tick. tick() reads
+      // `replayTargetId` and computes obs + inference each step. The
+      // store keeps the always-current refs so flipping `replayActive`
+      // takes effect on the very next tick.
+      policy: policy.value,
+      replayTargetId: replayActive.value ? replayTargetId.value : null,
     });
     if (lidarEnabled.value && rapierWorld) {
       // Bump the frame counter for the DebugPanel readout. We can't
@@ -426,6 +502,9 @@ export const useWorldStore = defineStore('world', () => {
         rapierWorld.removeVehicle(id);
       }
     }
+    // Plan 049: clear any loaded RL policy so it can't drive the
+    // fresh network's vehicles with stale target ids.
+    clearPolicy();
     history = [];
     redoStack = [];
     controllers = new Map();
@@ -657,6 +736,10 @@ export const useWorldStore = defineStore('world', () => {
         rapierWorld.removeVehicle(id);
       }
     }
+    // Plan 049: same as reset() — never let a stale policy drive the
+    // new network's vehicles. The user's selected replay target id may
+    // not even exist in the loaded scene.
+    clearPolicy();
     // Plan 035: assign via .value so Pinia's auto-unwrap on the store
     // surfaces the new network to EntityOutline, InspectorPanel, etc.
     network.value = next;
@@ -835,6 +918,18 @@ export const useWorldStore = defineStore('world', () => {
     coordinatedOffsetsEnabled,
     setCoordinatedOffset,
     toggleCoordinatedOffsets,
+    // Plan 049: RL replay surface
+    policy,
+    replayTargetId,
+    replayActive,
+    replayStep,
+    replayLastObs,
+    replayLastAction,
+    loadPolicy,
+    setReplayTarget,
+    startReplay,
+    stopReplay,
+    clearPolicy,
   };
 });
 

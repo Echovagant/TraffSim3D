@@ -171,19 +171,103 @@
         </li>
       </ul>
     </section>
+
+    <!-- Plan 049: RL replay surface — load a trained PPO checkpoint
+         and watch it drive one of the sim vehicles in the editor. -->
+    <section class="card">
+      <h2>策略部署 (Replay)</h2>
+      <div class="control-row">
+        <label class="ctrl">
+          Checkpoint
+          <select
+            v-model="replayCkptName"
+            data-testid="ckpt-replay-select"
+          >
+            <option value="">— 选择 —</option>
+            <option v-for="c in checkpoints" :key="c.name" :value="c.name">
+              {{ c.name }} · {{ c.size_kb }}KB
+            </option>
+          </select>
+        </label>
+        <button
+          class="ghost"
+          :disabled="!replayCkptName || policyLoading"
+          data-testid="load-policy-button"
+          @click="onLoadPolicy"
+        >{{ policyLoading ? '加载中…' : '加载' }}</button>
+        <button
+          class="ghost"
+          :disabled="!world.policy"
+          data-testid="clear-policy-button"
+          @click="onClearPolicy"
+        >清除</button>
+      </div>
+      <p class="muted small" data-testid="policy-status">
+        <template v-if="world.policy">
+          ✓ 已加载 <code>{{ world.policy.name }}</code>
+          ({{ world.policy.obs_dim }} obs / {{ world.policy.action_dim }} act)
+        </template>
+        <template v-else>未加载 — 先跑一次训练,再选 checkpoint 加载。</template>
+      </p>
+
+      <div class="control-row">
+        <label class="ctrl">
+          目标车辆
+          <select v-model="replayTarget" data-testid="replay-target-select">
+            <option v-for="vid in availableVehicles" :key="vid" :value="vid">
+              {{ vid }}
+            </option>
+          </select>
+        </label>
+        <button
+          class="primary"
+          :disabled="!canStartReplay"
+          data-testid="start-replay-button"
+          @click="onStartReplay"
+        >▶ 开始回放</button>
+        <button
+          class="ghost"
+          :disabled="!replayActive"
+          data-testid="stop-replay-button"
+          @click="onStopReplay"
+        >⏸ 停止</button>
+      </div>
+
+      <div class="replay-status" data-testid="replay-status">
+        <div class="metric-row">
+          <span>状态</span>
+          <strong data-testid="replay-state">{{ replayActive ? '运行中' : (world.policy ? '已加载 (待启动)' : '未加载') }}</strong>
+        </div>
+        <div class="metric-row">
+          <span>Replayed steps</span>
+          <strong data-testid="replay-step">{{ replayStep }}</strong>
+        </div>
+      </div>
+
+      <details v-if="replayLastObs.length > 0" class="replay-detail">
+        <summary>最近 obs / action</summary>
+        <p class="muted small">obs (13-dim):</p>
+        <code data-testid="replay-obs" class="obs">{{ formatObs(replayLastObs) }}</code>
+        <p class="muted small">action (2-dim):</p>
+        <code data-testid="replay-action" class="obs">{{ formatAction(replayLastAction) }}</code>
+      </details>
+      <p v-if="error" class="err" data-testid="replay-error">{{ error }}</p>
+    </section>
   </main>
 </template>
 
 <script setup lang="ts">
 /**
  * Plan 044: AI Playground — single-agent training dashboard.
- *
- * Polls /api/v1/rl/status every 2s after starting a training run.
- * Renders reward history as a pure SVG polyline (no canvas — easier
- * for Playwright to assert).
+ * Plan 045: checkpoint management UI.
+ * Plan 047: per-agent reward rendering.
+ * Plan 048: scene-kind selector.
+ * Plan 049: RL replay surface — load a PPO checkpoint and drive one
+ *   vehicle in the TS sim from the policy's actions.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
+import { useWorldStore } from '@interfaces/stores/worldStore';
 
 interface Status {
   running: boolean;
@@ -243,6 +327,78 @@ const checkpoints = ref<Checkpoint[]>([]);
 const checkpointsVisible = ref(false);
 
 const caps = ref<Capabilities | null>(null);
+
+// Plan 049: RL replay state. The store owns the loaded policy; this
+// view just collects the user's intent (which checkpoint, which target)
+// and pipes actions to the store.
+const world = useWorldStore();
+const replayActive = computed(() => world.replayActive);
+const replayStep = computed(() => world.replayStep);
+const replayLastObs = computed(() => world.replayLastObs);
+const replayLastAction = computed(() => world.replayLastAction);
+
+const replayCkptName = ref('');
+const replayTarget = ref('v-1');
+const policyLoading = ref(false);
+const replayError = ref<string | null>(null);
+
+// Read available vehicle IDs from the world store's network (the
+// dev hook `window.__world` mirrors it; not used here — Pinia store
+// is the source of truth). Refreshed on mount + whenever `tickCount`
+// changes (so adding/removing vehicles updates the dropdown).
+const availableVehicles = computed<string[]>(() => {
+  // Reading tickCount establishes a reactive dep, so this re-evaluates
+  // on network mutations.
+  void world.tickCount;
+  return Object.keys(world.network.vehicles).sort();
+});
+
+const canStartReplay = computed(() => Boolean(world.policy) && Boolean(replayTarget.value) && !replayActive.value);
+
+const onLoadPolicy = async (): Promise<void> => {
+  replayError.value = null;
+  if (!replayCkptName.value) return;
+  policyLoading.value = true;
+  try {
+    const r = await world.loadPolicy(replayCkptName.value);
+    if (!r.ok) {
+      replayError.value = r.reason;
+      showFlashMessage(`加载失败: ${r.reason}`, 'error');
+      return;
+    }
+    showFlashMessage(`策略已加载: ${replayCkptName.value}`, 'info');
+  } finally {
+    policyLoading.value = false;
+  }
+};
+
+const onStartReplay = (): void => {
+  replayError.value = null;
+  world.setReplayTarget(replayTarget.value);
+  const r = world.startReplay();
+  if (!r.ok) {
+    replayError.value = r.reason;
+    showFlashMessage(`回放启动失败: ${r.reason}`, 'error');
+    return;
+  }
+  showFlashMessage(`开始回放 — 目标: ${replayTarget.value}`, 'info');
+};
+
+const onStopReplay = (): void => {
+  world.stopReplay();
+  showFlashMessage('回放已停止', 'info');
+};
+
+const onClearPolicy = (): void => {
+  world.clearPolicy();
+  replayCkptName.value = '';
+  showFlashMessage('策略已清除', 'info');
+};
+
+const formatObs = (obs: readonly number[]): string =>
+  obs.map((x) => x.toFixed(3)).join(', ');
+const formatAction = (a: readonly [number, number]): string =>
+  `accel=${a[0].toFixed(3)}, steer=${a[1].toFixed(3)}`;
 const gpuAvailable = computed(() => caps.value?.cuda_available === true);
 const gpuDeviceName = computed(() => caps.value?.device_name ?? '');
 const capabilitiesNote = computed(() => {
@@ -263,6 +419,7 @@ const capabilitiesNote = computed(() => {
 const chartW = 600;
 const chartH = 120;
 let pollHandle: number | null = null;
+let replayMirrorHandle: number | null = null;
 
 const maxReward = computed(() => status.value.reward_history.length === 0
   ? 0
@@ -423,10 +580,26 @@ onMounted(() => {
   refreshCapabilities();
   refreshStatus();
   pollHandle = window.setInterval(refreshStatus, 2000);
+  // Plan 049: poll `window.__replayLast` (set by tick.ts on each
+  // replay inference) and copy into the store so the replay-status
+  // panel updates. 4 Hz is plenty for human-readable debug.
+  replayMirrorHandle = window.setInterval(() => {
+    const w = window as unknown as {
+      __replayLast?: { obs: number[]; action: [number, number]; step: number };
+    };
+    if (w.__replayLast) {
+      world.replayLastObs = [...w.__replayLast.obs];
+      world.replayLastAction = [...w.__replayLast.action] as [number, number];
+      world.replayStep = world.replayStep + 1;
+    }
+  }, 250);
 });
 onBeforeUnmount(() => {
   if (pollHandle !== null) {
     clearInterval(pollHandle);
+  }
+  if (replayMirrorHandle !== null) {
+    clearInterval(replayMirrorHandle);
   }
 });
 </script>
@@ -478,4 +651,16 @@ button.ghost:disabled { opacity: 0.4; cursor: not-allowed; }
 .chart { background: #1e293b; border-radius: 6px; width: 100%; height: auto; }
 .muted { color: #94a3b8; font-size: 13px; margin: 0; }
 .muted.small { font-size: 11px; margin-top: 6px; }
+
+/* Plan 049: RL replay surface styling. */
+.replay-status { display: flex; gap: 24px; margin-top: 12px; flex-wrap: wrap; }
+.metric-row { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: #94a3b8; }
+.metric-row strong { font-size: 14px; color: #f1f5f9; font-weight: 600; }
+.replay-detail { margin-top: 10px; font-size: 12px; }
+.replay-detail summary { cursor: pointer; color: #cbd5e1; }
+.replay-detail code.obs {
+  display: block; padding: 8px 10px; background: #1e293b; border-radius: 4px;
+  color: #fbbf24; font-size: 11px; word-break: break-all; line-height: 1.5;
+  margin-top: 4px;
+}
 </style>
