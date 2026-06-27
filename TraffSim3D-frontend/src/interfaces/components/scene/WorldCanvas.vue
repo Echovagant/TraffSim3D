@@ -28,9 +28,6 @@ const containerRef = ref<HTMLDivElement | null>(null);
 // (see the patch below). We mirror it into a shallowRef so Vue tracks the change.
 const { isReady, getRenderer } = useWorldSimulation(canvasRef);
 const rendererRef = shallowRef<ThreeJSRenderer | null>(null);
-watch(isReady, (ready) => {
-  if (ready) rendererRef.value = getRenderer();
-});
 useCameraControls(canvasRef, rendererRef);
 const { handleMouseDown, handleMouseMove, handleMouseUp } = useEditor(rendererRef);
 
@@ -53,6 +50,19 @@ const requestFitForCurrent = (): void => {
     requestFitToNetwork({ bounds, aspect, durationMs: 600 });
   }, 200);
 };
+
+// Watch isReady to trigger the FIRST fit once the renderer + OrbitControls
+// are wired up. Without this, the camera sits at ThreeJSRenderer's
+// default (40, 35, 40) until the user manually clicks "适配场景"
+// (Plan 053 follow-up: Playwright caught this bug — initial distance
+// 66.5m = default camera position, not the bbox-derived fit distance).
+watch(isReady, (ready) => {
+  if (ready) {
+    rendererRef.value = getRenderer();
+    requestFitForCurrent();
+  }
+});
+// Subsequent fits: scene switch, OSM import, undo/redo, manual button.
 watch(() => world.fitRequestTick, () => requestFitForCurrent());
 </script>
 

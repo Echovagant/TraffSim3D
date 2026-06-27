@@ -43,6 +43,31 @@ export const useCameraControls = (
       //    blocks the future "right-click to focus on point" feature.
       // Left-drag still orbits the camera around the target.
       renderer.attachControls(controls);
+      // Plan 053 follow-up: expose camera state for Playwright tests.
+      // Same DEV-only pattern as window.__world — Vite tree-shakes
+      // this out of production bundles.
+      if (import.meta.env.DEV && typeof window !== 'undefined') {
+        const w = window as unknown as {
+          __camera?: () => {
+            position: { x: number; y: number; z: number };
+            target: { x: number; y: number; z: number };
+            distance: number;
+            minDistance: number;
+            maxDistance: number;
+          };
+        };
+        w.__camera = () => ({
+          position: {
+            x: controls!.object.position.x,
+            y: controls!.object.position.y,
+            z: controls!.object.position.z,
+          },
+          target: { x: controls!.target.x, y: controls!.target.y, z: controls!.target.z },
+          distance: controls!.object.position.distanceTo(controls!.target),
+          minDistance: controls!.minDistance,
+          maxDistance: controls!.maxDistance,
+        });
+      }
     },
     { immediate: true },
   );
@@ -122,14 +147,20 @@ export const useCameraControls = (
     const safeDistance = Math.max(distance, bounds.diagonal * 0.5);
     // Zoom limits — wide enough to frame the whole district OR dive
     // into a single intersection. Allow ~1000× dynamic range.
-    zoomMin = Math.max(1, bounds.diagonal * 0.005);
-    zoomMax = Math.max(zoomMin * 10, bounds.diagonal * 8);
+    // The 0.002 minimum zoom-in is small enough to dive into any road
+    // detail (a single lane is ~3.5m wide; 5m keeps the lane in view).
+    zoomMin = Math.max(5, bounds.diagonal * 0.002);
+    zoomMax = Math.max(zoomMin * 50, bounds.diagonal * 10);
     c.minDistance = zoomMin;
     c.maxDistance = zoomMax;
 
-    // Aim slightly down: 35° from horizontal feels natural for an
-    // orbit camera looking at ground-level roads.
-    const polarAngle = Math.PI / 2 - Math.PI / 180 * 35;  // 55° from vertical
+    // Top-down-ish orbit: 30° from +Y axis = 60° from horizontal. This
+    // is the classic GIS / map-app angle — camera is mostly above the
+    // scene with a slight tilt so you can read 3D shape (overpasses,
+    // bridge ramps, building height). Pure top-down (0°) flattens
+    // everything; pure horizon (90°) makes the scene look like a
+    // sliver at the bottom of the canvas. 30° is the sweet spot.
+    const polarAngle = Math.PI / 180 * 30;  // 30° from vertical
     const azimuth = Math.PI / 4;  // NE corner so X+ / Z+ both visible
     const target = new THREE.Vector3(bounds.centerX, 0, bounds.centerZ);
     const camOffset = new THREE.Vector3(
