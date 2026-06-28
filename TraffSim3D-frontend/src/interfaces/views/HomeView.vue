@@ -1,5 +1,5 @@
 <template>
-  <div class="main-container">
+  <div ref="root" class="main-container">
     <EnhancedWebGLBackground />
 
     <header class="top-nav" role="navigation" aria-label="主导航">
@@ -16,6 +16,7 @@
           <router-link to="/scene-editor" class="nav-link">SceneLab</router-link>
           <router-link to="/simulation-lab" class="nav-link">SimulationLab</router-link>
           <router-link to="/map-importer" class="nav-link">MapLab</router-link>
+          <router-link to="/smart-city" class="nav-link nav-link-new">SmartCity 3D</router-link>
           <router-link to="/ai-playground" class="nav-link">AI Proving Ground</router-link>
           <router-link to="/deliverables" class="nav-link">DeliveryLab</router-link>
           <router-link to="/backend" class="nav-link">Backend</router-link>
@@ -26,28 +27,29 @@
     <main class="content-wrap">
       <section class="hero">
         <div class="hero-card">
-          <h1>TraffSim3D</h1>
-          <p class="hero-tagline">
+          <h1 class="gsap-hero-title">TraffSim3D</h1>
+          <p class="hero-tagline gsap-hero-tagline">
             面向智慧城市的 3D 交通仿真平台 — 前端 Vue3 + Three.js，后端 FastAPI + PyTorch，
             通过 DDD 分层 + 多智能体 RL 引擎联合驱动。
           </p>
-          <p class="hero-sub">
-            M1 已交付：场景编辑器（SceneLab）+ 后端 smoke 联调。 后续 M2–M5 将在此基础上叠加物理、OSM 地图、强化学习训练与交付流水线。
+          <p class="hero-sub gsap-hero-sub">
+            M1–M4 已交付：场景编辑器、物理仿真、OSM 地图导入、智能体 RL 训练。M3 新增 SmartCity 3D 底图(基于 Cesium + 高德瓦片 + 真实建筑 3D 拉伸)。
           </p>
-          <div class="hero-ctas">
+          <div class="hero-ctas gsap-hero-ctas">
             <router-link to="/scene-editor" class="btn">进入 SceneLab</router-link>
+            <router-link to="/smart-city" class="btn primary">🛰️ SmartCity 3D</router-link>
             <router-link to="/backend" class="btn ghost">查看后端状态</router-link>
           </div>
         </div>
       </section>
 
       <section class="modules">
-        <header class="modules-header">
-          <h2>五大产品模块</h2>
+        <header class="modules-header gsap-modules-header">
+          <h2>产品模块矩阵</h2>
           <p>每个模块对应一个前端路由和一个后端 app，按里程碑逐步交付。</p>
         </header>
 
-        <div class="module-grid">
+        <div class="module-grid gsap-module-grid">
           <router-link to="/scene-editor" class="module-card status-active">
             <div class="module-icon" aria-hidden>🚦</div>
             <div class="module-body">
@@ -62,7 +64,7 @@
             </div>
           </router-link>
 
-          <router-link to="/simulation-lab" class="module-card status-planned">
+          <router-link to="/simulation-lab" class="module-card status-active">
             <div class="module-icon" aria-hidden>🧪</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -76,12 +78,12 @@
             </div>
           </router-link>
 
-          <router-link to="/map-importer" class="module-card status-planned">
+          <router-link to="/map-importer" class="module-card status-active">
             <div class="module-icon" aria-hidden>🗺️</div>
             <div class="module-body">
               <div class="module-title-row">
                 <h3>MapLab</h3>
-                <span class="badge badge-planned">M3 · Planned</span>
+                <span class="badge badge-active">M3 · Active</span>
               </div>
               <p class="module-sub">OSM 地图导入与路网生成</p>
               <p class="module-desc">
@@ -91,16 +93,36 @@
             </div>
           </router-link>
 
-          <router-link to="/ai-playground" class="module-card status-planned">
+          <!-- Plan 055: SmartCity 3D basemap (Cesium + Three.js overlay) -->
+          <router-link
+            to="/smart-city"
+            class="module-card status-active module-card-featured"
+            data-testid="smart-city-card"
+          >
+            <div class="module-icon" aria-hidden>🛰️</div>
+            <div class="module-body">
+              <div class="module-title-row">
+                <h3>SmartCity 3D</h3>
+                <span class="badge badge-new">M3 · New</span>
+              </div>
+              <p class="module-sub">智慧城市 3D 底图（Cesium + 高德瓦片）</p>
+              <p class="module-desc">
+                Cesium 1.134 渲染高德瓦片 + OSM 3D 拉伸建筑 + 道路多段线,Three.js 透明 overlay 渲染车辆 + 信号灯 + LiDAR。
+                鸟瞰 / 平视 / 自由 切换;Overpass 数据经后端缓存,首次冷启动 &lt; 100ms。
+              </p>
+            </div>
+          </router-link>
+
+          <router-link to="/ai-playground" class="module-card status-active">
             <div class="module-icon" aria-hidden>🤖</div>
             <div class="module-body">
               <div class="module-title-row">
                 <h3>AI Proving Ground</h3>
-                <span class="badge badge-planned">M4 · Planned</span>
+                <span class="badge badge-active">M4 · Active</span>
               </div>
               <p class="module-sub">RL 训练 + 回放</p>
               <p class="module-desc">
-                与后端 apps/rl (PyTorch + Gymnasium) 联动：多智能体策略训练、回放 buffer 可视化、学到策略的影子车在 SceneLab 里 replay。
+                与后端 apps/rl (PyTorch + Gymnasium) 联动:多智能体策略训练、回放 buffer 可视化、学到策略的影子车在 SceneLab 里 replay。
               </p>
             </div>
           </router-link>
@@ -129,7 +151,7 @@
               </div>
               <p class="module-sub">FastAPI 服务面</p>
               <p class="module-desc">
-                所有模块的统一 API 入口。当前已暴露 <code>GET /health</code> 与 <code>GET /api/v1/ping</code> 两个 smoke 端点；scene sync、tick stream、RL control 等接口在 M2–M4 落地。
+                所有模块的统一 API 入口。当前已暴露 <code>GET /health</code> 与 <code>GET /api/v1/ping</code> 两个 smoke 端点;scene sync、tick stream、RL control 等接口在 M2–M4 落地。
               </p>
             </div>
           </router-link>
@@ -143,8 +165,105 @@
   </div>
 </template>
 
-<script setup>
-import EnhancedWebGLBackground from '@interfaces/components/showcase/EnhancedWebGLBackground.vue'
+<script setup lang="ts">
+/**
+ * Plan 057: GSAP-powered homepage animations.
+ *
+ * Animation design (per the gsap-skills `gsap-frameworks` Vue 3
+ * patterns + `gsap-scrolltrigger` recommendations):
+ *
+ *  1. Hero entrance (no scroll needed) — stagger fade-up on
+ *     `.gsap-hero-*` selectors via `gsap.from()`. Runs once at
+ *     `onMounted`, no ScrollTrigger.
+ *
+ *  2. Module cards stagger on scroll — `gsap.from('.module-card',
+ *     { ..., stagger: 0.10, scrollTrigger: { trigger: grid, start:
+ *     'top 82%' } })`. The 82% start triggers when the top of the
+ *     grid is 18% above the bottom of the viewport — feels snappy
+ *     without firing the moment the user scrolls.
+ *
+ *  3. Subtle hover lift on each card (CSS only, no GSAP — keeps
+ *     the no-cost micro-interactions separate from the page-load
+ *     animations).
+ *
+ * Cleanup: `ctx.revert()` in `onBeforeUnmount` kills tweens AND
+ * ScrollTriggers and reverts inline styles. Critical for hot-reload
+ * during dev (otherwise Vue re-mounts leave dangling ScrollTriggers).
+ */
+import { onMounted, onBeforeUnmount, ref } from 'vue';
+import { gsap } from 'gsap';
+import EnhancedWebGLBackground from '@interfaces/components/showcase/EnhancedWebGLBackground.vue';
+
+const root = ref<HTMLElement | null>(null);
+let ctx: gsap.Context | null = null;
+
+onMounted(() => {
+  if (!root.value) return;
+  ctx = gsap.context(() => {
+    // 1) Hero — entrance stagger (no scroll)
+    gsap.from('.gsap-hero-title', {
+      autoAlpha: 0,
+      y: 28,
+      duration: 0.7,
+      ease: 'power3.out',
+    });
+    gsap.from('.gsap-hero-tagline', {
+      autoAlpha: 0,
+      y: 16,
+      duration: 0.6,
+      ease: 'power2.out',
+      delay: 0.15,
+    });
+    gsap.from('.gsap-hero-sub', {
+      autoAlpha: 0,
+      y: 12,
+      duration: 0.5,
+      ease: 'power2.out',
+      delay: 0.28,
+    });
+    gsap.from('.gsap-hero-ctas', {
+      autoAlpha: 0,
+      y: 10,
+      duration: 0.5,
+      ease: 'power2.out',
+      delay: 0.42,
+    });
+    // 2) Modules header — fade up when in view
+    gsap.from('.gsap-modules-header', {
+      autoAlpha: 0,
+      y: 18,
+      duration: 0.6,
+      ease: 'power2.out',
+      scrollTrigger: {
+        trigger: '.gsap-modules-header',
+        start: 'top 85%',
+        once: true,
+        toggleActions: 'play none none reverse',
+      },
+    });
+    // 3) Module cards — stagger fade-up when grid enters viewport
+    gsap.from('.module-card', {
+      autoAlpha: 0,
+      y: 32,
+      duration: 0.55,
+      ease: 'power3.out',
+      stagger: 0.10,
+      scrollTrigger: {
+        trigger: '.gsap-module-grid',
+        start: 'top 82%',
+        once: true,
+        toggleActions: 'play none none reverse',
+      },
+    });
+  }, root.value);
+});
+
+onBeforeUnmount(() => {
+  // Kill tweens + ScrollTriggers + revert inline styles. Critical
+  // for hot-reload (otherwise ScrollTriggers accumulate across
+  // HMR cycles and fire for elements that no longer exist).
+  ctx?.revert();
+});
 </script>
 
 <style>
@@ -229,167 +348,239 @@ html { background: #f8fafc; }
   color: #1d4ed8;
 }
 
-/* === Content === */
-.content-wrap {
-  padding: 96px 24px 64px;
-  max-width: 1200px;
-  margin: 0 auto;
+/* Plan 057: SmartCity link has a violet gradient to signal it's
+   the "new" 3D basemap entry (matches the imported-scene badge). */
+.nav-link.nav-link-new {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.16), rgba(59, 130, 246, 0.16));
+  color: #7c3aed;
+  font-weight: 600;
+}
+.nav-link.nav-link-new:hover {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.28), rgba(59, 130, 246, 0.28));
+  color: #5b21b6;
 }
 
 /* === Hero === */
 .hero {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 0 56px;
+  padding: 140px 24px 60px;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 .hero-card {
   background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(12px);
-  border-radius: 16px;
-  padding: 36px 40px;
-  box-shadow: 0 10px 32px rgba(2, 6, 23, 0.08);
-  max-width: 880px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  padding: 44px 48px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 24px 48px -16px rgba(15, 23, 42, 0.16);
 }
 .hero-card h1 {
-  margin: 0 0 12px;
-  font-size: 36px;
+  font-size: 44px;
   letter-spacing: -0.02em;
+  margin: 0 0 8px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #1d4ed8, #7c3aed);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 .hero-tagline {
-  margin: 0 0 12px;
-  font-size: 15px;
-  line-height: 1.7;
+  font-size: 16px;
+  line-height: 1.65;
   color: rgba(15, 23, 42, 0.78);
+  margin: 12px 0 8px;
 }
 .hero-sub {
-  margin: 0 0 22px;
   font-size: 13px;
-  line-height: 1.7;
   color: rgba(15, 23, 42, 0.55);
+  margin: 0 0 28px;
 }
-.hero-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+.hero-ctas {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .btn {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 10px 18px;
   border-radius: 8px;
-  background: #2563eb;
-  color: white;
-  text-decoration: none;
   font-size: 14px;
-  transition: background 0.18s;
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 0.15s, background 0.18s, box-shadow 0.18s;
+  background: #1d4ed8;
+  color: #fff;
+  border: 1px solid #1d4ed8;
 }
-.btn:hover { background: #1d4ed8; }
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px -4px rgba(29, 78, 216, 0.4);
+}
+.btn.primary {
+  background: linear-gradient(135deg, #7c3aed, #1d4ed8);
+  border-color: transparent;
+}
+.btn.primary:hover {
+  box-shadow: 0 8px 16px -4px rgba(124, 58, 237, 0.4);
+}
 .btn.ghost {
   background: transparent;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  color: inherit;
+  color: rgba(15, 23, 42, 0.75);
+  border-color: rgba(15, 23, 42, 0.18);
 }
-.btn.ghost:hover { background: rgba(15, 23, 42, 0.04); }
+.btn.ghost:hover {
+  background: rgba(15, 23, 42, 0.04);
+  box-shadow: none;
+  transform: none;
+}
 
-/* === Module grid === */
-.modules-header {
-  margin: 0 0 20px;
+/* === Modules grid === */
+.modules {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
 }
+.modules-header { text-align: center; margin-bottom: 32px; }
 .modules-header h2 {
-  font-size: 22px;
-  margin: 0 0 6px;
+  font-size: 28px;
+  font-weight: 700;
   letter-spacing: -0.01em;
+  margin: 0 0 6px;
 }
 .modules-header p {
   margin: 0;
   color: rgba(15, 23, 42, 0.6);
   font-size: 14px;
 }
+
 .module-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
 }
+
 .module-card {
   display: flex;
-  gap: 14px;
-  padding: 20px;
+  gap: 16px;
+  padding: 22px;
   background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(8px);
-  border-radius: 12px;
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  box-shadow: 0 4px 16px rgba(2, 6, 23, 0.05);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
   text-decoration: none;
   color: inherit;
+  position: relative;
+  overflow: hidden;
   transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 .module-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.12);
-  border-color: rgba(59, 130, 246, 0.4);
+  transform: translateY(-3px);
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 12px 24px -8px rgba(15, 23, 42, 0.18);
 }
+.module-card.router-link-active {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+/* Plan 057: SmartCity card gets the "featured" violet gradient
+   to distinguish it from the regular modules. The hover effect
+   is amplified (slightly more lift, more glow). */
+.module-card.module-card-featured {
+  background:
+    linear-gradient(135deg, rgba(168, 85, 247, 0.06), rgba(59, 130, 246, 0.06)),
+    rgba(255, 255, 255, 0.85);
+  border-color: rgba(168, 85, 247, 0.25);
+}
+.module-card.module-card-featured:hover {
+  border-color: rgba(168, 85, 247, 0.45);
+  box-shadow: 0 16px 32px -10px rgba(124, 58, 237, 0.32);
+}
+
 .module-icon {
-  font-size: 32px;
-  width: 48px;
-  height: 48px;
+  font-size: 28px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(59, 130, 246, 0.1);
   border-radius: 10px;
-  flex-shrink: 0;
 }
-.module-body { flex: 1; }
+.module-card-featured .module-icon {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.18), rgba(59, 130, 246, 0.18));
+}
+
+.module-body { flex: 1 1 auto; min-width: 0; }
 .module-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 .module-title-row h3 {
   margin: 0;
   font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 .module-sub {
-  margin: 0 0 8px;
   font-size: 12px;
   color: rgba(15, 23, 42, 0.55);
+  margin: 0 0 10px;
 }
 .module-desc {
-  margin: 0;
   font-size: 13px;
-  line-height: 1.6;
-  color: rgba(15, 23, 42, 0.72);
+  line-height: 1.55;
+  color: rgba(15, 23, 42, 0.7);
+  margin: 0;
 }
 .module-desc code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   background: rgba(15, 23, 42, 0.06);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 .badge {
-  font-size: 11px;
+  display: inline-block;
   padding: 2px 8px;
   border-radius: 999px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
-.badge-active { background: rgba(34, 197, 94, 0.15); color: #15803d; }
-.badge-planned { background: rgba(148, 163, 184, 0.2); color: #475569; }
+.badge-active {
+  background: rgba(34, 197, 94, 0.18);
+  color: #047857;
+}
+.badge-planned {
+  background: rgba(148, 163, 184, 0.2);
+  color: rgba(15, 23, 42, 0.55);
+}
+/* Plan 057: badge for the brand-new SmartCity card. Violet gradient
+   matches the featured-card border to signal "new + featured". */
+.badge-new {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.22), rgba(59, 130, 246, 0.22));
+  color: #7c3aed;
+}
 
 /* === Footer === */
 .site-footer {
-  padding: 24px;
   text-align: center;
+  padding: 24px 16px 36px;
   font-size: 12px;
-  color: rgba(15, 23, 42, 0.45);
-}
-
-/* === Mobile === */
-@media (max-width: 720px) {
-  .nav-links { gap: 2px; }
-  .nav-link { padding: 6px 10px; font-size: 12px; }
-  .title .subtitle { display: none; }
-  .hero-card { padding: 24px; }
-  .hero-card h1 { font-size: 28px; }
+  color: rgba(15, 23, 42, 0.5);
 }
 </style>
