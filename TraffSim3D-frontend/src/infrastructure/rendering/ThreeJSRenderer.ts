@@ -53,7 +53,14 @@ export class ThreeJSRenderer {
     this.callbacks = callbacks;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0b1220);
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+    // Plan 054: distance fog so the ground edge (no matter how large)
+    // fades smoothly into the background color when the camera zooms
+    // out. Without this, even a 50km ground plane shows a hard gray
+    // rectangle against the dark background. Fog distance scales with
+    // the scene's far plane so we don't waste fillrate on fragments
+    // beyond the fog cutoff.
+    this.scene.fog = new THREE.Fog(0x0b1220, 500, 4000);
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 8000);
     this.camera.position.set(40, 35, 40);
     this.camera.lookAt(0, 0, 0);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -68,6 +75,21 @@ export class ThreeJSRenderer {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
+  }
+
+  /**
+   * Plan 054: retune fog + camera far plane for the current scene
+   * scale. The renderer uses fixed defaults at construction time;
+   * after a network replacement we want fog + far plane to extend
+   * to the bbox diagonal × 3 + padding (matching the ground mesh
+   * size in SceneBuilder), otherwise the ground edge becomes visible
+   * again when zooming out beyond 4000m.
+   */
+  setSceneScale(halfExtent: number): void {
+    const padded = halfExtent * 3 + 1000;
+    this.scene.fog = new THREE.Fog(0x0b1220, padded * 0.4, padded * 1.5);
+    this.camera.far = padded * 2;
+    this.camera.updateProjectionMatrix();
   }
 
   /** Public camera accessor so external controls (e.g. OrbitControls) can be attached. */

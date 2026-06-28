@@ -67,6 +67,31 @@ describe('worldStore.switchScene', () => {
   });
 });
 
+describe('worldStore.loadNetwork (Plan 054: imported OSM/PBF scenes)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('loadNetwork with sourceLabel switches to "imported" + records the label', () => {
+    const world = useWorldStore();
+    // Simulate an OSM import with a 537-road network and 629
+    // intersections — same shape as the parsed Shenzhen output.
+    const net = buildTJunctionNetwork();  // any valid network works as the source
+    world.loadNetwork(net, 'shenzhen-futuan.osm');
+    expect(world.currentSceneKind).toBe('imported');
+    expect(world.currentSceneLabel).toBe('shenzhen-futuan.osm');
+  });
+
+  it('switchScene back to a built-in scene clears the imported label', () => {
+    const world = useWorldStore();
+    world.loadNetwork(buildTJunctionNetwork(), 'shenzhen.osm');
+    expect(world.currentSceneLabel).toBe('shenzhen.osm');
+    world.switchScene('cross');
+    expect(world.currentSceneKind).toBe('cross');
+    expect(world.currentSceneLabel).toBe('十字路口');
+  });
+});
+
 describe('worldStore.replay (Plan 049)', () => {
   let fetchSpy: ReturnType<typeof vi.fn>;
 

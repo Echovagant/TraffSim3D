@@ -48,9 +48,12 @@ export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const;
  * Plan 035: scene-selector enum. The toolbar dropdown binds to this.
  * Plan 039: added 'elevated' (高架桥 — Y-axis ramps + level tagging).
  * Plan 040: added 'corridor' (多路口走廊 — 2-intersection corridor demo).
+ * Plan 054: added 'imported' (any OSM/PBF file loaded via MapImporter —
+ *   shown in the toolbar as a read-only label with the source file name
+ *   instead of the dropdown, since there's no factory to "switch back to").
  * Adding a new scene = add a factory + an entry here.
  */
-export type SceneKind = 'cross' | 't' | 'loop' | 'elevated' | 'corridor';
+export type SceneKind = 'cross' | 't' | 'loop' | 'elevated' | 'corridor' | 'imported';
 
 const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
   switch (kind) {
@@ -59,6 +62,25 @@ const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
     case 'loop':     return buildRectangularLoopNetwork();
     case 'elevated': return buildElevatedScene();
     case 'corridor': return buildCorridorScene();
+    case 'imported':
+      // Plan 054: switchScene should never be called with 'imported'
+      // (the toolbar hides the dropdown for imported scenes). If a
+      // caller does (e.g. undo restores an older state), fall back
+      // to cross so we always have a valid network.
+      return buildCrossIntersectionNetwork();
+  }
+};
+
+/** Plan 054: human-readable label for built-in scene kinds. Imported
+ *  scenes use the source filename (set by loadNetwork) instead. */
+const sceneLabelForKind = (kind: SceneKind): string => {
+  switch (kind) {
+    case 'cross':    return '十字路口';
+    case 't':        return 'T 路口';
+    case 'loop':     return '矩形环';
+    case 'elevated': return '高架桥';
+    case 'corridor': return '多路口走廊';
+    case 'imported': return '已导入';
   }
 };
 
@@ -82,6 +104,16 @@ export const useWorldStore = defineStore('world', () => {
   // (the original 4-way intersection). Drives the toolbar dropdown
   // and is read by `switchScene()` to know which factory to call.
   const currentSceneKind = ref<SceneKind>('cross');
+  // Plan 054: human-readable label for the currently loaded scene.
+  // - For built-in scenes: '十字路口' / 'T 路口' / etc. (matches
+  //   sceneLabel() in EditorToolbar).
+  // - For imported OSM/PBF: the original filename (e.g. 'futian.osm').
+  //   Set by loadNetwork() callers that have a source name (the
+  //   MapImporterView passes `file.name`). Undo/redo restores the
+  //   previous label automatically since the network state lives in
+  //   history; for cross-corridor switches the label re-derives from
+  //   currentSceneKind.
+  const currentSceneLabel = ref<string>('十字路口');
 
   // Discrete tick rate ladder. +/- keys (and the toolbar buttons) cycle
   // through this list. The ladder lives at module scope so the toolbar
@@ -806,8 +838,19 @@ export const useWorldStore = defineStore('world', () => {
    * (e.g. one produced by `importSceneFile`). Bypasses the LocalStorage
    * round-trip — the caller has already done the validation that
    * `hydrate()` would do via `loadScene()`.
+   *
+   * Plan 054: `sourceLabel` is the human-readable name shown in the
+   * toolbar's scene indicator (e.g. the imported file name). When
+   * omitted, the existing label is kept. Any call with a non-empty
+   * `sourceLabel` flips `currentSceneKind` to `'imported'` so the
+   * toolbar hides the scene-kind dropdown and shows the file name
+   * instead.
    */
-  const loadNetwork = (next: RoadNetwork): { ok: true } => {
+  const loadNetwork = (next: RoadNetwork, sourceLabel?: string): { ok: true } => {
+    if (sourceLabel) {
+      currentSceneKind.value = 'imported';
+      currentSceneLabel.value = sourceLabel;
+    }
     return replaceNetwork(next);
   };
 
@@ -829,6 +872,13 @@ export const useWorldStore = defineStore('world', () => {
     history = [];
     redoStack = [];
     currentSceneKind.value = kind;
+    if (kind === 'imported') {
+      // Plan 054: callers must pass a label via loadNetwork() before
+      // calling switchScene('imported') (or just call loadNetwork
+      // directly). For safety, fall back to the current label.
+    } else {
+      currentSceneLabel.value = sceneLabelForKind(kind);
+    }
     return loadNetwork(next);
   };
 
@@ -890,6 +940,7 @@ export const useWorldStore = defineStore('world', () => {
     loadNetwork,
     switchScene,
     currentSceneKind,
+    currentSceneLabel,
     clearStorage,
     frameMsMin,
     frameMsMax,

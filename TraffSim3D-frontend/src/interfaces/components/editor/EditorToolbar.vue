@@ -55,7 +55,13 @@
 
     <label class="ctrl-kind scene-kind" title="演示场景 (M2 道路几何)">
       <span class="ctrl-kind-label">场景</span>
+      <!-- Plan 054: for imported OSM/PBF scenes, show a read-only
+           label with the file name instead of the dropdown. The
+           user can still switch to a built-in scene to abandon
+           the import via the dropdown menu of the next built-in
+           scene (we keep the select available, just disabled). -->
       <select
+        v-if="world.currentSceneKind !== 'imported'"
         :value="world.currentSceneKind"
         @change="onSceneKindChange"
         data-testid="scene-kind-select"
@@ -66,6 +72,12 @@
         <option value="elevated">高架桥</option>
         <option value="corridor">多路口走廊</option>
       </select>
+      <span
+        v-else
+        class="scene-label-imported"
+        :title="`已导入: ${world.currentSceneLabel}`"
+        data-testid="scene-label-imported"
+      >📂 {{ world.currentSceneLabel }}</span>
     </label>
 
     <button
@@ -444,6 +456,23 @@ button.danger:hover { background: #991b1b; }
   font-size: 11px;
   color: #fbbf24;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Plan 054: read-only label shown in the toolbar when an OSM/PBF
+   scene is loaded (replaces the scene-kind dropdown). */
+.scene-label-imported {
+  display: inline-block;
+  background: rgba(168, 85, 247, 0.18);
+  color: #d8b4fe;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .flash {

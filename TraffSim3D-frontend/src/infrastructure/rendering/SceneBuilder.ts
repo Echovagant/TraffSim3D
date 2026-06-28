@@ -3,7 +3,7 @@ import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
 import type { Road } from '@domain/entities/Road';
-import { createGroundMesh } from './GroundMesh';
+import { createGroundMesh, GROUND_DEFAULT_SIZE, GROUND_PADDING } from './GroundMesh';
 import { createRoadMesh } from './RoadMesh';
 import { createRoadMarkings } from './RoadMarkingsMesh';
 import { createVehicleMesh, getVehicleBodyMesh } from './VehicleMesh';
@@ -164,7 +164,33 @@ const buildLightNode = (light: TrafficLight): TrafficLightNode => createTrafficL
 
 export const buildScene = (network: RoadNetwork): BuiltScene => {
   const root = new THREE.Group();
-  root.add(createGroundMesh());
+  // Plan 054: ground size scales with the network bbox so a 5km
+  // OSM district doesn't show a visible 200m gray square when the
+  // camera zooms out. Pinned to GROUND_DEFAULT_SIZE for synthetic
+  // scenes (no bbox available here — the renderer falls back to
+  // 200m which is plenty for the 60×60 demo scenes).
+  let groundSize = GROUND_DEFAULT_SIZE;
+  const xs: number[] = [];
+  const zs: number[] = [];
+  for (const r of Object.values(network.roads)) {
+    xs.push(r.startNode.x, r.endNode.x);
+    zs.push(r.startNode.z, r.endNode.z);
+  }
+  for (const i of Object.values(network.intersections)) {
+    xs.push(i.position.x);
+    zs.push(i.position.z);
+  }
+  if (xs.length > 0) {
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    const diag = Math.hypot(maxX - minX, maxZ - minZ);
+    if (diag > GROUND_DEFAULT_SIZE) {
+      groundSize = Math.ceil(diag * 3 + GROUND_PADDING);
+    }
+  }
+  root.add(createGroundMesh(groundSize));
 
   const roadNodes = new Map<string, RoadNode>();
   for (const road of Object.values(network.roads)) {

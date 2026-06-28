@@ -44,6 +44,12 @@ const requestFitForCurrent = (): void => {
     fitTimer = null;
     const bounds = computeNetworkBounds(world.network);
     if (bounds.diagonal === 0) return;  // empty network, nothing to frame
+    // Plan 054: retune the renderer's camera far plane + fog so the
+    // ground edge stays hidden when the user zooms out. Without
+    // this, a 5km OSM district shows a visible 200m gray square
+    // (the default ground size) until the ground is rebuilt — and
+    // even after the rebuild, fog hides the boundary smoothly.
+    rendererRef.value?.setSceneScale(bounds.diagonal / 2 + 500);
     const aspect = canvasRef.value
       ? canvasRef.value.clientWidth / Math.max(1, canvasRef.value.clientHeight)
       : 16 / 9;

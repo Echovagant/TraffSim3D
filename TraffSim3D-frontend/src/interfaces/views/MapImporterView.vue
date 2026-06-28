@@ -270,7 +270,11 @@ const onUpload = async (): Promise<void> => {
       roads: unknown[];
       intersections: { trafficLights: unknown[] }[];
     };
-    world.loadNetwork(network as never);
+    // Plan 054: pass the source filename so the toolbar can show
+    // "📂 福田.osm" instead of the generic scene-kind dropdown.
+    // The second arg sets `currentSceneKind = 'imported'` and
+    // bumps the camera fit tick (via replaceNetwork).
+    world.loadNetwork(network as never, file.value.name);
     lastResult.value = {
       ok: true,
       message: `✓ 解析成功 — 已载入 SceneLab`,
