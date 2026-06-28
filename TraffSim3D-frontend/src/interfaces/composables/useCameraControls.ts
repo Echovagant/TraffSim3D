@@ -35,6 +35,21 @@ export const useCameraControls = (
       controls.minDistance = zoomMin;
       controls.maxDistance = zoomMax;
       controls.maxPolarAngle = Math.PI / 2 - 0.05;  // keep camera above ground
+      // Plan 054: right-click pan disabled. Three.js OrbitControls
+      // defaults to RIGHT=pan which is hostile in a 3D traffic sim:
+      //   1. It hijacks the browser's right-click context menu, so
+      //      the user can't right-click an entity to inspect it.
+      //   2. With damping=0.08, right-drag-pan feels laggy because
+      //      the damped velocity follows the mouse for ~10 frames
+      //      after the user lets go.
+      //   3. Most map UIs (OSM / Google Maps / Mapbox) use
+      //      left-drag for pan and wheel for zoom; the user
+      //      expects that.
+      controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: null,
+      } as unknown as typeof controls.mouseButtons;
       // Plan 053: right-click is pan by default (Three.js convention).
       // Disable it for two reasons:
       //  - Most map UIs (OSM / Google Maps) use left-drag to pan and
@@ -172,12 +187,23 @@ export const useCameraControls = (
 
     const startTarget = c.target.clone();
     const startCam = (c.object as THREE.PerspectiveCamera).position.clone();
-    startRaf(c, durationMs, startTarget, target, startCam, endCam);
+    // Plan 054: shorter animation (400ms) so the camera is "in place"
+    // before the user can scroll — feels more responsive. Damping
+    // is temporarily disabled in startRaf() to prevent the
+    // spherical-cartesian fight that produced the flicker the user
+    // reported.
+    startRaf(c, 400, startTarget, target, startCam, endCam);
   };
 
   /** Drive a `lerp` from start → end over `durationMs` with cubic ease.
    *  Cancels any in-flight animation (focus + fit share this RAF id
-   *  since they're mutually exclusive user intents). */
+   *  since they're mutually exclusive user intents).
+   *
+   *  Plan 054: temporarily disable OrbitControls damping during the
+   *  animation. Without this, the damped spherical coordinates fight
+   *  with the position lerp — the user sees a "stuttering" or
+   *  "flickering" effect as the two update loops try to reconcile.
+   *  Damping is restored when the lerp completes (or is cancelled). */
   const startRaf = (
     c: OrbitControls,
     durationMs: number,
@@ -188,6 +214,8 @@ export const useCameraControls = (
   ): void => {
     const start = performance.now();
     if (focusRafId !== null) cancelAnimationFrame(focusRafId);
+    const wasDamped = c.enableDamping;
+    c.enableDamping = false;  // avoid spherical-vs-cartesian fighting
     const tick = (): void => {
       const elapsed = performance.now() - start;
       const u = Math.min(1, elapsed / durationMs);
@@ -199,6 +227,7 @@ export const useCameraControls = (
         focusRafId = requestAnimationFrame(tick);
       } else {
         focusRafId = null;
+        c.enableDamping = wasDamped;  // restore for post-fit user input
       }
     };
     focusRafId = requestAnimationFrame(tick);

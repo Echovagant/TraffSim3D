@@ -151,3 +151,33 @@ test('Plan 053 follow-up: zoom limits scale with scene size', async ({ page }) =
   expect(cross!.minDistance).toBeGreaterThanOrEqual(5);
   expect(loop!.minDistance).toBeGreaterThanOrEqual(5);
 });
+
+test('Plan 054 follow-up: right-click drag does NOT pan (mouseButtons.RIGHT = null)', async ({ page }) => {
+  await waitForSceneReady(page);
+  await settleFit(page);
+  const before = await getCamera(page);
+  expect(before).not.toBeNull();
+
+  // Right-click drag in the canvas. OrbitControls with mouseButtons.RIGHT
+  // = null should not pan, so the target should not move.
+  const canvas = page.locator('[data-testid="world-canvas"]');
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  const cx = box!.x + box!.width / 2;
+  const cy = box!.y + box!.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(cx + 150, cy + 100, { steps: 10 });
+  await page.mouse.up({ button: 'right' });
+  await page.waitForTimeout(400);
+  const after = await getCamera(page);
+  expect(after).not.toBeNull();
+  // Target should NOT have moved (right-click was a no-op for pan).
+  expect(
+    Math.hypot(after!.target.x - before!.target.x, after!.target.z - before!.target.z),
+  ).toBeLessThan(1);
+  // Camera position should also not have moved significantly.
+  expect(
+    Math.hypot(after!.position.x - before!.position.x, after!.position.z - before!.position.z),
+  ).toBeLessThan(1);
+});
