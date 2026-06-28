@@ -3,10 +3,20 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
+import cesium from 'vite-plugin-cesium'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [vue(), vueDevTools()],
+  plugins: [
+    vue(),
+    vueDevTools(),
+    // Plan 055: Cesium plugin — copies Cesium's static assets (Workers,
+    // ThirdParty, Assets, Widgets) to /Cesium/* in dev and emits the
+    // CESIUM_BASE_URL script. Without this, Cesium tries to load
+    // /Workers/*.js from the dev server root and fails with a 404
+    // module-script error.
+    cesium(),
+  ],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

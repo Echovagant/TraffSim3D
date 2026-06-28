@@ -4,6 +4,14 @@ import type { Vehicle } from '@domain/entities/Vehicle';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
 import type { Road } from '@domain/entities/Road';
 import { createGroundMesh, GROUND_DEFAULT_SIZE, GROUND_PADDING } from './GroundMesh';
+
+/** Plan 055: rendering mode. `flat` (default) renders the ground
+ *  + road meshes as Three.js geometry — used by /scene-editor for
+ *  the standalone simulator view. `smart-city` skips ground + roads
+ *  because Cesium provides the basemap underneath; Three.js only
+ *  draws dynamic entities (vehicles, lights, LiDAR). */
+export type RenderMode = 'flat' | 'smart-city';
+
 import { createRoadMesh } from './RoadMesh';
 import { createRoadMarkings } from './RoadMarkingsMesh';
 import { createVehicleMesh, getVehicleBodyMesh } from './VehicleMesh';
@@ -162,7 +170,10 @@ const buildRoadNode = (road: Road): RoadNode => {
 
 const buildLightNode = (light: TrafficLight): TrafficLightNode => createTrafficLightNode(light);
 
-export const buildScene = (network: RoadNetwork): BuiltScene => {
+export const buildScene = (
+  network: RoadNetwork,
+  mode: RenderMode = 'flat',
+): BuiltScene => {
   const root = new THREE.Group();
   // Plan 054: ground size scales with the network bbox so a 5km
   // OSM district doesn't show a visible 200m gray square when the
@@ -206,13 +217,30 @@ export const buildScene = (network: RoadNetwork): BuiltScene => {
       );
     }
   }
-  root.add(createGroundMesh(groundSize));
+  if (mode === 'flat') {
+    root.add(createGroundMesh(groundSize));
+  } else {
+    // Plan 055: invisible ground at y=0 to receive Three.js raycasts
+    // (vehicle pick, hover). The Cesium basemap provides the visible
+    // ground; this is purely a pick surface.
+    const pickPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(groundSize, groundSize),
+      new THREE.MeshBasicMaterial({ visible: false }),
+    );
+    pickPlane.rotation.x = -Math.PI / 2;
+    pickPlane.name = 'pick-plane';
+    root.add(pickPlane);
+  }
 
   const roadNodes = new Map<string, RoadNode>();
-  for (const road of Object.values(network.roads)) {
-    const node = buildRoadNode(road);
-    root.add(node.group);
-    roadNodes.set(road.id, node);
+  // Plan 055: smart-city mode skips Three.js road meshes because
+  // Cesium draws roads from real OSM data (GeoJsonDataSource).
+  if (mode === 'flat') {
+    for (const road of Object.values(network.roads)) {
+      const node = buildRoadNode(road);
+      root.add(node.group);
+      roadNodes.set(road.id, node);
+    }
   }
 
   const vehicleNodes = new Map<string, VehicleNode>();

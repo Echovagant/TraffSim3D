@@ -6,6 +6,7 @@ import {
   syncSceneContents,
   syncSelection,
   type BuiltScene,
+  type RenderMode,
 } from './SceneBuilder';
 import { MAX_DPR } from '@shared/constants/simulation';
 
@@ -45,6 +46,11 @@ export class ThreeJSRenderer {
   private getSelection: SelectionGetter | null = null;
   private getTickPolicy: TickPolicyGetter | null = null;
   private controls: { update: () => void } | null = null;
+  // Plan 055: 'flat' (default) renders ground + road meshes (used by
+  // /scene-editor). 'smart-city' skips both because Cesium provides
+  // the basemap underneath. Setting this calls `buildScene` again
+  // on the next frame so the rebuild is batched with the next tick.
+  private renderMode: RenderMode = 'flat';
   private rafId: number | null = null;
   private lastFrameMs = 0;
   private callbacks: RendererCallbacks;
@@ -63,8 +69,20 @@ export class ThreeJSRenderer {
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 8000);
     this.camera.position.set(40, 35, 40);
     this.camera.lookAt(0, 0, 0);
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    // Plan 055: alpha:true + clearColor(0,0) makes the Three.js
+    // canvas transparent so the Cesium basemap underneath shows
+    // through. `premultipliedAlpha: false` lets Cesium (which uses
+    // straight alpha) composite cleanly with our drawables. Without
+    // this, the Three.js canvas paints a solid dark background that
+    // hides the entire basemap.
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: true,
+      premultipliedAlpha: false,
+    });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_DPR));
+    this.renderer.setClearColor(0x000000, 0);  // transparent clear
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dir = new THREE.DirectionalLight(0xffffff, 0.8);
     dir.position.set(50, 80, 30);
@@ -229,6 +247,20 @@ export class ThreeJSRenderer {
   }
 
   /**
+   * Plan 055: switch between `flat` (ground + road meshes drawn by
+   * Three.js) and `smart-city` (Cesium provides ground + roads,
+   * Three.js only renders vehicles + lights + LiDAR). Triggers a
+   * scene rebuild on the next frame via the existing network-change
+   * branch. Calling this before the renderer has built a scene is
+   * a no-op (the mode is recorded and applied on first build). */
+  setRenderMode(mode: RenderMode): void {
+    if (this.renderMode === mode) return;
+    this.renderMode = mode;
+    // Invalidate the current build so the next frame rebuilds.
+    this.currentNetwork = null;
+  }
+
+  /**
    * Provide a getter for the current tick policy (pause + rate). Called
    * every frame so the user can flip pause and change rate from anywhere.
    * If never set, the renderer defaults to `{ paused: false, rate: 1 }`
@@ -273,7 +305,7 @@ export class ThreeJSRenderer {
             // were already linked to the scene root and will be GC'd once
             // the renderer drops its reference.
           }
-          this.built = buildScene(network);
+          this.built = buildScene(network, this.renderMode);
           this.scene.add(this.built.root);
           this.currentNetwork = network;
         } else if (this.built) {

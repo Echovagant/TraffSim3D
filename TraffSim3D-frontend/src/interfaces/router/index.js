@@ -27,6 +27,14 @@ const router = createRouter({
       component: () => import('@interfaces/views/MapImporterView.vue'),
     },
     {
+      // Plan 055: Smart City view — Cesium basemap + Three.js overlay.
+      // Distinct route from /scene-editor so the existing simulator
+      // view stays untouched (all existing e2e tests still pass).
+      path: '/smart-city',
+      name: 'smart-city',
+      component: () => import('@interfaces/views/SmartCityView.vue'),
+    },
+    {
       path: '/deliverables',
       name: 'deliverables',
       component: () => import('@interfaces/views/DeliveryView.vue'),
