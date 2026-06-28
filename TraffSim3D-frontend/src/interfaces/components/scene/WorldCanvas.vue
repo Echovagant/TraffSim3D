@@ -49,7 +49,10 @@ const requestFitForCurrent = (): void => {
     // this, a 5km OSM district shows a visible 200m gray square
     // (the default ground size) until the ground is rebuilt — and
     // even after the rebuild, fog hides the boundary smoothly.
-    rendererRef.value?.setSceneScale(bounds.diagonal / 2 + 500);
+    // Also called for built-in scenes (corridor, loop) so their
+    // ground edges fade too.
+    const halfExtent = bounds.diagonal / 2;
+    rendererRef.value?.setSceneScale(Math.max(halfExtent, 50));
     const aspect = canvasRef.value
       ? canvasRef.value.clientWidth / Math.max(1, canvasRef.value.clientHeight)
       : 16 / 9;

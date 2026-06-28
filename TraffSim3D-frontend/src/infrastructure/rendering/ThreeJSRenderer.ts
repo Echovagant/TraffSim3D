@@ -81,14 +81,24 @@ export class ThreeJSRenderer {
    * Plan 054: retune fog + camera far plane for the current scene
    * scale. The renderer uses fixed defaults at construction time;
    * after a network replacement we want fog + far plane to extend
-   * to the bbox diagonal × 3 + padding (matching the ground mesh
+   * to the bbox half-extent + padding (matching the ground mesh
    * size in SceneBuilder), otherwise the ground edge becomes visible
-   * again when zooming out beyond 4000m.
+   * again when zooming out.
+   *
+   * Works for both small (corridor diag=85m → halfExtent=50m, fog
+   * near=125 far=250) and large (5km OSM → halfExtent=2.5km, fog
+   * near=6.25km far=12.5km) scenes.
+   *
+   * Tuned so the road network (at ~halfExtent × 2.16 from camera
+   * when fit) sits below fogNear (unfogged), and the ground edge
+   * (at ~halfExtent × 4.5) sits above fogFar (fully fogged → looks
+   * like background).
    */
   setSceneScale(halfExtent: number): void {
-    const padded = halfExtent * 3 + 1000;
-    this.scene.fog = new THREE.Fog(0x0b1220, padded * 0.4, padded * 1.5);
-    this.camera.far = padded * 2;
+    const fogNear = halfExtent * 2.5;
+    const fogFar = halfExtent * 5;
+    this.scene.fog = new THREE.Fog(0x0b1220, fogNear, fogFar);
+    this.camera.far = Math.max(this.camera.far, halfExtent * 8);
     this.camera.updateProjectionMatrix();
   }
 

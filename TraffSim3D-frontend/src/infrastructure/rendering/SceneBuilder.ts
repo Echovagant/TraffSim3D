@@ -166,10 +166,13 @@ export const buildScene = (network: RoadNetwork): BuiltScene => {
   const root = new THREE.Group();
   // Plan 054: ground size scales with the network bbox so a 5km
   // OSM district doesn't show a visible 200m gray square when the
-  // camera zooms out. Pinned to GROUND_DEFAULT_SIZE for synthetic
-  // scenes (no bbox available here — the renderer falls back to
-  // 200m which is plenty for the 60×60 demo scenes).
+  // camera zooms out. For small synthetic scenes (cross, t, loop,
+  // corridor) we use 2× the diagonal so the road never sits on the
+  // very edge of the ground (the visible gray "background" the user
+  // reported in 054b). Fog hides the ground edge for both small and
+  // large scenes.
   let groundSize = GROUND_DEFAULT_SIZE;
+  let halfExtent = GROUND_DEFAULT_SIZE / 2;
   const xs: number[] = [];
   const zs: number[] = [];
   for (const r of Object.values(network.roads)) {
@@ -186,8 +189,21 @@ export const buildScene = (network: RoadNetwork): BuiltScene => {
     const minZ = Math.min(...zs);
     const maxZ = Math.max(...zs);
     const diag = Math.hypot(maxX - minX, maxZ - minZ);
-    if (diag > GROUND_DEFAULT_SIZE) {
-      groundSize = Math.ceil(diag * 3 + GROUND_PADDING);
+    if (diag > 1) {
+      // Half-extent = max distance from bbox center to a road corner.
+      // Use this to size fog (ThreeJSRenderer.setSceneScale) so the
+      // fog starts at the road edge and fades the ground to the
+      // background color well before the user can see the ground
+      // boundary.
+      halfExtent = Math.max(diag / 2, 50);
+      // Ground = 2× diagonal + padding so the road is comfortably
+      // inside, but the visible gray area beyond the road is fog'd
+      // out. For a 5km OSM: ground = 11km; fog starts at 5km +
+      // padding, fully opaque at 11km.
+      groundSize = Math.max(
+        GROUND_DEFAULT_SIZE,
+        Math.ceil(diag * 2 + GROUND_PADDING),
+      );
     }
   }
   root.add(createGroundMesh(groundSize));
