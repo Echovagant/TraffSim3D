@@ -1,15 +1,12 @@
 /**
  * Plan 055: Smart City view verification.
  *
- * Cesium needs network access (Overpass for buildings + roads,
- * Gaode tiles for basemap). To keep e2e self-contained, we stub
- * the Overpass fetch via page.route() and skip tile assertions
- * (the basemap is "the user sees a map" — exact tile content is
- * outside scope). The test verifies the structural pieces:
- *   - Cesium container + Three.js canvas both mount.
- *   - View mode toggle switches between bird / street / free.
- *   - Status panel shows the loaded road / building counts.
- *   - The view transitions don't throw.
+ * Plan 056 follow-up: we stub our BACKEND proxy
+ * (`/api/v1/maps/overpass`) instead of overpass-api.de directly,
+ * because the frontend now hits our cached proxy (Plan 055 called
+ * Overpass directly, which was blocked from China and slow). The
+ * stub returns the same raw Overpass shape the real backend would
+ * return after a cache miss / hit.
  */
 import { test, expect } from '@playwright/test';
 import * as path from 'path';
@@ -62,8 +59,10 @@ const FAKE_OVERPASS_RAW = {
 };
 
 test('Smart City: route mounts Cesium + Three.js canvases', async ({ page }) => {
-  // Stub the Overpass POST so the OSM loader doesn't hit the network.
-  await page.route('**/api/interpreter', async (route) => {
+  // Stub our backend's cached Overpass proxy so the OSM loader
+  // doesn't hit the network (Plan 056: browser calls our backend,
+  // not overpass-api.de directly).
+  await page.route('**/api/v1/maps/overpass*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -103,7 +102,7 @@ test('Smart City: route mounts Cesium + Three.js canvases', async ({ page }) => 
 });
 
 test('Smart City: view mode toggle switches between bird / street / free', async ({ page }) => {
-  await page.route('**/api/interpreter', async (route) => {
+  await page.route('**/api/v1/maps/overpass*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -129,7 +128,7 @@ test('Smart City: view mode toggle switches between bird / street / free', async
 });
 
 test('Smart City: OSM stats render after Overpass fetch', async ({ page }) => {
-  await page.route('**/api/interpreter', async (route) => {
+  await page.route('**/api/v1/maps/overpass*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

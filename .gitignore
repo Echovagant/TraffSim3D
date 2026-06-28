@@ -45,6 +45,10 @@ TraffSim3D-frontend/playwright-report/
 # Plan 050 — cross-language contract test snapshots (regenerated each run)
 TraffSim3D-backend/tests/contract/snapshots/
 
+# Plan 056 — Overpass response cache (large JSON files regenerated
+# by the backend; user can `rm -rf` to force refresh from overpass-api.de)
+TraffSim3D-backend/geojson/cache/
+
 # Environment / secrets
 .env
 .env.local

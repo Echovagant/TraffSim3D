@@ -69,11 +69,17 @@ out body; >; out skel qt;
 
 // ---- Overpass HTTP fetcher ----
 //
-// Overpass API endpoint, query timeout, and JSON output format.
-// `data=[out:json]` already in the queries above. We POST so we
-// don't bump into URL length limits on big bbox queries.
+// We DO NOT call overpass-api.de directly from the browser:
+//   1. It is slow / blocked from China (the user reported the
+//      "正在从 Overpass 加载 OSM 数据..." toast staying forever).
+//   2. Every page reload re-fetches the same bbox.
+//
+// Plan 056 added `GET /api/v1/maps/overpass` on the FastAPI backend
+// which forwards the query once, caches to `geojson/cache/<hash>.json`,
+// and serves subsequent identical queries from disk. The frontend
+// just hits our own endpoint (proxied via vite → `localhost:8000`).
 
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_PROXY_URL = '/api/v1/maps/overpass';
 
 /** Minimal GeoJSON namespace (we only use FeatureCollection /
  *  Feature / LineString / Polygon). The full spec would pull in
@@ -92,18 +98,15 @@ interface MinimalFeature extends MinimalGeoJSON {
 }
 
 const overpassFetch = async (query: string, signal?: AbortSignal): Promise<MinimalGeoJSON> => {
-  const body = new URLSearchParams({ data: query });
-  const r = await fetch(OVERPASS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-    signal,
-  });
+  const url = `${OVERPASS_PROXY_URL}?` + new URLSearchParams({ data: query }).toString();
+  const r = await fetch(url, { signal });
   if (!r.ok) {
-    throw new Error(`Overpass HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Overpass proxy HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
-  // Overpass returns `{ version, elements: [...] }`, NOT a
-  // FeatureCollection. Convert on the fly.
+  // Our backend caches and returns the *raw* Overpass JSON
+  // (`{ version, elements }`); we still need to convert it to a
+  // FeatureCollection here so Cesium.GeoJsonDataSource.load can
+  // accept it.
   const data = (await r.json()) as { elements?: unknown[] };
   return osmiumToFeatureCollection(data.elements ?? []);
 };
