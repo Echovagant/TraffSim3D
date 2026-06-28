@@ -239,6 +239,7 @@ const sceneLabel = (k: SceneKind): string => {
     case 'elevated': return '高架桥';
     case 'corridor': return '多路口走廊';
   }
+  return k; // fallback for imported scenes (Plan 054)
 };
 
 const onLidarToggle = (e: Event): void => {
