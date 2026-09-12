@@ -22,12 +22,35 @@ class TrainRequest(BaseModel):
     n_agents: int = 2     # Plan 045: stacked TrafficEnvs sharing PPO
     save_every: int = 5000  # Plan 045: checkpoint save interval
     independent_agents: bool = False  # Plan 047: per-agent PPO policies
-    scene_kind: str = "cross"  # Plan 048: 'cross' | 'corridor'
+    scene_kind: str = "cross"  # Plan 048: 'cross' | 'corridor' | 't_junction' | 'roundabout'
+    curriculum: bool = False  # Curriculum learning: progressive scene difficulty
 
 
 @router.post("/rl/train", tags=["rl"])
 async def train(req: TrainRequest) -> dict[str, Any]:
     """Start a training run (subprocess) and return immediately."""
+    if req.curriculum:
+        # Curriculum learning mode
+        if req.dry_run:
+            from app.apps.rl.train import dry_run
+            dry_run(req.steps, 1, False, "cross")
+            return {"ok": True, "dry_run": True, "steps": req.steps,
+                    "device": req.device, "curriculum": True}
+
+        import subprocess
+        backend_root = Path(__file__).resolve().parents[3]  # noqa: ASYNC240
+        args = [sys.executable, "-m", "app.apps.rl.train",
+                str(req.steps), "--device", req.device,
+                "--save-every", str(req.save_every),
+                "--curriculum"]
+        proc = subprocess.Popen(  # noqa: ASYNC220
+            args, cwd=str(backend_root),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return {"ok": True, "dry_run": False, "pid": proc.pid,
+                "steps": req.steps, "device": req.device,
+                "save_every": req.save_every, "curriculum": True}
+
     if req.dry_run:
         # Synchronous dry-run — write fake status immediately.
         from app.apps.rl.train import dry_run
@@ -95,7 +118,7 @@ async def prune_checkpoints() -> dict[str, Any]:
 @router.get("/rl/scenes", tags=["rl"])
 async def list_scenes() -> dict[str, Any]:
     """List supported sim scene kinds (Plan 048)."""
-    return {"scenes": ["cross", "corridor"]}
+    return {"scenes": ["cross", "corridor", "t_junction", "roundabout"]}
 
 
 @router.get("/rl/checkpoints/{name}/weights", tags=["rl"])

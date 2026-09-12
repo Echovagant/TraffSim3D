@@ -23,6 +23,10 @@ True independent multi-agent (Plan 047 extension):
 - `--independent`: each agent trains with its own PPO policy
   (no parameter sharing). Per-agent checkpoints + per-agent reward
   history written to status.json under `agent_rewards: {0: [...], ...}`.
+
+Curriculum learning:
+- `--curriculum`: progressive scene difficulty (cross → t_junction →
+  roundabout → corridor). Agent advances when mastering current scene.
 """
 from __future__ import annotations
 
@@ -199,6 +203,76 @@ def real_train(
     st.finalize_status(f"ppo_completed on {resolved_device} ({n_agents} agents)")
 
 
+def curriculum_train(
+    total_steps: int, device: str, save_every: int,
+    thresholds: dict[str, dict[str, float]] | None = None,
+) -> None:
+    """Curriculum learning: progressive scene difficulty.
+
+    Agent starts on easiest scene (cross) and advances through
+    t_junction → roundabout → corridor as it demonstrates mastery.
+    """
+    from . import capabilities as caps
+    from . import checkpoint as ckpt
+    from . import status as st
+    from .curriculum_env import CurriculumEnv
+
+    resolved_device, reason = caps.resolve_device(device)
+
+    st.init_status(total_steps)
+    s = st.read_status()
+    s["device"] = resolved_device
+    s["device_reason"] = reason
+    s["curriculum"] = True
+    s["scene_kind"] = "cross"  # starts on easiest
+    s["latest_checkpoint"] = ""
+    st.write_status(s)
+
+    if resolved_device == "dry_run":
+        st.append_reward(0.0)
+        s = st.read_status()
+        s["latest_checkpoint"] = "dry_run_fallback"
+        st.write_status(s)
+        st.finalize_status(f"dry_run_fallback ({reason})")
+        return
+
+    from stable_baselines3 import PPO
+
+    env = CurriculumEnv(thresholds=thresholds)
+    model = PPO("MlpPolicy", env, verbose=0, device=resolved_device)
+
+    latest_ckpts: list[str] = []
+
+    def on_step(_locals: dict[str, Any], _globals: dict[str, Any]) -> None:
+        step = int(_locals["self"].num_timesteps)
+        if step % save_every == 0 and step > 0:
+            path = ckpt.save_checkpoint(_locals["self"].model, step)
+            ckpt_name = path.name
+            latest_ckpts.append(ckpt_name)
+            ss = st.read_status()
+            ss["latest_checkpoint"] = ", ".join(latest_ckpts[-4:])
+            ss["step"] = step
+            st.write_status(ss)
+        if step % 200 == 0:
+            ep_buf = _locals["self"].ep_info_buffer
+            if ep_buf:
+                st.append_reward(float(ep_buf[-1]["r"]))
+            # Update curriculum status
+            status = env.get_curriculum_status()
+            ss = st.read_status()
+            ss["scene_kind"] = status["current_scene"]
+            ss["curriculum_status"] = status
+            st.write_status(ss)
+
+    model.learn(total_timesteps=total_steps, callback=on_step)
+    final_path = ckpt.save_checkpoint(model, total_steps)
+    s = st.read_status()
+    s["latest_checkpoint"] = final_path.name
+    s["curriculum_status"] = env.get_curriculum_status()
+    st.write_status(s)
+    st.finalize_status(f"curriculum_completed on {resolved_device}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("steps", nargs="?", type=int, default=1000)
@@ -223,10 +297,25 @@ def main() -> None:
         help="Train each agent with its own PPO policy (Plan 047 true multi-agent).",
     )
     parser.add_argument(
-        "--scene-kind", choices=["cross", "corridor"], default="cross",
-        help="Sim topology (Plan 048). 'corridor' = 2 4-way intersections + 60m corridor.",
+        "--scene-kind", choices=["cross", "corridor", "t_junction", "roundabout"], default="cross",
+        help="Sim topology (Plan 048). 'corridor' = 2 4-way intersections + 60m corridor. 't_junction' = 3-way T intersection. 'roundabout' = circular intersection.",
+    )
+    parser.add_argument(
+        "--curriculum", action="store_true",
+        help="Curriculum learning: progressive scene difficulty (cross → t_junction → roundabout → corridor).",
     )
     args = parser.parse_args()
+
+    if args.curriculum:
+        if args.dry_run:
+            dry_run(args.steps, 1, False, "cross")
+            return
+        try:
+            curriculum_train(args.steps, args.device, args.save_every)
+        except ImportError as e:
+            print(f"SB3 unavailable ({e}); falling back to dry-run path.")
+            dry_run(args.steps, 1, False, "cross")
+        return
 
     if args.dry_run:
         dry_run(args.steps, args.n_agents, args.independent, args.scene_kind)

@@ -51,6 +51,8 @@
           <select v-model="sceneKind" data-testid="scene-kind-select">
             <option value="cross">单路口</option>
             <option value="corridor">走廊 (2 路口)</option>
+            <option value="t_junction">T 型路口</option>
+            <option value="roundabout">环形路口</option>
           </select>
         </label>
         <label class="ctrl">
@@ -60,6 +62,14 @@
             data-testid="independent-agents-checkbox"
           />
           独立训练 (per-agent PPO)
+        </label>
+        <label class="ctrl">
+          <input
+            v-model="curriculumMode"
+            type="checkbox"
+            data-testid="curriculum-checkbox"
+          />
+          课程学习 (cross → T → 环形 → 走廊)
         </label>
         <label class="ctrl">
           <input v-model="dryRun" type="checkbox" data-testid="dry-run-checkbox" />
@@ -310,8 +320,9 @@ const BACKEND_URL =
 
 const steps = ref(200);
 const nAgents = ref(2);
-const sceneKind = ref<'cross' | 'corridor'>('cross');
+const sceneKind = ref<'cross' | 'corridor' | 't_junction' | 'roundabout'>('cross');
 const independentAgents = ref(false);
+const curriculumMode = ref(false);
 const device = ref<'auto' | 'gpu' | 'cpu'>('auto');
 const dryRun = ref(true);
 const running = ref(false);
@@ -513,6 +524,7 @@ const onStart = async (): Promise<void> => {
         device: device.value, n_agents: nAgents.value,
         save_every: 5000, independent_agents: independentAgents.value,
         scene_kind: sceneKind.value,
+        curriculum: curriculumMode.value,
       }),
     });
     if (!r.ok) {

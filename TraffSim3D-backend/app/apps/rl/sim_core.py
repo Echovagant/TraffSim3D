@@ -28,6 +28,7 @@ import numpy as np
 NS_HALF = 30.0          # NS road extends 60u total (-30 .. +30)
 EW_HALF = 30.0          # EW road same
 INTERSECTION_RADIUS = 8.0
+ROUNDABOUT_RADIUS = 10.0  # roundabout circle radius [m]
 SPEED_LIMIT = 16.67     # m/s (60 km/h)
 NPC_SPEED = 8.0         # m/s (29 km/h, slower than speed limit)
 EGO_WHEELBASE = 2.5     # m (approximate car wheelbase)
@@ -76,6 +77,10 @@ class SimCore:
     def reset(self, seed: int | None = None) -> np.ndarray:
         if self.scene_kind == "corridor":
             return self._reset_corridor()
+        if self.scene_kind == "t_junction":
+            return self._reset_t_junction()
+        if self.scene_kind == "roundabout":
+            return self._reset_roundabout()
         return self._reset_cross()
 
     def _reset_cross(self) -> np.ndarray:
@@ -125,6 +130,54 @@ class SimCore:
         self._terminated_reason = ""
         return self._obs()
 
+    def _reset_t_junction(self) -> np.ndarray:
+        """T-junction scene (mirror frontend buildTJunctionNetwork).
+
+        Layout: EW road (full width, z=0, x ∈ [-30, 30]) + S arm (x=0,
+        z ∈ [-30, 0]). No N arm — 3-way intersection at origin.
+        Ego starts south, heading north. Must enter intersection safely.
+        """
+        self.ego = Vehicle(x=0.0, z=-25.0, heading=math.pi / 2, speed=0.0)
+        # 4 NPCs: 2 on EW road, 1 on S arm ahead of ego, 1 on EW from other side
+        self.npcs = [
+            Vehicle(x=-18.0, z=3.5,  heading=0.0,           speed=NPC_SPEED),  # EB
+            Vehicle(x=18.0,  z=-3.5, heading=math.pi,       speed=NPC_SPEED),  # WB
+            Vehicle(x=3.5,   z=-12.0, heading=math.pi / 2,  speed=NPC_SPEED),  # NB on S arm
+            Vehicle(x=-10.0, z=0.0,  heading=0.0,           speed=NPC_SPEED),  # EB (closer)
+        ]
+        self.light = TrafficLight(ns_green=True, ew_green=False)
+        self.sim_time = 0.0
+        self.step_count = 0
+        self._terminated = False
+        self._terminated_reason = ""
+        return self._obs()
+
+    def _reset_roundabout(self) -> np.ndarray:
+        """Roundabout scene: circular intersection with circulating traffic.
+
+        Layout: Roundabout circle at origin, radius ROUNDABOUT_RADIUS (10m).
+        Ego enters from south (0, -25) heading north, must navigate the
+        circle and exit north. NPCs circulate counterclockwise.
+        """
+        R = ROUNDABOUT_RADIUS
+        self.ego = Vehicle(x=0.0, z=-25.0, heading=math.pi / 2, speed=0.0)
+        # 4 NPCs circulating counterclockwise on the roundabout.
+        # Positions at 0°, 90°, 180°, 270° (starting angles).
+        # Heading is tangent to circle (angle + π/2 for CCW motion).
+        self.npcs = [
+            Vehicle(x=R, z=0.0, heading=math.pi / 2, speed=NPC_SPEED),        # E→N
+            Vehicle(x=0.0, z=R, heading=math.pi, speed=NPC_SPEED),            # N→W
+            Vehicle(x=-R, z=0.0, heading=-math.pi / 2, speed=NPC_SPEED),      # W→S
+            Vehicle(x=0.0, z=-R, heading=0.0, speed=NPC_SPEED),               # S→E
+        ]
+        # Roundabout has no traffic lights (yield-on-entry)
+        self.light = TrafficLight(ns_green=True, ew_green=True)
+        self.sim_time = 0.0
+        self.step_count = 0
+        self._terminated = False
+        self._terminated_reason = ""
+        return self._obs()
+
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         """One 0.1s step. Returns (obs, reward, terminated, truncated, info)."""
         if self._terminated:
@@ -136,8 +189,11 @@ class SimCore:
         #   cross: intersection center (0, 0)
         #   corridor: north end of corridor (0, +30), so ego passes
         #     both intersections instead of stalling at the first one
+        #   roundabout: north exit (0, +10)
         if self.scene_kind == "corridor":
             target = (0.0, 30.0)
+        elif self.scene_kind == "roundabout":
+            target = (0.0, ROUNDABOUT_RADIUS)
         else:
             target = (0.0, 0.0)
         dx = target[0] - self.ego.x
@@ -156,14 +212,29 @@ class SimCore:
         self.ego.x += self.ego.speed * math.cos(self.ego.heading) * DT
         self.ego.z += self.ego.speed * math.sin(self.ego.heading) * DT
 
-        # 3) Advance NPCs (constant speed, straight)
-        for npc in self.npcs:
-            npc.x += npc.speed * math.cos(npc.heading) * DT
-            npc.z += npc.speed * math.sin(npc.heading) * DT
-            # NPC respawn at opposite end when out of bounds
-            if abs(npc.x) > 40 or abs(npc.z) > 40:
-                npc.x = -npc.x * 0.8
-                npc.z = -npc.z * 0.8
+        # 3) Advance NPCs (constant speed, straight or circular for roundabout)
+        if self.scene_kind == "roundabout":
+            # Circular motion: NPCs circulate counterclockwise around origin.
+            # Angular velocity = speed / radius.
+            omega = NPC_SPEED / ROUNDABOUT_RADIUS
+            for npc in self.npcs:
+                # Current angle from position
+                angle = math.atan2(npc.z, npc.x)
+                # Advance angle (CCW = positive)
+                angle += omega * DT
+                # Update position on circle
+                npc.x = ROUNDABOUT_RADIUS * math.cos(angle)
+                npc.z = ROUNDABOUT_RADIUS * math.sin(angle)
+                # Heading is tangent to circle (angle + π/2)
+                npc.heading = angle + math.pi / 2
+        else:
+            for npc in self.npcs:
+                npc.x += npc.speed * math.cos(npc.heading) * DT
+                npc.z += npc.speed * math.sin(npc.heading) * DT
+                # NPC respawn at opposite end when out of bounds
+                if abs(npc.x) > 40 or abs(npc.z) > 40:
+                    npc.x = -npc.x * 0.8
+                    npc.z = -npc.z * 0.8
 
         # 4) Traffic light cycle
         self.light.cycle_timer += DT
@@ -206,6 +277,20 @@ class SimCore:
                     self._terminated = True
                     self._terminated_reason = "success_corridor"
                     reward += 10.0  # larger bonus for 2-intersection pass
+            elif self.scene_kind == "t_junction":
+                # T-junction: ego enters intersection from south arm.
+                # Intersection at z=0 with radius 6; success at z > -3.
+                if self.ego.z > -3.0:
+                    self._terminated = True
+                    self._terminated_reason = "success_t_junction"
+                    reward += 5.0
+            elif self.scene_kind == "roundabout":
+                # Roundabout: ego enters from south, navigates circle, exits north.
+                # Success when ego passes north exit (z > 5, past circle at z=10).
+                if self.ego.z > 5.0:
+                    self._terminated = True
+                    self._terminated_reason = "success_roundabout"
+                    reward += 5.0
             else:
                 # Cross scene single-intersection success (original 044)
                 if self.ego.z > 25.0:
