@@ -7,7 +7,7 @@ from app.apps.rl.env import TrafficEnv
 from app.apps.rl.sim_core import OBS_DIM
 
 
-def test_observation_space_shape_is_13() -> None:
+def test_observation_space_shape_is_14() -> None:
     env = TrafficEnv()
     assert env.observation_space.shape == (OBS_DIM,)
 

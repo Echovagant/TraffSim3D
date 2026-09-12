@@ -12,10 +12,22 @@ from app.apps.rl.sim_core import (
 )
 
 
-def test_obs_dim_is_13() -> None:
+def test_obs_dim_is_14() -> None:
     s = SimCore()
     s.reset()
     assert s._obs().shape == (OBS_DIM,)
+    assert OBS_DIM == 14
+
+
+def test_ego_y_in_obs() -> None:
+    """Plan 061: obs[13] reflects ego elevation."""
+    s = SimCore()
+    s.reset()
+    obs = s._obs()
+    assert obs[13] == 0.0  # default y=0 → normalized 0
+    s.ego.y = 5.0
+    obs = s._obs()
+    assert abs(obs[13] - 0.5) < 1e-6  # 5/10 = 0.5
 
 
 def test_ego_starts_at_south_heading_north() -> None:

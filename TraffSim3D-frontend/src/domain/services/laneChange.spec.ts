@@ -94,6 +94,7 @@ describe('perpendicularOffsetAlongRoad', () => {
       ],
       laneCount: 2,
       speedLimit: 20,
+      level: 0,
     };
     expect(perpendicularOffsetAlongRoad(road, 10, { x: 5, z: -20 })).toBeCloseTo(5, 6);
   });

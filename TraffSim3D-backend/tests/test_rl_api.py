@@ -124,7 +124,7 @@ async def test_scenes_endpoint_returns_list(client: AsyncClient) -> None:
     """Plan 048: GET /api/v1/rl/scenes returns the supported scene kinds."""
     r = await client.get("/api/v1/rl/scenes")
     assert r.status_code == 200
-    assert r.json() == {"scenes": ["cross", "corridor"]}
+    assert r.json() == {"scenes": ["cross", "corridor", "t_junction", "roundabout"]}
 
 
 @pytest.mark.asyncio
@@ -178,13 +178,13 @@ async def test_weights_endpoint_returns_json_for_existing_checkpoint(
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["name"] == "ppo_step_0000064.zip"
-    assert body["obs_dim"] == 13
+    assert body["obs_dim"] == 14
     assert body["action_dim"] == 2
     assert body["hidden_sizes"] == [64, 64]
     layers = body["layers"]
     # PyTorch nn.Linear stores (out, in); shapes match the verified layout.
     assert len(layers["policy_net.0.weight"]) == 64
-    assert len(layers["policy_net.0.weight"][0]) == 13
+    assert len(layers["policy_net.0.weight"][0]) == 14
     assert len(layers["policy_net.0.bias"]) == 64
     assert len(layers["policy_net.2.weight"]) == 64
     assert len(layers["policy_net.2.weight"][0]) == 64

@@ -30,6 +30,7 @@ const makeRoad2 = (): Road => ({
   endNode: { x: 30, y: 0, z: 0 },
   laneCount: 2,
   speedLimit: 20,
+  level: 0,
 });
 
 const makeRoadRightAngle = (): Road => ({
@@ -43,6 +44,7 @@ const makeRoadRightAngle = (): Road => ({
   ],
   laneCount: 2,
   speedLimit: 20,
+  level: 0,
 });
 
 const makeRoadSCurve = (): Road => ({
@@ -57,6 +59,7 @@ const makeRoadSCurve = (): Road => ({
   ],
   laneCount: 2,
   speedLimit: 20,
+  level: 0,
 });
 
 describe('roadWaypoints', () => {

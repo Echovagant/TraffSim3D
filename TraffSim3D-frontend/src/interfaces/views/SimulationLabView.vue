@@ -13,6 +13,18 @@
       <!-- 1. 场景统计 -->
       <section class="card">
         <h2>1. 场景统计</h2>
+        <div class="scene-switcher">
+          <label>
+            <span>当前场景</span>
+            <select :value="world.currentSceneKind" @change="onSceneChange">
+              <option value="cross">单路口 (cross)</option>
+              <option value="corridor">走廊 (corridor)</option>
+              <option value="t">T 型路口 (t)</option>
+              <option value="loop">矩形环 (loop)</option>
+              <option value="elevated">高架桥 (elevated)</option>
+            </select>
+          </label>
+        </div>
         <div class="stat-grid">
           <div class="stat"><span>车辆</span><b>{{ vehicleCount }}</b></div>
           <div class="stat"><span>信号灯</span><b>{{ lightCount }}</b></div>
@@ -114,9 +126,21 @@
           <div class="stat"><span>帧 ms (avg)</span><b>{{ frameAvg.toFixed(1) }}</b></div>
           <div class="stat"><span>帧 ms (min)</span><b>{{ frameMin }}</b></div>
           <div class="stat"><span>帧 ms (max)</span><b>{{ frameMax }}</b></div>
-          <div class="stat"><span>仿真速率</span><b>{{ formatRate(world.tickRate) }}</b></div>
+          <div class="stat">
+            <span>仿真速率</span>
+            <b class="rate-control">
+              <button class="rate-btn" @click="world.cycleTickRate(-1)" title="减速">−</button>
+              <span class="rate-value">{{ formatRate(world.tickRate) }}</span>
+              <button class="rate-btn" @click="world.cycleTickRate(1)" title="加速">+</button>
+            </b>
+          </div>
           <div class="stat" :class="{ paused: !world.isRunning }">
-            <span>状态</span><b>{{ world.isRunning ? '运行中' : '已暂停' }}</b>
+            <span>状态</span>
+            <b>
+              <button class="pause-btn" @click="world.togglePause()">
+                {{ world.isRunning ? '⏸ 暂停' : '▶ 播放' }}
+              </button>
+            </b>
           </div>
         </div>
       </section>
@@ -155,7 +179,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useWorldStore } from '@interfaces/stores/worldStore';
+import { useWorldStore, type SceneKind } from '@interfaces/stores/worldStore';
 import { getAxisQueueLength } from '@application/services/signalController';
 import { M1_MIN_FPS } from '@shared/constants/simulation';
 import { CoordinatedConfigModal } from '@interfaces/components/editor';
@@ -206,6 +230,12 @@ const onControllerKindChange = (e: Event): void => {
   const v = (e.target as HTMLSelectElement).value;
   // world.setControllerKind 接受 ControllerKind union; 4 个 option 值都合法.
   (world.setControllerKind as (k: string) => void)(v);
+};
+
+// 1. 场景切换
+const onSceneChange = (e: Event): void => {
+  const v = (e.target as HTMLSelectElement).value;
+  world.switchScene(v as SceneKind);
 };
 
 // 3. 传感器
@@ -445,4 +475,73 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
 .diff-table td:first-child { color: #93c5fd; }
 .diff-table td:nth-child(2) { color: #94a3b8; }
 .diff-table td:nth-child(3) { color: #86efac; }
+
+.rate-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rate-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+.rate-btn:hover {
+  background: rgba(30, 41, 59, 0.8);
+  border-color: rgba(148, 163, 184, 0.5);
+}
+.rate-value {
+  min-width: 40px;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pause-btn {
+  padding: 4px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pause-btn:hover {
+  background: rgba(30, 41, 59, 0.8);
+  border-color: rgba(148, 163, 184, 0.5);
+}
+.scene-switcher {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+.scene-switcher label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+.scene-switcher select {
+  padding: 4px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.scene-switcher select:hover {
+  border-color: rgba(148, 163, 184, 0.5);
+}
 </style>

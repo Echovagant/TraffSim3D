@@ -73,7 +73,7 @@ export const createRoadMarkings = (road: Road): THREE.Group => {
     const positions = new Float32Array(wps.length * 3);
     for (let i = 0; i < wps.length; i++) {
       positions[i * 3 + 0] = wps[i]!.x;
-      positions[i * 3 + 1] = 0.02;
+      positions[i * 3 + 1] = (wps[i]!.y ?? 0) + 0.02;
       positions[i * 3 + 2] = wps[i]!.z;
     }
     const geom = new THREE.BufferGeometry();
@@ -114,10 +114,10 @@ export const createRoadMarkings = (road: Road): THREE.Group => {
       const pStart = pointAt(road, d.offset, d.sStart);
       const pEnd = pointAt(road, d.offset, d.sEnd);
       positions[cursor++] = pStart.x;
-      positions[cursor++] = 0.02;
+      positions[cursor++] = pStart.y + 0.02;
       positions[cursor++] = pStart.z;
       positions[cursor++] = pEnd.x;
-      positions[cursor++] = 0.02;
+      positions[cursor++] = pEnd.y + 0.02;
       positions[cursor++] = pEnd.z;
     }
     const geom = new THREE.BufferGeometry();
@@ -133,10 +133,9 @@ export const createRoadMarkings = (road: Road): THREE.Group => {
     const sClamped = Math.max(0, Math.min(length, length / 2 + along));
     const fwd = roadForward(road, sClamped);
     const rgt = roadRight(road, sClamped);
-    const cx = pointAt(road, 0, sClamped).x;
-    const cz = pointAt(road, 0, sClamped).z;
-    const a = new THREE.Vector3(cx + rgt.ux * (-halfWidth), 0.03, cz + rgt.uz * (-halfWidth));
-    const b = new THREE.Vector3(cx + rgt.ux * halfWidth, 0.03, cz + rgt.uz * halfWidth);
+    const cx = pointAt(road, 0, sClamped);
+    const a = new THREE.Vector3(cx.x + rgt.ux * (-halfWidth), cx.y + 0.03, cx.z + rgt.uz * (-halfWidth));
+    const b = new THREE.Vector3(cx.x + rgt.ux * halfWidth, cx.y + 0.03, cx.z + rgt.uz * halfWidth);
     const lineGeom = new THREE.BufferGeometry().setFromPoints([a, b]);
     const lineMat = new THREE.LineBasicMaterial({ color: STOPLINE_COLOR });
     group.add(new THREE.Line(lineGeom, lineMat));
@@ -152,7 +151,7 @@ export const createRoadMarkings = (road: Road): THREE.Group => {
       for (const s of arrowSlots) {
         const arrow = buildArrow(arrowSize);
         const p = pointAt(road, off, s);
-        arrow.position.set(p.x, 0.025, p.z);
+        arrow.position.set(p.x, p.y + 0.025, p.z);
         const fwd = roadForward(road, s);
         const yaw = Math.atan2(fwd.uz, fwd.ux);
         arrow.rotation.y = -yaw + (sign === -1 ? Math.PI : 0);

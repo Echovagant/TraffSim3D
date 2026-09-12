@@ -48,14 +48,18 @@
       </span>
     </header>
 
-    <!-- Floating status panel (top-right) — borrowed from the original
-         SceneEditorView so users see FPS / vehicle / light counts in
-         both views. -->
+    <!-- Floating status panel (top-right) — simulation dashboard -->
     <aside class="status-panel" data-testid="status-panel">
       <div><span>帧率</span><strong>{{ world.fps }}</strong></div>
       <div><span>车辆数</span><strong data-testid="vehicle-count">{{ vehicleCount }}</strong></div>
       <div><span>灯数</span><strong>{{ lightCount }}</strong></div>
+      <div><span>平均速度</span><strong>{{ avgSpeed.toFixed(1) }} m/s</strong></div>
+      <div><span>信号控制</span><strong>{{ controllerLabel }}</strong></div>
+      <div><span>仿真 tick</span><strong>{{ world.tickCount }}</strong></div>
       <div><span>仿真</span><strong>{{ world.isRunning ? '运行' : '暂停' }}</strong></div>
+      <div v-if="world.replayActive" class="replay-indicator">
+        <span>RL 回放</span><strong>活跃 (step {{ world.replayStep }})</strong>
+      </div>
     </aside>
 
     <!-- Floating error / loading toast (replaces the editor's
@@ -127,18 +131,36 @@ const rendererRef = ref<ThreeJSRenderer | null>(null);
 watch(isReady, (ready) => {
   if (ready) {
     const r = getRenderer();
+    if (!r) return;
     r.setRenderMode('smart-city');
     rendererRef.value = r;
   }
 });
-useCameraControls(threeCanvas, rendererRef);
-const { handleMouseDown, handleMouseMove, handleMouseUp } = useEditor(rendererRef);
+useCameraControls(threeCanvas, rendererRef as unknown as Parameters<typeof useCameraControls>[1]);
+const { handleMouseDown, handleMouseMove, handleMouseUp } = useEditor(rendererRef as unknown as Parameters<typeof useEditor>[0]);
 
 const vehicleCount = computed(() => Object.keys(world.network.vehicles).length);
 const lightCount = computed(
   () => Object.values(world.network.intersections)
     .reduce((s, i) => s + i.trafficLights.length, 0),
 );
+
+const avgSpeed = computed(() => {
+  const vehicles = Object.values(world.network.vehicles);
+  if (vehicles.length === 0) return 0;
+  const totalSpeed = vehicles.reduce((sum, v) => sum + v.speed, 0);
+  return totalSpeed / vehicles.length;
+});
+
+const controllerLabel = computed(() => {
+  const map: Record<string, string> = {
+    'fixed-cycle': '固定',
+    'actuated': '感应',
+    'coordinated': '协调',
+    'rl': 'RL',
+  };
+  return map[world.controllerKind] || world.controllerKind;
+});
 
 onMounted(async () => {
   if (!cesiumContainer.value) {
@@ -370,5 +392,13 @@ onBeforeUnmount(() => {
   background: rgba(239, 68, 68, 0.18);
   color: #fca5a5;
   border: 1px solid rgba(239, 68, 68, 0.4);
+}
+.replay-indicator {
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  padding-top: 6px;
+  margin-top: 4px;
+}
+.replay-indicator strong {
+  color: #a78bfa;
 }
 </style>

@@ -22,6 +22,7 @@ export const makeTestRoad = (id: string, axis: 'ns' | 'ew', laneCount = 2): Road
     endNode: isNS ? { x: 0, y: 0, z: 30 } : { x: 30, y: 0, z: 0 },
     laneCount,
     speedLimit: 20,
+    level: 0,
   };
 };
 
@@ -101,5 +102,6 @@ export const makePolylineRoad = (
     waypoints: waypoints.map((w) => ({ x: w.x, y: w.y ?? 0, z: w.z })),
     laneCount,
     speedLimit: 20,
+    level: 0,
   };
 };

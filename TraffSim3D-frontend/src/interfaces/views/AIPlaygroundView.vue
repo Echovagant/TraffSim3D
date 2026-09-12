@@ -339,6 +339,26 @@ const checkpointsVisible = ref(false);
 
 const caps = ref<Capabilities | null>(null);
 
+interface TrainingConfig {
+  algorithms: string[];
+  scenes: string[];
+  devices: string[];
+  hyperparameters: Record<string, { default: number; min: number; max: number; step: number }>;
+  training: Record<string, { default: number; min: number; max: number; step: number }>;
+  agents: { n_agents: { default: number; min: number; max: number; step: number }; independent: { default: boolean } };
+}
+const trainingConfig = ref<TrainingConfig | null>(null);
+
+const refreshTrainingConfig = async (): Promise<void> => {
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/v1/rl/training-config`);
+    if (!r.ok) return;
+    trainingConfig.value = (await r.json()) as TrainingConfig;
+  } catch {
+    // Backend unavailable — leave null, UI falls back to hardcoded defaults
+  }
+};
+
 // Plan 049: RL replay state. The store owns the loaded policy; this
 // view just collects the user's intent (which checkpoint, which target)
 // and pipes actions to the store.
@@ -591,6 +611,7 @@ const refreshCapabilities = async (): Promise<void> => {
 onMounted(() => {
   refreshCapabilities();
   refreshStatus();
+  refreshTrainingConfig();
   pollHandle = window.setInterval(refreshStatus, 2000);
   // Plan 049: poll `window.__replayLast` (set by tick.ts on each
   // replay inference) and copy into the store so the replay-status

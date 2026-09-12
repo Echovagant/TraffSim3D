@@ -8,7 +8,7 @@ from app.apps.rl.multi_env import MultiTrafficEnv
 from app.apps.rl.sim_core import OBS_DIM
 
 
-def test_observation_space_shape_is_n_agents_13() -> None:
+def test_observation_space_shape_is_n_agents_obs_dim() -> None:
     for n in (1, 2, 4):
         env = MultiTrafficEnv(n_agents=n)
         assert env.observation_space.shape == (n, OBS_DIM)

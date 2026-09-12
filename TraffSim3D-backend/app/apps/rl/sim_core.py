@@ -34,7 +34,7 @@ NPC_SPEED = 8.0         # m/s (29 km/h, slower than speed limit)
 EGO_WHEELBASE = 2.5     # m (approximate car wheelbase)
 COLLISION_DISTANCE = 2.0  # m — closer than this = collision
 MAX_STEPS_DEFAULT = 200
-OBS_DIM = 13
+OBS_DIM = 14
 
 # Pure Pursuit (Coulter 1992) — see ADR-004
 LOOKAHEAD_DISTANCE = 8.0
@@ -48,6 +48,7 @@ class Vehicle:
     z: float = 0.0
     heading: float = 0.0  # rad, 0 = +X, π/2 = +Z (north)
     speed: float = 0.0    # m/s
+    y: float = 0.0        # elevation (m), Plan 061
 
 
 @dataclass
@@ -320,7 +321,7 @@ class SimCore:
         return False
 
     def _obs(self) -> np.ndarray:
-        """Build the 13-dim observation vector."""
+        """Build the 14-dim observation vector."""
         obs = np.zeros(OBS_DIM, dtype=np.float32)
         # [0:3] ego pose normalized
         obs[0] = np.clip(self.ego.x / 50.0, -1.0, 1.0)
@@ -342,4 +343,6 @@ class SimCore:
             distances.append(50.0)
         for i, d in enumerate(distances[:5]):
             obs[8 + i] = min(d / 50.0, 1.0)
+        # [13] ego elevation (Plan 061)
+        obs[13] = np.clip(self.ego.y / 10.0, -1.0, 1.0)
         return obs

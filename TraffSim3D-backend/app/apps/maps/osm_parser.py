@@ -35,6 +35,9 @@ HIGHWAY_SPEED_LIMIT: dict[str, float] = {
 }
 DEFAULT_HIGHWAY_TYPES = frozenset(HIGHWAY_SPEED_LIMIT.keys())
 
+# Meters per level step — must match frontend LEVEL_HEIGHT in simulation constants.
+LEVEL_HEIGHT = 4.0
+
 # Skip nodes / ways that are too far from the network center.
 MAX_BBOX_DEG = 0.5  # ~55 km at mid-latitudes
 
@@ -109,8 +112,15 @@ def parse_osm_xml(xml_bytes: bytes) -> dict[str, Any]:
         used_node_ids.update(nd_refs)
         way_node_ids.append(nd_refs)
 
+        if tags.get("bridge") == "yes":
+            level = 1
+        elif tags.get("tunnel") == "yes":
+            level = -1
+        else:
+            level = 0
+
         waypoints = [
-            {"x": nodes[nid].x, "y": 0.0, "z": nodes[nid].z} for nid in nd_refs
+            {"x": nodes[nid].x, "y": level * LEVEL_HEIGHT, "z": nodes[nid].z} for nid in nd_refs
         ]
         a, b = waypoints[0], waypoints[-1]
 
@@ -122,13 +132,6 @@ def parse_osm_xml(xml_bytes: bytes) -> dict[str, Any]:
         oneway = tags.get("oneway", "no").lower() in ("yes", "true", "1")
         if oneway:
             lanes = max(1, lanes // 2)
-
-        if tags.get("bridge") == "yes":
-            level = 1
-        elif tags.get("tunnel") == "yes":
-            level = -1
-        else:
-            level = 0
 
         speed_limit = HIGHWAY_SPEED_LIMIT[highway]
         way_id = f"w-{w.attrib['id']}"
@@ -255,8 +258,15 @@ def _build_network(
         used_node_ids.update(nd_refs)
         way_node_ids.append(nd_refs)
 
+        if tags.get("bridge") == "yes":
+            level = 1
+        elif tags.get("tunnel") == "yes":
+            level = -1
+        else:
+            level = 0
+
         waypoints = [
-            {"x": nodes[nid].x, "y": 0.0, "z": nodes[nid].z} for nid in nd_refs
+            {"x": nodes[nid].x, "y": level * LEVEL_HEIGHT, "z": nodes[nid].z} for nid in nd_refs
         ]
         a, b = waypoints[0], waypoints[-1]
 
@@ -267,13 +277,6 @@ def _build_network(
         oneway = tags.get("oneway", "no").lower() in ("yes", "true", "1")
         if oneway:
             lanes = max(1, lanes // 2)
-
-        if tags.get("bridge") == "yes":
-            level = 1
-        elif tags.get("tunnel") == "yes":
-            level = -1
-        else:
-            level = 0
 
         speed_limit = HIGHWAY_SPEED_LIMIT[highway]
         road_id = f"w-pbf-{way_id}"

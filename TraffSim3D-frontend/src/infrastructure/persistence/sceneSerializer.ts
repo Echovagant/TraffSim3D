@@ -178,8 +178,8 @@ export const hydrateNetwork = (raw: unknown): HydrationResult => {
     // older localStorage payloads deserialize without error — they
     // simply render at ground level (existing behaviour). Will be
     // persisted with the field on next save.
-    if (typeof (r as Record<string, unknown>).level !== 'number') {
-      (r as Record<string, unknown>).level = 0;
+    if (!('level' in r) || typeof (r as unknown as Record<string, unknown>).level !== 'number') {
+      (r as unknown as Record<string, unknown>).level = 0;
     }
     net.roads[r.id] = r;
   }

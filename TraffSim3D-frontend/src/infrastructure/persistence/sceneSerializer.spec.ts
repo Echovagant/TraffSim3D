@@ -57,6 +57,7 @@ describe('sceneSerializer round-trip', () => {
       ],
       laneCount: 2,
       speedLimit: 20,
+      level: 0,
     };
     net.roads['r-poly'] = polyRoad;
     const scene = serializeNetwork(net);

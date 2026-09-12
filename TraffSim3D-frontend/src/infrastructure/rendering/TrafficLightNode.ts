@@ -49,7 +49,7 @@ export interface TrafficLightNode {
  */
 export const createTrafficLightNode = (light: TrafficLight): TrafficLightNode => {
   const group = new THREE.Group();
-  group.position.set(light.position.x, 0, light.position.z);
+  group.position.set(light.position.x, light.position.y, light.position.z);
 
   // Pole — thin cylinder anchored to the ground.
   const poleGeom = new THREE.CylinderGeometry(0.15, 0.15, 3, 8);

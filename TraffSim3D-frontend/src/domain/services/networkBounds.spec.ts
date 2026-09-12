@@ -2,10 +2,12 @@
 import { describe, it, expect } from 'vitest';
 import { computeNetworkBounds } from './networkBounds';
 import { buildCrossIntersectionNetwork } from '@application/services/defaultScene';
+import { createRoadNetwork } from '@domain/entities/RoadNetwork';
+import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 
 describe('computeNetworkBounds', () => {
   it('returns empty bounds for an empty network', () => {
-    const bounds = computeNetworkBounds({ roads: {}, intersections: {}, vehicles: {}, spawnPoints: {} });
+    const bounds = computeNetworkBounds(createRoadNetwork());
     expect(bounds.roadCount).toBe(0);
     expect(bounds.intersectionCount).toBe(0);
     expect(bounds.diagonal).toBe(0);
@@ -50,7 +52,7 @@ describe('computeNetworkBounds', () => {
       vehicles: {},
       spawnPoints: {},
     };
-    const bounds = computeNetworkBounds(net);
+    const bounds = computeNetworkBounds(net as unknown as RoadNetwork);
     expect(bounds.minZ).toBeCloseTo(-50, 0);
     expect(bounds.maxZ).toBeCloseTo(50, 0);
     expect(bounds.minX).toBeCloseTo(0, 0);

@@ -274,6 +274,7 @@ export const tick = (
       if (v.s < 0) v.s += len;
       const lp = lanePoint(road, v.laneIndex, v.s);
       v.position.x = lp.position.x;
+      v.position.y = lp.position.y;
       v.position.z = lp.position.z;
       v.heading = lp.heading;
     }
@@ -299,7 +300,7 @@ export const tick = (
       v.desiredLaneIndex = null;
       v.laneChangeStartedAt = null;
       const lp = lanePoint(road, v.laneIndex, v.s);
-      v.position = { x: lp.position.x, y: v.position.y, z: lp.position.z };
+      v.position = { x: lp.position.x, y: lp.position.y, z: lp.position.z };
       v.heading = lp.heading;
       ctx.rapierWorld?.setVehicleSpeed(v.id, v.speed, v.heading);
     } else if (v.laneChangeStartedAt !== null && simTime - v.laneChangeStartedAt > LANE_CHANGE_TIMEOUT_S) {

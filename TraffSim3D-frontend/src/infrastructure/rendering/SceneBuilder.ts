@@ -58,7 +58,7 @@ export interface BuiltScene {
 
 /** Per-frame update for a vehicle: move group, recolor body, advance trail. */
 const updateVehicleNode = (v: Vehicle, node: VehicleNode): void => {
-  node.group.position.set(v.position.x, 0, v.position.z);
+  node.group.position.set(v.position.x, v.position.y, v.position.z);
   node.group.rotation.y = -v.heading;
   // Recolor the primary body mesh. Decorations (cabin, cargo) follow
   // the body's color for car; for truck and bus, the cargo/roof have
@@ -88,18 +88,18 @@ const updateVehicleNode = (v: Vehicle, node: VehicleNode): void => {
     const dz = v.position.z - last.z;
     if (dx * dx + dz * dz > WRAP_THRESHOLD * WRAP_THRESHOLD) {
       for (let i = 0; i < node.trail.history.length; i++) {
-        node.trail.history[i] = { x: v.position.x, z: v.position.z };
+        node.trail.history[i] = { x: v.position.x, y: v.position.y, z: v.position.z };
       }
     }
   }
-  node.trail.history.push({ x: v.position.x, z: v.position.z });
+  node.trail.history.push({ x: v.position.x, y: v.position.y, z: v.position.z });
   if (node.trail.history.length > TRAIL_LENGTH) node.trail.history.shift();
 
   // Re-upload the history into the BufferAttribute in place.
   for (let i = 0; i < TRAIL_LENGTH; i++) {
     const h = node.trail.history[i] ?? v.position;
     node.trail.positions[i * 3 + 0] = h.x;
-    node.trail.positions[i * 3 + 1] = 0.1;
+    node.trail.positions[i * 3 + 1] = (h.y ?? 0) + 0.1;
     node.trail.positions[i * 3 + 2] = h.z;
   }
   node.trail.attribute.needsUpdate = true;
@@ -157,7 +157,7 @@ const buildVehicleNode = (v: Vehicle): VehicleNode => {
   const body = getVehicleBodyMesh(group);
   // Trail is NOT added to the group — see VehicleNode comment.
   const trail = createVehicleTrail(v);
-  group.position.set(v.position.x, 0, v.position.z);
+  group.position.set(v.position.x, v.position.y, v.position.z);
   return { group, body, trail };
 };
 
@@ -358,18 +358,18 @@ export const syncSelection = (
     ring.visible = false;
     return;
   }
-  let pos: { x: number; z: number } | null = null;
+  let pos: { x: number; y: number; z: number } | null = null;
   if (selected.kind === 'vehicle') {
     const node = built.vehicleNodes.get(selected.id);
-    if (node) pos = { x: node.group.position.x, z: node.group.position.z };
+    if (node) pos = { x: node.group.position.x, y: node.group.position.y, z: node.group.position.z };
   } else {
     const node = built.lightNodes.get(selected.id);
-    if (node) pos = { x: node.group.position.x, z: node.group.position.z };
+    if (node) pos = { x: node.group.position.x, y: node.group.position.y, z: node.group.position.z };
   }
   if (!pos) {
     ring.visible = false;
     return;
   }
   ring.visible = true;
-  ring.position.set(pos.x, Y_SELECTION_RING_BASE, pos.z);
+  ring.position.set(pos.x, pos.y + Y_SELECTION_RING_BASE, pos.z);
 };

@@ -3,7 +3,7 @@
     <header class="view-header">
       <router-link to="/" class="back-link">← 返回首页</router-link>
       <h1>Backend Services</h1>
-      <p class="view-sub">FastAPI 服务状态 · 当前仅暴露 M1 smoke 端点</p>
+      <p class="view-sub">FastAPI 服务状态 · 从 OpenAPI schema 动态发现端点</p>
     </header>
 
     <section class="status-panel" :class="`status-${overallState}`">
@@ -59,7 +59,7 @@ import { defaultBackend, defaultHttp, BackendError } from '@infrastructure/api';
 
 interface EndpointProbe {
   id: string;
-  method: 'GET';
+  method: 'GET' | 'POST' | 'DELETE';
   path: string;
   description: string;
   response?: unknown;
@@ -68,10 +68,53 @@ interface EndpointProbe {
 
 type ProbeState = 'unknown' | 'ok' | 'error';
 
-const endpoints = ref<EndpointProbe[]>([
-  { id: 'health', method: 'GET', path: '/health', description: 'Liveness probe — 返回 { status: "ok" } 即服务存活。' },
-  { id: 'ping', method: 'GET', path: '/api/v1/ping', description: 'M1 端到端 smoke 测试 — 经过 Vite proxy 与 FastAPI 全链路。' },
-]);
+const endpoints = ref<EndpointProbe[]>([]);
+
+const BACKEND_URL =
+  (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8000';
+
+const discoverEndpoints = async (): Promise<void> => {
+  try {
+    const r = await fetch(`${BACKEND_URL}/openapi.json`);
+    if (!r.ok) {
+      // Fallback to hardcoded list if OpenAPI unavailable
+      endpoints.value = [
+        { id: 'health', method: 'GET', path: '/health', description: 'Liveness probe — 返回 { status: "ok" } 即服务存活。' },
+        { id: 'ping', method: 'GET', path: '/api/v1/ping', description: 'M1 端到端 smoke 测试 — 经过 Vite proxy 与 FastAPI 全链路。' },
+      ];
+      return;
+    }
+    const spec = (await r.json()) as { paths: Record<string, Record<string, { summary?: string; description?: string }>> };
+    const discovered: EndpointProbe[] = [];
+    for (const [path, methods] of Object.entries(spec.paths)) {
+      for (const [method, detail] of Object.entries(methods)) {
+        const upperMethod = method.toUpperCase();
+        if (!['GET', 'POST', 'DELETE'].includes(upperMethod)) continue;
+        // Skip path parameters (e.g. /rl/checkpoints/{name}/weights) — they need runtime values
+        if (path.includes('{')) continue;
+        discovered.push({
+          id: `${upperMethod}-${path}`.replace(/[^a-zA-Z0-9-]/g, '-'),
+          method: upperMethod as 'GET' | 'POST' | 'DELETE',
+          path,
+          description: detail.summary || detail.description || `${upperMethod} ${path}`,
+        });
+      }
+    }
+    // Sort: health first, then by path
+    discovered.sort((a, b) => {
+      if (a.path === '/health') return -1;
+      if (b.path === '/health') return 1;
+      return a.path.localeCompare(b.path);
+    });
+    endpoints.value = discovered;
+  } catch {
+    // Network error — fallback to hardcoded list
+    endpoints.value = [
+      { id: 'health', method: 'GET', path: '/health', description: 'Liveness probe — 返回 { status: "ok" } 即服务存活。' },
+      { id: 'ping', method: 'GET', path: '/api/v1/ping', description: 'M1 端到端 smoke 测试 — 经过 Vite proxy 与 FastAPI 全链路。' },
+    ];
+  }
+};
 
 const lastCheckedAt = ref<number | null>(null);
 const isRefreshing = ref(false);
@@ -128,13 +171,37 @@ const probeOne = async (ep: EndpointProbe): Promise<void> => {
   delete ep.response;
   delete ep.error;
   try {
-    if (ep.id === 'health') {
+    if (ep.path === '/health') {
       ep.response = await defaultBackend.health();
-    } else if (ep.id === 'ping') {
-      ep.response = await defaultBackend.ping();
-    } else {
-      // Fallback — generic GET via the http client (for future endpoints).
+    } else if (ep.method === 'GET') {
       ep.response = await defaultHttp.get(ep.path);
+    } else if (ep.method === 'POST') {
+      // For POST endpoints, send minimal/dry-run requests
+      const body = ep.path === '/api/v1/rl/train'
+        ? { steps: 10, dry_run: true }
+        : ep.path === '/api/v1/maps/parse-osm'
+          ? '<osm version="0.6"></osm>'
+          : {};
+      const headers: Record<string, string> =
+        typeof body === 'string' ? { 'Content-Type': 'application/xml' } : { 'Content-Type': 'application/json' };
+      const r = await fetch(`${BACKEND_URL}${ep.path}`, {
+        method: 'POST',
+        headers,
+        body: typeof body === 'string' ? body : JSON.stringify(body),
+      });
+      // 422 = validation error (endpoint exists, just bad input) — treat as ok
+      if (r.ok || r.status === 422) {
+        ep.response = await r.json().catch(() => ({ status: r.status }));
+      } else {
+        ep.error = `[${r.status}] ${r.statusText}`;
+      }
+    } else if (ep.method === 'DELETE') {
+      const r = await fetch(`${BACKEND_URL}${ep.path}`, { method: 'DELETE' });
+      if (r.ok) {
+        ep.response = await r.json().catch(() => ({ status: r.status }));
+      } else {
+        ep.error = `[${r.status}] ${r.statusText}`;
+      }
     }
   } catch (err) {
     ep.error =
@@ -157,7 +224,8 @@ const refresh = async (): Promise<void> => {
   }
 };
 
-onMounted(() => {
+onMounted(async () => {
+  await discoverEndpoints();
   void refresh();
 });
 </script>

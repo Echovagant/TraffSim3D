@@ -121,6 +121,37 @@ async def list_scenes() -> dict[str, Any]:
     return {"scenes": ["cross", "corridor", "t_junction", "roundabout"]}
 
 
+@router.get("/rl/training-config", tags=["rl"])
+async def training_config() -> dict[str, Any]:
+    """Default training configuration for the AI Playground form.
+
+    Returns hyperparameter defaults + ranges, available algorithms,
+    scenes, and device options. The frontend uses this to pre-populate
+    the training configuration panel.
+    """
+    return {
+        "algorithms": ["PPO", "SAC", "TD3"],
+        "scenes": ["cross", "corridor", "t_junction", "roundabout"],
+        "devices": ["auto", "gpu", "cpu"],
+        "hyperparameters": {
+            "learning_rate": {"default": 3e-4, "min": 1e-6, "max": 1e-2, "step": 1e-5},
+            "gamma": {"default": 0.99, "min": 0.9, "max": 0.999, "step": 0.001},
+            "batch_size": {"default": 64, "min": 16, "max": 512, "step": 16},
+            "n_steps": {"default": 2048, "min": 128, "max": 8192, "step": 128},
+            "ent_coef": {"default": 0.01, "min": 0.0, "max": 1.0, "step": 0.001},
+        },
+        "training": {
+            "total_timesteps": {"default": 50000, "min": 1000, "max": 1000000, "step": 1000},
+            "eval_freq": {"default": 10, "min": 1, "max": 100, "step": 1},
+            "save_every": {"default": 5000, "min": 1000, "max": 50000, "step": 1000},
+        },
+        "agents": {
+            "n_agents": {"default": 2, "min": 1, "max": 8, "step": 1},
+            "independent": {"default": False},
+        },
+    }
+
+
 @router.get("/rl/checkpoints/{name}/weights", tags=["rl"])
 async def get_checkpoint_weights(name: str) -> dict[str, Any]:
     """Plan 049: export a saved PPO checkpoint as JSON-serializable weights.

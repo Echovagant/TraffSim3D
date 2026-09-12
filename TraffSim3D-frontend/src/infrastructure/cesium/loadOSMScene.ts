@@ -98,7 +98,7 @@ interface MinimalFeature extends MinimalGeoJSON {
 }
 
 const overpassFetch = async (query: string, signal?: AbortSignal): Promise<MinimalGeoJSON> => {
-  const url = `${OVERPASS_PROXY_URL}?` + new URLSearchParams({ data: query }).toString();
+  const url = `${OVERPASS_PROXY_URL}?` + new URLSearchParams({ query }).toString();
   const r = await fetch(url, { signal });
   if (!r.ok) {
     throw new Error(`Overpass proxy HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
@@ -193,11 +193,11 @@ export const loadOSMScene = async (
       : levelsStr
         ? parseFloat(levelsStr) * METERS_PER_LEVEL
         : DEFAULT_BUILDING_HEIGHT_M;
-    entity.polygon.extrudedHeight = Number.isFinite(height) ? height : DEFAULT_BUILDING_HEIGHT_M;
-    entity.polygon.material = Cesium.Color.fromCssColorString(BUILDING_COLOR).withAlpha(BUILDING_OPACITY);
-    entity.polygon.outline = false;
-    entity.polygon.closeTop = true;
-    entity.polygon.closeBottom = true;
+    entity.polygon.extrudedHeight = new Cesium.ConstantProperty(Number.isFinite(height) ? height : DEFAULT_BUILDING_HEIGHT_M);
+    entity.polygon.material = new Cesium.ColorMaterialProperty(Cesium.Color.fromCssColorString(BUILDING_COLOR).withAlpha(BUILDING_OPACITY));
+    entity.polygon.outline = new Cesium.ConstantProperty(false);
+    entity.polygon.closeTop = new Cesium.ConstantProperty(true);
+    entity.polygon.closeBottom = new Cesium.ConstantProperty(true);
   }
   viewer.dataSources.add(buildings);
 
