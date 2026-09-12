@@ -172,16 +172,20 @@ export class ThreeJSRenderer {
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(ndc, this.camera);
 
-    // Vehicles: collect the body meshes and raycast against them
-    // (recursive=false — only the body itself, not its decorations).
-    const vehicleBodies: THREE.Mesh[] = [];
-    for (const node of this.built.vehicleNodes.values()) vehicleBodies.push(node.body);
-    const hits = raycaster.intersectObjects(vehicleBodies, false);
+    // Plan 062: vehicles are InstancedMesh — raycast against the 3 type
+    // meshes and use instanceId to resolve the entity.
+    const vehicleMeshes = [
+      this.built.vehicles.meshes.car,
+      this.built.vehicles.meshes.truck,
+      this.built.vehicles.meshes.bus,
+    ];
+    const hits = raycaster.intersectObjects(vehicleMeshes, false);
     if (hits.length > 0) {
-      const hit = hits[0]!.object as THREE.Mesh;
-      // Find which vehicle this body belongs to.
-      for (const [id, node] of this.built.vehicleNodes) {
-        if (node.body === hit) return { kind: 'vehicle', id };
+      const hit = hits[0]!;
+      const mesh = hit.object as THREE.InstancedMesh;
+      if (hit.instanceId !== undefined) {
+        const id = this.built.vehicles.pickByInstance(mesh, hit.instanceId);
+        if (id) return { kind: 'vehicle', id };
       }
     }
 

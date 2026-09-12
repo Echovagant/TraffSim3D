@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { RoadNetwork } from '@domain/entities/RoadNetwork';
-import type { Vehicle } from '@domain/entities/Vehicle';
 import type { TrafficLight } from '@domain/entities/TrafficLight';
 import type { Road } from '@domain/entities/Road';
 import { createGroundMesh, GROUND_DEFAULT_SIZE, GROUND_PADDING } from './GroundMesh';
@@ -14,33 +13,11 @@ export type RenderMode = 'flat' | 'smart-city';
 
 import { createRoadMesh } from './RoadMesh';
 import { createRoadMarkings } from './RoadMarkingsMesh';
-import { createVehicleMesh, getVehicleBodyMesh } from './VehicleMesh';
-import { createVehicleTrail, type VehicleTrail } from './VehicleTrailMesh';
 import { createTrafficLightNode, updateTrafficLightNode, type TrafficLightNode } from './TrafficLightNode';
 import { createSelectionRing } from './SelectionRingMesh';
-import { TRAIL_LENGTH } from '@shared/constants/simulation';
+import { createVehicleInstances, type VehicleInstances } from './VehicleInstances';
 
-const WRAP_THRESHOLD = 20;     // |Δpos| greater than this on a tick is treated as a wrap-reset
 const Y_SELECTION_RING_BASE = 0.05;
-
-export interface VehicleNode {
-  /** Group anchored at the vehicle position; the renderer repositions + rotates this per frame. */
-  group: THREE.Group;
-  /**
-   * The pickable body mesh (lower hull). With distinct car/truck/bus
-   * models, the body is a child of `group` along with the cabin/cargo
-   * decorations. The picker uses `getVehicleBodyMesh(group)` to pull
-   * it out for raycasting.
-   */
-  body: THREE.Mesh;
-  /**
-   * Trail line; positions updated in place each frame. The line itself is
-   * attached directly to `built.root` (NOT the group) so its world-space
-   * coordinates aren't re-transformed by the group's rotation. The renderer
-   * adds/removes the line when nodes are added/removed.
-   */
-  trail: VehicleTrail;
-}
 
 export interface RoadNode {
   /** Group containing the road plane + lane markings. */
@@ -49,61 +26,13 @@ export interface RoadNode {
 
 export interface BuiltScene {
   root: THREE.Group;
-  vehicleNodes: Map<string, VehicleNode>;
+  /** Plan 062: instanced vehicle rendering (3 InstancedMesh, one per type). */
+  vehicles: VehicleInstances;
   lightNodes: Map<string, TrafficLightNode>;
   roadNodes: Map<string, RoadNode>;
   /** Single ring, reparented/repositioned per selection. Hidden when nothing is selected. */
   selectionRing: THREE.Mesh;
 }
-
-/** Per-frame update for a vehicle: move group, recolor body, advance trail. */
-const updateVehicleNode = (v: Vehicle, node: VehicleNode): void => {
-  node.group.position.set(v.position.x, v.position.y, v.position.z);
-  node.group.rotation.y = -v.heading;
-  // Recolor the primary body mesh. Decorations (cabin, cargo) follow
-  // the body's color for car; for truck and bus, the cargo/roof have
-  // their own color and are *not* recolored. This matches the user
-  // intent of "change the car's color" without painting over freight
-  // cargo or the bus's roof.
-  const mat = node.body.material as THREE.MeshStandardMaterial;
-  mat.color.set(v.color);
-  if (v.type === 'car') {
-    // Cars are one-color: also recolor the cabin mesh.
-    for (const child of node.group.children) {
-      if (child instanceof THREE.Mesh && child !== node.body) {
-        const m = child.material;
-        if (m instanceof THREE.MeshStandardMaterial) m.color.set(v.color);
-      }
-    }
-  }
-  // Keep the trail color in sync if the body color was changed via the inspector.
-  (node.trail.line.material as THREE.LineBasicMaterial).color.set(v.color);
-
-  // Advance trail history; if the new position is suspiciously far from the
-  // last (wrap-around at the world boundary), reset the history so the line
-  // doesn't draw a streak across the whole map.
-  const last = node.trail.history[node.trail.history.length - 1];
-  if (last) {
-    const dx = v.position.x - last.x;
-    const dz = v.position.z - last.z;
-    if (dx * dx + dz * dz > WRAP_THRESHOLD * WRAP_THRESHOLD) {
-      for (let i = 0; i < node.trail.history.length; i++) {
-        node.trail.history[i] = { x: v.position.x, y: v.position.y, z: v.position.z };
-      }
-    }
-  }
-  node.trail.history.push({ x: v.position.x, y: v.position.y, z: v.position.z });
-  if (node.trail.history.length > TRAIL_LENGTH) node.trail.history.shift();
-
-  // Re-upload the history into the BufferAttribute in place.
-  for (let i = 0; i < TRAIL_LENGTH; i++) {
-    const h = node.trail.history[i] ?? v.position;
-    node.trail.positions[i * 3 + 0] = h.x;
-    node.trail.positions[i * 3 + 1] = (h.y ?? 0) + 0.1;
-    node.trail.positions[i * 3 + 2] = h.z;
-  }
-  node.trail.attribute.needsUpdate = true;
-};
 
 /** Per-frame update for a traffic light: delegated to TrafficLightNode
  *  which now owns all phase-specific logic (color, emissive, flashing,
@@ -114,13 +43,6 @@ const updateLightNode = (
   simTime: number,
 ): void => {
   updateTrafficLightNode(node, light, simTime);
-};
-
-const disposeVehicleNode = (node: VehicleNode): void => {
-  node.body.geometry.dispose();
-  (node.body.material as THREE.Material).dispose();
-  node.trail.line.geometry.dispose();
-  (node.trail.line.material as THREE.Material).dispose();
 };
 
 const disposeLightNode = (node: TrafficLightNode): void => {
@@ -146,19 +68,6 @@ const disposeRoadNode = (node: RoadNode): void => {
       (child.material as THREE.Material).dispose();
     }
   }
-};
-
-const buildVehicleNode = (v: Vehicle): VehicleNode => {
-  const group = createVehicleMesh(v);
-  // The mesh group is already positioned in its own local space (the
-  // body sits at +Y_BODY above local origin so the chassis lifts off
-  // the road). The outer group (`group`) is anchored at the vehicle's
-  // world position by the renderer; its rotation is set per frame.
-  const body = getVehicleBodyMesh(group);
-  // Trail is NOT added to the group — see VehicleNode comment.
-  const trail = createVehicleTrail(v);
-  group.position.set(v.position.x, v.position.y, v.position.z);
-  return { group, body, trail };
 };
 
 const buildRoadNode = (road: Road): RoadNode => {
@@ -201,16 +110,7 @@ export const buildScene = (
     const maxZ = Math.max(...zs);
     const diag = Math.hypot(maxX - minX, maxZ - minZ);
     if (diag > 1) {
-      // Half-extent = max distance from bbox center to a road corner.
-      // Use this to size fog (ThreeJSRenderer.setSceneScale) so the
-      // fog starts at the road edge and fades the ground to the
-      // background color well before the user can see the ground
-      // boundary.
       halfExtent = Math.max(diag / 2, 50);
-      // Ground = 2× diagonal + padding so the road is comfortably
-      // inside, but the visible gray area beyond the road is fog'd
-      // out. For a 5km OSM: ground = 11km; fog starts at 5km +
-      // padding, fully opaque at 11km.
       groundSize = Math.max(
         GROUND_DEFAULT_SIZE,
         Math.ceil(diag * 2 + GROUND_PADDING),
@@ -243,12 +143,15 @@ export const buildScene = (
     }
   }
 
-  const vehicleNodes = new Map<string, VehicleNode>();
+  // Plan 062: instanced vehicle rendering.
+  const vehicles = createVehicleInstances();
+  for (const type of ['car', 'truck', 'bus'] as const) {
+    root.add(vehicles.meshes[type]);
+  }
   for (const v of Object.values(network.vehicles)) {
-    const node = buildVehicleNode(v);
-    root.add(node.group);
-    root.add(node.trail.line);  // trail is a top-level child, not in the group
-    vehicleNodes.set(v.id, node);
+    vehicles.allocate(v);
+    const trail = vehicles.trails.get(v.id);
+    if (trail) root.add(trail.line);
   }
 
   const lightNodes = new Map<string, TrafficLightNode>();
@@ -263,7 +166,7 @@ export const buildScene = (
   const selectionRing = createSelectionRing();
   root.add(selectionRing);
 
-  return { root, vehicleNodes, lightNodes, roadNodes, selectionRing };
+  return { root, vehicles, lightNodes, roadNodes, selectionRing };
 };
 
 /**
@@ -277,8 +180,7 @@ export const buildScene = (
  */
 export const syncMeshTransforms = (network: RoadNetwork, built: BuiltScene, simTime: number): void => {
   for (const v of Object.values(network.vehicles)) {
-    const node = built.vehicleNodes.get(v.id);
-    if (node) updateVehicleNode(v, node);
+    built.vehicles.update(v);
   }
   for (const inter of Object.values(network.intersections)) {
     for (const light of inter.trafficLights) {
@@ -296,24 +198,24 @@ export const syncMeshTransforms = (network: RoadNetwork, built: BuiltScene, simT
  * reset/hydrate, so we need this incremental path for add/remove.
  */
 export const syncSceneContents = (network: RoadNetwork, built: BuiltScene): void => {
-  // Vehicles
+  // Plan 062: vehicles use instanced pool, not individual nodes.
   const liveVehicleIds = new Set(Object.keys(network.vehicles));
-  for (const [id, node] of built.vehicleNodes) {
+  const allocatedIds = new Set(built.vehicles.trails.keys());
+
+  for (const id of allocatedIds) {
     if (!liveVehicleIds.has(id)) {
-      built.root.remove(node.group);
-      built.root.remove(node.trail.line);
-      disposeVehicleNode(node);
-      built.vehicleNodes.delete(id);
+      const trail = built.vehicles.trails.get(id);
+      if (trail) built.root.remove(trail.line);
+      built.vehicles.remove(id);
     }
   }
   for (const id of liveVehicleIds) {
-    if (!built.vehicleNodes.has(id)) {
+    if (!built.vehicles.trails.has(id)) {
       const v = network.vehicles[id];
       if (!v) continue;
-      const node = buildVehicleNode(v);
-      built.root.add(node.group);
-      built.root.add(node.trail.line);
-      built.vehicleNodes.set(id, node);
+      built.vehicles.allocate(v);
+      const trail = built.vehicles.trails.get(id);
+      if (trail) built.root.add(trail.line);
     }
   }
 
@@ -358,13 +260,12 @@ export const syncSelection = (
     ring.visible = false;
     return;
   }
-  let pos: { x: number; y: number; z: number } | null = null;
+  let pos: THREE.Vector3 | null = null;
   if (selected.kind === 'vehicle') {
-    const node = built.vehicleNodes.get(selected.id);
-    if (node) pos = { x: node.group.position.x, y: node.group.position.y, z: node.group.position.z };
+    pos = built.vehicles.getPosition(selected.id);
   } else {
     const node = built.lightNodes.get(selected.id);
-    if (node) pos = { x: node.group.position.x, y: node.group.position.y, z: node.group.position.z };
+    if (node) pos = node.group.position;
   }
   if (!pos) {
     ring.visible = false;

@@ -149,10 +149,48 @@ const osmiumToFeatureCollection = (elements: unknown[]): MinimalGeoJSON => {
 
 const ROAD_COLOR = '#fbbf24';   // amber, matches the toolbar's road tone
 const ROAD_WIDTH_PX = 3;
-const BUILDING_COLOR = '#a78bfa';  // violet, matches the imported scene badge
-const BUILDING_OPACITY = 0.7;
+const BUILDING_OPACITY = 0.75;
 const DEFAULT_BUILDING_HEIGHT_M = 10;
 const METERS_PER_LEVEL = 3.5;
+
+// Plan 062: classify buildings by OSM tag for visual variety.
+// Each category gets a distinct hue so a bird's-eye view reads
+// residential vs commercial vs public zones at a glance.
+const RESIDENTIAL_TAGS = new Set([
+  'residential', 'house', 'apartments', 'detached',
+  'semidetached_house', 'terrace', 'bungalow', 'dormitory',
+]);
+const COMMERCIAL_TAGS = new Set([
+  'commercial', 'retail', 'office', 'shop', 'supermarket',
+  'kiosk', 'hotel', 'restaurant', 'cafe',
+]);
+const PUBLIC_TAGS = new Set([
+  'public', 'civic', 'school', 'hospital', 'church', 'chapel',
+  'mosque', 'temple', 'synagogue', 'university', 'college',
+  'government', 'library', 'museum', 'theatre', 'cinema',
+]);
+const INDUSTRIAL_TAGS = new Set([
+  'industrial', 'warehouse', 'factory', 'manufacture',
+]);
+
+const COLOR_RESIDENTIAL = '#c4a882';  // warm sandstone
+const COLOR_COMMERCIAL  = '#7890a8';  // cool blue-grey
+const COLOR_PUBLIC      = '#88b0d0';  // light steel blue
+const COLOR_INDUSTRIAL  = '#8a8a90';  // dark neutral grey
+const COLOR_DEFAULT     = '#a0a0a8';  // neutral grey
+
+const getBuildingColor = (tags: Record<string, unknown> | undefined): string => {
+  if (!tags) return COLOR_DEFAULT;
+  const buildingTag = (tags['building'] as string | undefined)?.toLowerCase() ?? '';
+  if (RESIDENTIAL_TAGS.has(buildingTag)) return COLOR_RESIDENTIAL;
+  if (COMMERCIAL_TAGS.has(buildingTag)) return COLOR_COMMERCIAL;
+  if (PUBLIC_TAGS.has(buildingTag)) return COLOR_PUBLIC;
+  if (INDUSTRIAL_TAGS.has(buildingTag)) return COLOR_INDUSTRIAL;
+  // amenity tag as fallback for public buildings
+  const amenity = (tags['amenity'] as string | undefined)?.toLowerCase() ?? '';
+  if (amenity) return COLOR_PUBLIC;
+  return COLOR_DEFAULT;
+};
 
 /** Main entry: load roads + buildings, attach styled GeoJsonDataSources
  *  to the Cesium viewer, return counts for UI display. */
@@ -185,16 +223,27 @@ export const loadOSMScene = async (
   });
   for (const entity of buildings.entities.values) {
     if (!entity.polygon) continue;
-    const tags = entity.properties;
-    const levelsStr = tags?.['building:levels']?.getValue() as string | undefined;
-    const heightStr = tags?.['height']?.getValue() as string | undefined;
+    const props = entity.properties;
+    const getTag = (key: string): string | undefined => {
+      const p = props?.[key as keyof typeof props];
+      if (p && typeof (p as any).getValue === 'function') return (p as any).getValue() as string | undefined;
+      return p as string | undefined;
+    };
+    const levelsStr = getTag('building:levels');
+    const heightStr = getTag('height');
     const height = heightStr
       ? parseFloat(heightStr)
       : levelsStr
         ? parseFloat(levelsStr) * METERS_PER_LEVEL
         : DEFAULT_BUILDING_HEIGHT_M;
     entity.polygon.extrudedHeight = new Cesium.ConstantProperty(Number.isFinite(height) ? height : DEFAULT_BUILDING_HEIGHT_M);
-    entity.polygon.material = new Cesium.ColorMaterialProperty(Cesium.Color.fromCssColorString(BUILDING_COLOR).withAlpha(BUILDING_OPACITY));
+    const color = getBuildingColor({
+      building: getTag('building'),
+      amenity: getTag('amenity'),
+    });
+    entity.polygon.material = new Cesium.ColorMaterialProperty(
+      Cesium.Color.fromCssColorString(color).withAlpha(BUILDING_OPACITY),
+    );
     entity.polygon.outline = new Cesium.ConstantProperty(false);
     entity.polygon.closeTop = new Cesium.ConstantProperty(true);
     entity.polygon.closeBottom = new Cesium.ConstantProperty(true);
