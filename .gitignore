@@ -49,6 +49,25 @@ TraffSim3D-backend/tests/contract/snapshots/
 # by the backend; user can `rm -rf` to force refresh from overpass-api.de)
 TraffSim3D-backend/geojson/cache/
 
+# Real-world map data files (large, downloaded/regenerable, not source):
+# keep geojson2osm.py tool but ignore the .geojson / .osm data blobs
+TraffSim3D-backend/geojson/*.geojson
+TraffSim3D-backend/geojson/*.osm
+
+# Third-party skill repos cloned into root (not part of this project;
+# use `dsh` skill loading instead of vendoring full git repos)
+gsap-skills/
+
+# Root-level Playwright test-results (in addition to the frontend-specific
+# path above; some runs write to project root)
+/test-results/
+
+# Editor plugin / agent scratch dirs
+.qoder-cn/
+
+# Analysis report scratch (regenerated on demand)
+1014分析报告.md
+
 # Environment / secrets
 .env
 .env.local

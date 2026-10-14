@@ -58,4 +58,20 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
+  build: {
+    // Plan 055/062 follow-up: split heavy vendor libs into their own
+    // chunks so the home page (HomeView, no Rapier/Three scene) does not
+    // download a 2 MB WASM blob on first paint. Rapier is only needed by
+    // SceneEditor / SimulationLab / AIPlayground, which dynamically
+    // import the world simulation.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          rapier: ['@dimforge/rapier3d-compat'],
+          three: ['three', 'postprocessing'],
+          gsap: ['gsap'],
+        },
+      },
+    },
+  },
 })

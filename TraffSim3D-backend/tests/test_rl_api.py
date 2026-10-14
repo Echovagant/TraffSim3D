@@ -161,6 +161,10 @@ async def test_weights_endpoint_returns_json_for_existing_checkpoint(
     # Save a tiny PPO model directly to tmp and point the checkpoint
     # module at it. We use a fresh model (not the full train pipeline)
     # because that takes seconds; the weights layout is identical.
+    # SB3 is an optional dependency (`uv sync --extra rl`); skip cleanly
+    # when absent rather than erroring — the 503 path is covered by
+    # test_weights_endpoint_503_when_sb3_missing.
+    pytest.importorskip("stable_baselines3", reason="needs --extra rl")
     from stable_baselines3 import PPO
 
     from app.apps.rl import checkpoint as ckpt
