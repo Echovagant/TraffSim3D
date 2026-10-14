@@ -21,6 +21,7 @@ export const useEditor = (rendererRef: { value: ThreeJSRenderer | null }) => {
   const DRAG_THRESHOLD_PX = 4;
 
   const handleMouseDown = (event: MouseEvent) => {
+    if (event.button !== 0) return;  // only left-click for picking/drag
     if (!rendererRef.value) return;
     const hit = rendererRef.value.pick(event.clientX, event.clientY, world.getNetwork());
     if (hit && hit.kind === 'vehicle') {

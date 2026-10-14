@@ -276,6 +276,7 @@ export const useWorldStore = defineStore('world', () => {
   const lidarFrameCount = ref(0);
   const setLidarEnabled = (enabled: boolean): void => {
     lidarEnabled.value = enabled;
+    if (!enabled) lidarFrameCount.value = 0;
     bumpTick();
   };
   const toggleLidar = (): void => setLidarEnabled(!lidarEnabled.value);
@@ -322,6 +323,9 @@ export const useWorldStore = defineStore('world', () => {
   const lidarCloudsEnabled = ref(false);
   const setLidarCloudsEnabled = (enabled: boolean): void => {
     lidarCloudsEnabled.value = enabled;
+    // Note: point clouds require LiDAR to be enabled first. We don't
+    // auto-enable LiDAR here to avoid confusing users. If LiDAR is not
+    // enabled, the point clouds will simply not receive updates.
     bumpTick();
   };
   const toggleLidarClouds = (): void => setLidarCloudsEnabled(!lidarCloudsEnabled.value);
@@ -341,30 +345,28 @@ export const useWorldStore = defineStore('world', () => {
 
   /** M2-D: camera sensor. Lazily created on first enable so the
    *  WebGLRenderTarget is only allocated when actually used. */
-  let cameraSensor: CameraSensor | null = null;
+  const cameraSensor = shallowRef<CameraSensor | null>(null);
   const cameraEnabled = ref(false);
   const cameraFrameCount = ref(0);
   const setCameraEnabled = (enabled: boolean): void => {
     cameraEnabled.value = enabled;
     if (!enabled) {
-      if (cameraSensor) {
-        cameraSensor.destroy();
-        cameraSensor = null;
+      if (cameraSensor.value) {
+        cameraSensor.value.destroy();
+        cameraSensor.value = null;
       }
       cameraFrameCount.value = 0;
+      lidarFrameCount.value = 0;
     }
     bumpTick();
   };
   const toggleCamera = (): void => setCameraEnabled(!cameraEnabled.value);
-  const getCameraSensor = (): CameraSensor | null => cameraSensor;
+  const getCameraSensor = (): CameraSensor | null => cameraSensor.value;
 
-  /** Lazily create the CameraSensor instance for `vehicleId`. Called
-   *  by useWorldSimulation when the user enables the camera toggle.
-   *  Idempotent — returns the existing instance if already created. */
   const initCameraSensor = (vehicleId: string): CameraSensor => {
-    if (cameraSensor) return cameraSensor;
-    cameraSensor = new CameraSensor(defaultCameraConfig(vehicleId));
-    return cameraSensor;
+    if (cameraSensor.value) return cameraSensor.value;
+    cameraSensor.value = new CameraSensor(defaultCameraConfig(vehicleId));
+    return cameraSensor.value;
   };
 
   // History for undo/redo. Each entry is a full SerializedScene JSON
@@ -491,12 +493,10 @@ export const useWorldStore = defineStore('world', () => {
       policy: policy.value,
       replayTargetId: replayActive.value ? replayTargetId.value : null,
     });
-    if (lidarEnabled.value && rapierWorld) {
-      // Bump the frame counter for the DebugPanel readout. We can't
-      // count scanAll's output length from here (tick is opaque to
-      // it), but incrementing once per tick when LiDAR is on is
-      // a good enough proxy for "frames produced".
-      lidarFrameCount.value += 1;
+    // M2-C: update LiDAR frame counter from sensorRegistry's actual scan count
+    // (not per-tick). The registry tracks frames produced (throttled scans only).
+    if (lidarEnabled.value) {
+      lidarFrameCount.value = sensorRegistry.frameCount;
     }
 
     // M2-D: refresh LidarPointCloud meshes from the latest frames
@@ -532,7 +532,7 @@ export const useWorldStore = defineStore('world', () => {
     fpsAcc += clampedDt;
     const now = performance.now();
     if (now - lastFpsUpdateMs >= 500) {
-      fps.value = Math.round(frameCount / fpsAcc);
+      fps.value = fpsAcc > 0 ? Math.round(frameCount / fpsAcc) : 0;
       frameCount = 0;
       fpsAcc = 0;
       lastFpsUpdateMs = now;
@@ -562,8 +562,9 @@ export const useWorldStore = defineStore('world', () => {
     // M2-D: tear down point clouds + camera sensor.
     for (const cloud of lidarPointClouds.values()) cloud.destroy();
     lidarPointClouds = new Map();
-    if (cameraSensor) { cameraSensor.destroy(); cameraSensor = null; }
+    if (cameraSensor.value) { cameraSensor.value.destroy(); cameraSensor.value = null; }
     cameraFrameCount.value = 0;
+    lidarFrameCount.value = 0;
     network.value = buildCrossIntersectionNetwork();
     simTime = 0;
     fixedStepScheduler.reset();  // Plan 038: zero out the 10 Hz cadence
@@ -800,8 +801,9 @@ export const useWorldStore = defineStore('world', () => {
     // M2-D: tear down point clouds + camera sensor.
     for (const cloud of lidarPointClouds.values()) cloud.destroy();
     lidarPointClouds = new Map();
-    if (cameraSensor) { cameraSensor.destroy(); cameraSensor = null; }
+    if (cameraSensor.value) { cameraSensor.value.destroy(); cameraSensor.value = null; }
     cameraFrameCount.value = 0;
+    lidarFrameCount.value = 0;
     // Re-register new vehicles
     if (rapierWorld) {
       for (const v of Object.values(network.value.vehicles)) {
@@ -979,6 +981,7 @@ export const useWorldStore = defineStore('world', () => {
     ensureLidarCloud,
     cameraEnabled,
     cameraFrameCount,
+    cameraSensor,
     setCameraEnabled,
     toggleCamera,
     getCameraSensor,

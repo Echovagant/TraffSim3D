@@ -3,6 +3,9 @@ import { ThreeJSRenderer } from '@infrastructure/rendering';
 import { useWorldStore } from '@interfaces/stores/worldStore';
 import { useSelectionStore } from '@interfaces/stores/selectionStore';
 import { RapierWorld, buildRigidBodySpec } from '@infrastructure/physics';
+import { LidarSensor, defaultLidarConfig } from '@infrastructure/sensors';
+import { LIDAR_MOUNT_HEIGHT } from '@shared/constants/simulation';
+import { setMainRenderer } from './rendererRegistry';
 
 let sharedRapierWorld: RapierWorld | null = null;
 let rapierInitPromise: Promise<RapierWorld> | null = null;
@@ -47,20 +50,10 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
   let rapierWorld: RapierWorld | null = null;
 
   const setupRenderer = async (canvas: HTMLCanvasElement) => {
-    // Init Rapier first so the store can register bodies before the
-    // first frame.
-    rapierWorld = await getOrCreateRapierWorld();
-    rapierReady.value = true;
-    // Register existing vehicles in Rapier (covers M1 saved-scene
-    // load path AND the default scene built by buildDefaultNetwork).
-    for (const v of Object.values(store.getNetwork().vehicles)) {
-      rapierWorld.registerVehicle(
-        buildRigidBodySpec(v.id, v.type, v.position, v.heading),
-      );
-    }
-    store.setRapierWorld(rapierWorld);
-
+    // Create the renderer immediately so the camera sensor and scene
+    // visualization work even if Rapier WASM fails to load.
     renderer = new ThreeJSRenderer(canvas, { onTick: store.step });
+    setMainRenderer(renderer);
     renderer.setNetworkGetter(store.getNetwork);
     renderer.setSelectionGetter(() => {
       if (selection.kind && selection.id) {
@@ -74,11 +67,39 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
     }));
     renderer.start();
 
-    // M2-D: when the user flips LiDAR point-cloud visibility on,
-    // backfill clouds for every existing vehicle and add them to
-    // the scene. When flipped off, remove them. The worldStore owns
-    // the cloud objects; this composable just routes them through
-    // the renderer's auxiliary layer.
+    const container = canvas.parentElement;
+    if (container) {
+      renderer.resize(container.clientWidth, container.clientHeight);
+      resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          renderer?.resize(width, height);
+        }
+      });
+      resizeObserver.observe(container);
+    }
+    isReady.value = true;
+
+    // Init Rapier after the renderer is running. If WASM loading fails
+    // the scene still renders; physics just won't advance.
+    try {
+      rapierWorld = await getOrCreateRapierWorld();
+      rapierReady.value = true;
+      for (const v of Object.values(store.getNetwork().vehicles)) {
+        rapierWorld.registerVehicle(
+          buildRigidBodySpec(v.id, v.type, v.position, v.heading),
+        );
+        const colliderHandle = rapierWorld.getColliderHandle(v.id);
+        const excludes = colliderHandle ? [colliderHandle] : [];
+        const sensor = new LidarSensor(defaultLidarConfig(v.id, excludes));
+        sensor.configure({ mountHeight: LIDAR_MOUNT_HEIGHT[v.type] });
+        store.sensorRegistry.register(v.id, sensor, `lidar-${v.id}`);
+      }
+      store.setRapierWorld(rapierWorld);
+    } catch {
+      console.warn('[useWorldSimulation] Rapier init failed — physics disabled');
+    }
+
     watch(
       () => store.lidarCloudsEnabled,
       (enabled) => {
@@ -97,10 +118,6 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
       },
     );
 
-    // M2-D: when new vehicles arrive after clouds are enabled,
-    // attach a cloud mesh for each. The store already created the
-    // LidarPointCloud object in addVehicle; here we just add the
-    // mesh to the scene.
     watch(
       () => Object.keys(store.getNetwork().vehicles).length,
       () => {
@@ -110,33 +127,6 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
         }
       },
     );
-
-    // M2-D: when camera is enabled, lazily create the CameraSensor
-    // instance on first enable. The host vehicle is the user's
-    // selection if it's a vehicle, else the first vehicle.
-    watch(
-      () => store.cameraEnabled,
-      (enabled) => {
-        if (!enabled) return;
-        if (store.getCameraSensor()) return;
-        const hostId = selection.kind === 'vehicle' && selection.id
-          ? selection.id
-          : Object.keys(store.getNetwork().vehicles)[0] ?? 'v-1';
-        store.initCameraSensor(hostId);
-      },
-    );
-    const container = canvas.parentElement;
-    if (container) {
-      renderer.resize(container.clientWidth, container.clientHeight);
-      resizeObserver = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          const { width, height } = entry.contentRect;
-          renderer?.resize(width, height);
-        }
-      });
-      resizeObserver.observe(container);
-    }
-    isReady.value = true;
   };
 
   watch(
@@ -147,9 +137,24 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
     { immediate: true },
   );
 
+  // M2-D: camera sensor creation — top-level so it doesn't depend
+  // on Rapier loading (setupRenderer awaits Rapier before returning).
+  watch(
+    () => store.cameraEnabled,
+    (enabled) => {
+      if (!enabled) return;
+      if (store.getCameraSensor()) return;
+      const hostId = selection.kind === 'vehicle' && selection.id
+        ? selection.id
+        : Object.keys(store.getNetwork().vehicles)[0] ?? 'v-1';
+      store.initCameraSensor(hostId);
+    },
+  );
+
   onBeforeUnmount(() => {
     renderer?.dispose();
     renderer = null;
+    setMainRenderer(null);
     resizeObserver?.disconnect();
     resizeObserver = null;
     // Note: do NOT destroy the shared RapierWorld here. HMR might

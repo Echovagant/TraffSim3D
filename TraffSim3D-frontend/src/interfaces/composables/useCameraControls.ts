@@ -35,28 +35,11 @@ export const useCameraControls = (
       controls.minDistance = zoomMin;
       controls.maxDistance = zoomMax;
       controls.maxPolarAngle = Math.PI / 2 - 0.05;  // keep camera above ground
-      // Plan 054: right-click pan disabled. Three.js OrbitControls
-      // defaults to RIGHT=pan which is hostile in a 3D traffic sim:
-      //   1. It hijacks the browser's right-click context menu, so
-      //      the user can't right-click an entity to inspect it.
-      //   2. With damping=0.08, right-drag-pan feels laggy because
-      //      the damped velocity follows the mouse for ~10 frames
-      //      after the user lets go.
-      //   3. Most map UIs (OSM / Google Maps / Mapbox) use
-      //      left-drag for pan and wheel for zoom; the user
-      //      expects that.
       controls.mouseButtons = {
         LEFT: THREE.MOUSE.ROTATE,
         MIDDLE: THREE.MOUSE.DOLLY,
-        RIGHT: null,
+        RIGHT: THREE.MOUSE.PAN,
       } as unknown as typeof controls.mouseButtons;
-      // Plan 053: right-click is pan by default (Three.js convention).
-      // Disable it for two reasons:
-      //  - Most map UIs (OSM / Google Maps) use left-drag to pan and
-      //    wheel to zoom. Right-click → context menu is more intuitive.
-      //  - Right-drag-pan hijacks the browser's context menu, which
-      //    blocks the future "right-click to focus on point" feature.
-      // Left-drag still orbits the camera around the target.
       renderer.attachControls(controls);
       // Plan 053 follow-up: expose camera state for Playwright tests.
       // Same DEV-only pattern as window.__world — Vite tree-shakes

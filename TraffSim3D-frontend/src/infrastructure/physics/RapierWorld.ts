@@ -268,6 +268,21 @@ export class RapierWorld {
   }
 
   /**
+   * Set a vehicle's heading (yaw) without changing position or velocity.
+   * Used by OOB cleanup to re-orient the body after a respawn so that
+   * the next applyControl sends the vehicle in the correct direction.
+   */
+  setVehicleHeading(vehicleId: string, heading: number): void {
+    if (!this.world) return;
+    const bodyHandle = this.bodies.get(vehicleId);
+    if (bodyHandle === undefined) return;
+    const body = this.world.getRigidBody(bodyHandle);
+    if (!body) return;
+    body.setRotation(this.toRapierQuat(heading), true);
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  }
+
+  /**
    * Plan 037c: directly set a rigid body's angular velocity around the
    * Y-axis (in world-space). Used by the Pure Pursuit steering loop
    * to turn the vehicle toward the lookahead point.

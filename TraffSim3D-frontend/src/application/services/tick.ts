@@ -15,6 +15,7 @@
 import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { Road } from '@domain/entities/Road';
+import type { Intersection } from '@domain/entities/Intersection';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { inIntersectionBox, lanePoint, laneOffset, roadLength, laneForwardSign } from '@domain/services/laneGeometry';
 import { steerLateralVelocity, LANE_CHANGE_CONVERGED_M, perpendicularOffsetAlongRoad } from '@domain/services/laneChange';
@@ -33,6 +34,7 @@ import {
   DEFAULT_CONTROLLER_KIND,
   VEHICLE_PURE_PURSUIT,
   PYTHON_SIM_SPEED_LIMIT,
+  LATERAL_DRIFT_THRESHOLD_M,
 } from '@shared/constants/simulation';
 import type { RapierWorld, ContactEvent, Vec3 } from '@infrastructure/physics';
 import { findNearestLane } from './laneFrameSync';
@@ -93,6 +95,40 @@ export interface TickContext {
   replayTargetId: string | null;
 }
 
+const GREEN_LIKE = new Set<LightPhase>([
+  LightPhase.Green, LightPhase.GreenLeft,
+]);
+const YELLOW_LIKE = new Set<LightPhase>([
+  LightPhase.Yellow, LightPhase.YellowLeft,
+]);
+
+/**
+ * Intersection-level safety: when per-light controllers produce
+ * conflicting active phases (two different axes both showing green or
+ * yellow), force the later light to red. Traffic law (GB 14886) requires
+ * that perpendicular approaches never display green simultaneously —
+ * there must always be an all-red clearance between opposing greens.
+ */
+const resolveSignalConflicts = (inter: Intersection): void => {
+  const lights = inter.trafficLights;
+  for (let i = 0; i < lights.length; i++) {
+    const a = lights[i]!;
+    if (!GREEN_LIKE.has(a.phase) && !YELLOW_LIKE.has(a.phase)) continue;
+    for (let j = i + 1; j < lights.length; j++) {
+      const b = lights[j]!;
+      if (a.axis === b.axis) continue;
+      const bActive = GREEN_LIKE.has(b.phase) || YELLOW_LIKE.has(b.phase);
+      if (!bActive) continue;
+      // Conflict: both axes show green/yellow. Force the one with more
+      // remaining time to red (the other keeps its phase). When tied,
+      // force the second light.
+      const target = a.phaseRemaining >= b.phaseRemaining ? a : b;
+      target.phase = LightPhase.Red;
+      target.phaseRemaining = 3;
+    }
+  }
+};
+
 export const tick = (
   network: RoadNetwork,
   dt: number,
@@ -118,6 +154,11 @@ export const tick = (
         light.phase = decision.phase;
         light.phaseRemaining = decision.duration;
       }
+      // Safety: per-light controllers can drift (e.g. ActuatedController
+      // red-shortening) and produce conflicting greens across axes.
+      // Force conflicting lights to red — traffic law requires that
+      // perpendicular approaches never show green simultaneously.
+      resolveSignalConflicts(inter);
     }
   } else {
     // M1 fallback: no Rapier → no controllers yet, keep hand-rolled cycle.
@@ -137,6 +178,7 @@ export const tick = (
           }
         }
       }
+      resolveSignalConflicts(inter);
     }
   }
 
@@ -180,6 +222,13 @@ export const tick = (
     v.targetSpeed = road.speedLimit;
     applyTrafficLightConstraint(v, road, network, ctx);
     applyCarFollowingConstraint(v, road, network, ctx);
+    // Vehicles clamped at the road end (step 8 set speed=0) must stay
+    // stopped until a constraint release (light change, leader move).
+    // Guard runs AFTER constraints so they can't override it.
+    const len = roadLength(road);
+    if (v.speed < 0.1 && (v.s >= len - 0.01 || v.s <= 0.01)) {
+      v.targetSpeed = 0;
+    }
   }
 
   // 3.5. (Plan 037 bug 2) Controller → desiredStatus. We compute the
@@ -236,6 +285,56 @@ export const tick = (
       const nearest = findNearestLane(v, network);
       v.laneIndex = nearest.laneIndex;
       v.s = nearest.s;
+      // Guard: when findNearestLane couldn't project (vehicle went past
+      // road end and perpendicular distance exceeded the 5m limit), s
+      // stays stale — possibly >= roadLength or <= 0. Clamp and snap the
+      // Rapier body so rendering and physics stay in sync.
+      const vRoad = network.roads[v.roadId];
+      if (vRoad) {
+        const len = roadLength(vRoad);
+        // Also check if vehicle position is past the road endpoints.
+        // findNearestLane returns fallback s when vehicle is off-road,
+        // so s might be at the boundary (s=len or s=0) even though the
+        // vehicle has driven past the end.
+        const expectedAtS = lanePoint(vRoad, v.laneIndex, v.s);
+        const dxEnd = v.position.x - expectedAtS.position.x;
+        const dzEnd = v.position.z - expectedAtS.position.z;
+        const distFromExpectedSq = dxEnd * dxEnd + dzEnd * dzEnd;
+        if (v.s >= len || v.s <= 0 || distFromExpectedSq > 25) {  // 5m threshold
+          const clampedS = Math.max(0, Math.min(len, v.s));
+          v.s = clampedS;
+          const lp = lanePoint(vRoad, v.laneIndex, v.s);
+          v.position.x = lp.position.x;
+          v.position.y = lp.position.y;
+          v.position.z = lp.position.z;
+          v.heading = lp.heading;
+          v.speed = 0;
+          ctx.rapierWorld!.setVehiclePosition(v.id, v.position);
+          ctx.rapierWorld!.setVehicleHeading(v.id, lp.heading);
+          ctx.rapierWorld!.setVehicleSpeed(v.id, 0, lp.heading);  // zero Rapier linvel
+        }
+      }
+      // Guard 2: lateral drift. Pure Pursuit can diverge when the
+      // vehicle is far from its lane — the steering rotates heading
+      // toward the lookahead, but applyControl then drives the vehicle
+      // in the rotated heading direction (perpendicular to the road),
+      // making the divergence worse. Snap back when XZ distance from
+      // expected lane position exceeds the threshold.
+      if (vRoad) {
+        const expected = lanePoint(vRoad, v.laneIndex, v.s);
+        const dx = v.position.x - expected.position.x;
+        const dz = v.position.z - expected.position.z;
+        if (dx * dx + dz * dz > LATERAL_DRIFT_THRESHOLD_M * LATERAL_DRIFT_THRESHOLD_M) {
+          v.position.x = expected.position.x;
+          v.position.y = expected.position.y;
+          v.position.z = expected.position.z;
+          v.heading = expected.heading;
+          v.speed = Math.min(v.speed, 5);
+          ctx.rapierWorld!.setVehiclePosition(v.id, v.position);
+          ctx.rapierWorld!.setVehicleHeading(v.id, expected.heading);
+          ctx.rapierWorld!.setVehicleSpeed(v.id, v.speed, expected.heading);
+        }
+      }
     }
 
     // Plan 037c: Pure Pursuit steering — turn toward the lookahead
@@ -246,6 +345,13 @@ export const tick = (
       if (v.id === ctx.draggingId) continue;
       const road = network.roads[v.roadId];
       if (!road) continue;
+      // Skip steering when the vehicle is stopped — Pure Pursuit
+      // computes a non-zero angle whenever the heading differs from
+      // the lookahead direction, and setting angular velocity on a
+      // stationary body rotates it in place (the body doesn't move
+      // but the heading changes, so when the vehicle resumes it
+      // drives in the wrong direction).
+      if (v.speed < 0.5) continue;
       const delta = computeSteeringAngle(
         v.position.x,
         v.position.z,
@@ -378,6 +484,7 @@ export const tick = (
       removeVehicle: (id) => ctx.removeVehicle(id),
       snapVehicle: (id, pos, heading) => {
         ctx.rapierWorld?.setVehiclePosition(id, pos);
+        ctx.rapierWorld?.setVehicleHeading(id, heading);
         ctx.rapierWorld?.setVehicleSpeed(id, 0, heading);
       },
     },

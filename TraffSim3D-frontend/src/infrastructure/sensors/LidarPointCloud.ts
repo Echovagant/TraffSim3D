@@ -71,10 +71,16 @@ export class LidarPointCloud {
     this.frameCount += 1;
   }
 
-  /** Position + rotate the cloud at the host vehicle. */
-  setPose(position: { x: number; y: number; z: number }, heading: number): void {
-    this.mesh.position.set(position.x, position.y, position.z);
-    this.mesh.rotation.y = -heading;
+  /** LiDAR points are already in world coordinates (LidarSensor casts
+   *  rays in world space), so the mesh stays at the origin. The
+   *  position/heading params are accepted for API compatibility but
+   *  are intentionally NOT applied to the mesh transform — doing so
+   *  would double-offset the points (~2× vehicle position). */
+  setPose(
+    _position: { x: number; y: number; z: number },
+    _heading: number,
+  ): void {
+    // no-op: world-space points don't need a mesh transform
   }
 
   destroy(): void {

@@ -9,82 +9,89 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import * as THREE from 'three';
 import { useWorldStore } from '@interfaces/stores/worldStore';
 import { useSelectionStore } from '@interfaces/stores/selectionStore';
-import { useWorldSimulation } from '@interfaces/composables/useWorldSimulation';
+import { getMainRenderer } from '@interfaces/composables/rendererRegistry';
 import {
   CAMERA_DEFAULT_WIDTH,
   CAMERA_DEFAULT_HEIGHT,
   CAMERA_SAMPLE_INTERVAL,
 } from '@shared/constants/simulation';
-import type { Ref } from 'vue';
 
 const world = useWorldStore();
 const selection = useSelectionStore();
-// Pass a no-op canvas ref since the camera sensor renders to an
-// offscreen WebGLRenderTarget — it doesn't share this component's
-// canvas directly.
-const noopRef = ref<HTMLCanvasElement | null>(null) as Ref<HTMLCanvasElement | null>;
-const { getRenderer } = useWorldSimulation(noopRef);
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const width = CAMERA_DEFAULT_WIDTH;
 const height = CAMERA_DEFAULT_HEIGHT;
 const cameraFrameCount = ref(0);
 let lastSampleSimTime = -Infinity;
+let localRenderer: THREE.WebGLRenderer | null = null;
+let rafId: number | null = null;
 
 const hostLabel = computed(() => {
-  // Prefer the user's selection if it's a vehicle.
   if (selection.kind === 'vehicle' && selection.id) return selection.id;
   const first = Object.keys(world.network.vehicles)[0];
   return first ?? 'no-host';
 });
 
-/** Read a frame from the camera sensor and write it to the canvas.
- *  Throttled by CAMERA_SAMPLE_INTERVAL (5 Hz). Returns true if a
- *  frame was rendered. */
-const renderOnce = (simTime: number): boolean => {
-  if (!world.cameraEnabled) return false;
-  if (simTime - lastSampleSimTime < CAMERA_SAMPLE_INTERVAL) return false;
+const renderOnce = (): void => {
+  if (!world.cameraEnabled) return;
+  const now = performance.now() / 1000;
+  if (now - lastSampleSimTime < CAMERA_SAMPLE_INTERVAL) return;
   const cs = world.getCameraSensor();
-  if (!cs || !canvasRef.value) return false;
-  const renderer = getRenderer();
-  if (!renderer) return false;
+  if (!cs || !canvasRef.value) return;
+  const renderer = getMainRenderer();
+  if (!renderer) return;
   const hostId = hostLabel.value;
   const v = world.network.vehicles[hostId];
-  if (!v) return false;
-  const frame = cs.render(renderer.getGl(), renderer.getScene(), simTime, {
+  if (!v) return;
+  cs.render(renderer.getGl(), renderer.getScene(), now, {
     position: v.position,
     heading: v.heading,
   });
-  cs.renderToCanvas(frame, canvasRef.value);
   cameraFrameCount.value += 1;
-  lastSampleSimTime = simTime;
-  return true;
+  world.cameraFrameCount += 1;
+  lastSampleSimTime = now;
 };
 
-// Wrap worldStore.step so we get called every tick with simTime.
-let origStep: ((dt: number) => number) | null = null;
-const wrapStep = (): void => {
-  if (origStep) return;
-  origStep = world.step;
-  world.step = (dt: number): number => {
-    const simTime = origStep!(dt);
-    renderOnce(simTime);
-    return simTime;
+const startLoop = (): void => {
+  const tick = (): void => {
+    if (!world.cameraEnabled) return;
+    renderOnce();
+    rafId = requestAnimationFrame(tick);
   };
+  rafId = requestAnimationFrame(tick);
 };
-const unwrapStep = (): void => {
-  if (!origStep) return;
-  world.step = origStep;
-  origStep = null;
+
+const stopLoop = (): void => {
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
 };
+
+watch(
+  [canvasRef, () => world.cameraSensor],
+  ([canvas, cs]) => {
+    if (!canvas || !cs) return;
+    if (!localRenderer) {
+      localRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      localRenderer.setSize(width, height, false);
+    }
+    (cs as unknown as { externalRenderer: THREE.WebGLRenderer }).externalRenderer = localRenderer;
+  },
+);
 
 onMounted(() => {
-  wrapStep();
+  startLoop();
 });
+
 onBeforeUnmount(() => {
-  unwrapStep();
+  stopLoop();
+  localRenderer?.dispose();
+  localRenderer = null;
 });
 </script>
 

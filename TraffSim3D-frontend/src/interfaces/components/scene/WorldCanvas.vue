@@ -6,6 +6,7 @@
       @mousedown="handleMouseDown"
       @mousemove="handleMouseMove"
       @mouseup="handleMouseUp"
+      @contextmenu.prevent
     />
   </div>
 </template>

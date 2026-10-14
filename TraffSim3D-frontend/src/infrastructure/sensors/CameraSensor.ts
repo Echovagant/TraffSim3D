@@ -46,8 +46,9 @@ export class CameraSensor {
   private camera: THREE.PerspectiveCamera;
   private target: THREE.WebGLRenderTarget;
   private pixelBuffer: Uint8Array;
+  private externalRenderer: THREE.WebGLRenderer | null;
 
-  constructor(cfg: CameraConfig) {
+  constructor(cfg: CameraConfig, externalRenderer?: THREE.WebGLRenderer) {
     this.cfg = cfg;
     this.camera = new THREE.PerspectiveCamera(cfg.fov, cfg.width / cfg.height, 0.1, 1000);
     this.target = new THREE.WebGLRenderTarget(cfg.width, cfg.height, {
@@ -56,6 +57,7 @@ export class CameraSensor {
       format: THREE.RGBAFormat,
     });
     this.pixelBuffer = new Uint8Array(cfg.width * cfg.height * 4);
+    this.externalRenderer = externalRenderer ?? null;
   }
 
   /** Re-configure the sensor (e.g. when cameraEnabled flips true
@@ -73,8 +75,10 @@ export class CameraSensor {
     }
   }
 
-  /** Render one frame from `hostPose`. The renderer's main
-   *  scene is shared; we render to the offscreen target only. */
+  /** Render one frame from `hostPose`. When an external renderer is
+   *  available, render directly to its canvas (no readPixels — avoids
+   *  the GPU→CPU sync stall). Otherwise fall back to the offscreen
+   *  render-target + readPixels path. */
   render(
     renderer: THREE.WebGLRenderer,
     scene: THREE.Scene,
@@ -88,9 +92,18 @@ export class CameraSensor {
       hostPose.position.y + this.cfg.heightOffset,
       hostPose.position.z + sin * this.cfg.forwardOffset,
     );
-    // heading is yaw (rotation around Y). THREE camera's Y rotation
-    // is signed opposite to our Vehicle.heading convention.
     this.camera.rotation.set(0, -hostPose.heading, 0);
+
+    if (this.externalRenderer) {
+      this.externalRenderer.render(scene, this.camera);
+      return {
+        vehicleId: this.cfg.vehicleId,
+        simTime,
+        width: this.cfg.width,
+        height: this.cfg.height,
+        rgba: this.pixelBuffer,
+      };
+    }
 
     const prevTarget = renderer.getRenderTarget();
     renderer.setRenderTarget(this.target);

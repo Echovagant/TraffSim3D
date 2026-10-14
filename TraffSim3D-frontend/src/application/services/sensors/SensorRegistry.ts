@@ -31,6 +31,8 @@ export class SensorRegistry {
   private latestFrames: Map<VehicleId, LidarFrame> = new Map();
   /** Plan 033: max sensors that actually scan per tick. */
   private maxActiveSensors: number;
+  /** Total frames produced (not throttled calls). For UI display. */
+  private totalFramesProduced: number = 0;
 
   constructor(maxActiveSensors: number = LIDAR_MAX_ACTIVE_SENSORS) {
     this.maxActiveSensors = maxActiveSensors;
@@ -88,6 +90,7 @@ export class SensorRegistry {
         if (frame) {  // null = throttled
           out.push(frame);
           this.latestFrames.set(vehicleId, frame);
+          this.totalFramesProduced += 1;
         }
       }
     }
@@ -117,9 +120,14 @@ export class SensorRegistry {
     this.sensors.clear();
     this.byVehicle.clear();
     this.latestFrames.clear();
+    this.totalFramesProduced = 0;
   }
 
   get sensorCount(): number {
     return this.sensors.size;
+  }
+
+  get frameCount(): number {
+    return this.totalFramesProduced;
   }
 }

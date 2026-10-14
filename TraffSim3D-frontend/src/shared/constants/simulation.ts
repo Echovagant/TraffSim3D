@@ -251,3 +251,16 @@ export const CAMERA_SAMPLE_INTERVAL = 0.2;
  * tick.ts 的 OOB branch 用这个常量决定是否 respawn.
  */
 export const OUT_OF_BOUNDS_M = 50;
+
+/**
+ * Lateral drift threshold (metres). When a vehicle's Rapier position
+ * diverges from its expected lane-geometry position by more than this
+ * distance (in the XZ plane), tick.ts snaps it back. Pure Pursuit can
+ * create a divergent feedback loop when the vehicle is far from the
+ * lane: the steering rotates the heading toward the lookahead, but
+ * this causes the vehicle to drive perpendicular to the road rather
+ * than back toward it. 15m ≈ 4 lane widths — well beyond any legal
+ * lane change (~3.5m) but catches divergence before the vehicle
+ * leaves the visible area.
+ */
+export const LATERAL_DRIFT_THRESHOLD_M = 15;

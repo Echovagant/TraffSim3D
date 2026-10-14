@@ -47,7 +47,7 @@ export const tickOobCleanup = (
       v.s = 0;
       v.speed = 0;
       const lp = lanePoint(road, v.laneIndex, 0);
-      v.position = { x: lp.position.x, y: v.position.y, z: lp.position.z };
+      v.position = { x: lp.position.x, y: lp.position.y, z: lp.position.z };
       v.heading = lp.heading;
       deps.snapVehicle(v.id, { x: lp.position.x, y: lp.position.y ?? v.position.y, z: lp.position.z }, lp.heading);
     }

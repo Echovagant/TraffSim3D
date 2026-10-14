@@ -118,11 +118,11 @@
     <span class="sep" />
 
     <button title="下载轨迹 CSV (10Hz 采样)" @click="exportTrajectoryCsv">📥 轨迹 CSV</button>
-    <label class="lidar-toggle" title="启用车载 16线 LiDAR (点云未渲染, 但 scan() 跑通; perf gate 验证)">
+    <label class="lidar-toggle" title="启用车载 16线 LiDAR 扫描">
       <input type="checkbox" :checked="world.lidarEnabled" @change="onLidarToggle" />
       <span>LiDAR (雷达)</span>
     </label>
-    <label class="lidar-toggle" title="在 3D 场景中渲染 LiDAR 点云 (彩色, 按 intensity 渐变)">
+    <label class="lidar-toggle" title="在 3D 场景中渲染 LiDAR 点云 (需先启用 LiDAR)">
       <input type="checkbox" :checked="world.lidarCloudsEnabled" @change="onLidarCloudsToggle" />
       <span>点云</span>
     </label>
