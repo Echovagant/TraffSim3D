@@ -17,11 +17,15 @@ STATUS_PATH = rl_status.get_status_path()
 
 
 @pytest.fixture
-async def client():
+async def client(tmp_path, monkeypatch):
     # Clean slate per test
     if STATUS_PATH.exists():
         STATUS_PATH.unlink()
     rl_status.write_status({})  # ensure fresh empty status
+    # Isolate the control channel too — it is a module-level /tmp path shared
+    # across tests otherwise, and its epoch is monotonic by design.
+    from app.apps.rl import control as rl_control
+    monkeypatch.setattr(rl_control, "_DEFAULT_PATH", tmp_path / "control.json")
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as c:
@@ -223,3 +227,90 @@ async def test_weights_endpoint_503_when_sb3_missing(
     )
     assert r.status_code == 503
     assert "unavailable" in r.json()["detail"].lower()
+
+
+# --- M4 Must: training task control (pause / resume / terminate) ------------
+
+
+@pytest.mark.asyncio
+async def test_control_endpoints_409_when_no_run(client: AsyncClient) -> None:
+    """No active run -> every control verb is a conflict, not a silent 200."""
+    for path in ("pause", "resume", "terminate"):
+        r = await client.post(f"/api/v1/rl/train/{path}")
+        assert r.status_code == 409, f"{path} should 409 without a live run"
+        assert "no active training" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_pause_resume_terminate_roundtrip(client: AsyncClient) -> None:
+    rl_status.init_status(1000)
+
+    r1 = await client.post("/api/v1/rl/train/pause")
+    assert r1.status_code == 200
+    body = r1.json()
+    assert body["ok"] is True
+    assert body["action"] == "pause"
+    assert body["state"] == "paused"
+    assert body["epoch"] == 1
+
+    r2 = await client.post("/api/v1/rl/train/resume")
+    assert r2.status_code == 200
+    assert r2.json()["state"] == "running"
+    assert r2.json()["epoch"] == 2
+
+    r3 = await client.post("/api/v1/rl/train/terminate")
+    assert r3.status_code == 200
+    assert r3.json()["state"] == "terminated"
+    assert r3.json()["epoch"] == 3
+
+
+@pytest.mark.asyncio
+async def test_pause_is_idempotent(client: AsyncClient) -> None:
+    """Two pauses must not queue a double-pause that strands the trainer."""
+    rl_status.init_status(1000)
+    a = (await client.post("/api/v1/rl/train/pause")).json()
+    b = (await client.post("/api/v1/rl/train/pause")).json()
+    assert a["state"] == b["state"] == "paused"
+    assert b["epoch"] > a["epoch"]  # request recorded, desired state unchanged
+
+
+@pytest.mark.asyncio
+async def test_terminate_works_while_paused(client: AsyncClient) -> None:
+    """The pause loop must still observe a terminate issued during a pause."""
+    rl_status.init_status(1000)
+    await client.post("/api/v1/rl/train/pause")
+    r = await client.post("/api/v1/rl/train/terminate")
+    assert r.status_code == 200
+    assert r.json()["state"] == "terminated"
+
+
+@pytest.mark.asyncio
+async def test_status_reports_paused_flag(client: AsyncClient) -> None:
+    rl_status.init_status(1000)
+    assert (await client.get("/api/v1/rl/status")).json()["paused"] is False
+    rl_status.set_paused(True)
+    assert (await client.get("/api/v1/rl/status")).json()["paused"] is True
+
+
+@pytest.mark.asyncio
+async def test_train_start_clears_stale_control(client: AsyncClient) -> None:
+    """A leftover pause must not kill the next run the moment it starts."""
+    from app.apps.rl import control as rl_control
+
+    rl_status.init_status(1000)
+    await client.post("/api/v1/rl/train/pause")
+    assert rl_control.read_control()["state"] == "paused"
+
+    await client.post("/api/v1/rl/train", json={"steps": 50, "dry_run": True})
+    assert rl_control.read_control()["state"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_finalize_clears_paused_flag(client: AsyncClient) -> None:
+    rl_status.init_status(1000)
+    rl_status.set_paused(True)
+    rl_status.finalize_status("terminated_by_request")
+    s = rl_status.read_status()
+    assert s["running"] is False
+    assert s["paused"] is False
+    assert s["reason"] == "terminated_by_request"

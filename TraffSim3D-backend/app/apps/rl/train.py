@@ -34,6 +34,42 @@ import argparse
 import math
 from typing import Any
 
+# How long a pause may block the training loop before we give up on it and
+# let training continue. A forgotten pause must not wedge the process; the
+# pause is then treated as abandoned and recorded in status.json.
+PAUSE_WATCHDOG_S = 3600.0
+
+#: Epoch seen so far; shared by every callback in this process so a pause
+#: issued between two different loops is still observed exactly once.
+_SEEN_CONTROL_EPOCH = 0
+
+
+def _control_gate() -> tuple[bool, int]:
+    """Honour pause / terminate. Returns ``(should_stop, epoch)``.
+
+    Blocks inside this call while paused, so no environment step executes in
+    the meantime and the model stays in memory for a lossless resume.
+    """
+    global _SEEN_CONTROL_EPOCH
+    from . import control as ctl
+    from . import status as st
+
+    state, epoch = ctl.poll(_SEEN_CONTROL_EPOCH)
+    if state == ctl.STATE_PAUSED:
+        st.set_paused(True)
+        state, epoch = ctl.wait_while_paused(epoch, timeout_s=PAUSE_WATCHDOG_S)
+        if state == ctl.STATE_PAUSED:
+            # Watchdog fired: abandon the pause rather than oscillate.
+            ctl.request("resume")
+            s = st.read_status()
+            s["pause_abandoned"] = True
+            st.write_status(s)
+            st.set_paused(False)
+            return False, epoch
+        st.set_paused(False)
+    _SEEN_CONTROL_EPOCH = epoch
+    return state == ctl.STATE_TERMINATED, epoch
+
 
 def dry_run(
     total_steps: int = 1000, n_agents: int = 2, independent: bool = False,
@@ -101,10 +137,13 @@ def real_train(
     """
     from . import capabilities as caps
     from . import checkpoint as ckpt
+    from . import control as ctl
     from . import status as st
 
     resolved_device, reason = caps.resolve_device(device)
 
+    # A fresh run starts with no outstanding pause/terminate request.
+    ctl.clear_control()
     st.init_status(total_steps)
     s = st.read_status()
     s["device"] = resolved_device
@@ -155,14 +194,22 @@ def real_train(
         agent_rewards: dict[str, list[float]] = {
             str(i): [] for i in range(n_agents)
         }
+        terminated = False
         for round_idx in range(rounds):
             for i, (model, _env) in enumerate(zip(models, envs, strict=True)):
+                # This branch learns in discrete rounds rather than through a
+                # single SB3 callback, so the gate is checked per round.
+                if _control_gate()[0]:
+                    terminated = True
+                    break
                 model.learn(total_timesteps=steps_per_round)
                 cur_step = (round_idx + 1) * steps_per_round * n_agents
                 _save_and_record(model, cur_step, agent_id=i)
                 ep_buf = model.ep_info_buffer
                 if ep_buf:
                     agent_rewards[str(i)].append(float(ep_buf[-1]["r"]))
+            if terminated:
+                break
         s = st.read_status()
         s["agent_rewards"] = agent_rewards
         mean_history: list[float] = []
@@ -174,6 +221,9 @@ def real_train(
         s["reward_history"] = mean_history
         s["last_reward"] = mean_history[-1] if mean_history else 0.0
         st.write_status(s)
+        if terminated:
+            st.finalize_status("terminated_by_request")
+            return
         st.finalize_status(
             f"ppo_independent_completed on {resolved_device} ({n_agents} agents)",
         )
@@ -186,7 +236,10 @@ def real_train(
         sub_env.core.scene_kind = scene_kind
     model = PPO("MlpPolicy", env, verbose=0, device=resolved_device)
 
-    def on_step(_locals: dict[str, Any], _globals: dict[str, Any]) -> None:  # SB3 callback
+    def on_step(_locals: dict[str, Any], _globals: dict[str, Any]) -> bool:  # SB3 callback
+        if _control_gate()[0]:
+            st.finalize_status("terminated_by_request")
+            return False  # False tells SB3 to stop learning
         step = int(_locals["self"].num_timesteps)
         if step % save_every == 0 and step > 0:
             _save_and_record(_locals["self"].model, step)
@@ -194,8 +247,12 @@ def real_train(
             ep_buf = _locals["self"].ep_info_buffer
             if ep_buf:
                 st.append_reward(float(ep_buf[-1]["r"]))
+        return True
 
     model.learn(total_timesteps=total_steps, callback=on_step)
+    # A terminate request stops SB3 early; don't relabel it as "completed".
+    if st.read_status().get("running") is False:
+        return
     final_path = ckpt.save_checkpoint(model, total_steps)
     s = st.read_status()
     s["latest_checkpoint"] = final_path.name
@@ -214,11 +271,13 @@ def curriculum_train(
     """
     from . import capabilities as caps
     from . import checkpoint as ckpt
+    from . import control as ctl
     from . import status as st
     from .curriculum_env import CurriculumEnv
 
     resolved_device, reason = caps.resolve_device(device)
 
+    ctl.clear_control()
     st.init_status(total_steps)
     s = st.read_status()
     s["device"] = resolved_device
@@ -243,7 +302,10 @@ def curriculum_train(
 
     latest_ckpts: list[str] = []
 
-    def on_step(_locals: dict[str, Any], _globals: dict[str, Any]) -> None:
+    def on_step(_locals: dict[str, Any], _globals: dict[str, Any]) -> bool:
+        if _control_gate()[0]:
+            st.finalize_status("terminated_by_request")
+            return False
         step = int(_locals["self"].num_timesteps)
         if step % save_every == 0 and step > 0:
             path = ckpt.save_checkpoint(_locals["self"].model, step)
@@ -265,6 +327,8 @@ def curriculum_train(
             st.write_status(ss)
 
     model.learn(total_timesteps=total_steps, callback=on_step)
+    if st.read_status().get("running") is False:
+        return
     final_path = ckpt.save_checkpoint(model, total_steps)
     s = st.read_status()
     s["latest_checkpoint"] = final_path.name

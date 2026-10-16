@@ -29,6 +29,12 @@ class TrainRequest(BaseModel):
 @router.post("/rl/train", tags=["rl"])
 async def train(req: TrainRequest) -> dict[str, Any]:
     """Start a training run (subprocess) and return immediately."""
+    from app.apps.rl import control as rl_control
+
+    # Drop any pause/terminate left over from a previous run, so a fresh
+    # start is never immediately paused or killed by a stale request.
+    rl_control.clear_control()
+
     if req.curriculum:
         # Curriculum learning mode
         if req.dry_run:
@@ -88,7 +94,7 @@ async def status() -> dict[str, Any]:
     """Read training status from status.json. Empty dict if no run yet."""
     s = rl_status.read_status()
     if not s:
-        return {"running": False, "step": 0, "episode_count": 0,
+        return {"running": False, "paused": False, "step": 0, "episode_count": 0,
                 "last_reward": 0.0, "reward_history": [],
                 "started_at_ms": 0, "finished_at_ms": None,
                 "latest_checkpoint": "",
@@ -100,6 +106,52 @@ async def status() -> dict[str, Any]:
 async def capabilities() -> dict[str, Any]:
     """Runtime-detected torch / CUDA / SB3 / VRAM state."""
     return rl_caps.detect_capabilities()
+
+
+# --- Training task control (M4 Must: 启动/暂停/恢复/终止) -------------------
+#
+# Training is a detached subprocess, so these endpoints do not poke a live
+# object — they write a control request that the trainer polls from its step
+# callback. See `app/apps/rl/control.py` for why this is a file rather than a
+# signal.
+
+
+def _control(action: str) -> dict[str, Any]:
+    """Record a control request; 409 when no training run is live."""
+    from app.apps.rl import control as rl_control
+
+    s = rl_status.read_status()
+    if not s or not s.get("running"):
+        raise HTTPException(
+            status_code=409,
+            detail="no active training run to control",
+        )
+    payload = rl_control.request(action)
+    return {
+        "ok": True,
+        "action": action,
+        "state": payload["state"],
+        "epoch": payload["epoch"],
+        "requested_at_ms": payload["requested_at_ms"],
+    }
+
+
+@router.post("/rl/train/pause", tags=["rl"])
+async def pause_training() -> dict[str, Any]:
+    """Pause the running training task. Resumable with zero state loss."""
+    return _control("pause")
+
+
+@router.post("/rl/train/resume", tags=["rl"])
+async def resume_training() -> dict[str, Any]:
+    """Resume a paused training task from its in-memory state."""
+    return _control("resume")
+
+
+@router.post("/rl/train/terminate", tags=["rl"])
+async def terminate_training() -> dict[str, Any]:
+    """Stop the running training task. Works while paused."""
+    return _control("terminate")
 
 
 @router.get("/rl/checkpoints", tags=["rl"])

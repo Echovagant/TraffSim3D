@@ -50,6 +50,7 @@ def init_status(total_steps: int) -> None:
     """Initialize status.json at the start of a training run."""
     write_status({
         "running": True,
+        "paused": False,
         "step": 0,
         "total_steps": total_steps,
         "episode_count": 0,
@@ -75,9 +76,17 @@ def append_reward(reward: float, max_history: int = 200) -> None:
     write_status(s)
 
 
+def set_paused(paused: bool) -> None:
+    """Flag a live run as paused/resumed (M4 Must task control)."""
+    s = read_status()
+    s["paused"] = bool(paused)
+    write_status(s)
+
+
 def finalize_status(reason: str = "completed") -> None:
     s = read_status()
     s["running"] = False
+    s["paused"] = False
     s["finished_at_ms"] = int(time.time() * 1000)
     s["reason"] = reason
     write_status(s)
