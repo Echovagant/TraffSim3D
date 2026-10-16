@@ -38,8 +38,70 @@ DEFAULT_HIGHWAY_TYPES = frozenset(HIGHWAY_SPEED_LIMIT.keys())
 # Meters per level step — must match frontend LEVEL_HEIGHT in simulation constants.
 LEVEL_HEIGHT = 4.0
 
-# Skip nodes / ways that are too far from the network center.
-MAX_BBOX_DEG = 0.5  # ~55 km at mid-latitudes
+# Default clip half-extent in degrees (~55 km at mid-latitudes).
+# This is a *memory-safety* cap for oversized `.osm` files, NOT simulation-area
+# clipping: 55 km is orders of magnitude larger than any scene this project
+# simulates. Pass an explicit `bbox` to actually clip to an area of interest.
+MAX_BBOX_DEG = 0.5
+
+BBox = tuple[float, float, float, float]  # (south, west, north, east)
+
+
+def _resolve_center(
+    raw_nodes: dict[int, tuple[float, float]], center: tuple[float, float] | None,
+) -> tuple[float, float]:
+    """Projection origin. Defaults to the input's centroid."""
+    if center is not None:
+        return float(center[0]), float(center[1])
+    return (
+        sum(n[0] for n in raw_nodes.values()) / len(raw_nodes),
+        sum(n[1] for n in raw_nodes.values()) / len(raw_nodes),
+    )
+
+
+def _validate_bbox(bbox: BBox) -> None:
+    south, west, north, east = bbox
+    if south > north:
+        raise ValueError(f"bbox south must be <= north, got south={south} north={north}")
+    if west > east:
+        raise ValueError(f"bbox west must be <= east, got west={west} east={east}")
+
+
+def _project_nodes(
+    raw_nodes: dict[int, tuple[float, float]],
+    center: tuple[float, float] | None = None,
+    bbox: BBox | None = None,
+) -> tuple[dict[int, _Node], float, float]:
+    """lat/lon -> world meters, dropping anything outside `bbox`.
+
+    Shared by the XML and PBF pipelines so the clip semantics cannot drift
+    apart between them. Returns `(nodes, center_lat, center_lon)`.
+    """
+    if bbox is not None:
+        _validate_bbox(bbox)
+    center_lat, center_lon = _resolve_center(raw_nodes, center)
+    cos_lat = math.cos(center_lat * math.pi / 180.0)
+
+    half = None if bbox is not None else MAX_BBOX_DEG
+    south = west = north = east = None
+    if bbox is not None:
+        south, west, north, east = bbox
+
+    nodes: dict[int, _Node] = {}
+    for nid, (lat, lon) in raw_nodes.items():
+        if half is not None:
+            # Centred square safety cap around the projection origin.
+            if abs(lat - center_lat) > half or abs(lon - center_lon) > half:
+                continue
+        else:
+            assert south is not None and west is not None
+            assert north is not None and east is not None
+            if not (south <= lat <= north and west <= lon <= east):
+                continue
+        x = (lon - center_lon) * 111000.0 * cos_lat
+        z = (lat - center_lat) * 111000.0
+        nodes[nid] = _Node(id=nid, lat=lat, lon=lon, x=x, z=z)
+    return nodes, center_lat, center_lon
 
 
 @dataclass(frozen=True)
@@ -57,11 +119,19 @@ class _Node:
     z: float  # meters south of center (lat increase = z increase)
 
 
-def parse_osm_xml(xml_bytes: bytes) -> dict[str, Any]:
+def parse_osm_xml(
+    xml_bytes: bytes,
+    bbox: BBox | None = None,
+    center: tuple[float, float] | None = None,
+) -> dict[str, Any]:
     """Parse an OSM XML byte payload into a RoadNetwork dict.
 
     Returned shape matches the frontend SerializedScene (no schemaVersion
     wrapper) so the frontend can call `loadNetwork(parsed)` directly.
+
+    `bbox` (south, west, north, east) in degrees clips the map to an area of
+    interest. Omitting it keeps the historical ~55 km safety cap, so existing
+    callers are unaffected.
     """
     root = ET.fromstring(xml_bytes)
 
@@ -79,18 +149,8 @@ def parse_osm_xml(xml_bytes: bytes) -> dict[str, Any]:
     if not raw_nodes:
         return {"roads": [], "intersections": [], "vehicles": [], "spawnPoints": []}
 
-    # ---- 2) Project to world coords (meters, centered) ----
-    center_lat = sum(n[0] for n in raw_nodes.values()) / len(raw_nodes)
-    center_lon = sum(n[1] for n in raw_nodes.values()) / len(raw_nodes)
-    cos_lat = math.cos(center_lat * math.pi / 180.0)
-    nodes: dict[int, _Node] = {}
-    for nid, (lat, lon) in raw_nodes.items():
-        # Skip nodes too far from center (~55 km cap).
-        if abs(lat - center_lat) > MAX_BBOX_DEG or abs(lon - center_lon) > MAX_BBOX_DEG:
-            continue
-        x = (lon - center_lon) * 111000.0 * cos_lat
-        z = (lat - center_lat) * 111000.0
-        nodes[nid] = _Node(id=nid, lat=lat, lon=lon, x=x, z=z)
+    # ---- 2) Project to world coords (meters, centered), clipped ----
+    nodes, center_lat, center_lon = _project_nodes(raw_nodes, center, bbox)
 
     # ---- 3) Parse ways -> roads ----
     roads: list[dict[str, Any]] = []
@@ -220,6 +280,8 @@ def _build_network(
     raw_nodes: dict[int, tuple[float, float]],
     raw_ways: list[tuple[int, list[int], dict[str, str]]],
     traffic_signal_node_ids: set[int],
+    bbox: BBox | None = None,
+    center: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """Shared pipeline: project + ways -> roads + intersections.
 
@@ -230,17 +292,8 @@ def _build_network(
     if not raw_nodes:
         return {"roads": [], "intersections": [], "vehicles": [], "spawnPoints": []}
 
-    # ---- 2) Project to world coords (meters, centered) ----
-    center_lat = sum(n[0] for n in raw_nodes.values()) / len(raw_nodes)
-    center_lon = sum(n[1] for n in raw_nodes.values()) / len(raw_nodes)
-    cos_lat = math.cos(center_lat * math.pi / 180.0)
-    nodes: dict[int, _Node] = {}
-    for nid, (lat, lon) in raw_nodes.items():
-        if abs(lat - center_lat) > MAX_BBOX_DEG or abs(lon - center_lon) > MAX_BBOX_DEG:
-            continue
-        x = (lon - center_lon) * 111000.0 * cos_lat
-        z = (lat - center_lat) * 111000.0
-        nodes[nid] = _Node(id=nid, lat=lat, lon=lon, x=x, z=z)
+    # ---- 2) Project to world coords (meters, centered), clipped ----
+    nodes, center_lat, center_lon = _project_nodes(raw_nodes, center, bbox)
 
     # ---- 3) Ways -> roads (same logic as XML pipeline) ----
     roads: list[dict[str, Any]] = []
@@ -339,9 +392,15 @@ def _build_network(
     }
 
 
-def parse_osmpbf(pbf_bytes: bytes) -> dict[str, Any]:
+def parse_osmpbf(
+    pbf_bytes: bytes,
+    bbox: BBox | None = None,
+    center: tuple[float, float] | None = None,
+) -> dict[str, Any]:
     """Streaming PBF parser using libosmium. Same return shape as
     parse_osm_xml — frontend's `loadNetwork` accepts either.
+
+    `bbox` / `center` behave exactly as in `parse_osm_xml`.
 
     Raises ValueError on malformed PBF (e.g. invalid magic, corrupt
     block, missing required fields).
@@ -380,4 +439,6 @@ def parse_osmpbf(pbf_bytes: bytes) -> dict[str, Any]:
         handler.raw_nodes,
         handler.raw_ways,
         handler.traffic_signal_node_ids,
+        bbox=bbox,
+        center=center,
     )
