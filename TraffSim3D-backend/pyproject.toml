@@ -62,4 +62,5 @@ pythonpath = ["."]  # required so `from app.main import app` resolves from tests
 [dependency-groups]
 dev = [
     "httpx2>=2.5.0",
+    "pytest-cov",
 ]

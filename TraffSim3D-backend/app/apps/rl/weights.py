@@ -7,8 +7,10 @@ frontend uses this to instantiate an in-browser MlpPolicy (see
 
 Why JSON instead of ONNX:
 - ONNX export needs `onnx` + `onnxruntime-web` (heavy, +5MB bundle).
-- JSON is ~10x smaller than ONNX for a 13→64→64→2 MlpPolicy (~30KB
+- JSON is ~10x smaller than ONNX for a 14→64→64→2 MlpPolicy (~30KB
   vs ~300KB) and the TS forward pass is <30 lines.
+  The input dim (14) is authoritative in `sim_core.OBS_DIM` — do not
+  hardcode it here; read it from the checkpoint's state_dict shape.
 - Mvp scope: single architecture (MlpPolicy, default net_arch=[]). When
   policy_kwargs support lands (M5+), we'll add ONNX as the fallback.
 

@@ -1,5 +1,12 @@
-// M4 stub: identical to FixedCycle for now. M4 plugs PPO/SAC
-// agent in via applyAction().
+/** M4 stub: RL signal controller placeholder.
+ *
+ * Current implementation is **identical to FixedCycleController** — it does NOT integrate
+ * PPO/SAC agents yet (backlog). Users selecting "RL" in UI will still run fixed-cycle logic.
+ * True RL inference requires loading weights via worldStore.loadPolicy() → mlpInference.mlpForwardMean().
+ * For real signal control, see `worldStore` + `tick.ts` policy replay path (Plan 049), not this stub.
+ *
+ * M4 TODO: integrate PPO action queue via applyAction(). Until then: fixed cycle.
+ */
 import type { TrafficLight } from '@domain/entities/TrafficLight';
 import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { SignalAction, SignalController, SignalDecision } from '../signalController';

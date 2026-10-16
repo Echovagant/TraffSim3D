@@ -11,7 +11,7 @@ from typing import Any
 # Minimum VRAM (GB) required for the small obs/action network in this
 # project. Below this threshold we fall back to CPU because a GPU with
 # less than ~2GB is usually an integrated/old card that can't reliably
-# host even SB3's MlpPolicy + 13-dim obs.
+# host even SB3's MlpPolicy + 14-dim obs.
 MIN_VRAM_GB = 2.0
 
 

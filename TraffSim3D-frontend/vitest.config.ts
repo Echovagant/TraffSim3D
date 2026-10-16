@@ -30,5 +30,27 @@ export default defineConfig({
         web: { enabled: true },
       },
     },
+    // Plan C-1 / AC11a: coverage baseline. Scoped to the DDD layers —
+    // entry point, type-only barrels and config files are excluded so the
+    // number reflects testable logic, not file count.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'json-summary'],
+      reportsDirectory: './coverage',
+      include: [
+        'src/domain/**/*.ts',
+        'src/application/**/*.ts',
+        'src/infrastructure/**/*.ts',
+        'src/interfaces/**/*.ts',
+        'src/shared/**/*.ts',
+      ],
+      exclude: [
+        '**/*.spec.ts',
+        '**/*.d.ts',
+        '**/index.ts',
+        '**/main.ts',
+        '**/fixtures/**',
+      ],
+    },
   },
 });

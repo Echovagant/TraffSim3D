@@ -94,7 +94,7 @@ const controllerKindLabel = computed(() => {
   if (k === 'fixed-cycle') return '固定';
   if (k === 'actuated') return '感应';
   if (k === 'coordinated') return '协调';
-  return 'RL';
+  return 'RL (stub)'; // Plan 049/058 stub: does not implement RL control yet
 });
 const isCoordinated = computed(() => store.controllerKind === 'coordinated');
 const coordinatedPairs = computed(() =>

@@ -157,7 +157,7 @@ const controllerLabel = computed(() => {
     'fixed-cycle': '固定',
     'actuated': '感应',
     'coordinated': '协调',
-    'rl': 'RL',
+    'rl': 'RL (stub)',
   };
   return map[world.controllerKind] || world.controllerKind;
 });

@@ -50,7 +50,7 @@
               <option value="fixed-cycle">固定</option>
               <option value="actuated">感应</option>
               <option value="coordinated">协调 (绿波带)</option>
-              <option value="rl">RL</option>
+              <option value="rl">RL (未实装·回退固定周期)</option>
             </select>
           </label>
           <button
