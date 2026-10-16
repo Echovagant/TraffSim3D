@@ -9,7 +9,7 @@
 export interface PolicyWeights {
   /** Source checkpoint filename, e.g. "ppo_step_0005000.zip". */
   name: string;
-  /** Input observation dimension. Defaults to 13 for cross/corridor sims. */
+  /** Input observation dimension reported by the checkpoint (14 for current sims). */
   obs_dim: number;
   /** Action dimension. Defaults to 2 (accel, steer). */
   action_dim: number;

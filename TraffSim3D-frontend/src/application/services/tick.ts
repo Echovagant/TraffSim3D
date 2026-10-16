@@ -651,16 +651,17 @@ export { DEFAULT_CONTROLLER_KIND };
 // MUST stay in sync with the Python sim — PPO is sensitive to scaling
 // and will drive erratically if they diverge.
 
-const OBS_DIM = 13;
+const OBS_DIM = 14;
 const NORMALIZE_DIST = 50.0;
 
-/** Build the 13-dim observation vector for the replay target.
+/** Build the 14-dim observation vector for the replay target.
  *
  *  Layout (matches Python `SimCore._obs()`):
  *    [0:3] ego pose normalized  (x/50, z/50, heading/π)
  *    [3:6] ego motion           (speed/16.67, 0, 0)
  *    [6:8] traffic light        (NS-green, EW-green)
  *    [8:13] 5 nearest NPC distances / 50, padded with 1.0
+ *    [13] ego elevation normalized (y/10, clipped to [-1, 1])
  */
 const buildReplayObs = (ego: Vehicle, network: RoadNetwork): number[] => {
   const obs = new Array<number>(OBS_DIM).fill(0);
@@ -708,5 +709,7 @@ const buildReplayObs = (ego: Vehicle, network: RoadNetwork): number[] => {
   for (let i = 0; i < 5; i++) {
     obs[8 + i] = Math.min(1, (distances[i] ?? NORMALIZE_DIST) / NORMALIZE_DIST);
   }
+  // Plan 061: keep the replay vector aligned with Python SimCore._obs().
+  obs[13] = Math.max(-1, Math.min(1, ego.position.y / 10.0));
   return obs;
 };

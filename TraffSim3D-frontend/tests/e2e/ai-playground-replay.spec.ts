@@ -19,7 +19,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Load the real mlp-policy-fixture so the weights JSON we stub is
-// architecturally valid (obs_dim=13, action_dim=2, hidden_sizes=[64,64]).
+// architecturally valid (obs_dim=14, action_dim=2, hidden_sizes=[64,64]).
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = resolve(
   __dirname,
@@ -47,7 +47,7 @@ const FAKE_CHECKPOINTS = {
 
 const FAKE_WEIGHTS = {
   name: 'ppo_step_0005000.zip',
-  obs_dim: 13,
+  obs_dim: fixture.obs.length,
   action_dim: 2,
   hidden_sizes: [64, 64],
   layers: fixture.weights,
@@ -128,7 +128,7 @@ test('AI Playground: strategy load + replay UI', async ({ page }) => {
   await page.locator('[data-testid="load-policy-button"]').click();
   await expect(page.locator('[data-testid="policy-status"]')).toContainText('已加载');
   await expect(page.locator('[data-testid="policy-status"]')).toContainText('ppo_step_0005000.zip');
-  await expect(page.locator('[data-testid="policy-status"]')).toContainText('13 obs / 2 act');
+  await expect(page.locator('[data-testid="policy-status"]')).toContainText('14 obs / 2 act');
 
   // Select target vehicle (v-1 is the default).
   await page.selectOption('[data-testid="replay-target-select"]', 'v-1');

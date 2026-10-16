@@ -107,7 +107,7 @@ describe('worldStore.replay (Plan 049)', () => {
 
   const fakeWeights: PolicyWeights = {
     name: 'ppo_step_0005000.zip',
-    obs_dim: 13,
+    obs_dim: fixture.obs.length,
     action_dim: 2,
     hidden_sizes: [64, 64],
     layers: fixture.weights as PolicyWeights['layers'],
@@ -134,7 +134,7 @@ describe('worldStore.replay (Plan 049)', () => {
       throw new Error(`loadPolicy failed: ${r.reason}`);
     }
     expect(r.ok).toBe(true);
-    expect(r.obs_dim).toBe(13);
+    expect(r.obs_dim).toBe(fixture.obs.length);
     expect(r.action_dim).toBe(2);
     expect(world.policy?.name).toBe('ppo_step_0005000.zip');
     const callArgs = fetchSpy.mock.calls[0] ?? [];

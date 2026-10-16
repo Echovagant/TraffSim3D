@@ -47,7 +47,12 @@ export const tanhVec = (v: number[]): number[] => v.map(Math.tanh);
 /** Deterministic forward pass — returns the Gaussian mean (action).
  *  Use this for replay so the same state → same action. */
 export const mlpForwardMean = (obs: number[], w: PolicyWeights): PolicyAction => {
-  let h = addBias(matVec(w.layers['policy_net.0.weight'], obs), w.layers['policy_net.0.bias']);
+  const inputWeights = w.layers['policy_net.0.weight'];
+  const expectedDim = inputWeights[0]?.length ?? 0;
+  if (obs.length !== expectedDim) {
+    throw new Error(`obs dim mismatch: got ${obs.length}, weights expect ${expectedDim}`);
+  }
+  let h = addBias(matVec(inputWeights, obs), w.layers['policy_net.0.bias']);
   h = tanhVec(h);
   h = addBias(matVec(w.layers['policy_net.2.weight'], h), w.layers['policy_net.2.bias']);
   h = tanhVec(h);
