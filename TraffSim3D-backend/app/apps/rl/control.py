@@ -35,6 +35,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from . import paths as _paths
+
 STATE_RUNNING = "running"
 STATE_PAUSED = "paused"
 STATE_TERMINATED = "terminated"
@@ -46,8 +48,10 @@ ACTIONS: dict[str, str] = {
     "terminate": STATE_TERMINATED,
 }
 
-# Default control file — overridable via env var for tests.
-_DEFAULT_PATH = Path(os.environ.get("TRAFFIC_PPO_CONTROL", "/tmp/traffic_ppo_control.json"))
+# Default no longer lands in /tmp — on Windows that path is drive-relative,
+# which would make the control channel appear on a different drive depending
+# on where uvicorn was launched. See paths.py for the full rationale.
+_DEFAULT_PATH = _paths.control_file()
 
 
 def get_control_path() -> Path:

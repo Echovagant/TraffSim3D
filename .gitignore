@@ -27,6 +27,12 @@ build/
 dist/
 .uv-cache/
 
+# RL engine runtime state (PPO checkpoints, training status, pause/terminate
+# control file). Deliberately anchored to TraffSim3D-backend/ instead of /tmp —
+# on Windows /tmp is drive-relative, which split checkpoints across drives.
+# See TraffSim3D-backend/app/apps/rl/paths.py.
+TraffSim3D-backend/.data/
+
 # Node (TraffSim3D-frontend)
 node_modules/
 dist/

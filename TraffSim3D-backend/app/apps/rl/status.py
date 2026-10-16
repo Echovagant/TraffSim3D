@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 
 # Default status file — overridable via env var for tests.
-_DEFAULT_PATH = Path(os.environ.get("TRAFFIC_PPO_STATUS", "/tmp/traffic_ppo_status.json"))
+from . import paths as _paths
+
+# Default no longer lands in /tmp — on Windows that path is drive-relative.
+# See paths.py for the rationale.
+_DEFAULT_PATH = _paths.status_file()
 
 
 def get_status_path() -> Path:

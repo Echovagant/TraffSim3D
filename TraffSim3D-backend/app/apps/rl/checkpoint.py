@@ -11,7 +11,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-_DEFAULT_DIR = Path(os.environ.get("PPO_CHECKPOINT_DIR", "/tmp/ppo_checkpoints"))
+from . import paths as _paths
+
+# Default no longer lands in /tmp — on Windows that path is drive-relative and
+# silently split checkpoints across drives. See paths.py for the rationale.
+_DEFAULT_DIR = _paths.checkpoints_dir()
 CHECKPOINT_KEEP = 5  # retain the most recent N checkpoints per process
 
 

@@ -14,7 +14,10 @@ def tmp_ckpt_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Redirect PPO_CHECKPOINT_DIR to a temp dir for isolation."""
     monkeypatch.setenv("PPO_CHECKPOINT_DIR", str(tmp_path))
     # Force module-level _DEFAULT_DIR re-eval by setting it directly.
-    ckpt._DEFAULT_DIR = tmp_path  # type: ignore[attr-defined]
+    # NOTE: use monkeypatch.setattr, not a bare assignment — a bare
+    # `ckpt._DEFAULT_DIR = ...` leaks into every later test in the session,
+    # leaving the module pointed at a deleted tmp_path.
+    monkeypatch.setattr(ckpt, "_DEFAULT_DIR", tmp_path)
     return tmp_path
 
 
@@ -91,6 +94,6 @@ def test_prune_all_checkpoints_across_processes(tmp_ckpt_dir: Path) -> None:
 def test_list_checkpoints_empty_when_no_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When PPO_CHECKPOINT_DIR doesn't exist, list returns empty."""
     nonexistent = tmp_path / "nonexistent"
-    ckpt._DEFAULT_DIR = nonexistent  # type: ignore[attr-defined]
+    monkeypatch.setattr(ckpt, "_DEFAULT_DIR", nonexistent)
     assert ckpt.list_checkpoints() == []
     assert ckpt.prune_all_checkpoints() == 0
