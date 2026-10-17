@@ -12,7 +12,7 @@
  *     further zoom-out than a 60m intersection).
  */
 import { test, expect, type Page } from '@playwright/test';
-import { waitForSceneReady, switchScene, SCREENSHOT_DIR } from './helpers/wait';
+import { waitForSceneReady, switchScene, expectSceneScreenshot } from './helpers/wait';
 
 interface CameraState {
   position: { x: number; y: number; z: number };
@@ -130,7 +130,7 @@ test('Plan 053 follow-up: scene switch reruns fit', async ({ page }) => {
   const loop = await getCamera(page);
   expect(loop).not.toBeNull();
   expect(loop!.distance, `cross=${cross!.distance}, loop=${loop!.distance}`).toBeGreaterThan(cross!.distance * 1.5);
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/camera-fit-loop.png`, fullPage: false });
+  await expectSceneScreenshot(page, 'camera-fit-loop.png');
 });
 
 test('Plan 053 follow-up: zoom limits scale with scene size', async ({ page }) => {

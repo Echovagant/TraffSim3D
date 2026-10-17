@@ -13,7 +13,6 @@
  *   - Screenshot saved to e2e-output/baseline/ai-playground-replay.png
  */
 import { test, expect } from '@playwright/test';
-import { SCREENSHOT_DIR } from './helpers/wait';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -141,6 +140,6 @@ test('AI Playground: strategy load + replay UI', async ({ page }) => {
   await page.locator('[data-testid="stop-replay-button"]').click();
   await expect(page.locator('[data-testid="replay-state"]')).not.toContainText('运行中');
 
-  // Screenshot for visual regression.
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/ai-playground-replay.png`, fullPage: false });
+  // Visual regression on the replay panel.
+  await expect(page.locator('main')).toHaveScreenshot('ai-playground-replay.png');
 });

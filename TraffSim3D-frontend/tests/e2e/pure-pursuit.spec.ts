@@ -5,7 +5,7 @@
  * the T-junction corner (not just traveled straight).
  */
 import { test, expect } from '@playwright/test';
-import { waitForSceneReady, waitForVehicleCount, switchScene, SCREENSHOT_DIR } from './helpers/wait';
+import { waitForSceneReady, waitForVehicleCount, switchScene, expectSceneScreenshot } from './helpers/wait';
 
 test('Pure Pursuit: vehicle heading changes through T junction corner (Plan 037c)', async ({ page }) => {
   await waitForSceneReady(page);
@@ -21,7 +21,7 @@ test('Pure Pursuit: vehicle heading changes through T junction corner (Plan 037c
 
   // Let the vehicle drive for 5s — should pass through the T corner
   await page.waitForTimeout(5000);
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/pure-pursuit-t.png`, fullPage: false });
+  await expectSceneScreenshot(page, 'pure-pursuit-t.png');
 
   const after = await page.evaluate(() => {
     const w = window as unknown as { __world?: { network: { vehicles: Record<string, { position: { x: number; z: number }; heading: number; s: number }> } } };

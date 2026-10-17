@@ -38,8 +38,9 @@
         >在 Overpass Turbo 打开 ↗</button>
       </div>
       <p class="muted small">
-        ⚠ bbox 限制:TraffSim3D parser 只接受 <code>±0.5°</code> (~55 km) 以内的节点,大区会过滤远点。
-        整个深圳市请分片区导(福田/南山/罗湖)。
+        ⚠ 默认裁剪:不上传裁剪边界时,后端只保留距数据中心的 <code>0.5°</code>
+        (~55 km) 内的节点 — 这是<b>内存安全上限</b>,不是按仿真区域裁剪。
+        要只加载一片区域,请在下方 ② 填写裁剪边界(顺序 south, west, north, east)。
       </p>
     </section>
 
@@ -49,6 +50,34 @@
         选择刚才导出的 OpenStreetMap XML 文件 (.osm)，后端解析后直接载入到 SceneLab。
         解析结果支持 bridge/tunnel (level 标签)、oneway、traffic_signals 节点。
       </p>
+
+      <div class="bbox-block" data-testid="osm-bbox-block">
+        <label class="bbox-toggle">
+          <input
+            type="checkbox"
+            data-testid="osm-bbox-toggle"
+            :checked="bboxEnabled"
+            @change="onBBoxToggle"
+          />
+          <span>启用裁剪 — 只加载仿真区域</span>
+        </label>
+
+        <div v-if="bboxEnabled" class="bbox-inputs">
+          <label v-for="field in bboxFields" :key="field.key" class="bbox-field">
+            <span class="bbox-field-label">{{ field.label }}</span>
+            <input
+              type="number"
+              step="any"
+              :data-testid="`osm-bbox-${field.key}`"
+              :value="bboxInputs[field.key]"
+              @input="onBBoxInput(field.key, $event)"
+            />
+          </label>
+        </div>
+
+        <p class="muted small" data-testid="osm-clip-status">{{ clipStatus }}</p>
+        <p v-if="bboxError" class="bbox-error" data-testid="osm-bbox-error">{{ bboxError }}</p>
+      </div>
 
       <div class="upload-row">
         <input
@@ -60,7 +89,7 @@
         />
         <button
           class="primary"
-          :disabled="!file || uploading"
+          :disabled="!file || uploading || bboxError !== null"
           data-testid="osm-upload-button"
           @click="onUpload"
         >
@@ -132,6 +161,13 @@ import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useWorldStore } from '@interfaces/stores/worldStore';
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage';
+import {
+  OSM_UNSPECIFIED_CLIP_NOTE,
+  describeOsmClip,
+  validateOsmBBox,
+  withOsmBBoxQuery,
+  type OsmBBox,
+} from '@infrastructure/api';
 
 const router = useRouter();
 const world = useWorldStore();
@@ -139,6 +175,67 @@ const world = useWorldStore();
 const fileInput = ref<HTMLInputElement | null>(null);
 const file = ref<File | null>(null);
 const uploading = ref(false);
+
+// --- M3 bbox clipping (只加载仿真区域) --------------------------------
+// Off by default so an untouched upload produces the exact same request URL
+// as before the bbox wiring (e2e stubs match the bare parse-pbf URL).
+// Inputs are kept as strings so a blank field reads as "unspecified" rather
+// than silently coercing to 0.
+type BBoxKey = keyof OsmBBox;
+
+const bboxFields: ReadonlyArray<{ key: BBoxKey; label: string }> = [
+  { key: 'south', label: 'south 南' },
+  { key: 'west', label: 'west 西' },
+  { key: 'north', label: 'north 北' },
+  { key: 'east', label: 'east 东' },
+];
+
+const bboxEnabled = ref(false);
+const bboxInputs = ref<Record<BBoxKey, string>>({
+  south: '',
+  west: '',
+  north: '',
+  east: '',
+});
+
+const onBBoxToggle = (e: Event): void => {
+  bboxEnabled.value = (e.target as HTMLInputElement).checked;
+};
+
+const onBBoxInput = (key: BBoxKey, e: Event): void => {
+  bboxInputs.value[key] = (e.target as HTMLInputElement).value;
+};
+
+/** The box the user has typed, or null when disabled or still incomplete. */
+const bboxDraft = computed<OsmBBox | null>(() => {
+  if (!bboxEnabled.value) return null;
+  const raw = bboxFields.map((field) => bboxInputs.value[field.key].trim());
+  if (raw.some((value) => value === '')) return null;
+  const [south, west, north, east] = raw.map(Number);
+  if ([south, west, north, east].some((value) => !Number.isFinite(value))) return null;
+  return { south, west, north, east };
+});
+
+/** Non-null only when the box is safe to send; mirrors the backend rules. */
+const bboxError = computed<string | null>(() => {
+  if (!bboxEnabled.value) return null;
+  const draft = bboxDraft.value;
+  if (draft === null) return '裁剪边界需要填写完整的 4 个值 (south / west / north / east)';
+  return validateOsmBBox(draft);
+});
+
+/** What actually goes on the wire: null keeps the historical uncropped call. */
+const activeBBox = computed<OsmBBox | null>(() =>
+  bboxError.value === null ? bboxDraft.value : null,
+);
+
+// Always state the clip in effect — a silent "nothing was cropped" is exactly
+// the misunderstanding this panel exists to prevent.
+const clipStatus = computed<string>(() =>
+  bboxEnabled.value && bboxDraft.value !== null
+    ? describeOsmClip(bboxDraft.value)
+    : OSM_UNSPECIFIED_CLIP_NOTE,
+);
 
 interface UploadResult {
   ok: boolean;
@@ -246,6 +343,11 @@ const onFileSelected = (e: Event): void => {
 
 const onUpload = async (): Promise<void> => {
   if (!file.value) return;
+  if (bboxError.value !== null) {
+    lastResult.value = { ok: false, message: `裁剪边界无效: ${bboxError.value}` };
+    showFlashMessage('裁剪边界无效,已阻止上传', 'error');
+    return;
+  }
   uploading.value = true;
   lastResult.value = null;
   try {
@@ -256,7 +358,9 @@ const onUpload = async (): Promise<void> => {
     const endpoint = isPbf
       ? `${backendUrl.value}/api/v1/maps/parse-pbf`
       : `${backendUrl.value}/api/v1/maps/parse-osm`;
-    const r = await fetch(endpoint, {
+    // activeBBox is null unless the user enabled clipping and it validates,
+    // so the default request URL is unchanged.
+    const r = await fetch(withOsmBBoxQuery(endpoint, activeBBox.value), {
       method: 'POST',
       body: fd,
     });
@@ -374,6 +478,45 @@ button.ghost:hover { background: rgba(148, 163, 184, 0.08); }
 .result.ok { background: rgba(34, 197, 94, 0.12); color: #86efac; }
 .result.err { background: rgba(239, 68, 68, 0.12); color: #fca5a5; }
 .stats { display: flex; gap: 16px; font-size: 12px; color: #94a3b8; margin-top: 8px; }
+
+/* M3 bbox clipping controls. */
+.bbox-block {
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+}
+.bbox-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+.bbox-inputs {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0 6px;
+}
+.bbox-field { display: flex; flex-direction: column; gap: 4px; }
+.bbox-field-label { font-size: 11px; color: #94a3b8; }
+.bbox-field input {
+  width: 120px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: #e2e8f0;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+}
+.bbox-error {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #fca5a5;
+}
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
        background: rgba(2, 6, 23, 0.7); padding: 1px 6px; border-radius: 4px; color: #93c5fd; }
 

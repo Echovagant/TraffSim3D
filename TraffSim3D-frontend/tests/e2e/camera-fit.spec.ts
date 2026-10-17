@@ -8,7 +8,7 @@
  * it after zooming way out — the button should restore the frame.
  */
 import { test, expect } from '@playwright/test';
-import { waitForSceneReady, switchScene, SCREENSHOT_DIR } from './helpers/wait';
+import { waitForSceneReady, switchScene, expectSceneScreenshot } from './helpers/wait';
 
 const getCameraState = (page: import('@playwright/test').Page) =>
   page.evaluate(() => {
@@ -39,12 +39,12 @@ test('Plan 053: scene switch auto-fits the camera', async ({ page }) => {
   await switchScene(page, 'corridor');
   // Give the fit animation time to settle.
   await page.waitForTimeout(900);
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/corridor-scene-fit.png`, fullPage: false });
+  await expectSceneScreenshot(page, 'corridor-scene-fit.png');
 
   // Switch back to cross to confirm the cycle is symmetric.
   await switchScene(page, 'cross');
   await page.waitForTimeout(900);
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/cross-scene-fit.png`, fullPage: false });
+  await expectSceneScreenshot(page, 'cross-scene-fit.png');
 });
 
 test('Plan 053: manual fit button works after zooming out', async ({ page }) => {
@@ -55,5 +55,5 @@ test('Plan 053: manual fit button works after zooming out', async ({ page }) => 
   // requestFit() path which goes through the same animateCameraTo.
   await page.locator('[data-testid="fit-scene-button"]').click();
   await page.waitForTimeout(900);
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/fit-scene-button.png`, fullPage: false });
+  await expectSceneScreenshot(page, 'fit-scene-button.png');
 });

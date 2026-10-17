@@ -6,7 +6,7 @@
  * with 4+ roads. Screenshots to baseline.
  */
 import { test, expect } from '@playwright/test';
-import { waitForSceneReady, SCREENSHOT_DIR } from './helpers/wait';
+import { waitForSceneReady, expectSceneScreenshot } from './helpers/wait';
 
 const FAKE_NETWORK = {
   roads: [
@@ -70,5 +70,5 @@ test('OSM PBF import: routes to parse-pbf endpoint, loads network', async ({ pag
     { timeout: 10_000 },
   );
 
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/osm-import-pbf.png`, fullPage: false });
+  await expectSceneScreenshot(page, 'osm-import-pbf.png');
 });

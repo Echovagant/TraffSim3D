@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -40,3 +40,29 @@ export const switchScene = async (page: Page, kind: 'cross' | 't' | 'loop' | 'el
  *  4 级 ..: helpers/ → e2e/ → tests/ → TraffSim3D-frontend/ → TraffSim3D/。 */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SCREENSHOT_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'e2e-output', 'current');
+
+/**
+ * A float-free region of the 1280x800 scene-editor viewport.
+ *
+ * The scene-editor is `position: fixed; inset: 0`, so `[data-testid="world-canvas"]`
+ * covers the whole viewport — asserting on it is pixel-identical to a full-page
+ * screenshot and therefore drags in every HUD overlay. Those overlays are live
+ * counters (fps, frame-time min/max/average, trajectory row count, LiDAR frame
+ * count) that advance with wall-clock, so they can never match twice.
+ *
+ * This rect is sized to exclude every overlay while keeping the road network
+ * and the vehicles that are the thing actually worth regression-testing:
+ *   - top EditorToolbar        y < 105
+ *   - CameraView panel         x > 835 && y < 260
+ *   - scene-outline / DebugPanel x < 258
+ *   - bottom-centre camera widget y > 750
+ */
+export const SCENE_CLIP = { x: 265, y: 270, width: 700, height: 460 } as const;
+
+/**
+ * Visual-regression assertion for the 3D scene viewport. Replaces the old
+ * `page.screenshot({ path })`, which wrote a PNG nobody ever compared.
+ */
+export const expectSceneScreenshot = async (page: Page, name: string): Promise<void> => {
+  await expect(page).toHaveScreenshot(name, { clip: SCENE_CLIP });
+};

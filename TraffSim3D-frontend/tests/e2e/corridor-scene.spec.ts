@@ -4,7 +4,7 @@
  * and screenshots the visualization.
  */
 import { test, expect } from '@playwright/test';
-import { waitForSceneReady, switchScene, SCREENSHOT_DIR } from './helpers/wait';
+import { waitForSceneReady, switchScene, expectSceneScreenshot } from './helpers/wait';
 
 test('corridor scene: 6 vehicles load on the 2-intersection line graph', async ({ page }) => {
   await waitForSceneReady(page);
@@ -42,6 +42,8 @@ test('corridor scene: 6 vehicles load on the 2-intersection line graph', async (
   expect(topo.iSouthConnects).toContain('r-ns-corridor');
   expect(topo.northLightCount).toBe(2);
 
-  // Screenshot for visual regression
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/corridor-scene.png`, fullPage: false });
+  // Visual regression. Distinct name from scenes.spec.ts's `corridor-scene.png`:
+  // this test captures much later (it waits for all 6 vehicles to spawn), so the
+  // two captures are different scenes-in-time and must not share one baseline.
+  await expectSceneScreenshot(page, 'corridor-scene-topology.png');
 });

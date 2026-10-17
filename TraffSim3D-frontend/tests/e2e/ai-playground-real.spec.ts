@@ -72,8 +72,8 @@ test('real PPO training: starts, updates chart, captures GPU/CPU state', async (
     timeout: 15_000,
   });
 
-  // 6. Capture in-progress screenshot
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/ai-playground-real.png`, fullPage: false });
+  // 6. Capture in-progress state for visual regression.
+  await expect(page.locator('main')).toHaveScreenshot('ai-playground-real.png');
 
   // 7. Verify the metric-step is updating (not stuck at 0)
   const stepText = await page.locator('[data-testid="metric-step"]').textContent();
@@ -82,5 +82,3 @@ test('real PPO training: starts, updates chart, captures GPU/CPU state', async (
   console.log(`Real PPO training started on ${caps.cuda_available ? 'GPU' : 'CPU'} ` +
               `(${caps.device_name || 'unknown'}). step=${step}`);
 });
-
-import { SCREENSHOT_DIR } from './helpers/wait';

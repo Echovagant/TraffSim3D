@@ -14,7 +14,7 @@
  * the visual screenshot here is the integration check.
  */
 import { test, expect } from '@playwright/test';
-import { waitForSceneReady, switchScene, SCREENSHOT_DIR } from './helpers/wait';
+import { waitForSceneReady, switchScene, expectSceneScreenshot } from './helpers/wait';
 
 test('elevated scene: bridge visible + 4 vehicles + v-e3 starts on ramp', async ({ page }) => {
   await waitForSceneReady(page);
@@ -32,8 +32,10 @@ test('elevated scene: bridge visible + 4 vehicles + v-e3 starts on ramp', async 
     { timeout: 10_000 },
   );
 
-  // Screenshot the elevated bridge from default camera angle.
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/elevated-scene.png`, fullPage: false });
+  // Visual regression of the elevated bridge from the default camera angle.
+  // Distinct name from scenes.spec.ts's `elevated-scene.png`: this test waits
+  // for all 4 vehicles before capturing, so the two are different scenes-in-time.
+  await expectSceneScreenshot(page, 'elevated-ramp-scene.png');
 
   // Verify v-e3 is on the ramp road with Y between 1 and 3 (mid-ramp).
   const v3 = await page.evaluate(() => {
@@ -60,5 +62,5 @@ test('elevated scene: bridge visible + 4 vehicles + v-e3 starts on ramp', async 
 
   // After a few seconds, capture a "running" screenshot for visual review.
   await page.waitForTimeout(3000);
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/elevated-after-3s.png`, fullPage: false });
+  await expectSceneScreenshot(page, 'elevated-after-3s.png');
 });

@@ -13,6 +13,15 @@ export { createBackendService } from './backendService';
 export type { BackendService, HealthResponse, PingResponse } from './backendService';
 export { createRLWeightsClient } from './rlWeightsClient';
 export type { CheckpointWeightsResponse, RLWeightsClient } from './rlWeightsClient';
+export {
+  OSM_DEFAULT_CLIP_DEG,
+  OSM_UNSPECIFIED_CLIP_NOTE,
+  describeOsmClip,
+  formatOsmBBoxQuery,
+  validateOsmBBox,
+  withOsmBBoxQuery,
+} from './osmImportClient';
+export type { OsmBBox } from './osmImportClient';
 
 import { createHttpClient } from './httpClient';
 import { createBackendService } from './backendService';

@@ -9,7 +9,7 @@
  *  - Screenshot baseline
  */
 import { test, expect } from '@playwright/test';
-import { waitForSceneReady, SCREENSHOT_DIR } from './helpers/wait';
+import { waitForSceneReady } from './helpers/wait';
 
 const FAKE_STATUS = {
   running: false,
@@ -79,5 +79,5 @@ test('AI Playground: independent multi-agent renders per-agent polylines', async
   await page.locator('[data-testid="list-checkpoints-button"]').click();
   await expect(page.locator('[data-testid="ckpt-list"] li')).toHaveCount(2);
 
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/ai-playground-independent.png`, fullPage: false });
+  await expect(page.locator('main')).toHaveScreenshot('ai-playground-independent.png');
 });

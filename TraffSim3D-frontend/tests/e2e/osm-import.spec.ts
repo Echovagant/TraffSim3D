@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
-import { waitForSceneReady, SCREENSHOT_DIR } from './helpers/wait';
+import { waitForSceneReady, expectSceneScreenshot } from './helpers/wait';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -94,6 +94,6 @@ test('OSM import: stubbed backend → scene-editor shows parsed network', async 
   });
   expect(hasLevel1).toBe(true);
 
-  // Step 6: screenshot for visual regression.
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/osm-import.png`, fullPage: false });
+  // Step 6: visual regression on the imported road layout.
+  await expectSceneScreenshot(page, 'osm-import.png');
 });

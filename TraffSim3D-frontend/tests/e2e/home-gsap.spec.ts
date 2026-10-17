@@ -9,12 +9,6 @@
  *  - All module cards animate in (visible after a short delay).
  */
 import { test, expect } from '@playwright/test';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const SCREENSHOT_DIR = path.resolve(__dirname, '..', '..', '..', 'e2e-output', 'current');
 
 test('Home: GSAP hero text reaches final opacity after animation', async ({ page }) => {
   await page.goto('/');
@@ -35,7 +29,7 @@ test('Home: GSAP hero text reaches final opacity after animation', async ({ page
   );
   expect(parseFloat(subOpacity)).toBeGreaterThan(0.95);
 
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/home-gsap-hero.png`, fullPage: false });
+  await expect(page.locator('.hero')).toHaveScreenshot('home-gsap-hero.png');
 });
 
 test('Home: SmartCity 3D card is rendered as featured', async ({ page }) => {
@@ -67,5 +61,5 @@ test('Home: all 7 module cards present (was 5 before Plan 055)', async ({ page }
 test('Home: full-page screenshot baseline', async ({ page }) => {
   await page.goto('/');
   await page.waitForTimeout(2000);  // all GSAP animations done
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/home-gsap-full.png`, fullPage: true });
+  await expect(page.locator('main')).toHaveScreenshot('home-gsap-full.png');
 });

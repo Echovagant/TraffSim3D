@@ -10,7 +10,7 @@
  *  - Screenshot captured for visual regression
  */
 import { test, expect } from '@playwright/test';
-import { waitForSceneReady, SCREENSHOT_DIR } from './helpers/wait';
+import { waitForSceneReady } from './helpers/wait';
 
 const FAKE_STATUS = {
   running: false,
@@ -66,6 +66,6 @@ test('AI Playground: training chart renders with reward history', async ({ page 
   const rewardText = await page.locator('[data-testid="metric-last-reward"]').textContent();
   expect(rewardText).toBe('12.50');
 
-  // Screenshot for visual regression.
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/ai-playground.png`, fullPage: false });
+  // Visual regression on the dashboard panel (metrics + reward chart).
+  await expect(page.locator('main')).toHaveScreenshot('ai-playground.png');
 });
