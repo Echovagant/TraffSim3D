@@ -59,6 +59,15 @@ class CurriculumEnv(TrafficEnv):
                 self.core.scene_kind = new_scene
                 info["curriculum_advanced"] = True
                 info["new_scene"] = new_scene
+            elif self.scheduler.state.is_complete:
+                # `advance()` returns None for two different reasons: the
+                # criteria were not met, or the curriculum just finished. Only
+                # the latter is a milestone, and a training loop that watches
+                # for `curriculum_advanced` would otherwise never learn that
+                # the agent graduated. Emit a distinct key rather than
+                # overloading `curriculum_advanced`, which would wrongly claim
+                # a scene switch that never happened.
+                info["curriculum_complete"] = True
             self._prev_episode_reward = 0.0
             self._prev_episode_info = {}
 

@@ -163,9 +163,23 @@ def test_scheduler_accepts_custom_thresholds_and_window() -> None:
     assert sched.eval_window == 4
 
 
-def test_scheduler_falls_back_to_defaults_for_empty_threshold_dict() -> None:
-    """`thresholds or DEFAULT_THRESHOLDS` treats {} as unset."""
+def test_scheduler_honours_an_explicitly_empty_threshold_dict() -> None:
+    """`{}` is a caller-supplied table, not "unset".
+
+    This used to assert the opposite: `thresholds or DEFAULT_THRESHOLDS`
+    silently substituted the defaults for `{}`. Fixed 2026-10-18 — an
+    explicitly empty table now means "no scene has a threshold", which makes
+    `should_advance` fall back to its `inf` / `1.0` defaults per scene rather
+    than quietly inheriting someone else's tuning.
+    """
     sched = CurriculumScheduler(thresholds={})
+    assert sched.thresholds == {}
+    assert sched.thresholds is not DEFAULT_THRESHOLDS
+
+
+def test_scheduler_uses_defaults_when_thresholds_is_none() -> None:
+    """`None` is the actual "not set" signal."""
+    sched = CurriculumScheduler(thresholds=None)
     assert sched.thresholds is DEFAULT_THRESHOLDS
 
 
@@ -445,6 +459,7 @@ def test_get_status_on_fresh_scheduler_reports_zeroed_metrics() -> None:
         "total_scenes": 4,
         "is_complete": False,
         "episodes_on_scene": 0,
+        "episodes_on_current_scene": 0,
         "avg_reward": 0.0,
         "success_rate": 0.0,
         "scene_history": [],
@@ -618,6 +633,70 @@ def test_finishing_the_curriculum_leaves_the_last_scene_in_place() -> None:
     assert "new_scene" not in info
     assert env.core.scene_kind == "corridor"  # never switched away from corridor
     assert [h["scene"] for h in env.scheduler.state.scene_history] == ["corridor"]
+
+
+def test_finishing_the_curriculum_emits_a_distinct_completion_signal() -> None:
+    """`advance()` returns None for "not yet" and for "just graduated" alike.
+
+    Before 2026-10-18 the two were indistinguishable from `info`, so a training
+    loop watching for `curriculum_advanced` never learned the agent graduated.
+    """
+    episodes = [[(6.0, False, True, "collision")]]
+    env = _stubbed(episodes * 4, eval_window=1)
+    env.scheduler.state.current_scene_idx = 3
+    env.reset()
+    _, _, _, _, info = env.step(np.array([1.0, 0.0]))
+    assert env.scheduler.state.is_complete is True
+    assert info.get("curriculum_complete") is True
+    # Must NOT masquerade as a scene switch — none happened.
+    assert "curriculum_advanced" not in info
+    assert "new_scene" not in info
+
+
+def test_missed_thresholds_do_not_emit_the_completion_signal() -> None:
+    """The new key must mean "graduated", not merely "advance() returned None"."""
+    # `reset()` pops one episode list from the script and each list here is a
+    # single truncated step, so one reset + one step is one episode.
+    env = _stubbed([[(0.1, False, True, "collision")]] * 3, eval_window=2)
+    env.reset()
+    _, _, _, _, info = env.step(np.array([1.0, 0.0]))
+    assert env.scheduler.state.is_complete is False
+    assert "curriculum_complete" not in info
+    assert "curriculum_advanced" not in info
+
+
+def test_scene_history_reports_lifetime_episodes_not_the_window_size() -> None:
+    """`len(episode_rewards)` saturates at eval_window; the lifetime count does not.
+
+    Before 2026-10-18 `scene_history[...]["episodes"]` recorded
+    `len(episode_rewards)`, which is capped at `eval_window` — so a scene that
+    took 7 episodes to master with a window of 3 reported "3".
+    """
+    sched = CurriculumScheduler(eval_window=3)
+    # 7 mediocre episodes then 3 good ones → advances on the 10th.
+    for _ in range(7):
+        sched.record_episode(0.0, {"reason": "collision"})
+    for _ in range(3):
+        sched.record_episode(9.0, {"reason": "success_goal"})
+
+    assert sched.should_advance() is True
+    sched.advance()
+    history = sched.state.scene_history
+    assert len(history) == 1
+    assert history[0]["scene"] == "cross"
+    assert history[0]["episodes"] == 10  # lifetime, not min(10, eval_window=3)
+
+
+def test_episodes_counter_resets_when_the_scene_changes() -> None:
+    sched = CurriculumScheduler(eval_window=1)
+    sched.record_episode(9.0, {"reason": "success_goal"})
+    sched.advance()
+    assert sched.state.episodes_on_current_scene == 0
+    assert sched.get_status()["episodes_on_current_scene"] == 0
+    sched.record_episode(1.0, {"reason": "collision"})
+    assert sched.get_status()["episodes_on_current_scene"] == 1
+    # The windowed metric is still independent of the lifetime one.
+    assert sched.get_status()["episodes_on_scene"] == 1
 
 
 def test_env_advances_against_the_real_sim_core() -> None:

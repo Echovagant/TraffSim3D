@@ -43,6 +43,10 @@ class CurriculumState:
     episode_rewards: list[float] = field(default_factory=list)
     episode_successes: list[bool] = field(default_factory=list)
     scene_history: list[dict[str, float | str | int]] = field(default_factory=list)
+    # Lifetime count of episodes recorded on the current scene. `episode_rewards`
+    # is a sliding window capped at `eval_window`, so `len(episode_rewards)` can
+    # never report how many episodes a scene actually took — this counter can.
+    episodes_on_current_scene: int = 0
 
     @property
     def current_scene(self) -> str:
@@ -63,13 +67,17 @@ class CurriculumScheduler:
         thresholds: dict[str, dict[str, float]] | None = None,
         eval_window: int = EVAL_WINDOW,
     ) -> None:
-        self.thresholds = thresholds or DEFAULT_THRESHOLDS
+        # `thresholds or DEFAULT_THRESHOLDS` would treat a caller-supplied
+        # `{}` as "not set" and silently substitute the defaults. `is None`
+        # is the actual "not set" signal.
+        self.thresholds = DEFAULT_THRESHOLDS if thresholds is None else thresholds
         self.eval_window = eval_window
         self.state = CurriculumState()
 
     def record_episode(self, reward: float, info: dict) -> None:
         """Record episode result and check for scene advancement."""
         self.state.episode_rewards.append(reward)
+        self.state.episodes_on_current_scene += 1
         # Check if episode ended with success
         reason = info.get("reason", "")
         success = reason.startswith("success")
@@ -113,12 +121,16 @@ class CurriculumScheduler:
             {
                 "scene": old_scene,
                 "scene_idx": self.state.current_scene_idx,
-                "episodes": len(self.state.episode_rewards),
+                # Lifetime count for this scene. `len(episode_rewards)` would
+                # saturate at `eval_window` and under-report by exactly the
+                # amount the sliding window trimmed.
+                "episodes": self.state.episodes_on_current_scene,
             }
         )
         self.state.current_scene_idx += 1
         self.state.episode_rewards.clear()
         self.state.episode_successes.clear()
+        self.state.episodes_on_current_scene = 0
 
         if self.state.is_complete:
             return None
@@ -135,6 +147,7 @@ class CurriculumScheduler:
             "total_scenes": len(CURRICULUM_ORDER),
             "is_complete": self.state.is_complete,
             "episodes_on_scene": len(self.state.episode_rewards),
+            "episodes_on_current_scene": self.state.episodes_on_current_scene,
             "avg_reward": sum(recent_rewards) / len(recent_rewards) if recent_rewards else 0.0,
             "success_rate": (
                 sum(recent_successes) / len(recent_successes) if recent_successes else 0.0

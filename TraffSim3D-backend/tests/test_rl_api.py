@@ -14,24 +14,36 @@ from httpx2 import ASGITransport, AsyncClient
 from app.apps.rl import status as rl_status
 from app.main import app
 
-STATUS_PATH = rl_status.get_status_path()
+# NOTE: there is deliberately no module-level `STATUS_PATH` any more. It was
+# captured at import time and pointed at the real `<backend>/.data/` directory,
+# so every test in this file mutated shared on-disk state. The `client` fixture
+# now redirects `rl_status._DEFAULT_PATH` into `tmp_path` and resolves the path
+# through `rl_status.get_status_path()` after that monkeypatch.
 
 
 @pytest.fixture
 async def client(tmp_path, monkeypatch):
-    # Clean slate per test
-    if STATUS_PATH.exists():
-        STATUS_PATH.unlink()
-    rl_status.write_status({})  # ensure fresh empty status
-    # Isolate the control channel too — it is a module-level /tmp path shared
-    # across tests otherwise, and its epoch is monotonic by design.
+    # Isolate the training-status file into tmp_path.
+    #
+    # `rl_status._DEFAULT_PATH` is resolved at *import* time (status.py:17), so
+    # before this fix every test in this file read and wrote the REAL
+    # `<backend>/.data/training_status.json`. That produced cross-test state
+    # bleed and, on Windows, `PermissionError` when a previous run's handle was
+    # still open — the ~1-in-6 flake two parallel agents independently hit and
+    # reported. The control channel was already isolated one line below; the
+    # status file was the gap.
+    monkeypatch.setattr(rl_status, "_DEFAULT_PATH", tmp_path / "training_status.json")
+
     from app.apps.rl import control as rl_control
 
     monkeypatch.setattr(rl_control, "_DEFAULT_PATH", tmp_path / "control.json")
+
+    status_path = rl_status.get_status_path()
+    rl_status.write_status({})  # ensure fresh empty status
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
-    if STATUS_PATH.exists():
-        STATUS_PATH.unlink()
+    if status_path.exists():
+        status_path.unlink()
 
 
 @pytest.mark.asyncio
@@ -238,6 +250,38 @@ async def test_weights_endpoint_503_when_sb3_missing(
     r = await client.get("/api/v1/rl/checkpoints/ppo_step_0000064.zip/weights")
     assert r.status_code == 503
     assert "unavailable" in r.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_weights_endpoint_404_when_the_file_vanishes_mid_request(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """TOCTOU: the checkpoint disappears between the exists() check and the load.
+
+    `export_weights()` raises `FileNotFoundError` for a missing file (correct for
+    a library function), which the endpoint's original `except WeightsUnavailableError`
+    did not catch — so this race surfaced as a 500 instead of a 404. Fixed
+    2026-10-18 by mapping `FileNotFoundError` to the same 404 the up-front
+    check produces.
+    """
+    from app.apps.rl import checkpoint as ckpt
+    from app.apps.rl import weights as rl_weights
+
+    target = tmp_path / "pid9999" / "ppo_step_0000064.zip"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"PK\x03\x04")
+    monkeypatch.setattr(ckpt, "_DEFAULT_DIR", tmp_path)
+
+    def _vanished(_p):
+        raise FileNotFoundError("checkpoint not found")
+
+    monkeypatch.setattr(rl_weights, "export_weights", _vanished)
+
+    r = await client.get("/api/v1/rl/checkpoints/ppo_step_0000064.zip/weights")
+    assert r.status_code == 404, r.text
+    assert "missing" in r.json()["detail"].lower()
 
 
 # --- M4 Must: training task control (pause / resume / terminate) ------------

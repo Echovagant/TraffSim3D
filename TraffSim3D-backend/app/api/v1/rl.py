@@ -284,5 +284,11 @@ async def get_checkpoint_weights(name: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"checkpoint file missing: {name}")
     try:
         return export_weights(path)
+    except FileNotFoundError as e:
+        # TOCTOU: `path.exists()` above and `export_weights()`'s own check can
+        # straddle a deletion, in which case the library raises FileNotFoundError
+        # rather than WeightsUnavailableError. Map it to the same 404 the
+        # up-front check produces instead of letting it surface as a 500.
+        raise HTTPException(status_code=404, detail=f"checkpoint file missing: {name}") from e
     except WeightsUnavailableError as e:
         raise HTTPException(status_code=503, detail=f"weights unavailable: {e}") from e
