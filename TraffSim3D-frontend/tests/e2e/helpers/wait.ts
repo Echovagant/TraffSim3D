@@ -60,9 +60,92 @@ export const SCREENSHOT_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'e
 export const SCENE_CLIP = { x: 265, y: 270, width: 700, height: 460 } as const;
 
 /**
+ * Freeze the simulation so a screenshot captures a static frame.
+ *
+ * `SCENE_CLIP` deliberately includes vehicles, but vehicles MOVE. A slow
+ * first run (cold Vite server, busy machine) captures them at different
+ * positions than a fast run, producing ~1% pixel diff — above the 0.5%
+ * tolerance — even though nothing regressed. Observed 2026-10-17 on
+ * `camera-fit.spec.ts:26`: failed once at ratio 0.01, then passed twice.
+ *
+ * `window.__world` is the dev-only Pinia store (Vite tree-shakes the hook out
+ * of production), and Pinia unwraps refs on the store proxy, so assigning
+ * `isRunning` freezes the fixed-step scheduler. Call this BEFORE
+ * `expectSceneScreenshot`, and note that the captured frame therefore shows a
+ * paused sim — re-record affected baselines after adding this call.
+ */
+export const pauseSimulation = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    const w = window as unknown as { __world?: { isRunning?: boolean } };
+    if (w.__world) w.__world.isRunning = false;
+  });
+  // One more frame so the renderer picks up the frozen state.
+  await page.waitForTimeout(150);
+};
+
+/**
  * Visual-regression assertion for the 3D scene viewport. Replaces the old
  * `page.screenshot({ path })`, which wrote a PNG nobody ever compared.
  */
 export const expectSceneScreenshot = async (page: Page, name: string): Promise<void> => {
   await expect(page).toHaveScreenshot(name, { clip: SCENE_CLIP });
+};
+
+/**
+ * Block until the camera has stopped moving.
+ *
+ * Replaces the fixed `waitForTimeout(900)` calls the camera-fit specs used to
+ * "give the fit animation time to settle". That number is a guess: the fit
+ * animation duration depends on how far the camera has to travel, so on a slow
+ * frame 900ms is sometimes not enough. Observed 2026-10-17 as
+ * `camera-fit.spec.ts:26` failing once at 1% pixel diff (above the 0.5%
+ * tolerance) and passing on both re-runs.
+ *
+ * This polls the `window.__camera` debug hook and returns once two
+ * consecutive samples are within `epsilon` of each other and the sample
+ * before that — i.e. the camera is genuinely at rest rather than
+ * accidentally caught between frames. `maxWaitMs` is a safety net, not the
+ * expected duration.
+ */
+export const waitForCameraIdle = async (
+  page: Page,
+  { epsilon = 1e-3, settleSamples = 2, maxWaitMs = 8000, pollMs = 100 } = {},
+): Promise<void> => {
+  const readCamera = (): Promise<string | null> =>
+    page.evaluate(() => {
+      const w = window as unknown as { __camera?: () => unknown };
+      if (!w.__camera) return null;
+      const c = w.__camera() as {
+        position?: { x: number; y: number; z: number };
+        target?: { x: number; y: number; z: number };
+      };
+      if (!c?.position || !c?.target) return null;
+      // Round so float noise does not read as movement.
+      return `${c.position.x.toFixed(4)},${c.position.y.toFixed(4)},${c.position.z.toFixed(4)}|${c.target.x.toFixed(4)},${c.target.y.toFixed(4)},${c.target.z.toFixed(4)}`;
+    });
+
+  const isSettled = (a: string, b: string, eps: number): boolean => {
+    const pa = a.split(/[|,]/).map(Number);
+    const pb = b.split(/[|,]/).map(Number);
+    if (pa.length !== pb.length || pa.some(Number.isNaN)) return false;
+    return pa.every((v, i) => Math.abs(v - pb[i]) <= eps);
+  };
+
+  const deadline = Date.now() + maxWaitMs;
+  let stable = 0;
+  let previous = await readCamera();
+
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(pollMs);
+    const current = await readCamera();
+    if (current !== null && previous !== null && isSettled(previous, current, epsilon)) {
+      stable += 1;
+      if (stable >= settleSamples) return;
+    } else {
+      stable = 0;
+    }
+    previous = current;
+  }
+  // Exhausting maxWaitMs is not a hard failure: the camera may still be within
+  // visual tolerance. The screenshot assertion downstream is the real gate.
 };

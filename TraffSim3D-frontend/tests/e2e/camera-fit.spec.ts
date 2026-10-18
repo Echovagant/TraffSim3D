@@ -8,7 +8,7 @@
  * it after zooming way out — the button should restore the frame.
  */
 import { test, expect } from '@playwright/test';
-import { waitForSceneReady, switchScene, expectSceneScreenshot } from './helpers/wait';
+import { waitForSceneReady, switchScene, expectSceneScreenshot, waitForCameraIdle, pauseSimulation } from './helpers/wait';
 
 const getCameraState = (page: import('@playwright/test').Page) =>
   page.evaluate(() => {
@@ -37,13 +37,17 @@ test('Plan 053: scene switch auto-fits the camera', async ({ page }) => {
   // bumps fitRequestTick; WorldCanvas watches it and calls
   // requestFitToNetwork.
   await switchScene(page, 'corridor');
-  // Give the fit animation time to settle.
-  await page.waitForTimeout(900);
+  // Wait for the camera to actually come to rest rather than guessing a
+  // duration — see waitForCameraIdle. A fixed 900ms made this spec flaky at
+  // ~1% pixel diff (observed 2026-10-17).
+  await waitForCameraIdle(page);
+  await pauseSimulation(page);
   await expectSceneScreenshot(page, 'corridor-scene-fit.png');
 
   // Switch back to cross to confirm the cycle is symmetric.
   await switchScene(page, 'cross');
-  await page.waitForTimeout(900);
+  await waitForCameraIdle(page);
+  await pauseSimulation(page);
   await expectSceneScreenshot(page, 'cross-scene-fit.png');
 });
 
@@ -54,6 +58,7 @@ test('Plan 053: manual fit button works after zooming out', async ({ page }) => 
   // Click the fit button (user is "lost"). Should trigger the
   // requestFit() path which goes through the same animateCameraTo.
   await page.locator('[data-testid="fit-scene-button"]').click();
-  await page.waitForTimeout(900);
+  await waitForCameraIdle(page);
+  await pauseSimulation(page);
   await expectSceneScreenshot(page, 'fit-scene-button.png');
 });
