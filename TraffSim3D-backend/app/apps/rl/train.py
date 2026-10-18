@@ -28,6 +28,7 @@ Curriculum learning:
 - `--curriculum`: progressive scene difficulty (cross → t_junction →
   roundabout → corridor). Agent advances when mastering current scene.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -72,7 +73,9 @@ def _control_gate() -> tuple[bool, int]:
 
 
 def dry_run(
-    total_steps: int = 1000, n_agents: int = 2, independent: bool = False,
+    total_steps: int = 1000,
+    n_agents: int = 2,
+    independent: bool = False,
     scene_kind: str = "cross",
 ) -> None:
     """Write synthetic training status (no PPO)."""
@@ -104,9 +107,8 @@ def dry_run(
         s["step"] = total_steps
         s["episode_count"] = n_episodes
         s["last_reward"] = float(s["reward_history"][-1]) if s["reward_history"] else 0.0
-        s["latest_checkpoint"] = (
-            ", ".join(f"ppo_agent{i}_step_{total_steps:07d}.zip"
-                      for i in range(n_agents))
+        s["latest_checkpoint"] = ", ".join(
+            f"ppo_agent{i}_step_{total_steps:07d}.zip" for i in range(n_agents)
         )
         st.write_status(s)
         st.finalize_status(
@@ -123,8 +125,12 @@ def dry_run(
 
 
 def real_train(
-    total_steps: int, device: str, n_agents: int, save_every: int,
-    independent: bool = False, scene_kind: str = "cross",
+    total_steps: int,
+    device: str,
+    n_agents: int,
+    save_every: int,
+    independent: bool = False,
+    scene_kind: str = "cross",
 ) -> None:
     """Real PPO training via stable-baselines3 on the resolved device.
 
@@ -170,7 +176,9 @@ def real_train(
     latest_ckpts: list[str] = []
 
     def _save_and_record(
-        model: Any, step: int, agent_id: int | None = None,
+        model: Any,
+        step: int,
+        agent_id: int | None = None,
     ) -> None:
         path = ckpt.save_checkpoint(model, step, agent_id=agent_id)
         ckpt_name = path.name
@@ -185,15 +193,10 @@ def real_train(
         # GPU can run multiple models in parallel via SubprocVecEnv
         # but that's a follow-up.
         envs = [TrafficEnv(scene_kind=scene_kind) for _ in range(n_agents)]
-        models = [
-            PPO("MlpPolicy", env, verbose=0, device=resolved_device)
-            for env in envs
-        ]
+        models = [PPO("MlpPolicy", env, verbose=0, device=resolved_device) for env in envs]
         steps_per_round = max(1, save_every // n_agents)
         rounds = max(1, total_steps // (steps_per_round * n_agents))
-        agent_rewards: dict[str, list[float]] = {
-            str(i): [] for i in range(n_agents)
-        }
+        agent_rewards: dict[str, list[float]] = {str(i): [] for i in range(n_agents)}
         terminated = False
         for round_idx in range(rounds):
             for i, (model, _env) in enumerate(zip(models, envs, strict=True)):
@@ -215,9 +218,7 @@ def real_train(
         mean_history: list[float] = []
         n = min(len(v) for v in agent_rewards.values()) if agent_rewards else 0
         for ep in range(n):
-            mean_history.append(
-                sum(agent_rewards[str(i)][ep] for i in range(n_agents)) / n_agents
-            )
+            mean_history.append(sum(agent_rewards[str(i)][ep] for i in range(n_agents)) / n_agents)
         s["reward_history"] = mean_history
         s["last_reward"] = mean_history[-1] if mean_history else 0.0
         st.write_status(s)
@@ -261,7 +262,9 @@ def real_train(
 
 
 def curriculum_train(
-    total_steps: int, device: str, save_every: int,
+    total_steps: int,
+    device: str,
+    save_every: int,
     thresholds: dict[str, dict[str, float]] | None = None,
 ) -> None:
     """Curriculum learning: progressive scene difficulty.
@@ -346,26 +349,34 @@ def main() -> None:
         choices=["auto", "gpu", "cpu"],
         default="auto",
         help="Training device (Plan 044 GPU extension). "
-             "'auto' picks GPU if available + ≥2GB VRAM, else CPU.",
+        "'auto' picks GPU if available + ≥2GB VRAM, else CPU.",
     )
     parser.add_argument(
-        "--n-agents", type=int, default=2,
+        "--n-agents",
+        type=int,
+        default=2,
         help="Number of parallel agents sharing the PPO policy (Plan 045).",
     )
     parser.add_argument(
-        "--save-every", type=int, default=5000,
+        "--save-every",
+        type=int,
+        default=5000,
         help="Save checkpoint every N env steps (Plan 045).",
     )
     parser.add_argument(
-        "--independent", action="store_true",
+        "--independent",
+        action="store_true",
         help="Train each agent with its own PPO policy (Plan 047 true multi-agent).",
     )
     parser.add_argument(
-        "--scene-kind", choices=["cross", "corridor", "t_junction", "roundabout"], default="cross",
+        "--scene-kind",
+        choices=["cross", "corridor", "t_junction", "roundabout"],
+        default="cross",
         help="Sim topology (Plan 048). 'corridor' = 2 4-way intersections + 60m corridor. 't_junction' = 3-way T intersection. 'roundabout' = circular intersection.",
     )
     parser.add_argument(
-        "--curriculum", action="store_true",
+        "--curriculum",
+        action="store_true",
         help="Curriculum learning: progressive scene difficulty (cross → t_junction → roundabout → corridor).",
     )
     args = parser.parse_args()
@@ -387,8 +398,12 @@ def main() -> None:
 
     try:
         real_train(
-            args.steps, args.device, args.n_agents, args.save_every,
-            args.independent, args.scene_kind,
+            args.steps,
+            args.device,
+            args.n_agents,
+            args.save_every,
+            args.independent,
+            args.scene_kind,
         )
     except ImportError as e:
         print(f"SB3 unavailable ({e}); falling back to dry-run path.")

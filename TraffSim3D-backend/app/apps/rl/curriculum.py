@@ -10,6 +10,7 @@ Mastery criteria:
   - Average reward over last N episodes exceeds threshold
   - OR: success rate (episodes ending with 'success*') exceeds threshold
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -76,8 +77,8 @@ class CurriculumScheduler:
 
         # Keep only recent episodes
         if len(self.state.episode_rewards) > self.eval_window:
-            self.state.episode_rewards = self.state.episode_rewards[-self.eval_window:]
-            self.state.episode_successes = self.state.episode_successes[-self.eval_window:]
+            self.state.episode_rewards = self.state.episode_rewards[-self.eval_window :]
+            self.state.episode_successes = self.state.episode_successes[-self.eval_window :]
 
     def should_advance(self) -> bool:
         """Check if agent has mastered current scene."""
@@ -90,12 +91,12 @@ class CurriculumScheduler:
         thresholds = self.thresholds.get(scene, {})
 
         # Check average reward
-        recent_rewards = self.state.episode_rewards[-self.eval_window:]
+        recent_rewards = self.state.episode_rewards[-self.eval_window :]
         avg_reward = sum(recent_rewards) / len(recent_rewards)
         reward_threshold = thresholds.get("avg_reward", float("inf"))
 
         # Check success rate
-        recent_successes = self.state.episode_successes[-self.eval_window:]
+        recent_successes = self.state.episode_successes[-self.eval_window :]
         success_rate = sum(recent_successes) / len(recent_successes)
         success_threshold = thresholds.get("success_rate", 1.0)
 
@@ -108,11 +109,13 @@ class CurriculumScheduler:
             return None
 
         old_scene = self.state.current_scene
-        self.state.scene_history.append({
-            "scene": old_scene,
-            "scene_idx": self.state.current_scene_idx,
-            "episodes": len(self.state.episode_rewards),
-        })
+        self.state.scene_history.append(
+            {
+                "scene": old_scene,
+                "scene_idx": self.state.current_scene_idx,
+                "episodes": len(self.state.episode_rewards),
+            }
+        )
         self.state.current_scene_idx += 1
         self.state.episode_rewards.clear()
         self.state.episode_successes.clear()
@@ -123,8 +126,8 @@ class CurriculumScheduler:
 
     def get_status(self) -> dict:
         """Return current curriculum status for logging/UI."""
-        recent_rewards = self.state.episode_rewards[-self.eval_window:]
-        recent_successes = self.state.episode_successes[-self.eval_window:]
+        recent_rewards = self.state.episode_rewards[-self.eval_window :]
+        recent_successes = self.state.episode_successes[-self.eval_window :]
 
         return {
             "current_scene": self.state.current_scene,
@@ -134,8 +137,7 @@ class CurriculumScheduler:
             "episodes_on_scene": len(self.state.episode_rewards),
             "avg_reward": sum(recent_rewards) / len(recent_rewards) if recent_rewards else 0.0,
             "success_rate": (
-                sum(recent_successes) / len(recent_successes)
-                if recent_successes else 0.0
+                sum(recent_successes) / len(recent_successes) if recent_successes else 0.0
             ),
             "scene_history": self.state.scene_history,
         }

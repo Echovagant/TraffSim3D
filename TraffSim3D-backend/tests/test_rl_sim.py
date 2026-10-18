@@ -1,4 +1,5 @@
 """Plan 044: SimCore unit tests."""
+
 from __future__ import annotations
 
 import math
@@ -102,9 +103,7 @@ def test_corridor_scene_ego_drives_through_2_intersections() -> None:
             assert info["reason"] == "success_corridor"
             assert s.ego.z > 25.0
             return
-    raise AssertionError(
-        f"corridor did not terminate within 300 steps (z={s.ego.z:.2f})"
-    )
+    raise AssertionError(f"corridor did not terminate within 300 steps (z={s.ego.z:.2f})")
 
 
 def test_corridor_scene_collision_still_terminates() -> None:

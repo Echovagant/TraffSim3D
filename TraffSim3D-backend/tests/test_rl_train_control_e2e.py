@@ -10,6 +10,7 @@ torch install, this drives `_control_gate()` inside a real subprocess and
 asserts the observable effects: it blocks while paused, returns on resume,
 and reports terminate so the SB3 callback can halt.
 """
+
 from __future__ import annotations
 
 import json
@@ -42,12 +43,16 @@ def test_gate_reports_terminate_so_sb3_stops(tmp_path: Path) -> None:
         "from app.apps.rl.train import _control_gate\n"
         "ctl.request('terminate')\n"
         "stop, epoch = _control_gate()\n"
-        f"print(json.dumps({{'stop': stop, 'epoch': epoch}}))\n"
+        "print(json.dumps({'stop': stop, 'epoch': epoch}))\n"
     )
     proc = subprocess.run(
         [sys.executable, "-c", script],
-        cwd=str(BACKEND_ROOT), env=_child_env(status_path, control_path),
-        capture_output=True, text=True, timeout=60, check=False,
+        cwd=str(BACKEND_ROOT),
+        env=_child_env(status_path, control_path),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     assert proc.returncode == 0, f"child failed:\n{proc.stdout}\n{proc.stderr}"
     result = json.loads(proc.stdout.strip().splitlines()[-1])
@@ -70,18 +75,19 @@ def test_gate_blocks_on_pause_then_resumes(tmp_path: Path) -> None:
             "from app.apps.rl.train import _control_gate\n"
             "ctl.request('pause')\n"
             "stop, epoch = _control_gate()\n"
-            f"print(json.dumps({{'stop': stop, 'epoch': epoch}}))\n"
+            "print(json.dumps({'stop': stop, 'epoch': epoch}))\n"
         )
         proc = subprocess.Popen(
             [sys.executable, "-c", script],
-            cwd=str(BACKEND_ROOT), env=_child_env(status_path, control_path),
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            cwd=str(BACKEND_ROOT),
+            env=_child_env(status_path, control_path),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
         try:
             time.sleep(1.5)
-            assert proc.poll() is None, (
-                "trainer should still be blocked while paused"
-            )
+            assert proc.poll() is None, "trainer should still be blocked while paused"
             rl_control.request("resume")
             out, err = proc.communicate(timeout=30)
         finally:
@@ -96,6 +102,7 @@ def test_gate_blocks_on_pause_then_resumes(tmp_path: Path) -> None:
         rl_control._DEFAULT_PATH = Path(rl_control._DEFAULT_PATH)  # type: ignore[arg-type]
         # restore the module default for the rest of the session
         import importlib
+
         importlib.reload(rl_control)
 
 
@@ -116,12 +123,16 @@ def test_gate_terminates_out_of_a_pause(tmp_path: Path) -> None:
         "    ctl.request('terminate')\n"
         "threading.Thread(target=flip, daemon=True).start()\n"
         "stop, epoch = _control_gate()\n"
-        f"print(json.dumps({{'stop': stop, 'epoch': epoch}}))\n"
+        "print(json.dumps({'stop': stop, 'epoch': epoch}))\n"
     )
     proc = subprocess.run(
         [sys.executable, "-c", script],
-        cwd=str(BACKEND_ROOT), env=_child_env(status_path, control_path),
-        capture_output=True, text=True, timeout=60, check=False,
+        cwd=str(BACKEND_ROOT),
+        env=_child_env(status_path, control_path),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     assert proc.returncode == 0, f"child failed:\n{proc.stdout}\n{proc.stderr}"
     result = json.loads(proc.stdout.strip().splitlines()[-1])

@@ -18,6 +18,7 @@ This module is lazy-loaded by the API endpoint — `stable_baselines3` is
 NOT imported at module scope so test environments without SB3 installed
 can still import the rest of the package.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

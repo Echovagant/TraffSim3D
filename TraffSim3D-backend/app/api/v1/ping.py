@@ -1,4 +1,5 @@
 """Smoke-test endpoint for end-to-end frontend/backend wiring checks."""
+
 from fastapi import APIRouter
 
 router = APIRouter()

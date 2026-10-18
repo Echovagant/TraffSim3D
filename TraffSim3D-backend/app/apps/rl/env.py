@@ -1,4 +1,5 @@
 """Plan 044: Gymnasium env wrapping SimCore."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -24,7 +25,8 @@ class TrafficEnv(gym.Env[np.ndarray, np.ndarray]):
     action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
 
     def __init__(
-        self, max_steps: int = MAX_STEPS_DEFAULT,
+        self,
+        max_steps: int = MAX_STEPS_DEFAULT,
         scene_kind: str = "cross",  # Plan 048: 'cross' | 'corridor'
     ) -> None:
         super().__init__()

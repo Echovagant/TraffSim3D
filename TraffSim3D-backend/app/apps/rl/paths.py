@@ -43,6 +43,7 @@ problems, but durability across *container recreation* still requires the
 deployment to mount a volume — that is ADR-007 (Docker Compose, still
 Proposed), not something a path default can solve.
 """
+
 from __future__ import annotations
 
 import os

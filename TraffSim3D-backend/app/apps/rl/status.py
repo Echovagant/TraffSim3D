@@ -1,4 +1,5 @@
 """Plan 044: training status persistence (status.json)."""
+
 from __future__ import annotations
 
 import json
@@ -37,7 +38,9 @@ def write_status(d: dict[str, Any]) -> None:
     path = get_status_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(
-        prefix=".status_", suffix=".json", dir=path.parent,
+        prefix=".status_",
+        suffix=".json",
+        dir=path.parent,
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -52,18 +55,20 @@ def write_status(d: dict[str, Any]) -> None:
 
 def init_status(total_steps: int) -> None:
     """Initialize status.json at the start of a training run."""
-    write_status({
-        "running": True,
-        "paused": False,
-        "step": 0,
-        "total_steps": total_steps,
-        "episode_count": 0,
-        "last_reward": 0.0,
-        "reward_history": [],
-        "started_at_ms": int(time.time() * 1000),
-        "finished_at_ms": None,
-        "reason": "",
-    })
+    write_status(
+        {
+            "running": True,
+            "paused": False,
+            "step": 0,
+            "total_steps": total_steps,
+            "episode_count": 0,
+            "last_reward": 0.0,
+            "reward_history": [],
+            "started_at_ms": int(time.time() * 1000),
+            "finished_at_ms": None,
+            "reason": "",
+        }
+    )
 
 
 def append_reward(reward: float, max_history: int = 200) -> None:

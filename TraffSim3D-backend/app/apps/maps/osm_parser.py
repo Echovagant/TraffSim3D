@@ -10,6 +10,7 @@ MVP scope:
 - simple lat/lon -> meters projection (WGS84/WM deferred)
 - stateless (no PostGIS)
 """
+
 from __future__ import annotations
 
 import math
@@ -48,7 +49,8 @@ BBox = tuple[float, float, float, float]  # (south, west, north, east)
 
 
 def _resolve_center(
-    raw_nodes: dict[int, tuple[float, float]], center: tuple[float, float] | None,
+    raw_nodes: dict[int, tuple[float, float]],
+    center: tuple[float, float] | None,
 ) -> tuple[float, float]:
     """Projection origin. Defaults to the input's centroid."""
     if center is not None:
@@ -195,15 +197,17 @@ def parse_osm_xml(
 
         speed_limit = HIGHWAY_SPEED_LIMIT[highway]
         way_id = f"w-{w.attrib['id']}"
-        roads.append({
-            "id": way_id,
-            "startNode": a,
-            "endNode": b,
-            "waypoints": waypoints,
-            "laneCount": lanes,
-            "speedLimit": speed_limit,
-            "level": level,
-        })
+        roads.append(
+            {
+                "id": way_id,
+                "startNode": a,
+                "endNode": b,
+                "waypoints": waypoints,
+                "laneCount": lanes,
+                "speedLimit": speed_limit,
+                "level": level,
+            }
+        )
 
     # ---- 4) Traffic signal nodes -> bucket for intersection step ----
     for n in root.iter("node"):
@@ -240,23 +244,29 @@ def parse_osm_xml(
             # axis from waypoints: EW if dx > dz, else NS.
             dx = primary_road["endNode"]["x"] - primary_road["startNode"]["x"]
             axis = "ew" if abs(dx) > 0.1 else "ns"
-            traffic_lights.append({
-                "id": f"tl-{inter_counter}-{axis}",
-                "position": {"x": node.x - 3 if axis == "ew" else node.x,
-                             "y": 0.0,
-                             "z": node.z if axis == "ew" else node.z - 3},
-                "phase": "green" if axis == "ns" else "red",
-                "phaseRemaining": 30,
-                "cycleSeconds": 63,
-                "axis": axis,
-            })
-        intersections.append({
-            "id": inter_id,
-            "position": {"x": node.x, "y": 0.0, "z": node.z},
-            "trafficLights": traffic_lights,
-            "connectedRoads": [roads[i]["id"] for i in way_idxs],
-            "intersectionRadius": 8,
-        })
+            traffic_lights.append(
+                {
+                    "id": f"tl-{inter_counter}-{axis}",
+                    "position": {
+                        "x": node.x - 3 if axis == "ew" else node.x,
+                        "y": 0.0,
+                        "z": node.z if axis == "ew" else node.z - 3,
+                    },
+                    "phase": "green" if axis == "ns" else "red",
+                    "phaseRemaining": 30,
+                    "cycleSeconds": 63,
+                    "axis": axis,
+                }
+            )
+        intersections.append(
+            {
+                "id": inter_id,
+                "position": {"x": node.x, "y": 0.0, "z": node.z},
+                "trafficLights": traffic_lights,
+                "connectedRoads": [roads[i]["id"] for i in way_idxs],
+                "intersectionRadius": 8,
+            }
+        )
         used_intersection_node_ids.add(nid)
 
     return {
@@ -265,6 +275,7 @@ def parse_osm_xml(
         "vehicles": [],
         "spawnPoints": [],
     }
+
 
 # ---------------------------------------------------------------------------
 # Plan 046: OSM PBF parser (.osm.pbf -> RoadNetwork).
@@ -275,6 +286,7 @@ def parse_osm_xml(
 # raw_ways, traffic_signal_node_ids) from the PBF stream and feed
 # it through the same pipeline.
 # ---------------------------------------------------------------------------
+
 
 def _build_network(
     raw_nodes: dict[int, tuple[float, float]],
@@ -333,15 +345,17 @@ def _build_network(
 
         speed_limit = HIGHWAY_SPEED_LIMIT[highway]
         road_id = f"w-pbf-{way_id}"
-        roads.append({
-            "id": road_id,
-            "startNode": a,
-            "endNode": b,
-            "waypoints": waypoints,
-            "laneCount": lanes,
-            "speedLimit": speed_limit,
-            "level": level,
-        })
+        roads.append(
+            {
+                "id": road_id,
+                "startNode": a,
+                "endNode": b,
+                "waypoints": waypoints,
+                "laneCount": lanes,
+                "speedLimit": speed_limit,
+                "level": level,
+            }
+        )
 
     # ---- 5) Find intersections (shared nodes between >= 2 ways) ----
     node_to_ways: dict[int, list[int]] = {}
@@ -365,23 +379,29 @@ def _build_network(
             primary_road = roads[way_idxs[0]]
             dx = primary_road["endNode"]["x"] - primary_road["startNode"]["x"]
             axis = "ew" if abs(dx) > 0.1 else "ns"
-            traffic_lights.append({
-                "id": f"tl-{inter_counter}-{axis}",
-                "position": {"x": node.x - 3 if axis == "ew" else node.x,
-                             "y": 0.0,
-                             "z": node.z if axis == "ew" else node.z - 3},
-                "phase": "green" if axis == "ns" else "red",
-                "phaseRemaining": 30,
-                "cycleSeconds": 63,
-                "axis": axis,
-            })
-        intersections.append({
-            "id": inter_id,
-            "position": {"x": node.x, "y": 0.0, "z": node.z},
-            "trafficLights": traffic_lights,
-            "connectedRoads": [roads[i]["id"] for i in way_idxs],
-            "intersectionRadius": 8,
-        })
+            traffic_lights.append(
+                {
+                    "id": f"tl-{inter_counter}-{axis}",
+                    "position": {
+                        "x": node.x - 3 if axis == "ew" else node.x,
+                        "y": 0.0,
+                        "z": node.z if axis == "ew" else node.z - 3,
+                    },
+                    "phase": "green" if axis == "ns" else "red",
+                    "phaseRemaining": 30,
+                    "cycleSeconds": 63,
+                    "axis": axis,
+                }
+            )
+        intersections.append(
+            {
+                "id": inter_id,
+                "position": {"x": node.x, "y": 0.0, "z": node.z},
+                "trafficLights": traffic_lights,
+                "connectedRoads": [roads[i]["id"] for i in way_idxs],
+                "intersectionRadius": 8,
+            }
+        )
         used_intersection_node_ids.add(nid)
 
     return {
@@ -431,6 +451,7 @@ def parse_osmpbf(
         # We pass 'pbf' explicitly so osmium doesn't need to sniff from
         # file extension (we're passing bytes, not a path).
         import osmium
+
         handler.apply_buffer(pbf_bytes, "pbf", locations=True)
     except Exception as e:
         raise ValueError(f"Invalid PBF: {e}") from e

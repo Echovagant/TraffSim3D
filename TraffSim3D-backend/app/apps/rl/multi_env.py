@@ -4,6 +4,7 @@ Wraps N TrafficEnv instances in lockstep. All agents share the same PPO
 policy network (parameter sharing — common in MARL). Per-agent
 observations and actions are stacked into single tensors.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -28,10 +29,16 @@ class MultiTrafficEnv(gym.Env[np.ndarray, np.ndarray]):
         # Stacked spaces — PPO expects flat shape; we flatten inside
         # the env wrapper before passing to the model if needed.
         self.observation_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(n_agents, OBS_DIM), dtype=np.float32,
+            low=-1.0,
+            high=1.0,
+            shape=(n_agents, OBS_DIM),
+            dtype=np.float32,
         )
         self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(n_agents, 2), dtype=np.float32,
+            low=-1.0,
+            high=1.0,
+            shape=(n_agents, 2),
+            dtype=np.float32,
         )
 
     def reset(
@@ -55,8 +62,7 @@ class MultiTrafficEnv(gym.Env[np.ndarray, np.ndarray]):
             raise ValueError(
                 f"actions must have shape ({self.n_agents}, 2), got {actions.shape}",
             )
-        results = [env.step(actions[i].astype(np.float32))
-                   for i, env in enumerate(self.envs)]
+        results = [env.step(actions[i].astype(np.float32)) for i, env in enumerate(self.envs)]
         obs = np.stack([r[0] for r in results])
         rewards = [float(r[1]) for r in results]
         terms = [r[2] for r in results]

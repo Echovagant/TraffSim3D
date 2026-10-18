@@ -9,6 +9,7 @@ simulated.
 Clipping now takes an explicit bbox (degrees). The safety cap remains as the
 default so an un-cropped call keeps behaving exactly as before.
 """
+
 from __future__ import annotations
 
 import pytest

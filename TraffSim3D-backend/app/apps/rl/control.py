@@ -26,14 +26,16 @@ stops executing environment steps while holding its model in memory. That
 makes `resume` instant and lossless — no checkpoint round-trip, no policy
 reload — which a save-and-exit design would require.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import paths as _paths
 
@@ -121,12 +123,14 @@ def request(action: str) -> dict[str, Any]:
 
 def clear_control() -> None:
     """Drop any outstanding request (used when a run starts)."""
-    _write_atomic({
-        "state": STATE_RUNNING,
-        "epoch": int(read_control().get("epoch", 0)) + 1,
-        "requested_at_ms": int(time.time() * 1000),
-        "action": "clear",
-    })
+    _write_atomic(
+        {
+            "state": STATE_RUNNING,
+            "epoch": int(read_control().get("epoch", 0)) + 1,
+            "requested_at_ms": int(time.time() * 1000),
+            "action": "clear",
+        }
+    )
 
 
 def poll(seen_epoch: int = 0) -> tuple[str, int]:
@@ -150,9 +154,7 @@ def wait_while_paused(
     slightly, which is acceptable for a safety valve that only exists to
     stop a forgotten pause from hanging the process forever.
     """
-    max_polls = (
-        max(1, int(timeout_s / poll_interval_s)) if timeout_s is not None else None
-    )
+    max_polls = max(1, int(timeout_s / poll_interval_s)) if timeout_s is not None else None
     state, epoch = poll(seen_epoch)
     polls = 0
     while state == STATE_PAUSED:

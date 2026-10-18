@@ -21,6 +21,7 @@ two-way road flows both ways. `RoadGraph` therefore adds:
 The parser already halves the lane count for oneway ways, so `laneCount == 1`
 is the observable signal available downstream; the graph honours that.
 """
+
 from __future__ import annotations
 
 import math
@@ -38,9 +39,17 @@ def _network(roads: list[dict]) -> dict:
     return {"roads": roads, "intersections": [], "vehicles": [], "spawnPoints": []}
 
 
-def _road(rid: str, start: dict, end: dict, *, lanes: int = 2,
-          speed: float = 13.89, waypoints: list[dict] | None = None,
-          level: int = 0, cost_override: float | None = None) -> dict:
+def _road(
+    rid: str,
+    start: dict,
+    end: dict,
+    *,
+    lanes: int = 2,
+    speed: float = 13.89,
+    waypoints: list[dict] | None = None,
+    level: int = 0,
+    cost_override: float | None = None,
+) -> dict:
     """Build a parser-shaped road dict. start/end are node *positions*.
 
     `cost_override` lets a test state an edge cost that deliberately
@@ -66,10 +75,12 @@ def _road(rid: str, start: dict, end: dict, *, lanes: int = 2,
 
 
 def test_graph_indexes_every_road_endpoint() -> None:
-    net = _network([
-        _road("w-1", _pos(0, 0), _pos(10, 0)),
-        _road("w-2", _pos(10, 0), _pos(10, 10)),
-    ])
+    net = _network(
+        [
+            _road("w-1", _pos(0, 0), _pos(10, 0)),
+            _road("w-2", _pos(10, 0), _pos(10, 10)),
+        ]
+    )
     g = RoadGraph.from_network(net)
     assert len(g.nodes) == 3
     assert g.node_count == 3
@@ -78,10 +89,12 @@ def test_graph_indexes_every_road_endpoint() -> None:
 
 def test_shared_endpoint_becomes_one_node() -> None:
     """Two roads meeting at a corner must share a node, not duplicate it."""
-    net = _network([
-        _road("w-1", _pos(0, 0), _pos(10, 0)),
-        _road("w-2", _pos(10, 0), _pos(10, 10)),
-    ])
+    net = _network(
+        [
+            _road("w-1", _pos(0, 0), _pos(10, 0)),
+            _road("w-2", _pos(10, 0), _pos(10, 10)),
+        ]
+    )
     g = RoadGraph.from_network(net)
     corner = g.node_at(10, 0)
     assert corner is not None
@@ -141,7 +154,9 @@ def test_polyline_length_uses_all_waypoints() -> None:
     """A curved way must cost more than its straight-line endpoints."""
     straight = _road("w-1", _pos(0, 0), _pos(0, 30))
     curved = _road(
-        "w-2", _pos(0, 0), _pos(0, 30),
+        "w-2",
+        _pos(0, 0),
+        _pos(0, 30),
         waypoints=[_pos(0, 0), _pos(10, 10), _pos(0, 30)],
     )
     net = _network([straight, curved])
@@ -160,12 +175,14 @@ def test_polyline_length_uses_all_waypoints() -> None:
 
 def _ladder() -> dict:
     """A 2x2 ladder: corners A(0,0) B(10,0) C(0,10) D(10,10)."""
-    return _network([
-        _road("w-ab", _pos(0, 0), _pos(10, 0)),
-        _road("w-ac", _pos(0, 0), _pos(0, 10)),
-        _road("w-bd", _pos(10, 0), _pos(10, 10)),
-        _road("w-cd", _pos(0, 10), _pos(10, 10)),
-    ])
+    return _network(
+        [
+            _road("w-ab", _pos(0, 0), _pos(10, 0)),
+            _road("w-ac", _pos(0, 0), _pos(0, 10)),
+            _road("w-bd", _pos(10, 0), _pos(10, 10)),
+            _road("w-cd", _pos(0, 10), _pos(10, 10)),
+        ]
+    )
 
 
 def test_astar_finds_the_direct_route() -> None:
@@ -178,17 +195,20 @@ def test_astar_finds_the_direct_route() -> None:
 
 def test_astar_routes_around_a_missing_link() -> None:
     """Break one edge and A* must take the long way round."""
-    net = _network([
-        _road("w-ab", _pos(0, 0), _pos(10, 0)),
-        _road("w-ac", _pos(0, 0), _pos(0, 10)),
-        _road("w-bd", _pos(10, 0), _pos(10, 10)),
-        _road("w-cd", _pos(0, 10), _pos(10, 10)),
-    ])
+    net = _network(
+        [
+            _road("w-ab", _pos(0, 0), _pos(10, 0)),
+            _road("w-ac", _pos(0, 0), _pos(0, 10)),
+            _road("w-bd", _pos(10, 0), _pos(10, 10)),
+            _road("w-cd", _pos(0, 10), _pos(10, 10)),
+        ]
+    )
     g = RoadGraph.from_network(net)
     # Remove A<->B by making that road one-way out of B.
     net["roads"][0]["laneCount"] = 1
     net["roads"][0]["startNode"], net["roads"][0]["endNode"] = (
-        _pos(10, 0), _pos(0, 0),
+        _pos(10, 0),
+        _pos(0, 0),
     )
     g2 = RoadGraph.from_network(net)
     path = g2.shortest_path(g2.node_at(0, 0).id, g2.node_at(10, 0).id)
@@ -198,10 +218,12 @@ def test_astar_routes_around_a_missing_link() -> None:
 
 
 def test_astar_returns_none_when_unreachable() -> None:
-    net = _network([
-        _road("w-1", _pos(0, 0), _pos(10, 0)),
-        _road("w-2", _pos(100, 100), _pos(110, 100)),
-    ])
+    net = _network(
+        [
+            _road("w-1", _pos(0, 0), _pos(10, 0)),
+            _road("w-2", _pos(100, 100), _pos(110, 100)),
+        ]
+    )
     g = RoadGraph.from_network(net)
     assert g.shortest_path(g.node_at(0, 0).id, g.node_at(10, 0).id) is not None
     assert g.shortest_path(g.node_at(0, 0).id, g.node_at(110, 100).id) is None
@@ -226,17 +248,18 @@ def test_astar_prefers_a_longer_looking_detour_when_it_is_cheaper() -> None:
     heuristic over the true cost returns 25 here. Correct A* must return 20 —
     the whole point of expanding on `g + h` rather than on `h` alone.
     """
-    net = _network([
-        _road("w-sg", _pos(0, 0), _pos(10, 10), cost_override=25.0),
-        _road("w-sm", _pos(0, 0), _pos(0, 10), cost_override=10.0),
-        _road("w-mg", _pos(0, 10), _pos(10, 10), cost_override=10.0),
-    ])
+    net = _network(
+        [
+            _road("w-sg", _pos(0, 0), _pos(10, 10), cost_override=25.0),
+            _road("w-sm", _pos(0, 0), _pos(0, 10), cost_override=10.0),
+            _road("w-mg", _pos(0, 10), _pos(10, 10), cost_override=10.0),
+        ]
+    )
     g = RoadGraph.from_network(net)
     path = g.shortest_path(g.node_at(0, 0).id, g.node_at(10, 10).id)
     assert path is not None
     assert path.cost == pytest.approx(20.0), (
-        f"expected the 20-cost detour, got {path.cost} via "
-        f"{[leg.road_id for leg in path.legs]}"
+        f"expected the 20-cost detour, got {path.cost} via " f"{[leg.road_id for leg in path.legs]}"
     )
     assert [leg.road_id for leg in path.legs] == ["w-sm", "w-mg"]
 
@@ -260,14 +283,17 @@ def test_astar_agrees_with_dijkstra_on_random_networks() -> None:
         # Connect each point to 1-3 others so the graph stays well connected;
         # a bare chain leaves too few reachable pairs to be a meaningful oracle.
         for i, src in enumerate(pts):
-            targets = rng.sample([j for j in range(len(pts)) if j != i],
-                                 rng.randint(1, 3))
+            targets = rng.sample([j for j in range(len(pts)) if j != i], rng.randint(1, 3))
             for k, j in enumerate(targets):
-                roads.append(_road(
-                    f"w-{i}-{k}", _pos(*src), _pos(*pts[j]),
-                    lanes=rng.choice([1, 2]),
-                    cost_override=rng.choice([None, rng.uniform(1.0, 30.0)]),
-                ))
+                roads.append(
+                    _road(
+                        f"w-{i}-{k}",
+                        _pos(*src),
+                        _pos(*pts[j]),
+                        lanes=rng.choice([1, 2]),
+                        cost_override=rng.choice([None, rng.uniform(1.0, 30.0)]),
+                    )
+                )
         net = _network(roads)
         g = RoadGraph.from_network(net)
         for _ in range(6):
@@ -278,16 +304,16 @@ def test_astar_agrees_with_dijkstra_on_random_networks() -> None:
             if (a is None) != (d is None):
                 pytest.fail(f"trial {trial}: A* and Dijkstra disagree on reachability")
             if a is not None:
-                assert a.cost == pytest.approx(d.cost), (
-                    f"trial {trial}: A* cost {a.cost} != Dijkstra {d.cost}"
-                )
+                assert a.cost == pytest.approx(
+                    d.cost
+                ), f"trial {trial}: A* cost {a.cost} != Dijkstra {d.cost}"
                 total_checked += 1
     # One-way edges legitimately make some pairs unreachable, so the guard is
     # on the corpus total rather than per trial — what matters is that the
     # oracle actually compared a meaningful number of paths.
-    assert total_checked >= 100, (
-        f"only {total_checked} reachable pairs compared — oracle too weak to be meaningful"
-    )
+    assert (
+        total_checked >= 100
+    ), f"only {total_checked} reachable pairs compared — oracle too weak to be meaningful"
 
 
 def test_unknown_node_id_raises() -> None:
@@ -312,7 +338,8 @@ def test_graph_serializes_to_plain_json_types() -> None:
     assert restored.node_count == g.node_count
     assert restored.edge_count == g.edge_count
     assert restored.shortest_path(
-        restored.node_at(0, 0).id, restored.node_at(10, 10).id,
+        restored.node_at(0, 0).id,
+        restored.node_at(10, 10).id,
     ).cost == pytest.approx(20.0)
 
 

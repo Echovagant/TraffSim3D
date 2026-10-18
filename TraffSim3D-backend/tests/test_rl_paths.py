@@ -11,16 +11,15 @@ from a D: project and `C:\\tmp\\` from C: — which is where the six orphaned
 POSIX gotcha: `/tmp` is conventionally wiped on reboot, taking every trained
 model with it.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
+from app.apps.rl import checkpoint as rl_ckpt
 from app.apps.rl import control as rl_control
 from app.apps.rl import paths as rl_paths
 from app.apps.rl import status as rl_status
-from app.apps.rl import checkpoint as rl_ckpt
 
 
 def test_all_runtime_paths_are_absolute() -> None:

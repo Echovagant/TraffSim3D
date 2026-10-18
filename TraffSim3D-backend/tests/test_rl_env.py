@@ -1,4 +1,5 @@
 """Plan 044: Gymnasium env contract tests."""
+
 from __future__ import annotations
 
 import numpy as np

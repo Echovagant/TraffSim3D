@@ -9,6 +9,7 @@ The file holds a **desired state** rather than an event queue, so a repeated
 `pause` is idempotent and a request made while paused (e.g. `terminate`) is
 never lost.
 """
+
 from __future__ import annotations
 
 import json
@@ -135,7 +136,10 @@ def test_wait_gives_up_after_timeout(control_file) -> None:
         calls["n"] += 1
 
     state, epoch = rl_control.wait_while_paused(
-        0, timeout_s=5.0, poll_interval_s=1.0, sleep=fake_sleep,
+        0,
+        timeout_s=5.0,
+        poll_interval_s=1.0,
+        sleep=fake_sleep,
     )
     # 5.0s / 1.0s = 5 polls, then the watchdog bails out.
     assert calls["n"] == 5

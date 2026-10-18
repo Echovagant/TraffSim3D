@@ -18,6 +18,7 @@ These tests pin the contract at the API boundary:
 The expected road ids below were derived by running the parser directly
 against the two fixtures, not guessed.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -69,9 +70,7 @@ PBF_ENDPOINT = "/api/v1/maps/parse-pbf"
 
 @pytest.fixture
 async def client():
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
 

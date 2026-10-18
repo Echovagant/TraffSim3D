@@ -5,6 +5,7 @@ Uses httpx2 + ASGITransport (in-process, no subprocess overhead).
 use a shared file path and clear it per test (simpler than reloading
 modules).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -25,10 +26,9 @@ async def client(tmp_path, monkeypatch):
     # Isolate the control channel too — it is a module-level /tmp path shared
     # across tests otherwise, and its epoch is monotonic by design.
     from app.apps.rl import control as rl_control
+
     monkeypatch.setattr(rl_control, "_DEFAULT_PATH", tmp_path / "control.json")
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     if STATUS_PATH.exists():
         STATUS_PATH.unlink()
@@ -70,6 +70,7 @@ async def test_checkpoints_endpoint_returns_list_shape(
     """GET /api/v1/rl/checkpoints returns {checkpoints: [...]}."""
     # Redirect checkpoint dir to tmp so list returns []
     from app.apps.rl import checkpoint as ckpt
+
     monkeypatch.setattr(ckpt, "_DEFAULT_DIR", tmp_path / "nonexistent")
     r = await client.get("/api/v1/rl/checkpoints")
     assert r.status_code == 200
@@ -83,8 +84,7 @@ async def test_train_accepts_n_agents_and_save_every(client: AsyncClient) -> Non
     """POST /api/v1/rl/train with n_agents=3, save_every=2000 in dry-run."""
     r = await client.post(
         "/api/v1/rl/train",
-        json={"steps": 600, "dry_run": True, "device": "auto",
-              "n_agents": 3, "save_every": 2000},
+        json={"steps": 600, "dry_run": True, "device": "auto", "n_agents": 3, "save_every": 2000},
     )
     assert r.status_code == 200
     body = r.json()
@@ -103,8 +103,13 @@ async def test_train_independent_writes_agent_rewards(client: AsyncClient) -> No
     """Plan 047: independent dry-run produces per-agent reward dict."""
     r = await client.post(
         "/api/v1/rl/train",
-        json={"steps": 600, "dry_run": True, "device": "auto",
-              "n_agents": 2, "independent_agents": True},
+        json={
+            "steps": 600,
+            "dry_run": True,
+            "device": "auto",
+            "n_agents": 2,
+            "independent_agents": True,
+        },
     )
     assert r.status_code == 200
     body = r.json()
@@ -147,10 +152,13 @@ async def test_train_accepts_scene_kind_corridor(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_weights_endpoint_404_for_missing_checkpoint(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path,
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     """Plan 049: GET /weights with a name not in the list returns 404."""
     from app.apps.rl import checkpoint as ckpt
+
     monkeypatch.setattr(ckpt, "_DEFAULT_DIR", tmp_path / "nonexistent")
     r = await client.get("/api/v1/rl/checkpoints/nonexistent.zip/weights")
     assert r.status_code == 404
@@ -159,7 +167,9 @@ async def test_weights_endpoint_404_for_missing_checkpoint(
 
 @pytest.mark.asyncio
 async def test_weights_endpoint_returns_json_for_existing_checkpoint(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path,
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     """Plan 049: GET /weights for a real SB3 .zip returns architecture + layers."""
     # Save a tiny PPO model directly to tmp and point the checkpoint
@@ -173,6 +183,7 @@ async def test_weights_endpoint_returns_json_for_existing_checkpoint(
 
     from app.apps.rl import checkpoint as ckpt
     from app.apps.rl.env import TrafficEnv
+
     env = TrafficEnv()
     model = PPO("MlpPolicy", env, verbose=0, n_steps=64)
     target = tmp_path / "pid9999" / "ppo_step_0000064.zip"
@@ -180,9 +191,7 @@ async def test_weights_endpoint_returns_json_for_existing_checkpoint(
     model.save(str(target))
 
     monkeypatch.setattr(ckpt, "_DEFAULT_DIR", tmp_path)
-    r = await client.get(
-        "/api/v1/rl/checkpoints/ppo_step_0000064.zip/weights"
-    )
+    r = await client.get("/api/v1/rl/checkpoints/ppo_step_0000064.zip/weights")
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["name"] == "ppo_step_0000064.zip"
@@ -204,10 +213,13 @@ async def test_weights_endpoint_returns_json_for_existing_checkpoint(
 
 @pytest.mark.asyncio
 async def test_weights_endpoint_503_when_sb3_missing(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path,
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     """Plan 049: when SB3 is uninstalled, GET /weights returns 503."""
     from app.apps.rl import checkpoint as ckpt
+
     # Drop a stub .zip in the checkpoint dir (no SB3 needed for the list),
     # then monkeypatch export_weights to raise WeightsUnavailable.
     target = tmp_path / "pid9999" / "ppo_step_0000064.zip"
@@ -220,11 +232,10 @@ async def test_weights_endpoint_503_when_sb3_missing(
 
     def _raise(_p):
         raise WeightsUnavailableError("stable-baselines3 not installed")
+
     monkeypatch.setattr(rl_weights, "export_weights", _raise)
 
-    r = await client.get(
-        "/api/v1/rl/checkpoints/ppo_step_0000064.zip/weights"
-    )
+    r = await client.get("/api/v1/rl/checkpoints/ppo_step_0000064.zip/weights")
     assert r.status_code == 503
     assert "unavailable" in r.json()["detail"].lower()
 

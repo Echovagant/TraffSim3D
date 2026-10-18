@@ -19,6 +19,7 @@ The cache is intentionally simple (no TTL, no LRU). A research
 project doesn't need hot-cache eviction; we invalidate by deleting
 `geojson/cache/` if the OSM data for a region changes.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -80,9 +81,11 @@ def list_cached_queries() -> list[dict[str, Any]]:
     out = []
     for p in sorted(CACHE_DIR.glob("*.json")):
         stat = p.stat()
-        out.append({
-            "key": p.stem,
-            "size_kb": round(stat.st_size / 1024, 1),
-            "modified_ms": int(stat.st_mtime * 1000),
-        })
+        out.append(
+            {
+                "key": p.stem,
+                "size_kb": round(stat.st_size / 1024, 1),
+                "modified_ms": int(stat.st_mtime * 1000),
+            }
+        )
     return out

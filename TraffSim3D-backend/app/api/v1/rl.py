@@ -1,4 +1,5 @@
 """Plan 044 + 045: /api/v1/rl/* endpoints (train + status + capabilities + checkpoints)."""
+
 from __future__ import annotations
 
 import sys
@@ -19,7 +20,7 @@ class TrainRequest(BaseModel):
     steps: int = 1000
     dry_run: bool = True
     device: str = "auto"  # 'auto' | 'gpu' | 'cpu' — Plan 044 GPU extension
-    n_agents: int = 2     # Plan 045: stacked TrafficEnvs sharing PPO
+    n_agents: int = 2  # Plan 045: stacked TrafficEnvs sharing PPO
     save_every: int = 5000  # Plan 045: checkpoint save interval
     independent_agents: bool = False  # Plan 047: per-agent PPO policies
     scene_kind: str = "cross"  # Plan 048: 'cross' | 'corridor' | 't_junction' | 'roundabout'
@@ -39,54 +40,99 @@ async def train(req: TrainRequest) -> dict[str, Any]:
         # Curriculum learning mode
         if req.dry_run:
             from app.apps.rl.train import dry_run
+
             dry_run(req.steps, 1, False, "cross")
-            return {"ok": True, "dry_run": True, "steps": req.steps,
-                    "device": req.device, "curriculum": True}
+            return {
+                "ok": True,
+                "dry_run": True,
+                "steps": req.steps,
+                "device": req.device,
+                "curriculum": True,
+            }
 
         import subprocess
+
         backend_root = Path(__file__).resolve().parents[3]  # noqa: ASYNC240
-        args = [sys.executable, "-m", "app.apps.rl.train",
-                str(req.steps), "--device", req.device,
-                "--save-every", str(req.save_every),
-                "--curriculum"]
+        args = [
+            sys.executable,
+            "-m",
+            "app.apps.rl.train",
+            str(req.steps),
+            "--device",
+            req.device,
+            "--save-every",
+            str(req.save_every),
+            "--curriculum",
+        ]
         proc = subprocess.Popen(  # noqa: ASYNC220
-            args, cwd=str(backend_root),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            args,
+            cwd=str(backend_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
-        return {"ok": True, "dry_run": False, "pid": proc.pid,
-                "steps": req.steps, "device": req.device,
-                "save_every": req.save_every, "curriculum": True}
+        return {
+            "ok": True,
+            "dry_run": False,
+            "pid": proc.pid,
+            "steps": req.steps,
+            "device": req.device,
+            "save_every": req.save_every,
+            "curriculum": True,
+        }
 
     if req.dry_run:
         # Synchronous dry-run — write fake status immediately.
         from app.apps.rl.train import dry_run
+
         dry_run(req.steps, req.n_agents, req.independent_agents, req.scene_kind)
-        return {"ok": True, "dry_run": True, "steps": req.steps,
-                "device": req.device, "n_agents": req.n_agents,
-                "independent_agents": req.independent_agents,
-                "scene_kind": req.scene_kind}
+        return {
+            "ok": True,
+            "dry_run": True,
+            "steps": req.steps,
+            "device": req.device,
+            "n_agents": req.n_agents,
+            "independent_agents": req.independent_agents,
+            "scene_kind": req.scene_kind,
+        }
 
     # Real training — spawn subprocess, return PID.
     # noqa: ASYNC240 (fire-and-forget Path is OK in endpoint), ASYNC220 (Popen is OK here)
     import subprocess
+
     backend_root = Path(__file__).resolve().parents[3]  # noqa: ASYNC240
-    args = [sys.executable, "-m", "app.apps.rl.train",
-            str(req.steps), "--device", req.device,
-            "--n-agents", str(req.n_agents),
-            "--save-every", str(req.save_every),
-            "--scene-kind", req.scene_kind]
+    args = [
+        sys.executable,
+        "-m",
+        "app.apps.rl.train",
+        str(req.steps),
+        "--device",
+        req.device,
+        "--n-agents",
+        str(req.n_agents),
+        "--save-every",
+        str(req.save_every),
+        "--scene-kind",
+        req.scene_kind,
+    ]
     if req.independent_agents:
         args.append("--independent")
     proc = subprocess.Popen(  # noqa: ASYNC220
-        args, cwd=str(backend_root),
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        args,
+        cwd=str(backend_root),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
-    return {"ok": True, "dry_run": False, "pid": proc.pid,
-            "steps": req.steps, "device": req.device,
-            "n_agents": req.n_agents,
-            "independent_agents": req.independent_agents,
-            "save_every": req.save_every,
-            "scene_kind": req.scene_kind}
+    return {
+        "ok": True,
+        "dry_run": False,
+        "pid": proc.pid,
+        "steps": req.steps,
+        "device": req.device,
+        "n_agents": req.n_agents,
+        "independent_agents": req.independent_agents,
+        "save_every": req.save_every,
+        "scene_kind": req.scene_kind,
+    }
 
 
 @router.get("/rl/status", tags=["rl"])
@@ -94,11 +140,19 @@ async def status() -> dict[str, Any]:
     """Read training status from status.json. Empty dict if no run yet."""
     s = rl_status.read_status()
     if not s:
-        return {"running": False, "paused": False, "step": 0, "episode_count": 0,
-                "last_reward": 0.0, "reward_history": [],
-                "started_at_ms": 0, "finished_at_ms": None,
-                "latest_checkpoint": "",
-                "n_agents": 0, "independent_agents": False}
+        return {
+            "running": False,
+            "paused": False,
+            "step": 0,
+            "episode_count": 0,
+            "last_reward": 0.0,
+            "reward_history": [],
+            "started_at_ms": 0,
+            "finished_at_ms": None,
+            "latest_checkpoint": "",
+            "n_agents": 0,
+            "independent_agents": False,
+        }
     return s
 
 

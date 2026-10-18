@@ -4,6 +4,7 @@ Returns a snapshot of torch / CUDA / SB3 / VRAM state so the frontend
 can make informed UI decisions (e.g. grey out "GPU" when not available)
 and the trainer can auto-fallback gracefully.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -19,6 +20,7 @@ def _torch_info() -> dict[str, Any]:
     """Return torch info dict, or empty dict if torch is unavailable."""
     try:
         import torch
+
         return {
             "torch_version": torch.__version__,
             "cuda_available": bool(torch.cuda.is_available()),
@@ -29,7 +31,7 @@ def _torch_info() -> dict[str, Any]:
                 else ""
             ),
             "vram_gb": (
-                round(torch.cuda.get_device_properties(0).total_memory / (1024 ** 3), 2)
+                round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2)
                 if torch.cuda.is_available() and torch.cuda.device_count() > 0
                 else 0.0
             ),
@@ -47,6 +49,7 @@ def _torch_info() -> dict[str, Any]:
 def _sb3_available() -> bool:
     try:
         import stable_baselines3  # noqa: F401
+
         return True
     except ImportError:
         return False

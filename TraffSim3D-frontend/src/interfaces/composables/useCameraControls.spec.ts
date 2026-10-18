@@ -144,10 +144,13 @@ describe('useCameraControls', () => {
       expect(h.controls().maxPolarAngle).toBeCloseTo(Math.PI / 2 - 0.05, 10);
     });
 
-    it('binds left=rotate, middle=dolly, right=pan', () => {
+    it('binds left=rotate, middle=dolly, right=disabled (Plan 054b)', () => {
       expect(h.controls().mouseButtons.LEFT).toBe(THREE.MOUSE.ROTATE);
       expect(h.controls().mouseButtons.MIDDLE).toBe(THREE.MOUSE.DOLLY);
-      expect(h.controls().mouseButtons.RIGHT).toBe(THREE.MOUSE.PAN);
+      // Plan 054b: right-click pan is deliberately disabled so the browser
+      // context menu stays available for entity inspection. See the rationale
+      // block in useCameraControls.ts.
+      expect(h.controls().mouseButtons.RIGHT).toBeNull();
     });
 
     it('exposes window.__camera reporting the live camera state', () => {

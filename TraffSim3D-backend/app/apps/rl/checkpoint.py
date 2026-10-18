@@ -5,6 +5,7 @@ collisions when multiple training runs are spawned concurrently. The
 default CHECKPOINT_DIR holds all subprocesses' checkpoints; the API
 endpoint lists them in mtime-descending order.
 """
+
 from __future__ import annotations
 
 import os
@@ -29,7 +30,9 @@ def _per_process_dir() -> Path:
 
 
 def save_checkpoint(
-    model: Any, step: int, agent_id: int | None = None,
+    model: Any,
+    step: int,
+    agent_id: int | None = None,
 ) -> Path:
     """Save PPO model to a per-process subdirectory and prune old ones.
 
@@ -39,7 +42,8 @@ def save_checkpoint(
     pdir = _per_process_dir()
     pdir.mkdir(parents=True, exist_ok=True)
     name = (
-        f"ppo_agent{agent_id}_step_{step:07d}.zip" if agent_id is not None
+        f"ppo_agent{agent_id}_step_{step:07d}.zip"
+        if agent_id is not None
         else f"ppo_step_{step:07d}.zip"
     )
     path = pdir / name
@@ -56,6 +60,7 @@ def list_checkpoints() -> list[dict[str, Any]]:
     ppo_step_*.zip → None.
     """
     import re
+
     pattern = re.compile(r"^ppo(?:_agent(\d+))?_step_\d+\.zip$")
     if not _DEFAULT_DIR.exists():
         return []
@@ -70,13 +75,15 @@ def list_checkpoints() -> list[dict[str, Any]]:
     for p in files:
         m = pattern.match(p.name)
         agent_id: int | None = int(m.group(1)) if (m and m.group(1)) else None
-        out.append({
-            "name": p.name,
-            "process": p.parent.name,
-            "agent_id": agent_id,
-            "size_kb": round(p.stat().st_size / 1024, 1),
-            "mtime_ms": int(p.stat().st_mtime * 1000),
-        })
+        out.append(
+            {
+                "name": p.name,
+                "process": p.parent.name,
+                "agent_id": agent_id,
+                "size_kb": round(p.stat().st_size / 1024, 1),
+                "mtime_ms": int(p.stat().st_mtime * 1000),
+            }
+        )
     return out
 
 
@@ -104,8 +111,7 @@ def _prune_old(pdir: Path, keep: int) -> int:
     """Within a per-process dir, keep the newest N checkpoints."""
     if not pdir.exists():
         return 0
-    files = sorted(pdir.glob("ppo_step_*.zip"),
-                   key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted(pdir.glob("ppo_step_*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
     deleted = 0
     for p in files[keep:]:
         try:

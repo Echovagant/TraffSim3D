@@ -43,6 +43,7 @@ suboptimal route returned silently would be far worse. `shortest_path(...,
 heuristic="zero")` forces the same behaviour for testing, which is how
 `test_astar_agrees_with_dijkstra_on_random_networks` acts as an oracle.
 """
+
 from __future__ import annotations
 
 import heapq
@@ -78,7 +79,7 @@ def _polyline_length(waypoints: list[dict[str, Any]]) -> float:
 class GraphNode:
     id: str
     position: dict[str, float]
-    edges: tuple["GraphEdge", ...] = field(default=(), compare=False)
+    edges: tuple[GraphEdge, ...] = field(default=(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -127,7 +128,7 @@ class RoadGraph:
     # ---- construction ----------------------------------------------------
 
     @classmethod
-    def from_network(cls, network: dict[str, Any]) -> "RoadGraph":
+    def from_network(cls, network: dict[str, Any]) -> RoadGraph:
         """Build from the parser's `{roads: [...]}` output."""
         nodes: dict[str, GraphNode] = {}
         index: dict[tuple[int, int, int], str] = {}
@@ -143,11 +144,14 @@ class RoadGraph:
                 return existing
             nid = f"n-{len(nodes)}"
             index[k] = nid
-            nodes[nid] = GraphNode(id=nid, position={
-                "x": float(pos.get("x", 0.0)),
-                "y": float(pos.get("y", 0.0)),
-                "z": float(pos.get("z", 0.0)),
-            })
+            nodes[nid] = GraphNode(
+                id=nid,
+                position={
+                    "x": float(pos.get("x", 0.0)),
+                    "y": float(pos.get("y", 0.0)),
+                    "z": float(pos.get("z", 0.0)),
+                },
+            )
             adjacency[nid] = []
             return nid
 
@@ -183,25 +187,36 @@ class RoadGraph:
             if s_id == e_id:
                 continue  # self-loop carries no routing information
 
-            adjacency[s_id].append(GraphEdge(
-                road_id=rid, to_node=e_id, cost=cost,
-                speed_limit=speed, lanes=lanes, oneway=oneway,
-            ))
+            adjacency[s_id].append(
+                GraphEdge(
+                    road_id=rid,
+                    to_node=e_id,
+                    cost=cost,
+                    speed_limit=speed,
+                    lanes=lanes,
+                    oneway=oneway,
+                )
+            )
             if not oneway:
-                adjacency[e_id].append(GraphEdge(
-                    road_id=rid, to_node=s_id, cost=cost,
-                    speed_limit=speed, lanes=lanes, oneway=oneway,
-                ))
+                adjacency[e_id].append(
+                    GraphEdge(
+                        road_id=rid,
+                        to_node=s_id,
+                        cost=cost,
+                        speed_limit=speed,
+                        lanes=lanes,
+                        oneway=oneway,
+                    )
+                )
 
         frozen = {
-            nid: GraphNode(id=nid, position=n.position,
-                           edges=tuple(adjacency.get(nid, ())))
+            nid: GraphNode(id=nid, position=n.position, edges=tuple(adjacency.get(nid, ())))
             for nid, n in nodes.items()
         }
         return cls(frozen, index, geometric_costs=geometric)
 
     @classmethod
-    def from_dict(cls, blob: dict[str, Any]) -> "RoadGraph":
+    def from_dict(cls, blob: dict[str, Any]) -> RoadGraph:
         """Rebuild from `to_dict()` output (JSON round-trip safe)."""
         raw_nodes: dict[str, dict[str, Any]] = blob.get("nodes", {})
         nodes: dict[str, GraphNode] = {}
@@ -212,10 +227,12 @@ class RoadGraph:
             index[_key(pos)] = nid
         frozen = {
             nid: GraphNode(
-                id=nid, position=n.position,
+                id=nid,
+                position=n.position,
                 edges=tuple(
                     GraphEdge(
-                        road_id=e["road_id"], to_node=e["to_node"],
+                        road_id=e["road_id"],
+                        to_node=e["to_node"],
                         cost=float(e["cost"]),
                         speed_limit=float(e.get("speed_limit", 0.0)),
                         lanes=int(e.get("lanes", 2)),
@@ -311,14 +328,17 @@ class RoadGraph:
                     came_from[edge.to_node] = (nid, edge)
                     tiebreak += 1
                     heapq.heappush(
-                        open_heap, (tentative + h(edge.to_node), tiebreak, edge.to_node),
+                        open_heap,
+                        (tentative + h(edge.to_node), tiebreak, edge.to_node),
                     )
         return None
 
     def _reconstruct(
         self,
         came_from: dict[str, tuple[str, GraphEdge]],
-        start: str, goal: str, cost: float,
+        start: str,
+        goal: str,
+        cost: float,
     ) -> Path:
         chain: list[tuple[str, GraphEdge]] = []
         cur = goal

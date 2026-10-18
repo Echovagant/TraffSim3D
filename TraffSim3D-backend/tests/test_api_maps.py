@@ -2,6 +2,7 @@
 
 Uses httpx2 + ASGITransport (in-process, no subprocess overhead).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,9 +17,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "sample-4way.osm"
 
 @pytest.fixture
 async def client():
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
 
@@ -83,8 +82,7 @@ async def test_parse_pbf_returns_200_with_roads(client: AsyncClient) -> None:
 async def test_parse_pbf_rejects_truncated(client: AsyncClient) -> None:
     r = await client.post(
         "/api/v1/maps/parse-pbf",
-        files={"file": ("bad.pbf", b"\x00\x01\x02 not a pbf",
-                        "application/octet-stream")},
+        files={"file": ("bad.pbf", b"\x00\x01\x02 not a pbf", "application/octet-stream")},
     )
     assert r.status_code == 400
     assert "Invalid OSM PBF" in r.text

@@ -3,6 +3,7 @@
 Uses httpx2 + ASGITransport (starlette 1.3+ requires httpx2; the new
 httpx2 ASGITransport is async-only, so we use AsyncClient).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -13,9 +14,7 @@ from app.main import app
 
 @pytest.fixture
 async def client():
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
 

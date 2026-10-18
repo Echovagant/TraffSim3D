@@ -5,6 +5,7 @@ M3 follow-up: both parse endpoints accept an optional bbox
 simulate. The parser capability already existed (`osm_parser.parse_osm_xml`
 / `parse_osmpbf` take a `bbox`); this module only wires it through.
 """
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
@@ -87,13 +88,9 @@ async def parse_osm(
         # no-bbox response cannot drift from the pre-bbox behaviour.
         return parse_osm_xml(raw) if bbox is None else parse_osm_xml(raw, bbox=bbox)
     except ET.ParseError as e:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid OSM XML: {e}"
-        ) from e
+        raise HTTPException(status_code=400, detail=f"Invalid OSM XML: {e}") from e
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"OSM parse failed: {e}"
-        ) from e
+        raise HTTPException(status_code=500, detail=f"OSM parse failed: {e}") from e
 
 
 @router.post("/maps/parse-pbf", tags=["maps"])
@@ -118,14 +115,9 @@ async def parse_pbf(
         return parse_osmpbf(raw) if bbox is None else parse_osmpbf(raw, bbox=bbox)
     except ValueError as e:
         # parse_osmpbf wraps libosmium errors as ValueError.
-        raise HTTPException(
-            status_code=400, detail=f"Invalid OSM PBF: {e}"
-        ) from e
+        raise HTTPException(status_code=400, detail=f"Invalid OSM PBF: {e}") from e
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"PBF parse failed: {e}"
-        ) from e
-
+        raise HTTPException(status_code=500, detail=f"PBF parse failed: {e}") from e
 
 
 @router.get("/maps/overpass", tags=["maps"])

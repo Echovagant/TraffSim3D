@@ -3,16 +3,15 @@
 Wraps TrafficEnv and dynamically switches scene_kind based on agent
 performance. Integrates with CurriculumScheduler for progression logic.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 import numpy as np
-from gymnasium import spaces
 
 from .curriculum import CurriculumScheduler
 from .env import TrafficEnv
-from .sim_core import OBS_DIM
 
 
 class CurriculumEnv(TrafficEnv):
@@ -32,13 +31,15 @@ class CurriculumEnv(TrafficEnv):
         # Initialize with first scene in curriculum
         super().__init__(max_steps=max_steps, scene_kind="cross")
         self.scheduler = CurriculumScheduler(
-            thresholds=thresholds, eval_window=eval_window,
+            thresholds=thresholds,
+            eval_window=eval_window,
         )
         self._prev_episode_reward = 0.0
         self._prev_episode_info: dict[str, Any] = {}
 
     def step(
-        self, action: np.ndarray,
+        self,
+        action: np.ndarray,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         obs, reward, terminated, truncated, info = super().step(action)
 
@@ -49,7 +50,8 @@ class CurriculumEnv(TrafficEnv):
         # Check for episode end and curriculum advancement
         if terminated or truncated:
             self.scheduler.record_episode(
-                self._prev_episode_reward, self._prev_episode_info,
+                self._prev_episode_reward,
+                self._prev_episode_info,
             )
             new_scene = self.scheduler.advance()
             if new_scene is not None:

@@ -1,4 +1,5 @@
 """Plan 041 + 046: OSM parser unit tests (XML + PBF)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,6 +19,7 @@ def _build_pbf_fixture_if_missing() -> Path:
     if FIXTURE_PBF.exists() and FIXTURE_PBF.stat().st_size > 100:
         return FIXTURE_PBF
     import osmium
+
     FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
     # ForwardReferenceWriter uses the XML as ref_src to resolve node
     # references while writing the PBF (preserves IDs).
@@ -28,8 +30,11 @@ def _build_pbf_fixture_if_missing() -> Path:
     )
 
     class _Reader(osmium.SimpleHandler):
-        def node(self, n): fw.add_node(n)
-        def way(self, w): fw.add_way(w)
+        def node(self, n):
+            fw.add_node(n)
+
+        def way(self, w):
+            fw.add_way(w)
 
     r = _Reader()
     r.apply_file(str(FIXTURE_XML), locations=True)
@@ -90,6 +95,7 @@ def test_empty_xml_returns_empty_network() -> None:
 
 def test_invalid_xml_raises() -> None:
     import xml.etree.ElementTree as ET
+
     with pytest.raises(ET.ParseError):
         parse_osm_xml(b"<not-xml>")
 
@@ -97,6 +103,7 @@ def test_invalid_xml_raises() -> None:
 def test_serializer_shape_roundtrip(sample_network: dict) -> None:
     """The dict should serialize to JSON and back without losing structure."""
     import json
+
     text = json.dumps(sample_network)
     restored = json.loads(text)
     assert restored == sample_network
@@ -108,9 +115,11 @@ def test_v7_level_field_compatibility(sample_network: dict) -> None:
         assert "level" in r
         assert isinstance(r["level"], int)
 
+
 # ---------------------------------------------------------------------------
 # Plan 046: PBF parser tests.
 # ---------------------------------------------------------------------------
+
 
 def test_parses_pbf_returns_4_roads() -> None:
     """PBF and XML should produce equivalent road counts (4) for sample-4way."""
