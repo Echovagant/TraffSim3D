@@ -136,7 +136,7 @@
               </div>
               <p class="module-sub">部署与交付物总览</p>
               <p class="module-desc">
-                Docker Compose 启动清单、ADR 归档、API 文档、测试覆盖率报告的目录页。
+                本地部署清单、ADR 归档、API 文档、测试覆盖率报告的目录页。
                 不引入新功能, 只把前 4 个里程碑的可交付物集中展示给项目接手人。
               </p>
             </div>

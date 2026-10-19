@@ -1,0 +1,816 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TraffSim3D Backend",
+    "description": "3D traffic simulation platform — RL engine and scene services.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/ping": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Ping",
+        "operationId": "ping_api_v1_ping_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "type": "object",
+                  "title": "Response Ping Api V1 Ping Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maps/parse-osm": {
+      "post": {
+        "tags": [
+          "maps",
+          "maps"
+        ],
+        "summary": "Parse Osm",
+        "description": "Parse an uploaded .osm file into a RoadNetwork dict.\n\nOptional bbox query params (south, west, north, east) clip the map to an\narea of interest; omit them all to keep the parser's default\n~55 km memory-safety cap. The response shape is identical either way.",
+        "operationId": "parse_osm_api_v1_maps_parse_osm_post",
+        "parameters": [
+          {
+            "name": "south",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 90,
+                  "minimum": -90
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "South"
+            }
+          },
+          {
+            "name": "west",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 180,
+                  "minimum": -180
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "West"
+            }
+          },
+          {
+            "name": "north",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 90,
+                  "minimum": -90
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "North"
+            }
+          },
+          {
+            "name": "east",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 180,
+                  "minimum": -180
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "East"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_parse_osm_api_v1_maps_parse_osm_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Parse Osm Api V1 Maps Parse Osm Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maps/parse-pbf": {
+      "post": {
+        "tags": [
+          "maps",
+          "maps"
+        ],
+        "summary": "Parse Pbf",
+        "description": "Parse an uploaded .osm.pbf file into a RoadNetwork dict.\n\nSame return shape as /maps/parse-osm. Uses libosmium (osmium Python\nbindings) to stream the binary PBF. Real-world city files (Shenzhen\n~20MB, Guangdong ~200MB) use this format.\n\nTakes the same optional bbox query params as /maps/parse-osm.",
+        "operationId": "parse_pbf_api_v1_maps_parse_pbf_post",
+        "parameters": [
+          {
+            "name": "south",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 90,
+                  "minimum": -90
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "South"
+            }
+          },
+          {
+            "name": "west",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 180,
+                  "minimum": -180
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "West"
+            }
+          },
+          {
+            "name": "north",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 90,
+                  "minimum": -90
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "North"
+            }
+          },
+          {
+            "name": "east",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 180,
+                  "minimum": -180
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "East"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_parse_pbf_api_v1_maps_parse_pbf_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Parse Pbf Api V1 Maps Parse Pbf Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maps/overpass": {
+      "get": {
+        "tags": [
+          "maps",
+          "maps"
+        ],
+        "summary": "Overpass",
+        "description": "Plan 056: cached Overpass proxy.\n\nThe smart-city view (Plan 055) used to call Overpass directly,\nwhich fails in China (overpass-api.de is blocked) and re-fetches\non every page load. This endpoint forwards the query to Overpass\nonce, caches the response to `geojson/cache/<hash>.json`, and\nserves subsequent identical queries from disk.\n\nQuery param:\n  `query` — the full Overpass QL string (e.g. `[out:json][timeout:60]; ...`)\n\nReturns:\n  The raw Overpass JSON dict (`{ version, generator, elements }`).",
+        "operationId": "overpass_api_v1_maps_overpass_get",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 10,
+              "title": "Query"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Overpass Api V1 Maps Overpass Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maps/overpass/cache": {
+      "get": {
+        "tags": [
+          "maps",
+          "maps"
+        ],
+        "summary": "Overpass Cache List",
+        "description": "Plan 056: list cached Overpass queries (debug UI).",
+        "operationId": "overpass_cache_list_api_v1_maps_overpass_cache_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Overpass Cache List Api V1 Maps Overpass Cache Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rl/train": {
+      "post": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Train",
+        "description": "Start a training run (subprocess) and return immediately.",
+        "operationId": "train_api_v1_rl_train_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Train Api V1 Rl Train Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rl/status": {
+      "get": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Status",
+        "description": "Read training status from status.json. Empty dict if no run yet.",
+        "operationId": "status_api_v1_rl_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Status Api V1 Rl Status Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rl/capabilities": {
+      "get": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Capabilities",
+        "description": "Runtime-detected torch / CUDA / SB3 / VRAM state.",
+        "operationId": "capabilities_api_v1_rl_capabilities_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Capabilities Api V1 Rl Capabilities Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rl/train/pause": {
+      "post": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Pause Training",
+        "description": "Pause the running training task. Resumable with zero state loss.",
+        "operationId": "pause_training_api_v1_rl_train_pause_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Pause Training Api V1 Rl Train Pause Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rl/train/resume": {
+      "post": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Resume Training",
+        "description": "Resume a paused training task from its in-memory state.",
+        "operationId": "resume_training_api_v1_rl_train_resume_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Resume Training Api V1 Rl Train Resume Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rl/train/terminate": {
+      "post": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Terminate Training",
+        "description": "Stop the running training task. Works while paused.",
+        "operationId": "terminate_training_api_v1_rl_train_terminate_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Terminate Training Api V1 Rl Train Terminate Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rl/checkpoints": {
+      "get": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "List Checkpoints",
+        "description": "List saved PPO checkpoints across all processes, newest first.",
+        "operationId": "list_checkpoints_api_v1_rl_checkpoints_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Checkpoints Api V1 Rl Checkpoints Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Prune Checkpoints",
+        "description": "Delete old checkpoints, keeping only the newest 5 overall.",
+        "operationId": "prune_checkpoints_api_v1_rl_checkpoints_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Prune Checkpoints Api V1 Rl Checkpoints Delete"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rl/scenes": {
+      "get": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "List Scenes",
+        "description": "List supported sim scene kinds (Plan 048).",
+        "operationId": "list_scenes_api_v1_rl_scenes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Scenes Api V1 Rl Scenes Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rl/training-config": {
+      "get": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Training Config",
+        "description": "Default training configuration for the AI Playground form.\n\nReturns hyperparameter defaults + ranges, available algorithms,\nscenes, and device options. The frontend uses this to pre-populate\nthe training configuration panel.",
+        "operationId": "training_config_api_v1_rl_training_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Training Config Api V1 Rl Training Config Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rl/checkpoints/{name}/weights": {
+      "get": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Get Checkpoint Weights",
+        "description": "Plan 049: export a saved PPO checkpoint as JSON-serializable weights.\n\nThe frontend uses this to instantiate an in-browser MlpPolicy for\nreplay (see `src/infrastructure/rl/mlpInference.ts`). Returns the\npolicy `state_dict()` flattened to nested lists + architecture\nmetadata (`obs_dim`, `action_dim`, `hidden_sizes`).\n\nErrors:\n  - 404: checkpoint file not found\n  - 503: SB3 / torch not installed (run `uv sync --extra rl`)",
+        "operationId": "get_checkpoint_weights_api_v1_rl_checkpoints__name__weights_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Checkpoint Weights Api V1 Rl Checkpoints  Name  Weights Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Health",
+        "description": "Liveness probe.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_parse_osm_api_v1_maps_parse_osm_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_parse_osm_api_v1_maps_parse_osm_post"
+      },
+      "Body_parse_pbf_api_v1_maps_parse_pbf_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_parse_pbf_api_v1_maps_parse_pbf_post"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "TrainRequest": {
+        "properties": {
+          "steps": {
+            "type": "integer",
+            "title": "Steps",
+            "default": 1000
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": true
+          },
+          "device": {
+            "type": "string",
+            "title": "Device",
+            "default": "auto"
+          },
+          "n_agents": {
+            "type": "integer",
+            "title": "N Agents",
+            "default": 2
+          },
+          "save_every": {
+            "type": "integer",
+            "title": "Save Every",
+            "default": 5000
+          },
+          "independent_agents": {
+            "type": "boolean",
+            "title": "Independent Agents",
+            "default": false
+          },
+          "scene_kind": {
+            "type": "string",
+            "title": "Scene Kind",
+            "default": "cross"
+          },
+          "curriculum": {
+            "type": "boolean",
+            "title": "Curriculum",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "TrainRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

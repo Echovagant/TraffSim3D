@@ -15,8 +15,12 @@ import { LightPhase } from '@domain/value-objects/Phase';
 
 const groundOf = (built: BuiltScene): THREE.Mesh =>
   built.root.children.find(
-    (c): c is THREE.Mesh => (c as THREE.Mesh).isMesh === true && c.geometry.type === 'PlaneGeometry' && c.name !== 'pick-plane',
+    (c): c is THREE.Mesh => c instanceof THREE.Mesh && c.geometry.type === 'PlaneGeometry' && c.name !== 'pick-plane',
   )!;
+
+/** The lit ground and the smart-city pick plane are both PlaneGeometry —
+ *  `parameters` is declared on the concrete class, not on BufferGeometry. */
+const planeWidth = (mesh: THREE.Mesh): number => (mesh.geometry as THREE.PlaneGeometry).parameters.width;
 
 describe('buildScene — ground sizing (Plan 054)', () => {
   it('scales the ground to max(200, ceil(diag * 2 + 1000)) for the 60x60 cross network', () => {
@@ -25,7 +29,7 @@ describe('buildScene — ground sizing (Plan 054)', () => {
     const diag = Math.hypot(60, 60);
     const expected = Math.max(GROUND_DEFAULT_SIZE, Math.ceil(diag * 2 + GROUND_PADDING));
     expect(expected).toBe(1170);
-    expect((groundOf(built).geometry.parameters as { width: number }).width).toBe(expected);
+    expect(planeWidth(groundOf(built))).toBe(expected);
   });
 
   it('keeps the 200u default for a scene smaller than 1u across', () => {
@@ -36,7 +40,7 @@ describe('buildScene — ground sizing (Plan 054)', () => {
       endNode: { x: 0, y: 0, z: 0.5 },
     };
     const built = buildScene(net);
-    expect((groundOf(built).geometry.parameters as { width: number }).width).toBe(GROUND_DEFAULT_SIZE);
+    expect(planeWidth(groundOf(built))).toBe(GROUND_DEFAULT_SIZE);
   });
 
   it('scales up for an OSM-scale district (5 km across)', () => {
@@ -45,14 +49,12 @@ describe('buildScene — ground sizing (Plan 054)', () => {
     net.roads['r-b'] = { ...makeTestRoad('r-b', 'ew', 2), startNode: { x: 0, y: 0, z: 0 }, endNode: { x: 2500, y: 0, z: 0 } };
     const built = buildScene(net);
     const diag = Math.hypot(2500, 2500);
-    expect((groundOf(built).geometry.parameters as { width: number }).width).toBe(
-      Math.ceil(diag * 2 + GROUND_PADDING),
-    );
+    expect(planeWidth(groundOf(built))).toBe(Math.ceil(diag * 2 + GROUND_PADDING));
   });
 
   it('falls back to the default ground for an empty network', () => {
     const built = buildScene(createRoadNetwork());
-    expect((groundOf(built).geometry.parameters as { width: number }).width).toBe(GROUND_DEFAULT_SIZE);
+    expect(planeWidth(groundOf(built))).toBe(GROUND_DEFAULT_SIZE);
     expect(built.roadNodes.size).toBe(0);
     expect(built.lightNodes.size).toBe(0);
   });
@@ -113,7 +115,7 @@ describe('buildScene — smart-city mode (Plan 055)', () => {
     expect(plane).toBeDefined();
     expect((plane.material as THREE.MeshBasicMaterial).visible).toBe(false);
     expect(plane.rotation.x).toBeCloseTo(-Math.PI / 2, 12);
-    expect((plane.geometry.parameters as { width: number }).width).toBe(1170);
+    expect(planeWidth(plane)).toBe(1170);
   });
 
   it('skips the Three.js road meshes — Cesium draws the basemap', () => {

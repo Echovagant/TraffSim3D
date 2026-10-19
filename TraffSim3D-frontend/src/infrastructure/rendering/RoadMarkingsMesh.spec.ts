@@ -21,14 +21,18 @@ const polylines = (g: THREE.Group) =>
   g.children.filter((c) => c instanceof THREE.Line && !(c instanceof THREE.LineSegments)) as THREE.Line[];
 const segs = (g: THREE.Group) =>
   g.children.filter((c) => c instanceof THREE.LineSegments) as THREE.LineSegments[];
+/** Children are typed as bare Object3D; every marking is a Mesh carrying a
+ *  LineBasicMaterial, so narrow once here instead of at each call site. */
+const asMesh = (o: THREE.Object3D): THREE.Mesh => o as THREE.Mesh;
 /** Children painted pure white — stop lines (arrows share the colour, so
  *  callers must combine this with a laneCount >= 3 road). */
 const whiteLines = (g: THREE.Group) =>
   g.children.filter(
-    (c) => c instanceof THREE.Line && !(c instanceof THREE.LineSegments) && colorOf(c) === 0xffffff,
+    (c): c is THREE.Line =>
+      c instanceof THREE.Line && !(c instanceof THREE.LineSegments) && colorOf(c) === 0xffffff,
   );
-const posArr = (o: THREE.Object3D) => o.geometry.attributes.position!.array as Float32Array;
-const colorOf = (o: THREE.Object3D) => (o.material as THREE.LineBasicMaterial).color.getHex();
+const posArr = (o: THREE.Object3D) => asMesh(o).geometry.attributes.position!.array as Float32Array;
+const colorOf = (o: THREE.Object3D) => (asMesh(o).material as THREE.LineBasicMaterial).color.getHex();
 
 describe('createRoadMarkings — 2-lane road (length 60)', () => {
   const g = createRoadMarkings(ns2);
@@ -51,7 +55,7 @@ describe('createRoadMarkings — 2-lane road (length 60)', () => {
     expect(p[5]).toBeCloseTo(30, 6);
     // An odd lane count has no centre divider — the road is single-sided.
     const odd = createRoadMarkings(makeTestRoad('r-ns3', 'ns', 3));
-    expect(odd.children.some((c) => (c.material as THREE.LineBasicMaterial).color.getHex() === 0xfacc15)).toBe(false);
+    expect(odd.children.some((c) => colorOf(c) === 0xfacc15)).toBe(false);
   });
 
   it('divides the 2 lanes with one dashed line at offset +3.5 (= laneWidth)', () => {

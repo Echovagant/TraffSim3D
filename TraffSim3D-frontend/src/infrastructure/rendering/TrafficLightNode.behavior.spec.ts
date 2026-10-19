@@ -31,9 +31,7 @@ describe('createTrafficLightNode', () => {
     expect(node.group.children[1]).toBe(node.sphere);
     expect(node.group.children[2]).toBe(node.bar);
     const pole = node.group.children[0] as THREE.Mesh;
-    const params = pole.geometry.parameters as {
-      radiusTop: number; radiusBottom: number; height: number; radialSegments: number;
-    };
+    const params = (pole.geometry as THREE.CylinderGeometry).parameters;
     expect(pole.geometry.type).toBe('CylinderGeometry');
     expect(params.radiusTop).toBeCloseTo(0.15, 6);
     expect(params.radiusBottom).toBeCloseTo(0.15, 6);
@@ -44,12 +42,16 @@ describe('createTrafficLightNode', () => {
   });
 
   it('hangs a 0.6r sphere at y = 3 and a 1.5-wide bar at y = 3.7', () => {
-    const sph = node.sphere.geometry.parameters as { radius: number; widthSegments: number; heightSegments: number };
+    const sph = (node.sphere.geometry as THREE.SphereGeometry).parameters;
     expect(sph.radius).toBe(0.6);
     expect(sph.widthSegments).toBe(16);
     expect(sph.heightSegments).toBe(16);
     expect(node.sphere.position.y).toBe(3);
-    expect(node.bar.geometry.parameters).toMatchObject({ width: 1.5, height: 0.15, depth: 0.15 });
+    expect((node.bar.geometry as THREE.BoxGeometry).parameters).toMatchObject({
+      width: 1.5,
+      height: 0.15,
+      depth: 0.15,
+    });
     expect(node.bar.position.y).toBe(3.7);
   });
 

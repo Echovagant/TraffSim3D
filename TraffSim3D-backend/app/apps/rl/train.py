@@ -243,7 +243,11 @@ def real_train(
             return False  # False tells SB3 to stop learning
         step = int(_locals["self"].num_timesteps)
         if step % save_every == 0 and step > 0:
-            _save_and_record(_locals["self"].model, step)
+            # `_locals["self"]` IS the SB3 model (PPO is an
+            # OnPolicyAlgorithm, not a wrapper around one) — there is no
+            # `.model` attribute. This bug was invisible while SB3 was
+            # uninstalled, because the whole body of real_train was skipped.
+            _save_and_record(_locals["self"], step)
         if step % 200 == 0:
             ep_buf = _locals["self"].ep_info_buffer
             if ep_buf:
@@ -311,7 +315,8 @@ def curriculum_train(
             return False
         step = int(_locals["self"].num_timesteps)
         if step % save_every == 0 and step > 0:
-            path = ckpt.save_checkpoint(_locals["self"].model, step)
+            # Same as real_train's callback: `_locals["self"]` is the model.
+            path = ckpt.save_checkpoint(_locals["self"], step)
             ckpt_name = path.name
             latest_ckpts.append(ckpt_name)
             ss = st.read_status()

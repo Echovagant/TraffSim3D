@@ -38,10 +38,11 @@ Override precedence (most specific wins):
     TRAFFIC_PPO_STATUS    → status file only
     TRAFFIC_PPO_CONTROL   → control channel only
 
-Note on containers: this fixes the drive-splitting and POSIX-reboot-wipe
-problems, but durability across *container recreation* still requires the
-deployment to mount a volume — that is ADR-007 (Docker Compose, still
-Proposed), not something a path default can solve.
+Note on containers: ADR-007 was **Rejected** on 2026-10-17 — the project
+does not adopt Docker Compose (see `docs/adr/ADR-007-deployment-docker-compose.md`).
+Deployment is local-process based, so "survive a container recreation" is not
+a requirement here; this module's contract is durability across same-machine
+restarts and portability off `C:`.
 """
 
 from __future__ import annotations

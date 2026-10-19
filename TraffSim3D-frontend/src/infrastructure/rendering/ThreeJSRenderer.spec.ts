@@ -73,13 +73,17 @@ function makeCanvas(): HTMLCanvasElement {
   return c;
 }
 
+/** lib.dom's `FrameRequestCallback`, spelled out locally: the flat config's
+ *  `no-undef` only knows runtime globals, not ambient DOM *types*. */
+type FrameCallback = (time: number) => void;
+
 /** Deterministic rAF pump: `step(ms)` advances the fake clock and runs
  *  exactly one queued frame callback. */
 function makeFramePump() {
   let clock = 0;
-  const pending = new Map<number, FrameRequestCallback>();
+  const pending = new Map<number, FrameCallback>();
   let nextId = 1;
-  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+  vi.stubGlobal('requestAnimationFrame', (cb: FrameCallback) => {
     const id = nextId++;
     pending.set(id, cb);
     return id;
@@ -111,14 +115,16 @@ let canvas: HTMLCanvasElement;
 let r: InstanceType<typeof ThreeJSRenderer>;
 let gl: InstanceType<typeof GL.FakeGL>;
 let pump: ReturnType<typeof makeFramePump>;
-const onTick = vi.fn((): number => 0);
+/** Mirrors the renderer's own callback contract: it hands over `dt` and gets
+ *  back the new simTime, which may be `undefined` (renderer then treats it as 0). */
+const onTick = vi.fn<(dt: number) => number | undefined>(() => 0);
 
 /** The built scene root — the only Group that owns InstancedMeshes. */
 const builtRoot = (): THREE.Group =>
   r
     .getScene()
     .children.find(
-      (c): c is THREE.Group => c instanceof THREE.Group && c.children.some((x) => (x as THREE.Mesh).isInstancedMesh),
+      (c): c is THREE.Group => c instanceof THREE.Group && c.children.some((x) => x instanceof THREE.InstancedMesh),
     )!;
 
 const ringOf = (root: THREE.Group): THREE.Mesh =>
@@ -311,7 +317,7 @@ describe('ThreeJSRenderer — the frame loop', () => {
     pump.step(16);
     const root = builtRoot();
     expect(root).toBeDefined();
-    expect(root.children.filter((c) => (c as THREE.Mesh).isInstancedMesh)).toHaveLength(3);
+    expect(root.children.filter((c) => c instanceof THREE.InstancedMesh)).toHaveLength(3);
     expect(gl.renderCalls).toBe(1);
   });
 

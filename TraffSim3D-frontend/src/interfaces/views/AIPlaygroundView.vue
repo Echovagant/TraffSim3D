@@ -256,7 +256,7 @@
 
       <details v-if="replayLastObs.length > 0" class="replay-detail">
         <summary>最近 obs / action</summary>
-        <p class="muted small">obs (13-dim):</p>
+        <p class="muted small">obs (14-dim):</p>
         <code data-testid="replay-obs" class="obs">{{ formatObs(replayLastObs) }}</code>
         <p class="muted small">action (2-dim):</p>
         <code data-testid="replay-action" class="obs">{{ formatAction(replayLastAction) }}</code>

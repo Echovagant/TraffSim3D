@@ -18,19 +18,19 @@ describe('createGroundMesh', () => {
   it('defaults to a 200x200 plane (the synthetic demo scenes keep their framing)', () => {
     const mesh = createGroundMesh();
     expect(mesh.geometry.type).toBe('PlaneGeometry');
-    const params = mesh.geometry.parameters as { width: number; height: number };
+    const params = (mesh.geometry as THREE.PlaneGeometry).parameters;
     expect(params.width).toBe(200);
     expect(params.height).toBe(200);
   });
 
   it('honours an explicit size', () => {
-    const params = createGroundMesh(1170).geometry.parameters as { width: number; height: number };
+    const params = (createGroundMesh(1170).geometry as THREE.PlaneGeometry).parameters;
     expect(params.width).toBe(1170);
     expect(params.height).toBe(1170);
   });
 
   it('a size of 0 is passed through rather than silently replaced by the default', () => {
-    const params = createGroundMesh(0).geometry.parameters as { width: number };
+    const params = (createGroundMesh(0).geometry as THREE.PlaneGeometry).parameters;
     expect(params.width).toBe(0);
   });
 

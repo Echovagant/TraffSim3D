@@ -59,7 +59,13 @@ describe('createVehicleInstances — pool construction', () => {
 
   it('sizes each instanced box to the type silhouette and offsets y by yCenter', () => {
     const expect3 = (t: typeof TYPES[number], w: number, h: number, d: number) => {
-      expect(pool.meshes[t].geometry.parameters).toMatchObject({ width: w, height: h, depth: d });
+      // `parameters` is a BoxGeometry runtime field absent from the
+      // BufferGeometry typings in three 0.180 — narrow before reading it.
+      expect((pool.meshes[t].geometry as THREE.BoxGeometry).parameters).toMatchObject({
+        width: w,
+        height: h,
+        depth: d,
+      });
     };
     expect3('car', 4.2, 0.9, 1.8);
     expect3('truck', 6.5, 1.8, 2.2);

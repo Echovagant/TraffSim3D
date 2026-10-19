@@ -10,7 +10,10 @@ import * as THREE from 'three';
 import { createVehicleMesh, getVehicleBodyMesh, Y_BODY } from './VehicleMesh';
 import { makeTestVehicle } from '@__fixtures__/testNetwork';
 
-const boxParams = (m: THREE.Mesh) => m.geometry.parameters as { width: number; height: number; depth: number };
+// `BoxGeometry.parameters` exists at runtime but is not declared on the
+// `BufferGeometry` base type in three's typings, so narrow to BoxGeometry.
+const boxParams = (m: THREE.Mesh) =>
+  (m.geometry as THREE.BoxGeometry).parameters as { width: number; height: number; depth: number };
 const mat = (m: THREE.Mesh) => m.material as THREE.MeshStandardMaterial;
 
 describe('Y_BODY', () => {
