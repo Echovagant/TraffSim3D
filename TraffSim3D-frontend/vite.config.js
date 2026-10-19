@@ -16,6 +16,30 @@ export default defineConfig({
     // /Workers/*.js from the dev server root and fails with a 404
     // module-script error.
     cesium(),
+    /**
+     * Plan 066: load the Cesium runtime on demand instead of on every page.
+     *
+     * `vite-plugin-cesium` injects `<script src="/cesium/Cesium.js">` into
+     * `index.html` for production builds, because it externalises the `cesium`
+     * npm package and expects the UMD global. That tag is 5.3 MB and was
+     * downloaded by *every* page — the home page included — even though only
+     * `SmartCityView` touches Cesium.
+     *
+     * The script is still copied to `dist/cesium/` by the plugin's
+     * `closeBundle`; only the eager tag is removed here. The runtime is then
+     * injected on demand by `src/infrastructure/cesium/loadCesiumRuntime.ts`,
+     * using the identical URL so Cesium's own base-URL derivation is
+     * unchanged.
+     */
+    {
+      name: 'cesium-lazy-runtime',
+      transformIndexHtml: {
+        order: 'post',
+        handler(html) {
+          return html.replace(/<script[^>]*src="[^"]*Cesium\.js"[^>]*>\s*<\/script>\s*/g, '')
+        },
+      },
+    },
   ],
   resolve: {
     alias: {
@@ -59,11 +83,24 @@ export default defineConfig({
     format: 'es',
   },
   build: {
-    // Plan 055/062 follow-up: split heavy vendor libs into their own
-    // chunks so the home page (HomeView, no Rapier/Three scene) does not
-    // download a 2 MB WASM blob on first paint. Rapier is only needed by
-    // SceneEditor / SimulationLab / AIPlayground, which dynamically
-    // import the world simulation.
+    // Split heavy vendor libs into their own chunks.
+    //
+    // Plan 066 correction: the long-standing comment here claimed the home
+    // page used to download "a 2 MB WASM blob". That was already untrue for
+    // Rapier — `RapierWorld.init()` lazy-imports it, so `rapier-*.js` is only
+    // fetched when a 3D view opens. The real first-paint offender was
+    // **Cesium**: `vite-plugin-cesium` injected its 5.3 MB UMD runtime into
+    // `index.html` for every page. That is now loaded on demand (see the
+    // `cesium-lazy-runtime` plugin above and
+    // `src/infrastructure/cesium/loadCesiumRuntime.ts`).
+    //
+    // Measured on 2026-10-20 (production build, gzip transfer size):
+    //   home page   235 KB total  (three 134 + index 62 + gsap 27 + css 8)
+    //   before fix  ~1800 KB       (the extra 1565 KB was cesium/Cesium.js)
+    //
+    // `three` stays eager on purpose: `HomeView` renders
+    // `EnhancedWebGLBackground`, a decorative WebGL backdrop that genuinely
+    // needs it.
     rollupOptions: {
       output: {
         manualChunks: {

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import HomeView from '@interfaces/views/HomeView.vue'
+import { ensureCesiumRuntime } from '@infrastructure/cesium/loadCesiumRuntime'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -30,9 +31,15 @@ const router = createRouter({
       // Plan 055: Smart City view — Cesium basemap + Three.js overlay.
       // Distinct route from /scene-editor so the existing simulator
       // view stays untouched (all existing e2e tests still pass).
+      //
+      // Plan 066: the Cesium runtime (5.3 MB UMD) is loaded on demand
+      // instead of being injected into index.html for every page. The
+      // runtime must be in place before this chunk evaluates, hence the
+      // explicit `ensureCesiumRuntime()` before the dynamic import.
       path: '/smart-city',
       name: 'smart-city',
-      component: () => import('@interfaces/views/SmartCityView.vue'),
+      component: () =>
+        ensureCesiumRuntime().then(() => import('@interfaces/views/SmartCityView.vue')),
     },
     {
       path: '/deliverables',

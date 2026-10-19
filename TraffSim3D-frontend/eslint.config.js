@@ -80,10 +80,21 @@ export default defineConfig([
     // site, not inside the type body. Real unused runtime variables are
     // still caught by the TS compiler when `noUnusedLocals` is enabled
     // (currently off; turn on once the codebase stabilizes).
+    //
+    // `no-undef` is off for the same reason, and per typescript-eslint's
+    // own guidance: ESLint's `no-undef` has no notion of *type-only*
+    // positions, so a spec that names a DOM interface
+    // (`MouseEventInit`, `KeyboardEventInit`, `ResizeObserverCallback`)
+    // in a type annotation is reported as an undefined variable even
+    // though the identifier is a perfectly valid `lib.dom.d.ts` type.
+    // Undefined *runtime* identifiers are still caught by the compiler —
+    // `vue-tsc --noEmit` is the gate for that, and it is part of the
+    // project's validation set.
     files: ['**/*.ts'],
     rules: {
       'no-redeclare': 'off',
       'no-unused-vars': 'off',
+      'no-undef': 'off',
     },
   },
   {
