@@ -21,7 +21,9 @@
     "test:e2e:real": "playwright test tests/e2e/ai-playground-real.spec.ts",
     "lint": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "contract:gen": "vite-node --config vite.contract.config.ts scripts/generate-contract-snapshots.ts",
+    "contract:check": "vite-node --config vite.contract.config.ts scripts/generate-contract-snapshots.ts --check"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.14.0",

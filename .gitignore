@@ -52,8 +52,10 @@ e2e-output/current/
 TraffSim3D-frontend/test-results/
 TraffSim3D-frontend/playwright-report/
 
-# Plan 050 — cross-language contract test snapshots (regenerated each run)
-TraffSim3D-backend/tests/contract/snapshots/
+# Plan 050 — cross-language contract test snapshots.
+# The Python side regenerates its own on every run; the TS side's goldens
+# are committed so the backend suite can run the full contract standalone.
+TraffSim3D-backend/tests/contract/snapshots/python_*.json
 
 # Plan 056 — Overpass response cache (large JSON files regenerated
 # by the backend; user can `rm -rf` to force refresh from overpass-api.de)
