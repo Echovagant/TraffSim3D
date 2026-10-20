@@ -39,9 +39,9 @@ describe('egoKernel — pythonSpeedStep', () => {
   })
 
   it('converts the action to float32 first, like Python`s np.float32 cast', () => {
-    // Python: np.float32(0.1) = 0.10000000149011612
-    // 0.1 (float64) would give a different accel and a different speed.
-    expect(pythonSpeedStep(0, 0.1, PYTHON_SIM.DT)).toBe(Math.fround(0.1) * 3.0 * PYTHON_SIM.DT)
+    // Python: float(np.clip(np.float32(0.1), -1, 1)) * 3.0 * 0.1
+    //        = 0.03000000044703484
+    expect(pythonSpeedStep(0, 0.1, PYTHON_SIM.DT)).toBe(0.03000000044703484)
     expect(pythonSpeedStep(0, 0.1, PYTHON_SIM.DT)).not.toBe(0.1 * 3.0 * PYTHON_SIM.DT)
   })
 
@@ -52,6 +52,9 @@ describe('egoKernel — pythonSpeedStep', () => {
     for (let i = 0; i < 58; i++) {
       ego = integrateEgo(ego, 1.0, PYTHON_SIM.DT, target)
     }
+    // 16.67 is Python's measured value, pinned deliberately: changing
+    // PYTHON_SIM.SPEED_LIMIT must make this test fail loudly rather than
+    // let the trajectory drift silently.
     expect(ego.speed).toBe(16.67)
     expect(ego.z).toBe(26.20100000000003)
     expect(ego.x).toBe(1.467525924532092e-14)
@@ -74,5 +77,14 @@ describe('egoKernel — pythonSteer', () => {
       const steer = pythonSteer({ x: 3, z: -25, heading, speed: 0 }, [0, 0])
       expect(Math.abs(steer)).toBeLessThanOrEqual(PYTHON_SIM.MAX_STEER)
     }
+  })
+
+  it('wraps alpha exactly like CPython float %', () => {
+    // CPython: steer = -0.39425420560955743 (verified against sim_core.py's
+    // (alpha + pi) % (2*pi) - pi). The "always add 2*pi and re-mod" spelling
+    // yields -0.39425420560955776 here — 1 ULP off from Python.
+    expect(pythonSteer({ x: 0, z: 0, heading: -0.7283761257056431, speed: 0 }, [1, 0])).toBe(
+      -0.39425420560955743,
+    )
   })
 })

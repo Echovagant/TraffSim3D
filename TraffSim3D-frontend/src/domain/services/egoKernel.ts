@@ -9,14 +9,18 @@
 //     needs the same speed integration so a PPO policy trained in Python
 //     drives identically in the browser.
 //
-// Four porting rules keep the two implementations bit-comparable:
+// Five porting rules keep the two implementations bit-comparable:
 //   1. The Pure Pursuit denominator is the CONSTANT `LOOKAHEAD_DISTANCE`
 //      (8.0 m), not the distance to the target. That is Python's
 //      semantics — cross-language difference #3 lives here.
 //   2. Update order is speed → heading → position, and `steer` is
 //      computed from the state *before* the update.
-//   3. `wrapPi` uses floor-mod, matching Python's `%` (whose result
-//      always carries the modulus' sign); JS `%` keeps the dividend's.
+//   3. `wrapPi` must reproduce CPython's float-modulo algorithm: JS `%` is
+//      a truncated remainder (= `fmod`), and CPython's `%` is that plus ONE
+//      conditional add of the modulus when the remainder's sign differs.
+//      The naive "always add 2*pi and re-mod" spelling is NOT equivalent —
+//      it adds a rounding step and drifts 1 ULP away from Python on ~5% of
+//      angles.
 //   4. Statement order mirrors Python's, so the floating-point rounding
 //      sequence matches. `3.0 * 0.1` is 0.30000000000000004, so
 //      `speed + accel * dt` and `speed + accel * 0.1` can differ in the
@@ -29,6 +33,10 @@
 //      applies. The policy's output layer has no tanh, so real actions are
 //      arbitrary float64 values and skipping this cast moves the trajectory
 //      by ~1e-10 per step.
+//
+// The bit-exactness asserted against Python holds for V8's `Math.sin` /
+// `Math.cos` / `Math.atan2`, which ECMA-262 leaves implementation-approximated
+// — a deliberate platform assumption, not a language guarantee.
 //
 // Pure functions only: no DOM, no Three.js, no Rapier.
 
@@ -106,6 +114,9 @@ export const pythonSteer = (ego: EgoState, target: readonly [number, number]): n
  * `steer` is derived from the **pre-update** state, matching Python's
  * statement order. The position uses the **updated** speed and heading,
  * again matching Python.
+ *
+ * The speed update is `pythonSpeedStep` verbatim — the two must stay one
+ * operation sequence, so the shared function is the single place to change.
  */
 export const integrateEgo = (
   ego: EgoState,
@@ -113,8 +124,7 @@ export const integrateEgo = (
   dt: number,
   target: readonly [number, number],
 ): EgoState => {
-  const accelCmd = clamp(Math.fround(action0), -1, 1) * PYTHON_SIM.ACCEL_SCALE
-  const speed = clamp(ego.speed + accelCmd * dt, 0, PYTHON_SIM.SPEED_LIMIT)
+  const speed = pythonSpeedStep(ego.speed, action0, dt)
   const steer = pythonSteer(ego, target)
   const heading = ego.heading + steer * dt
   return {
