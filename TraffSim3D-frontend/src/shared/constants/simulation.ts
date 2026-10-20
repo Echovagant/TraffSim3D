@@ -261,3 +261,52 @@ export const OUT_OF_BOUNDS_M = 50
  * leaves the visible area.
  */
 export const LATERAL_DRIFT_THRESHOLD_M = 15
+
+/**
+ * Plan 071: constants mirrored from the Python RL sim
+ * (`TraffSim3D-backend/app/apps/rl/sim_core.py`).
+ *
+ * These are the **contract constants** — the cross-language contract
+ * (`docs/contracts/sim-snapshot.md`) asserts the Python sim and the TS
+ * mirror produce bit-identical trajectories, which only holds when both
+ * sides use the same numbers AND the same floating-point operation order.
+ *
+ * Every value below has a direct counterpart in `sim_core.py`. Change one
+ * here and the Python contract test fails.
+ */
+export const PYTHON_SIM = {
+  /** Python: `accel_cmd = clip(action[0], -1, 1) * 3.0` */
+  ACCEL_SCALE: 3.0,
+  /** Python: `SPEED_LIMIT = 16.67` (m/s) */
+  SPEED_LIMIT: 16.67,
+  /** Python: `DT = 0.1` (s per sim step) */
+  DT: 0.1,
+  /**
+   * Python: `LOOKAHEAD_DISTANCE = 8.0` — the Pure Pursuit denominator is a
+   * **constant**, not the actual distance to the target. That is the
+   * Python semantics; do not "fix" it to match the lane-following Pure
+   * Pursuit in `purePursuit.ts` (that is cross-language difference #3).
+   */
+  LOOKAHEAD_DISTANCE: 8.0,
+  /** Python: `MAX_STEER = 0.4` (rad) — cross-language difference #4 */
+  MAX_STEER: 0.4,
+  /** Python: `EGO_WHEELBASE = 2.5` (m) */
+  EGO_WHEELBASE: 2.5,
+  // --- scene geometry / traffic (used by the contract mirror only) ---
+  /** Python: `NS_HALF = 30.0` */
+  NS_HALF: 30.0,
+  /** Python: `EW_HALF = 30.0` */
+  EW_HALF: 30.0,
+  /** Python: `INTERSECTION_RADIUS = 8.0` */
+  INTERSECTION_RADIUS: 8.0,
+  /** Python: `ROUNDABOUT_RADIUS = 10.0` */
+  ROUNDABOUT_RADIUS: 10.0,
+  /** Python: `NPC_SPEED = 8.0` (m/s) */
+  NPC_SPEED: 8.0,
+  /** Python: `COLLISION_DISTANCE = 2.0` (m) */
+  COLLISION_DISTANCE: 2.0,
+  /** Python: `MAX_STEPS_DEFAULT = 200` */
+  MAX_STEPS_DEFAULT: 200,
+  /** Python: `TrafficLight.cycle_duration = 30.0` (s per phase) */
+  LIGHT_CYCLE_SECONDS: 30.0,
+} as const
