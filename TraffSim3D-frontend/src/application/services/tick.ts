@@ -16,6 +16,7 @@ import type { RoadNetwork } from '@domain/entities/RoadNetwork';
 import type { Vehicle } from '@domain/entities/Vehicle';
 import type { Road } from '@domain/entities/Road';
 import type { Intersection } from '@domain/entities/Intersection';
+import type { TrafficLight } from '@domain/entities/TrafficLight';
 import { LightPhase } from '@domain/value-objects/Phase';
 import { inIntersectionBox, lanePoint, laneOffset, roadLength, laneForwardSign } from '@domain/services/laneGeometry';
 import { steerLateralVelocity, LANE_CHANGE_CONVERGED_M, perpendicularOffsetAlongRoad } from '@domain/services/laneChange';
@@ -101,6 +102,13 @@ const GREEN_LIKE = new Set<LightPhase>([
 const YELLOW_LIKE = new Set<LightPhase>([
   LightPhase.Yellow, LightPhase.YellowLeft,
 ]);
+/**
+ * "This axis currently has the right of way" — green, or the clearance-yellow
+ * that follows it. Used by the RL replay observation (Plan 069) to mirror
+ * Python's `ns_green` / `ew_green` semantics, where exactly one axis is
+ * always permitted.
+ */
+const MAY_GO = new Set<LightPhase>([...GREEN_LIKE, ...YELLOW_LIKE]);
 
 /**
  * Intersection-level safety: when per-light controllers produce
@@ -669,7 +677,7 @@ const NORMALIZE_DIST = 50.0;
  *    [8:13] 5 nearest NPC distances / 50, padded with 1.0
  *    [13] ego elevation normalized (y/10, clipped to [-1, 1])
  */
-const buildReplayObs = (ego: Vehicle, network: RoadNetwork): number[] => {
+export const buildReplayObs = (ego: Vehicle, network: RoadNetwork): number[] => {
   const obs = new Array<number>(OBS_DIM).fill(0);
   obs[0] = Math.max(-1, Math.min(1, ego.position.x / NORMALIZE_DIST));
   obs[1] = Math.max(-1, Math.min(1, ego.position.z / NORMALIZE_DIST));
@@ -678,25 +686,62 @@ const buildReplayObs = (ego: Vehicle, network: RoadNetwork): number[] => {
   obs[4] = 0;  // accel placeholder (Python: not used by PPO)
   obs[5] = 0;  // steer placeholder (Python: not used by PPO)
 
-  // Traffic light: pick the controlling light for ego's axis.
+  // Traffic light bits — Python parity (Plan 069).
+  //
+  // Python's `SimCore._obs()` sets:
+  //     obs[6] = 1 if ns_green else 0      # the NS axis, ALWAYS
+  //     obs[7] = 1 if ew_green else 0      # the EW axis, ALWAYS
+  // The two are always complementary, because SimCore swaps `ns_green` and
+  // `ew_green` together and has no yellow phase at all.
+  //
+  // The previous implementation had two defects:
+  //   1. It only ever set the bit for the **ego's own axis**, so the other
+  //      axis's state was invisible to the policy — obs[7] stayed 0 forever
+  //      for an NS ego, while Python would have reported the EW axis there.
+  //   2. It used "phase === Green", so during the TS sim's 3s yellow the
+  //      pair degraded to (0,0) — a state the policy can never observe in
+  //      Python, where exactly one axis is always green.
+  //
+  // Fix: report each axis independently, and treat "green" as *may go*
+  // (green or clearance-yellow) so the pair stays one-hot — the same
+  // structure Python's obs[6:8] has. The residual difference is the 3s
+  // yellow phase, which Python does not have; see
+  // `docs/contracts/sim-snapshot.md` → 「实际差异清单」.
   const egoRoad = network.roads[ego.roadId];
   if (egoRoad) {
     for (const inter of Object.values(network.intersections)) {
       if (!inter.connectedRoads.includes(egoRoad.id)) continue;
-      // roadIsNS = NS road if z-extent > x-extent (Plan 035).
-      const roadIsNS = Math.abs(egoRoad.endNode.z - egoRoad.startNode.z)
-        > Math.abs(egoRoad.endNode.x - egoRoad.startNode.x);
+      // Per axis, prefer the through-lane light (the "main" phase) over a
+      // left-turn variant, so a `greenLeft` light cannot mask a red
+      // through-lane. Falls back to any light on that axis.
+      const byAxis: Record<'ns' | 'ew', { main?: TrafficLight; any?: TrafficLight }> = {
+        ns: {},
+        ew: {},
+      };
+      const mayGo: Record<'ns' | 'ew', boolean> = { ns: false, ew: false };
       for (const light of inter.trafficLights) {
-        const matchesAxis = (roadIsNS && light.axis === 'ns')
-          || (!roadIsNS && light.axis === 'ew');
-        if (!matchesAxis) continue;
-        if (roadIsNS) {
-          obs[6] = light.phase === LightPhase.Green ? 1 : 0;
-        } else {
-          obs[7] = light.phase === LightPhase.Green ? 1 : 0;
-        }
-        break;
+        const slot = byAxis[light.axis];
+        const isLeft = light.phase.endsWith('Left');
+        if (!slot.any) slot.any = light;
+        if (!isLeft && !slot.main) slot.main = light;
       }
+      for (const axis of ['ns', 'ew'] as const) {
+        const light = byAxis[axis].main ?? byAxis[axis].any;
+        if (!light) continue;
+        mayGo[axis] = MAY_GO.has(light.phase);
+      }
+      // Python's obs[6:8] is ALWAYS exactly one-hot: SimCore keeps a single
+      // "which axis has green" boolean and swaps it, so the pair is never
+      // (0,0) and never (1,1). The policy was only ever trained on (1,0) and
+      // (0,1) — any other pair is out of distribution for it.
+      //
+      // Mirror that invariant instead of reporting the two axes
+      // independently. Ties (both axes may go, or neither) cannot occur in
+      // the default cycle but can with a mis-configured scene: NS wins the
+      // "both" tie, and "neither" is reported as (0,1), which reads as "NS
+      // must stop" — the right action during an all-red clearance.
+      obs[6] = mayGo.ns ? 1 : 0;
+      obs[7] = obs[6] ? 0 : 1;
       break;  // first intersection matching ego's road
     }
   }
