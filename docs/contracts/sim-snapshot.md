@@ -80,8 +80,10 @@ trajectories are **bit-identical**. Measured on the `cross` vector:
 The assertions therefore use **exact equality** (`==`). A tolerance would hide
 exactly the failure this contract exists to catch: silent drift on one side.
 
-This is only possible because of six porting rules, all enforced in
-`egoKernel.ts` and `simCoreMirror.ts`:
+This is only possible because of the porting rules, all enforced in
+`egoKernel.ts` and `simCoreMirror.ts`. Five are listed here; the sixth — the
+platform assumption about V8's transcendental functions — has its own section
+below.
 
 1. The Pure Pursuit denominator is the **constant** `LOOKAHEAD_DISTANCE = 8.0`,
    never the actual distance to the target.

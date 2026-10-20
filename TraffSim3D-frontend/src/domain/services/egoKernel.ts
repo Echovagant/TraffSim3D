@@ -9,7 +9,7 @@
 //     needs the same speed integration so a PPO policy trained in Python
 //     drives identically in the browser.
 //
-// Five porting rules keep the two implementations bit-comparable:
+// Six porting rules keep the two implementations bit-comparable:
 //   1. The Pure Pursuit denominator is the CONSTANT `LOOKAHEAD_DISTANCE`
 //      (8.0 m), not the distance to the target. That is Python's
 //      semantics — cross-language difference #3 lives here.
