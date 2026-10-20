@@ -101,9 +101,10 @@ export interface TickContext {
    *  When null, replay is disabled regardless of `replayTargetId`. */
   policy: PolicyWeights | null
   /** Plan 049: id of the vehicle currently being controlled by the
-   *  loaded policy. When null, no replay this tick. When non-null,
-   *  the constraint layers (light / car-follow) skip this vehicle —
-   *  PPO learned to handle them via its obs. */
+   *  loaded policy. When null, no replay this tick. While the replay
+   *  path is driving this vehicle (a policy is loaded or an action is
+   *  injected), the constraint layers (light / car-follow / cross-road
+   *  yield) skip it — PPO learned to handle them via its obs. */
   replayTargetId: string | null
   /**
    * Plan 071: a fixed action applied to the replay target this tick,
@@ -112,6 +113,25 @@ export interface TickContext {
    */
   replayAction?: readonly [number, number]
 }
+
+/**
+ * Plan 071: is the replay path actually driving this vehicle this tick?
+ *
+ * `replayTargetId` alone only *nominates* a vehicle. That vehicle's speed
+ * is owned by the policy (or by an injected fixed action) only when one of
+ * those exists. With neither, the nominated vehicle must behave like an
+ * ordinary one — subject to the traffic-light, car-following and
+ * cross-road-yield rules — instead of being exempt from them while keeping
+ * a stale speed.
+ *
+ * Every replay-target exemption goes through this one predicate, so the
+ * "policy owns the speed" rule and the "policy owns the constraints" rule
+ * cannot drift apart.
+ */
+const isReplayDriven = (ctx: TickContext, v: Vehicle): boolean =>
+  ctx.replayTargetId !== null &&
+  (ctx.policy !== null || ctx.replayAction !== undefined) &&
+  v.id === ctx.replayTargetId
 
 const GREEN_LIKE = new Set<LightPhase>([LightPhase.Green, LightPhase.GreenLeft])
 const YELLOW_LIKE = new Set<LightPhase>([LightPhase.Yellow, LightPhase.YellowLeft])
@@ -209,9 +229,9 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   //      veto PPO's accel at red lights / follower distances — PPO
   //      learned to handle these via the obs's [6:8] light bits and
   //      [8:13] NPC-distance bits).
-  if (ctx.replayTargetId && (ctx.policy || ctx.replayAction)) {
+  if (ctx.replayTargetId) {
     const replayV = network.vehicles[ctx.replayTargetId]
-    if (replayV) {
+    if (replayV && isReplayDriven(ctx, replayV)) {
       const obs = buildReplayObs(replayV, network)
       // Plan 071: an injected fixed action overrides the policy, so the
       // replay path can be measured without a checkpoint.
@@ -240,7 +260,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     // an injected action) and was written in step 2.5. Overwriting it
     // here discarded the policy's output entirely — the replay vehicle
     // drove at the road speed limit.
-    if (ctx.replayTargetId && v.id === ctx.replayTargetId) continue
+    if (isReplayDriven(ctx, v)) continue
     v.targetSpeed = road.speedLimit
     applyTrafficLightConstraint(v, road, network, ctx)
     applyCarFollowingConstraint(v, road, network, ctx)
@@ -270,7 +290,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   }
 
   // 4. Cross-road yield (先到先行) — M1.5 right-of-way priority.
-  applyCrossRoadYield(network)
+  applyCrossRoadYield(network, ctx)
 
   // 5-6. Hand each vehicle's control to Rapier + step.
   if (ctx.rapierWorld) {
@@ -398,7 +418,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // speed (step 2.5). Ramping it through smoothAccel would cap the
       // acceleration at VEHICLE_DYN[type].accel (2.0 m/s²) instead of
       // Python's 3.0 — cross-language difference #7.
-      if (ctx.replayTargetId && v.id === ctx.replayTargetId) {
+      if (isReplayDriven(ctx, v)) {
         v.speed = v.targetSpeed
       } else {
         v.speed = smoothAccel(v.speed, v.targetSpeed, dt, v.type)
@@ -571,7 +591,7 @@ const applyTrafficLightConstraint = (
   ctx: TickContext,
 ) => {
   // Plan 049: replay target handles lights itself via obs.
-  if (ctx.replayTargetId && v.id === ctx.replayTargetId) return
+  if (isReplayDriven(ctx, v)) return
   const len = roadLength(road)
   for (const inter of Object.values(network.intersections)) {
     if (!inter.connectedRoads.includes(road.id)) continue
@@ -624,7 +644,7 @@ const applyCarFollowingConstraint = (
   ctx: TickContext,
 ) => {
   // Plan 049: replay target handles follower distance via obs.
-  if (ctx.replayTargetId && v.id === ctx.replayTargetId) return
+  if (isReplayDriven(ctx, v)) return
   const sign = laneForwardSign(v.laneIndex, road.laneCount)
   let bestGap = Infinity
   let leader: Vehicle | null = null
@@ -651,7 +671,7 @@ const applyCarFollowingConstraint = (
   v.targetSpeed = leader.speed
 }
 
-const applyCrossRoadYield = (network: RoadNetwork): void => {
+const applyCrossRoadYield = (network: RoadNetwork, ctx: TickContext): void => {
   const cars = Object.values(network.vehicles)
   for (let i = 0; i < cars.length; i++) {
     const a = cars[i]!
@@ -662,17 +682,23 @@ const applyCrossRoadYield = (network: RoadNetwork): void => {
       const roadB = network.roads[b.roadId]
       if (!roadB) continue
       if (a.roadId === b.roadId) continue
+      // The later arrival yields. Plan 071: the replay target's speed is
+      // owned by the policy (or by an injected action) — the yield rule
+      // must not discard it, or the policy's output dies one step after
+      // it was written.
+      let yielded: Vehicle | null = null
       if (a.enteredIntersectionAt !== null && b.enteredIntersectionAt === null) {
-        b.targetSpeed = 0
+        yielded = b
       } else if (b.enteredIntersectionAt !== null && a.enteredIntersectionAt === null) {
-        a.targetSpeed = 0
+        yielded = a
       } else if (a.enteredIntersectionAt !== null && b.enteredIntersectionAt !== null) {
         if (a.enteredIntersectionAt < b.enteredIntersectionAt) {
-          b.targetSpeed = 0
+          yielded = b
         } else if (b.enteredIntersectionAt < a.enteredIntersectionAt) {
-          a.targetSpeed = 0
+          yielded = a
         }
       }
+      if (yielded && !isReplayDriven(ctx, yielded)) yielded.targetSpeed = 0
     }
   }
 }
