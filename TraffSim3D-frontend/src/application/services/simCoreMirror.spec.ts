@@ -7,7 +7,7 @@
 // not tolerance: the contract's whole value is catching drift.
 
 import { describe, it, expect } from 'vitest'
-import { SimCoreMirror, runEpisode } from './simCoreMirror'
+import { SimCoreMirror, runEpisode, type MirrorEpisode } from './simCoreMirror'
 import { PYTHON_SIM, MAX_GREEN_SECS, type SignalActionName } from '@shared/constants/simulation'
 
 describe('simCoreMirror — cross scene', () => {
@@ -322,5 +322,67 @@ describe('simCoreMirror — signal actions', () => {
       core.step(0)
       expect(core.light.cycleTimer).toBeGreaterThanOrEqual(floor)
     }
+  })
+})
+
+// Plan 074 (T3): the mirror can run the contract vectors' two optional
+// extras — the light override and the scheduled signal actions.
+describe('simCoreMirror — contract vector options (Plan 074)', () => {
+  const lightAt = (ep: MirrorEpisode): Map<number, { nsGreen: boolean; ewGreen: boolean }> =>
+    new Map(ep.samples.map((s) => [s.step, s.light]))
+
+  it('runs the default cycle over the overridden light', () => {
+    // The roundabout's own light is both-green; the override gives it the
+    // plain NS-green light the Python side installs.
+    const ep = runEpisode('roundabout', new Array(400).fill(0), 10, 400, {
+      lightOverride: { nsGreen: true, ewGreen: false },
+    })
+    const lights = lightAt(ep)
+    expect(lights.get(0)).toEqual({ nsGreen: true, ewGreen: false })
+    expect(lights.get(300)).toEqual({ nsGreen: false, ewGreen: true })
+  })
+
+  it('applies a scheduled action before the step it is labelled with', () => {
+    // The step convention: `"step": 10` is applied BEFORE the 10th step, so
+    // the 10th step is the one that consumes it.
+    const ep = runEpisode('roundabout', new Array(400).fill(0), 10, 400, {
+      lightOverride: { nsGreen: true, ewGreen: false },
+      signalActions: [{ step: 10, action: 'preempt' }],
+    })
+    const lights = lightAt(ep)
+    expect(lights.get(0)).toEqual({ nsGreen: true, ewGreen: false })
+    // The clearance runs on steps 10..39 ...
+    expect(lights.get(10)).toEqual({ nsGreen: false, ewGreen: false })
+    expect(lights.get(30)).toEqual({ nsGreen: false, ewGreen: false })
+    // ... and the phase resumes inside step 40.
+    expect(lights.get(40)).toEqual({ nsGreen: true, ewGreen: false })
+  })
+
+  it('keeps the light alive across the clearance boundary', () => {
+    // A second preempt on the very step the phase resumed (step 40) must
+    // not wedge the light — the Plan 073 Sprint 2 regression.
+    const ep = runEpisode('roundabout', new Array(400).fill(0), 10, 400, {
+      lightOverride: { nsGreen: true, ewGreen: false },
+      signalActions: [
+        { step: 10, action: 'preempt' },
+        { step: 40, action: 'preempt' },
+      ],
+    })
+    const lights = lightAt(ep)
+    expect(lights.get(60)).toEqual({ nsGreen: false, ewGreen: false })
+    expect(lights.get(70)).toEqual({ nsGreen: true, ewGreen: false })
+  })
+
+  it('rejects a malformed scheduled action', () => {
+    expect(() =>
+      runEpisode('roundabout', new Array(10).fill(0), 10, 400, {
+        signalActions: [{ step: 0, action: 'preempt' }],
+      }),
+    ).toThrow(/positive integer/)
+    expect(() =>
+      runEpisode('roundabout', new Array(10).fill(0), 10, 400, {
+        signalActions: [{ step: 1, action: 'go_faster' as SignalActionName }],
+      }),
+    ).toThrow(/unknown signal action/)
   })
 })

@@ -36,6 +36,7 @@ from app.apps.rl.sim_core import (
     PHASE_ADJUST_SECS,
     SIGNAL_ACTION_NAMES,
     SimCore,
+    TrafficLight,
 )
 
 CONTRACT_DIR = Path(__file__).parent
@@ -121,6 +122,86 @@ def _expand_actions(v: dict) -> list[list[float]]:
     return list(v["actions"]) * repeat
 
 
+def _golden_path(name: str) -> Path:
+    """The committed TypeScript golden for a vector."""
+    return SNAPSHOT_DIR / f"ts_{name}.json"
+
+
+def _signal_actions_for(v: dict) -> list[dict]:
+    """The external signal actions to apply, as recorded in the TS golden.
+
+    THE GOLDEN IS THE SOURCE: the TypeScript generator writes the sequence
+    it applied into every golden, and the Python side applies **that**
+    sequence — the same relationship the `signal_vocabulary` block has. The
+    vector file's own copy is cross-checked against it, so a golden that
+    was not regenerated after a vector edit cannot hide the drift.
+
+    THE STEP CONVENTION (identical on both sides, and load-bearing): an
+    action labelled `"step": N` is applied **before** the N-th simulation
+    step — it is consumed by that step. Here that means
+    `light.apply_action(name)` immediately before `core.step(...)`; in the
+    TypeScript mirror it means `applySignalAction(name)` immediately before
+    `mirror.step(...)`. Getting this off by one silently produces
+    different trajectories, which the contract would then report as a
+    semantic mismatch.
+    """
+    from_vector = list(v.get("signal_actions", []))
+    path = _golden_path(v["name"])
+    if not path.exists():
+        # The missing golden is reported by `test_contract_snapshots_are_present`.
+        return from_vector
+    golden = json.loads(path.read_text(encoding="utf-8"))
+    from_golden = list(golden.get("signal_actions", []))
+    assert from_golden == from_vector, (
+        f"{v['name']}: the TS golden's signal actions differ from the vector's "
+        f"(golden={from_golden}, vector={from_vector}). "
+        f"Regenerate the goldens with: cd ../TraffSim3D-frontend && npm run contract:gen"
+    )
+    for entry in from_golden:
+        step = entry.get("step")
+        name = entry.get("action")
+        assert (
+            isinstance(step, int) and not isinstance(step, bool) and step >= 1
+        ), f"{v['name']}: a signal action's step must be a positive integer, got {step!r}"
+        assert name in SIGNAL_ACTION_NAMES, (
+            f"{v['name']}: unknown signal action {name!r} "
+            f"(expected one of {', '.join(SIGNAL_ACTION_NAMES)})"
+        )
+    return from_golden
+
+
+def _light_override_for(v: dict) -> dict | None:
+    """The light to install right after the scene's `reset()`.
+
+    The roundabout's own light is both-green ("no traffic lights there"),
+    so its swap is a no-op — the signalled vectors override it with a plain
+    NS-green light, exactly like `tests/contract/test_signal_actions.py`
+    does for the same reason (a parked ego is hit by an NPC long before the
+    30 s flip in every signalled scene, so the roundabout is the only scene
+    whose episode survives long enough to observe a phase).
+    """
+    override = v.get("light_override")
+    if override is None:
+        return None
+    for key in ("ns_green", "ew_green"):
+        if not isinstance(override.get(key), bool):
+            raise ValueError(
+                f"{v['name']}: light_override.{key} must be a boolean, "
+                f"got {override.get(key)!r}"
+            )
+    path = _golden_path(v["name"])
+    if path.exists():
+        golden = json.loads(path.read_text(encoding="utf-8"))
+        assert golden.get("light_override") == {
+            "ns_green": override["ns_green"],
+            "ew_green": override["ew_green"],
+        }, (
+            f"{v['name']}: the TS golden's light override differs from the vector's. "
+            f"Regenerate the goldens with: cd ../TraffSim3D-frontend && npm run contract:gen"
+        )
+    return override
+
+
 def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
     """Generate the Python snapshot for vector `v` (live, every run)."""
     actions = _expand_actions(v)
@@ -129,8 +210,18 @@ def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
         max_steps=v.get("max_steps", MAX_STEPS_DEFAULT),
     )
     core.reset()
+    override = _light_override_for(v)
+    if override is not None:
+        core.light = TrafficLight(ns_green=override["ns_green"], ew_green=override["ew_green"])
+    by_step: dict[int, list[str]] = {}
+    for entry in _signal_actions_for(v):
+        by_step.setdefault(entry["step"], []).append(entry["action"])
     samples = [_sample(0, v["ego_id"], core)]
     for i, action in enumerate(actions, start=1):
+        # The action labelled `step: i` is applied BEFORE the i-th step, so
+        # it is consumed by that step (see `_signal_actions_for`).
+        for name in by_step.get(i, []):
+            core.light.apply_action(name)
         core.step(np.asarray(action, dtype=np.float32))
         if i % sample_every == 0 or i == len(actions):
             samples.append(_sample(i, v["ego_id"], core))
@@ -372,3 +463,99 @@ def test_python_and_ts_kernel_speed_series_agree(vector_name: str) -> None:
     comparable = ts_series[: len(py_series)]
     for i, (a, b) in enumerate(zip(py_series, comparable, strict=True)):
         assert a == b, f"{v['name']}: kernel speed[{i}] mismatch " f"(python={a!r}, ts={b!r})"
+
+
+# --------------------------------------------------------------------------
+# Plan 074 (T3): the action-driven contract vectors
+# --------------------------------------------------------------------------
+#
+# The five vectors above run the **default** cycle, so they cannot tell
+# whether the two sides interpret the five signal actions the same way.
+# These five do: the same action is applied at the same step on both sides,
+# and the trajectories must still be bit-identical.
+
+# The sample steps at which the light bits change, per vector. The sample
+# stride is 10, so a phase change is observed at the first sample after it.
+_SIGNAL_VECTOR_CHANGES: dict[str, list[int]] = {
+    # The default cycle: the swap lands on step 300.
+    "signalled_light_baseline": [300],
+    # `extend_green` delays the swap by 5 s (50 steps).
+    "signalled_light_extend_green": [350],
+    # `shorten_red` advances the swap by 5 s (50 steps).
+    "signalled_light_shorten_red": [250],
+    # `preempt` on step 10: all-red from step 10, the phase resumes inside
+    # step 40, and the swap lands 30 steps later than the default (the clock
+    # was frozen during the clearance).
+    "signalled_light_preempt": [10, 40, 330],
+    # The clearance-boundary case: a second `preempt` on step 40 — the very
+    # step the phase resumed — must not wedge the light. The phase comes
+    # back inside step 70 and the swap lands on step 360.
+    "signalled_light_preempt_boundary": [10, 70, 360],
+}
+
+
+def _light_changes(golden: dict) -> list[int]:
+    """The sample steps at which the golden's light bits change."""
+    changes: list[int] = []
+    previous: tuple[bool, bool] | None = None
+    for sample in golden["samples"]:
+        bits = (sample["light"]["nsGreen"], sample["light"]["ewGreen"])
+        if previous is not None and bits != previous:
+            changes.append(sample["step"])
+        previous = bits
+    return changes
+
+
+@pytest.mark.parametrize("vector_name", sorted(_SIGNAL_VECTOR_CHANGES))
+def test_the_signal_actions_move_the_phase_as_expected(vector_name: str) -> None:
+    """The action semantics are visible in the golden — and agree.
+
+    This is the trajectory-level counterpart of the vocabulary assertion
+    (L4): the *same* action applied at the *same* step must move the phase
+    the same way on both sides. The expected timelines are the ones the
+    Python light produces (see `tests/contract/test_signal_actions.py`).
+    """
+    golden = _require_snapshot(_golden_path(vector_name))
+    changes = _light_changes(golden)
+    assert changes == _SIGNAL_VECTOR_CHANGES[vector_name], (
+        f"{vector_name}: unexpected phase timeline "
+        f"(golden={changes}, expected={_SIGNAL_VECTOR_CHANGES[vector_name]})"
+    )
+
+
+@pytest.mark.parametrize(
+    "vector_name",
+    [name for name in sorted(_SIGNAL_VECTOR_CHANGES) if name != "signalled_light_baseline"],
+)
+def test_an_action_vector_differs_from_the_default_behaviour(vector_name: str) -> None:
+    """The action must actually change the episode.
+
+    Without this assertion the exact-equality check would be vacuous: it
+    would pass even if *both* sides ignored the actions.
+    """
+    baseline = _require_snapshot(_golden_path("signalled_light_baseline"))
+    actioned = _require_snapshot(_golden_path(vector_name))
+    assert actioned["samples"] != baseline["samples"], (
+        f"{vector_name}: the golden is identical to the no-action baseline — "
+        f"the action changed nothing, so the comparison proves nothing"
+    )
+
+
+def test_the_preempt_boundary_case_keeps_the_light_alive() -> None:
+    """The clearance-boundary regression, now at the trajectory level.
+
+    A `preempt` that lands on the step right after a clearance ended used to
+    record the all-red state as the resume point, and the light then never
+    went green again (Plan 073 Sprint 2 fix wave). The golden must show the
+    phase coming back.
+    """
+    golden = _require_snapshot(_golden_path("signalled_light_preempt_boundary"))
+    by_step = {s["step"]: s["light"] for s in golden["samples"]}
+    # All-red through the two clearances (steps 10..39 and 40..69).
+    assert by_step[30] == {"nsGreen": False, "ewGreen": False}
+    assert by_step[60] == {"nsGreen": False, "ewGreen": False}
+    # The phase resumed inside step 40 and was cleared again by the second
+    # preempt, so the sample on step 40 is all-red too ...
+    assert by_step[40] == {"nsGreen": False, "ewGreen": False}
+    # ... and the phase is back (it resumes inside step 70).
+    assert by_step[70] == {"nsGreen": True, "ewGreen": False}

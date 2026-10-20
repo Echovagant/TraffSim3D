@@ -13,6 +13,18 @@ export interface PolicyWeights {
   obs_dim: number
   /** Action dimension. Defaults to 2 (accel, steer). */
   action_dim: number
+  /**
+   * The checkpoint's action space (Plan 074).
+   *
+   * - `"discrete"` — the policy emits action *logits*; use
+   *   `mlpForwardDiscrete` to get the action index.
+   * - `"continuous"` — the policy emits a Gaussian mean; use
+   *   `mlpForwardMean`.
+   *
+   * **Absent ⇒ treated as `"continuous"**, so the weights exported before
+   * Plan 074 (and the committed fixtures) keep working unchanged.
+   */
+  action_space?: 'discrete' | 'continuous'
   /** Sizes of the two hidden layers. Defaults to [64, 64]. */
   hidden_sizes: number[]
   /** All layer parameters, flattened to nested lists. */
@@ -23,8 +35,14 @@ export interface PolicyWeights {
     'policy_net.2.bias': number[] // [hidden[1]]
     'action_net.weight': number[][] // [action_dim][hidden[-1]]
     'action_net.bias': number[] // [action_dim]
-    /** Diagonal Gaussian log-std, learnable parameter (action_dim,). */
-    log_std: number[]
+    /**
+     * Diagonal Gaussian log-std, learnable parameter (action_dim,).
+     *
+     * **Continuous (Box) policies only.** A discrete policy has no such
+     * parameter — SB3's `CategoricalPolicy` produces logits — so the key
+     * is absent for a discrete export.
+     */
+    log_std?: number[]
   }
 }
 

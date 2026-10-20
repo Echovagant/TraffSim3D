@@ -85,6 +85,35 @@ MAX_GREEN_SECS = 60.0
 # The all-red clearance expressed in sim steps (3 s at the contract's 10 Hz).
 ALL_RED_STEPS = int(round(ALL_RED_SECS / DT))
 
+# ===== Plan 074 Sprint 3 (S3a-1): traffic that answers to the light =====
+#
+# The NPCs used to drive in straight lines at a constant speed and to
+# teleport back when they left the world — they never looked at the light.
+# A signal agent trained against that world had no causal link between its
+# action and the traffic. The constants below describe the *responsive*
+# traffic model.
+#
+# It is OFF by default (`SimCore.responsive_traffic`): the default path is
+# the basis of the committed cross-language contract goldens
+# (tests/contract/snapshots/ts_*.json), and the contract compares the two
+# sides for *exact* equality. The signal training env turns it on.
+
+# The stop line sits at the edge of the intersection box — this far before
+# the intersection centre, measured along the vehicle's direction of travel.
+STOP_LINE_DISTANCE = INTERSECTION_RADIUS  # 8.0 m
+# The smallest gap a queued vehicle keeps to the leader in front of it.
+# Without it every vehicle would pile up *on* the stop line and no queue
+# would ever form.
+MIN_GAP = 4.0  # m
+# Longitudinal comfort: how fast an NPC may accelerate / brake.
+NPC_ACCEL = 4.0  # m/s²
+NPC_DECEL = 6.0  # m/s²
+# Below this speed a vehicle counts as queued (waiting at the stop line or
+# behind a leader).
+STOPPED_SPEED = 0.5  # m/s
+# Slack for the "is the vehicle still before the stop line?" comparison.
+STOP_LINE_EPS = 1e-9
+
 
 @dataclass
 class Vehicle:
@@ -93,6 +122,55 @@ class Vehicle:
     heading: float = 0.0  # rad, 0 = +X, π/2 = +Z (north)
     speed: float = 0.0    # m/s
     y: float = 0.0        # elevation (m), Plan 061
+    # --- Plan 074 Sprint 3 (S3a-1): signal-responsive traffic ---
+    # The signalised approach axis this vehicle runs along ("ns" / "ew"),
+    # derived from its heading. Empty when the vehicle is not on a
+    # signalised approach.
+    axis: str = ""
+    # The sim time at which the current wait began (None while the vehicle
+    # is not waiting). Used for the delay accounting.
+    stopped_at: float | None = None
+
+
+def approach_axis(heading: float) -> str:
+    """The signalised approach axis a heading runs along: "ns" or "ew".
+
+    The NPCs drive straight through the intersection centre, so the axis
+    follows from the heading alone: a heading within 45° of ±Z runs on the
+    north-south road ("ns"), a heading within 45° of ±X on the east-west
+    road ("ew").
+    """
+    sin_h = math.sin(heading)
+    cos_h = math.cos(heading)
+    return "ns" if abs(sin_h) >= abs(cos_h) else "ew"
+
+
+def approach_distance(vehicle: Vehicle) -> float:
+    """The signed distance from the intersection centre along the travel
+    direction.
+
+    It grows as the vehicle drives, so a vehicle that has not reached the
+    centre yet has a negative value — and the stop line sits at
+    `-STOP_LINE_DISTANCE` in these coordinates.
+    """
+    return vehicle.x * math.cos(vehicle.heading) + vehicle.z * math.sin(vehicle.heading)
+
+
+def _lane_key(vehicle: Vehicle) -> tuple[str, int, float]:
+    """The lane a vehicle runs in: (axis, direction, lateral offset).
+
+    Vehicles only follow each other when they share all three — the same
+    approach axis, the same direction of travel and (roughly) the same
+    lateral offset, i.e. the same lane.
+    """
+    axis = approach_axis(vehicle.heading)
+    if axis == "ns":
+        direction = 1 if math.sin(vehicle.heading) >= 0 else -1
+        lateral = vehicle.x
+    else:
+        direction = 1 if math.cos(vehicle.heading) >= 0 else -1
+        lateral = vehicle.z
+    return (axis, direction, round(lateral, 2))
 
 
 @dataclass
@@ -207,6 +285,15 @@ class SimCore:
     # 'cross' (default, 044 behavior): single 4-way intersection.
     # 'corridor' (048): 2 4-way intersections + 60m NS corridor between.
     scene_kind: str = "cross"
+    # Plan 074 Sprint 3 (S3a-1): make the traffic obey the light.
+    #
+    # OFF by default on purpose. The default path is the basis of the
+    # committed cross-language contract goldens
+    # (tests/contract/snapshots/ts_*.json) and the contract compares the
+    # two sides for *exact* equality, so the responsive behaviour must not
+    # leak into it. The signal training env (`signal_env.SignalEnv`) turns
+    # it on; the contract vectors keep running the default path.
+    responsive_traffic: bool = False
 
     def reset(self, seed: int | None = None) -> np.ndarray:
         if self.scene_kind == "corridor":
@@ -370,6 +457,10 @@ class SimCore:
                 npc.z = ROUNDABOUT_RADIUS * math.sin(angle)
                 # Heading is tangent to circle (angle + π/2)
                 npc.heading = angle + math.pi / 2
+        elif self.responsive_traffic:
+            # Plan 074 Sprint 3 (S3a-1): the NPCs obey the light, queue up
+            # behind each other and are released by the green.
+            self._step_responsive_npcs()
         else:
             for npc in self.npcs:
                 npc.x += npc.speed * math.cos(npc.heading) * DT
@@ -469,6 +560,144 @@ class SimCore:
 
         info = {"reason": self._terminated_reason, "progress": progress}
         return self._obs(), float(reward), self._terminated, self._truncated, info
+
+    # ===== Plan 074 Sprint 3 (S3a-1): signal-responsive traffic =====
+
+    def queue_length(self, axis: str) -> int:
+        """How many NPCs are queued on `axis`.
+
+        A vehicle counts when it is still *before* the stop line (it has
+        not entered the intersection yet) and it is (nearly) stopped —
+        either waiting at the line or waiting behind a leader.
+        """
+        count = 0
+        for npc in self.npcs:
+            if approach_axis(npc.heading) != axis:
+                continue
+            if approach_distance(npc) > -STOP_LINE_DISTANCE + STOP_LINE_EPS:
+                continue  # at or past the stop line: inside the intersection
+            if npc.speed >= STOPPED_SPEED:
+                continue  # still rolling: not queued (yet)
+            count += 1
+        return count
+
+    def queue_lengths(self) -> dict[str, int]:
+        """The per-axis queue counts: ``{"ns": n, "ew": n}``."""
+        return {"ns": self.queue_length("ns"), "ew": self.queue_length("ew")}
+
+    def waiting_time(self, axis: str) -> float:
+        """How long the vehicles currently queued on `axis` have been
+        waiting, in seconds (the sum of their current waits)."""
+        total = 0.0
+        for npc in self.npcs:
+            if npc.stopped_at is None:
+                continue
+            if approach_axis(npc.heading) != axis:
+                continue
+            total += max(0.0, self.sim_time - npc.stopped_at)
+        return total
+
+    def _step_responsive_npcs(self) -> None:
+        """Advance the NPCs so that they obey the traffic light.
+
+        Plan 074 Sprint 3 (S3a-1). The model is deliberately small:
+
+        - a vehicle that is still before the stop line and whose axis is
+          red brakes to a stop at the stop line;
+        - a vehicle may never come closer than `MIN_GAP` to the leader in
+          front of it (same axis, same lane, same direction) — this is
+          what makes a *queue* form instead of every vehicle piling up on
+          the stop line;
+        - a vehicle that has passed the stop line is inside the
+          intersection: it keeps driving (it has already committed to the
+          crossing) and it respawns as before.
+        """
+        lanes: dict[tuple[str, int, float], list[tuple[float, Vehicle]]] = {}
+        for npc in self.npcs:
+            npc.axis = approach_axis(npc.heading)
+            lanes.setdefault(_lane_key(npc), []).append((approach_distance(npc), npc))
+
+        for group in lanes.values():
+            # Front first: the largest distance along the travel direction
+            # belongs to the vehicle closest to (or past) the stop line.
+            group.sort(key=lambda item: item[0], reverse=True)
+            leader: float | None = None
+            for distance, npc in group:
+                limit = self._signal_limit(npc, distance)
+                if leader is not None:
+                    follow = leader - MIN_GAP
+                    limit = follow if limit is None else min(limit, follow)
+                leader = self._drive_npc(npc, distance, limit)
+
+        # Respawn at the opposite end when out of bounds — the behaviour
+        # the default path has always had.
+        for npc in self.npcs:
+            if abs(npc.x) > 40 or abs(npc.z) > 40:
+                npc.x = -npc.x * 0.8
+                npc.z = -npc.z * 0.8
+                npc.stopped_at = None
+
+    def _signal_limit(self, npc: Vehicle, distance: float) -> float | None:
+        """The furthest the vehicle may travel this step, given the light.
+
+        `None` means "no limit from the signal": its axis is green, or it
+        has already entered the intersection.
+        """
+        if npc.axis == "ns":
+            green = self.light.ns_green
+        elif npc.axis == "ew":
+            green = self.light.ew_green
+        else:
+            return None
+        if green:
+            return None
+        stop_distance = -STOP_LINE_DISTANCE
+        if distance > stop_distance + STOP_LINE_EPS:
+            # Already past the stop line: the vehicle is in the
+            # intersection and keeps going.
+            return None
+        return stop_distance
+
+    def _drive_npc(
+        self, npc: Vehicle, distance: float, limit: float | None
+    ) -> float:
+        """Move one NPC along its heading, honouring `limit`.
+
+        `limit` is the furthest distance along the travel direction the
+        vehicle may reach this step; `None` means "no limit". Returns the
+        vehicle's new distance.
+        """
+        if limit is None:
+            allowed = NPC_SPEED
+            room = None
+        else:
+            room = max(0.0, limit - distance)
+            # The speed from which the vehicle can still stop at `limit`.
+            allowed = min(NPC_SPEED, math.sqrt(2.0 * NPC_DECEL * room))
+        if allowed < npc.speed:
+            npc.speed = allowed  # brake
+        else:
+            # Never accelerate past the speed from which the vehicle could
+            # still stop at `limit` — otherwise a stopped vehicle would
+            # report a speed it does not have.
+            npc.speed = min(allowed, npc.speed + NPC_ACCEL * DT)
+        delta = npc.speed * DT
+        if room is not None:
+            delta = min(delta, room)
+        npc.x += math.cos(npc.heading) * delta
+        npc.z += math.sin(npc.heading) * delta
+
+        new_distance = distance + delta
+        queued = (
+            npc.speed < STOPPED_SPEED
+            and new_distance <= -STOP_LINE_DISTANCE + STOP_LINE_EPS
+        )
+        if queued:
+            if npc.stopped_at is None:
+                npc.stopped_at = self.sim_time
+        else:
+            npc.stopped_at = None
+        return new_distance
 
     def _check_red_light_run(self) -> bool:
         """Ego is in intersection AND light is red for its direction."""

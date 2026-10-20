@@ -86,6 +86,47 @@ export interface MirrorEpisode {
   samples: MirrorSample[]
 }
 
+/**
+ * One external signal action, scheduled for a **1-based** step.
+ *
+ * THE STEP CONVENTION (identical on both sides of the contract, and the
+ * reason the trajectories still match bit for bit): an action labelled
+ * `step: N` is applied **before** the N-th simulation step — it is
+ * *consumed by* that step. Here that means `applySignalAction(name)`
+ * immediately before `mirror.step(...)`; in Python it means
+ * `light.apply_action(name)` immediately before `core.step(...)`.
+ *
+ * Getting this off by one silently produces different trajectories, which
+ * the contract would then report as a semantic mismatch.
+ */
+export interface MirrorSignalAction {
+  /** The 1-based step the action is applied before. */
+  step: number
+  action: SignalActionName
+}
+
+/**
+ * The light to install right after the scene's `reset()`.
+ *
+ * The roundabout's own light is both-green ("no traffic lights there"), so
+ * its swap is a no-op. The contract vectors that need an *observable*
+ * signal override it with a plain NS-green light — the same override the
+ * Python side applies (`TrafficLight(ns_green=True, ew_green=False)`),
+ * exactly like `tests/contract/test_signal_actions.py` does.
+ */
+export interface MirrorLightOverride {
+  nsGreen: boolean
+  ewGreen: boolean
+}
+
+/** The optional extras a contract vector may ask the mirror for. */
+export interface MirrorRunOptions {
+  /** Replace the scene's light after `reset()`. */
+  lightOverride?: MirrorLightOverride
+  /** The external signal actions to apply, and when. */
+  signalActions?: MirrorSignalAction[]
+}
+
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
 /**
@@ -117,16 +158,22 @@ const EGO_START = (): MirrorVehicle => ({
  */
 export const ALL_RED_STEPS = Math.round(ALL_RED_SECS / PYTHON_SIM.DT)
 
-/** Python `sim_core.TrafficLight()` — the default (NS-green) light. */
-const LIGHT_START = (): MirrorLight => ({
-  nsGreen: true,
-  ewGreen: false,
+/**
+ * A fresh light, built the way Python's `TrafficLight(...)` constructor
+ * builds one: the phase clock at zero, no queued action, no clearance.
+ */
+export const createMirrorLight = (nsGreen: boolean, ewGreen: boolean): MirrorLight => ({
+  nsGreen,
+  ewGreen,
   cycleTimer: 0,
   cycleDuration: PYTHON_SIM.LIGHT_CYCLE_SECONDS,
   pendingActions: [],
   allRedSteps: 0,
   resumeState: null,
 })
+
+/** Python `sim_core.TrafficLight()` — the default (NS-green) light. */
+const LIGHT_START = (): MirrorLight => createMirrorLight(true, false)
 
 /**
  * A port of Python's `SimCore`.
@@ -175,15 +222,7 @@ export class SimCoreMirror {
     // never raise, and `obs[6:8]` reports `(1, 0)` instead of Python's `(1, 1)`.
     // Swapping `(true, true)` is a no-op, so Python's roundabout light never
     // changes.
-    this.light = {
-      nsGreen: true,
-      ewGreen: this.sceneKind === 'roundabout',
-      cycleTimer: 0,
-      cycleDuration: PYTHON_SIM.LIGHT_CYCLE_SECONDS,
-      pendingActions: [],
-      allRedSteps: 0,
-      resumeState: null,
-    }
+    this.light = createMirrorLight(true, this.sceneKind === 'roundabout')
     this.simTime = 0
     this.stepCount = 0
     this.terminated = false
@@ -449,6 +488,29 @@ const snapshot = (step: number, core: SimCoreMirror): MirrorSample => ({
 })
 
 /**
+ * Validate a scheduled action sequence — loudly.
+ *
+ * A malformed entry must fail on **both** sides of the contract, exactly
+ * like a malformed `repeat` does: a silently-ignored action would make the
+ * trajectory comparison vacuous (both sides would run the same *default*
+ * episode and "agree").
+ */
+export const assertValidSignalActions = (actions: MirrorSignalAction[]): void => {
+  for (const entry of actions) {
+    if (!Number.isInteger(entry.step) || entry.step < 1) {
+      throw new Error(
+        `signal action step must be a positive integer, got ${JSON.stringify(entry.step)}`,
+      )
+    }
+    if (!SIGNAL_ACTION_NAMES.includes(entry.action)) {
+      throw new Error(
+        `unknown signal action '${entry.action}'; expected one of ${SIGNAL_ACTION_NAMES.join(', ')}`,
+      )
+    }
+  }
+}
+
+/**
  * Run one episode and collect samples.
  *
  * Sampling and stopping follow Python's `_ensure_python_snapshot` exactly:
@@ -461,17 +523,33 @@ const snapshot = (step: number, core: SimCoreMirror): MirrorSample => ({
  *
  * `maxSteps` is appended last so the existing positional call sites
  * (`runEpisode(scene, actions, sampleEvery)`) keep working unchanged.
+ *
+ * `options` carries the two optional extras a contract vector may ask for:
+ * the light override and the external signal actions. The actions are
+ * applied **before** the step they are labelled with — the same order as
+ * Python's `light.apply_action(...)` immediately before `core.step(...)`.
  */
 export const runEpisode = (
   sceneKind: SceneKind,
   actions: number[],
   sampleEvery = 10,
   maxSteps: number = PYTHON_SIM.MAX_STEPS_DEFAULT,
+  options: MirrorRunOptions = {},
 ): MirrorEpisode => {
   const core = new SimCoreMirror(sceneKind, maxSteps)
   core.reset()
+  if (options.lightOverride) {
+    core.light = createMirrorLight(options.lightOverride.nsGreen, options.lightOverride.ewGreen)
+  }
+  const signalActions = options.signalActions ?? []
+  assertValidSignalActions(signalActions)
   const samples: MirrorSample[] = [snapshot(0, core)]
   for (let i = 0; i < actions.length; i++) {
+    // The 1-based step this iteration is about to run.
+    const stepNo = i + 1
+    for (const entry of signalActions) {
+      if (entry.step === stepNo) core.applySignalAction(entry.action)
+    }
     core.step(actions[i]!)
     if ((i + 1) % sampleEvery === 0 || i === actions.length - 1) {
       samples.push(snapshot(i + 1, core))

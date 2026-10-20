@@ -114,6 +114,63 @@
       "max_steps": 400,
       "actions": [[0.0, 0.0]],
       "repeat": 400
+    },
+    {
+      "name": "signalled_light_baseline",
+      "scene_kind": "roundabout",
+      "ego_id": "v-1",
+      "n_steps": 400,
+      "max_steps": 400,
+      "actions": [[0.0, 0.0]],
+      "repeat": 400,
+      "light_override": { "ns_green": true, "ew_green": false }
+    },
+    {
+      "name": "signalled_light_extend_green",
+      "scene_kind": "roundabout",
+      "ego_id": "v-1",
+      "n_steps": 400,
+      "max_steps": 400,
+      "actions": [[0.0, 0.0]],
+      "repeat": 400,
+      "light_override": { "ns_green": true, "ew_green": false },
+      "signal_actions": [{ "step": 10, "action": "extend_green" }]
+    },
+    {
+      "name": "signalled_light_shorten_red",
+      "scene_kind": "roundabout",
+      "ego_id": "v-1",
+      "n_steps": 400,
+      "max_steps": 400,
+      "actions": [[0.0, 0.0]],
+      "repeat": 400,
+      "light_override": { "ns_green": true, "ew_green": false },
+      "signal_actions": [{ "step": 10, "action": "shorten_red" }]
+    },
+    {
+      "name": "signalled_light_preempt",
+      "scene_kind": "roundabout",
+      "ego_id": "v-1",
+      "n_steps": 400,
+      "max_steps": 400,
+      "actions": [[0.0, 0.0]],
+      "repeat": 400,
+      "light_override": { "ns_green": true, "ew_green": false },
+      "signal_actions": [{ "step": 10, "action": "preempt" }]
+    },
+    {
+      "name": "signalled_light_preempt_boundary",
+      "scene_kind": "roundabout",
+      "ego_id": "v-1",
+      "n_steps": 400,
+      "max_steps": 400,
+      "actions": [[0.0, 0.0]],
+      "repeat": 400,
+      "light_override": { "ns_green": true, "ew_green": false },
+      "signal_actions": [
+        { "step": 10, "action": "preempt" },
+        { "step": 40, "action": "preempt" }
+      ]
     }
   ]
 }

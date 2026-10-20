@@ -20,7 +20,13 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { runEpisode, type SceneKind } from '../src/application/services/simCoreMirror'
+import {
+  assertValidSignalActions,
+  runEpisode,
+  type MirrorLightOverride,
+  type MirrorSignalAction,
+  type SceneKind,
+} from '../src/application/services/simCoreMirror'
 import { tick } from '../src/application/services/tick'
 import { buildTestNetwork } from '../src/__fixtures__/testNetwork'
 import {
@@ -29,8 +35,23 @@ import {
   PHASE_ADJUST_SECS,
   PYTHON_SIM,
   SIGNAL_ACTION_NAMES,
+  type SignalActionName,
 } from '../src/shared/constants/simulation'
 import type { TickContext } from '../src/application/services/tick'
+
+/**
+ * One external signal action, as it appears in `test_vector.json`.
+ *
+ * THE STEP CONVENTION (identical on the Python side): an action labelled
+ * `"step": N` is applied **before** the N-th simulation step — it is
+ * *consumed by* that step. Python: `light.apply_action(name)` immediately
+ * before `core.step(...)`; here: `applySignalAction(name)` immediately
+ * before `mirror.step(...)`.
+ */
+interface VectorSignalAction {
+  step: number
+  action: SignalActionName
+}
 
 interface Vector {
   name: string
@@ -42,6 +63,17 @@ interface Vector {
   actions: number[][]
   /** Expand `actions` this many times. Absent → the sequence is `actions`. */
   repeat?: number
+  /**
+   * Optional: the light to install right after the scene's `reset()`.
+   *
+   * The roundabout's own light is both-green ("no traffic lights there"),
+   * so its swap is a no-op — the vectors that need an *observable* signal
+   * override it with a plain NS-green light, the same override the Python
+   * side applies (see `tests/contract/test_signal_actions.py`).
+   */
+  light_override?: { ns_green: boolean; ew_green: boolean }
+  /** Optional: the external signal actions to apply, and when. */
+  signal_actions?: VectorSignalAction[]
 }
 
 /**
@@ -72,6 +104,57 @@ const expandActions = (v: Vector): number[][] => {
     )
   }
   return Array.from({ length: v.repeat }, () => v.actions).flat()
+}
+
+/**
+ * Parse a vector's optional `signal_actions` list.
+ *
+ * A malformed entry throws **here** instead of being silently ignored: an
+ * ignored action would make the trajectory comparison vacuous (both sides
+ * would run the same default episode and "agree"). The Python side
+ * validates the same entries when it reads them back from the golden.
+ */
+const parseSignalActions = (v: Vector): MirrorSignalAction[] => {
+  const raw = v.signal_actions
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) {
+    throw new Error(`vector "${v.name}": "signal_actions" must be an array`)
+  }
+  const parsed: MirrorSignalAction[] = raw.map((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new Error(`vector "${v.name}": every signal action must be an object`)
+    }
+    if (!Number.isInteger(entry.step) || entry.step < 1) {
+      throw new Error(
+        `vector "${v.name}": signal action "step" must be a positive integer, ` +
+          `got ${JSON.stringify(entry.step)}`,
+      )
+    }
+    if (!SIGNAL_ACTION_NAMES.includes(entry.action)) {
+      throw new Error(
+        `vector "${v.name}": unknown signal action "${entry.action}"; ` +
+          `expected one of ${SIGNAL_ACTION_NAMES.join(', ')}`,
+      )
+    }
+    return { step: entry.step, action: entry.action }
+  })
+  assertValidSignalActions(parsed)
+  return parsed
+}
+
+/**
+ * Parse a vector's optional `light_override`.
+ *
+ * The override is applied right after the scene's `reset()`, exactly like
+ * the Python side's `core.light = TrafficLight(ns_green=..., ew_green=...)`.
+ */
+const parseLightOverride = (v: Vector): MirrorLightOverride | undefined => {
+  const raw = v.light_override
+  if (raw === undefined) return undefined
+  if (typeof raw.ns_green !== 'boolean' || typeof raw.ew_green !== 'boolean') {
+    throw new Error(`vector "${v.name}": "light_override" needs boolean "ns_green" and "ew_green"`)
+  }
+  return { nsGreen: raw.ns_green, ewGreen: raw.ew_green }
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -163,11 +246,14 @@ const main = (): void => {
   const expected = new Set<string>()
   for (const v of vectors) {
     const actions = expandActions(v)
+    const signalActions = parseSignalActions(v)
+    const lightOverride = parseLightOverride(v)
     const episode = runEpisode(
       v.scene_kind,
       actions.map((a) => a[0]!),
       sampleEvery,
       v.max_steps,
+      { lightOverride, signalActions },
     )
     const scenario = {
       name: v.name,
@@ -184,6 +270,24 @@ const main = (): void => {
         phase_adjust_seconds: PHASE_ADJUST_SECS,
         max_green_seconds: MAX_GREEN_SECS,
       },
+      // The light override the mirror actually ran with (absent → the
+      // scene's own light). The Python side cross-checks it against the
+      // vector's copy.
+      ...(lightOverride
+        ? {
+            light_override: {
+              ns_green: lightOverride.nsGreen,
+              ew_green: lightOverride.ewGreen,
+            },
+          }
+        : {}),
+      // The external signal actions the mirror actually applied, and when.
+      // The Python side reads the sequence **from here** — the golden is
+      // the single source it applies — so a stale golden cannot hide a
+      // changed vector (it cross-checks the two against each other).
+      ...(signalActions.length > 0
+        ? { signal_actions: signalActions.map((e) => ({ step: e.step, action: e.action })) }
+        : {}),
       final_state: {
         terminated: episode.terminated,
         truncated: episode.truncated,

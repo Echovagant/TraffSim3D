@@ -21,6 +21,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
 
 from app.apps.rl import weights as rl_weights
@@ -49,6 +50,52 @@ TINY_SHAPES: dict[str, tuple[int, ...]] = {
     "action_net.bias": (2,),
     "log_std": (2,),
 }
+
+# A **discrete** policy: SB3's `CategoricalPolicy` has an action head but
+# **no** `log_std` — it produces logits, not a Gaussian mean. The action
+# head has one row per action (here the five signal actions).
+DISCRETE_STATE_VALUES: dict[str, Any] = {
+    "mlp_extractor.policy_net.0.weight": [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+    "mlp_extractor.policy_net.0.bias": [0.5, -0.5],
+    "mlp_extractor.policy_net.2.weight": [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
+    "mlp_extractor.policy_net.2.bias": [0.1, 0.2, 0.3, 0.4],
+    "action_net.weight": [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+        [1.0, 1.0, 1.0, 1.0],
+    ],
+    "action_net.bias": [-1.0, -0.5, 0.0, 0.5, 1.0],
+}
+
+DISCRETE_SHAPES: dict[str, tuple[int, ...]] = {
+    "mlp_extractor.policy_net.0.weight": (2, 3),
+    "mlp_extractor.policy_net.0.bias": (2,),
+    "mlp_extractor.policy_net.2.weight": (4, 2),
+    "mlp_extractor.policy_net.2.bias": (4,),
+    "action_net.weight": (5, 4),
+    "action_net.bias": (5,),
+}
+
+
+class _FakeDiscrete:
+    """A stand-in for `gymnasium.spaces.Discrete`.
+
+    `n` is a **numpy** integer in the real space (gymnasium stores it as
+    `np.int64`), which is exactly the detail the export's action-space
+    detection has to survive.
+    """
+
+    def __init__(self, n: int) -> None:
+        self.n = np.int64(n)
+
+
+class _FakeBox:
+    """A stand-in for `gymnasium.spaces.Box` — a `shape`, and no `n`."""
+
+    def __init__(self, shape: tuple[int, ...]) -> None:
+        self.shape = shape
 
 
 class _FakeTensor:
@@ -97,8 +144,14 @@ def _install_fake_sb3(
     state_dict: dict[str, Any] | None = None,
     load_error: BaseException | None = None,
     load_calls: list[str] | None = None,
+    action_space: Any = None,
 ) -> None:
-    """Put a fake `stable_baselines3.PPO` on the import path."""
+    """Put a fake `stable_baselines3.PPO` on the import path.
+
+    `action_space` mirrors the real algorithm's Gymnasium space. It is
+    left unset by default — a stand-in loader that does not expose one
+    makes the export fall back to the legacy, strict "continuous" reading.
+    """
     inner_sd = state_dict if state_dict is not None else _tiny_state_dict()
 
     class _FakePPO:
@@ -108,7 +161,10 @@ def _install_fake_sb3(
                 load_calls.append(path)
             if load_error is not None:
                 raise load_error
-            return SimpleNamespace(policy=SimpleNamespace(state_dict=lambda: inner_sd))
+            model = SimpleNamespace(policy=SimpleNamespace(state_dict=lambda: inner_sd))
+            if action_space is not None:
+                model.action_space = action_space
+            return model
 
     sb3_mod = ModuleType("stable_baselines3")
     sb3_mod.PPO = _FakePPO  # type: ignore[attr-defined]
@@ -146,6 +202,100 @@ def test_export_weights_returns_architecture_and_layers(
         "action_net.bias": [-1.0, 1.0],
         "log_std": [-0.5, 0.25],
     }
+
+
+# --------------------------------------------------------------------------
+# Plan 074 (T4): the action space — discrete vs continuous
+# --------------------------------------------------------------------------
+
+
+def test_export_weights_reports_a_continuous_action_space(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Box action space → `action_space: "continuous"`, `log_std` exported."""
+    _install_fake_sb3(monkeypatch, action_space=_FakeBox((2,)))
+
+    result = rl_weights.export_weights(_checkpoint(tmp_path))
+
+    assert result["action_space"] == "continuous"
+    assert result["layers"]["log_std"] == [-0.5, 0.25]
+
+
+def test_export_weights_exports_a_discrete_policy_without_log_std(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SB3's `CategoricalPolicy` has **no** `log_std` — it must still export.
+
+    This is the case that blocked the signal agent: the browser needs a
+    discrete forward pass, and the export used to demand the diagonal
+    Gaussian log-std that only a Box policy has.
+    """
+    _install_fake_sb3(
+        monkeypatch,
+        state_dict=_make_state_dict(
+            {k: (DISCRETE_SHAPES[k], DISCRETE_STATE_VALUES[k]) for k in DISCRETE_SHAPES}
+        ),
+        action_space=_FakeDiscrete(5),
+    )
+
+    result = rl_weights.export_weights(_checkpoint(tmp_path))
+
+    assert result["action_space"] == "discrete"
+    assert result["action_dim"] == 5
+    assert "log_std" not in result["layers"]
+    assert set(result["layers"]) == {
+        "policy_net.0.weight",
+        "policy_net.0.bias",
+        "policy_net.2.weight",
+        "policy_net.2.bias",
+        "action_net.weight",
+        "action_net.bias",
+    }
+
+
+def test_export_weights_detects_a_numpy_backed_discrete_space(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gymnasium's `Discrete.n` is a numpy integer, not a Python `int`.
+
+    The first implementation of the action-space detection compared against
+    `int` and therefore read a real SB3 `Discrete` checkpoint as
+    continuous — which then demanded the `log_std` the checkpoint does not
+    have. This test pins the numpy shape of the check.
+    """
+    _install_fake_sb3(
+        monkeypatch,
+        state_dict=_make_state_dict(
+            {k: (DISCRETE_SHAPES[k], DISCRETE_STATE_VALUES[k]) for k in DISCRETE_SHAPES}
+        ),
+        action_space=_FakeDiscrete(5),
+    )
+
+    result = rl_weights.export_weights(_checkpoint(tmp_path))
+
+    assert result["action_space"] == "discrete"
+
+
+def test_export_weights_of_an_unknown_action_space_stays_strict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A loader that does not expose an action space → the legacy reading.
+
+    Without an action space there is nothing to tell a discrete policy
+    from a continuous one, so the export stays strict and demands the
+    `log_std` — the same behaviour as before Plan 074.
+    """
+    _install_fake_sb3(
+        monkeypatch,
+        state_dict=_make_state_dict(
+            {k: (DISCRETE_SHAPES[k], DISCRETE_STATE_VALUES[k]) for k in DISCRETE_SHAPES}
+        ),
+    )
+
+    with pytest.raises(WeightsUnavailableError) as excinfo:
+        rl_weights.export_weights(_checkpoint(tmp_path))
+
+    assert "'log_std'" in str(excinfo.value)
 
 
 def test_export_weights_output_is_json_serializable(
@@ -277,7 +427,13 @@ def test_export_weights_wraps_ppo_load_failure(tmp_path, monkeypatch: pytest.Mon
 def test_export_weights_rejects_state_dict_missing_log_std(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A non-default policy (no diagonal `log_std`) is rejected by name."""
+    """A checkpoint whose action space is unknown is rejected by name.
+
+    Since Plan 074 a `Discrete` policy legitimately has no `log_std` — but
+    the export can only tell the two apart from the checkpoint's *action
+    space*. A loader that does not expose one leaves the export strict,
+    exactly as it was before.
+    """
     partial = _make_state_dict(
         {
             key: (TINY_SHAPES[key], TINY_STATE_VALUES[key])

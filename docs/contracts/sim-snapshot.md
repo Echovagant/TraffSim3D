@@ -4,14 +4,26 @@
 > 比对测试不再跳过 —— TS 侧快照缺失时**失败**而不是跳过。
 > 快照由 `TraffSim3D-frontend` 生成并入库，后端测试可独立跑完整契约。
 > 实测（2026-10-21）：`pytest tests/contract/` → **16 passed / 0 failed / 0 skipped**。
+> （这是 Plan 071/072 时的数字；Sprint 1 扩容到 16，Sprint 2 的动作词表断言
+> 到 40，**Sprint 3 的带动作向量到 65** —— 下面各状态块给出的是各自时点的实测。）
 >
 > **状态（2026-10-21，Plan 072 修复波）：本文件此前高估了契约的覆盖面。**
 > 下文「What the contract does NOT cover」一节已按**实测**的变异盲区重写：
 > 信号相位时长在两侧都是**未被观测**的。修订前的版本只列了
 > `MAX_STEER` / `LOOKAHEAD_DISTANCE` 两个盲点。
 >
+> **状态（2026-10-21，Plan 074 Sprint 3 / A2b）：动作语义进入契约（镜像侧）。**
+> 向量格式新增可选的 `signal_actions`（带步骤约定）与 `light_override`，
+> 新增 5 条 `signalled_light_*` 向量：两侧在**同一步**施加**同一个动作**，
+> 轨迹仍**逐位相等**。⇒ 「两侧对动作的解释一致」从推断变成实测。
+> 同时，离散策略的权重导出（`log_std` 可选 + `action_space` 字段）与
+> TypeScript 离散前向（`mlpForwardDiscrete`）由一份**提交的前向契约 fixture**
+> 把关：同一权重、同一观测 → 同一个动作下标。
+> 实测（2026-10-21）：`pytest tests/contract/` → **65 passed / 0 failed / 0 skipped**
+> （原 40；新增的 25 条来自 5 条新向量 × 场景 / kernel / 词表 / 前向四类断言）。
+>
 > **状态（2026-10-21，Plan 073 Sprint 2 / A2a）：信号灯成为可被外部动作驱动的控制面。**
-> 两侧各持一份**自己拥有的**动作词表（五个动作名 + 两个语义常量），
+> 两侧各持一份**自己拥有的**动作词表（五个动作名 + 三个语义常量），
 > 词表被写进 golden，由 Python 契约测试**逐项**比对 —— 这是本 Sprint 的
 > 跨语言门禁。
 > **注意：本 Sprint 没有引入「跨语言相位序列」断言**（原因见
@@ -36,6 +48,8 @@ by a user noticing a bad drive.
 | **L1 kernel** | ego speed integration | the **product replay path** (`tick.ts`) | `ts_kernel_<name>.json` |
 | **L3 scenario** | full SimCore semantics — termination rules, reason strings, trajectory | the **contract mirror** (`simCoreMirror.ts`) | `ts_<name>.json` |
 | **L4 vocabulary** | the five signal-action names + the three semantics constants | the **Python training sim**'s own copy (`sim_core.SIGNAL_ACTION_NAMES`) | the `signal_vocabulary` block inside `ts_<name>.json` |
+| **L5 action-driven** | the **trajectory under an explicit action sequence** | the **contract mirror** (`simCoreMirror.ts`) applying the same actions at the same steps | the `ts_signalled_light_*.json` goldens |
+| **L6 forward pass** | the **discrete** policy's argmax over the action logits | the **Python training side**'s own forward pass (SB3's own policy forward + a pure-Python reference) | `discrete-policy-fixture.json` (in the frontend's fixtures folder) |
 
 **L4 (the signal-action vocabulary)** was added in Plan 073 Sprint 2. The
 traffic signal became an externally-actionable control surface: both sides
@@ -48,6 +62,42 @@ read would make the assertion vacuous. The TypeScript generator writes its
 copy into every scenario golden; the Python contract test compares it
 **item by item** (the order is part of the contract), so if the two sides
 ever disagree on the vocabulary, `pytest tests/contract/` goes red.
+
+**L5 (action-driven trajectories)** was added in Plan 074 Sprint 3 (S3a-3).
+Until then the contract only proved that the two sides agree on the **default**
+trajectory and on the action **vocabulary** — it did **not** prove that the two
+sides *interpret the five actions the same way*. L5 closes that gap: a contract
+vector may carry an explicit action sequence, and both sides apply the same
+actions at the same steps and must still produce **bit-identical** trajectories.
+
+The **step convention** is part of the contract: an action labelled
+`{"step": N}` is applied **before** the N-th simulation step, i.e. it is
+consumed by that step. In Python that is `light.apply_action(name)` immediately
+before `core.step(...)`; in the mirror it is `applySignalAction(name)`
+immediately before `mirror.step(...)`.
+
+Measured on the committed vectors (the `signalled_light_*` family, 400 steps,
+roundabout with an overridden NS-green light — the roundabout's own light is
+both-green, so its swap would be a no-op):
+
+| Vector | Action(s) | Effect on the sampled light bits |
+|---|---|---|
+| `signalled_light_baseline` | — | the reference (the axis swaps at step 300) |
+| `signalled_light_extend_green` | `extend_green` @ 10 | the swap moves 300 → **350** (5 s later) |
+| `signalled_light_shorten_red` | `shorten_red` @ 10 | the swap moves 300 → **250** (5 s earlier) |
+| `signalled_light_preempt` | `preempt` @ 10 | all-red from step 10, the phase resumes afterwards |
+| `signalled_light_preempt_boundary` | `preempt` @ 10 **and** @ 40 | two clearances, the second one landing on the boundary step — the exact case that used to wedge the light permanently (see "Sprint 2 修复波") |
+
+⇒ The action **semantics** are now verified cross-language at the trajectory
+level, not merely asserted. And the vectors are **not vacuous**: each one
+differs from the baseline golden in the sampled light bits (5 / 5 / 6 / 12
+sampled points respectively).
+
+**What L5 does NOT cover**: the *values* of the signal agent's observation.
+The browser's traffic is a lane-level sandbox and Python's is free-space NPCs,
+so the two sides compute "the queue on the north axis" from different objects.
+Only the **schema** (dimension, order, normalisation, meaning) is shared — see
+"the signal observation schema" below.
 
 The **mirror** exists because the *product* TS sim is a lane-based,
 Rapier-driven sandbox, structurally incompatible with Python's free-space
@@ -70,6 +120,11 @@ it needs a scalar-level entry point into the obs builder. See "Not covered".
 | `cross_action_overrange` | cross | The **cross-language action clip**: every action is `2.0`, outside the policy's `[-1, 1]` range. |
 | `t_junction_lights` | t_junction | The **longest signalled episode**: a parked ego that collides at step 257, sampled every 10 steps (26 samples, steps 0…250). This is the vector that makes the traffic-light phase observable at all. |
 | `roundabout_truncation` | roundabout | The **truncation** path: the episode runs to the step limit (400) and ends `truncated` with no termination reason. Its light is both-green, so the phase swap is a no-op — the vector pins the truncation semantics, not the phase. |
+| `signalled_light_baseline` | roundabout | The **signalled** reference run: the same scene, but with a plain NS-green light (the roundabout's own light is both-green, so its swap is a no-op). No action — the default phase timeline, observed over a full 400-step episode. |
+| `signalled_light_extend_green` | roundabout | `extend_green`: the swap moves 5 s later (step 300 → 350). |
+| `signalled_light_shorten_red` | roundabout | `shorten_red`: the swap moves 5 s earlier (step 300 → 250). |
+| `signalled_light_preempt` | roundabout | `preempt`: all-red for 3 s, then the interrupted phase resumes and the swap lands 30 steps later (step 330). |
+| `signalled_light_preempt_boundary` | roundabout | The **clearance-boundary** case: a second `preempt` on the very step the phase resumed (step 40). The light must come back (step 70) — the regression the Plan 073 Sprint 2 fix wave repaired, now pinned at the trajectory level. |
 
 `cross_action_overrange`'s scenario golden is **identical to
 `cross_baseline`'s** — every sample and the whole `final_state` — because
@@ -95,6 +150,8 @@ fields:
 | `actions` | The literal action list. Each entry is a pair, but **only the first element is read**: it is the acceleration command, clipped to `[-1, 1]` and scaled to 3 m/s². The steer is *not* taken from the action — both sides compute it with Pure Pursuit. |
 | `repeat` | **Optional.** Expands `actions` this many times. Absent → the sequence is `actions` itself. |
 | `max_steps` | **Optional.** The episode's step limit (Python `SimCore.max_steps`). Absent → `MAX_STEPS_DEFAULT` (200). |
+| `light_override` | **Optional.** The light to install right after the scene's `reset()`: `{"ns_green": bool, "ew_green": bool}`. It exists because the roundabout's own light is both-green ("no traffic lights there"), so its swap is a no-op; the *signalled* vectors override it with a plain NS-green light — the same override `tests/contract/test_signal_actions.py` applies. |
+| `signal_actions` | **Optional.** The external signal actions to apply: `[{"step": N, "action": "<one of the five names>"}, …]`. **The step convention:** an action labelled `"step": N` is applied **before** the N-th simulation step — it is *consumed by* that step (`light.apply_action(name)` immediately before `core.step(...)` in Python, `applySignalAction(name)` immediately before `mirror.step(...)` in TypeScript). The steps are **1-based**. |
 
 The **expansion rule**, identical on both sides, one line each:
 
@@ -176,6 +233,8 @@ the same shape — looks like this:
 | `signal_vocabulary.all_red_seconds` | The all-red clearance (s) applied by `preempt` / `force_all_red`. Compared against `sim_core.ALL_RED_SECS`. |
 | `signal_vocabulary.phase_adjust_seconds` | The phase-adjust amount (s) applied by `extend_green` (+5 s) and `shorten_red` (-5 s). Compared against `sim_core.PHASE_ADJUST_SECS`. |
 | `signal_vocabulary.max_green_seconds` | The upper bound (s) on a green phase's **remaining** time after `extend_green`. Compared against `sim_core.MAX_GREEN_SECS`. |
+| `light_override` | **Optional** — present only when the vector has one. The light the mirror actually ran with: `{"ns_green": …, "ew_green": …}`. The Python side cross-checks it against the vector's copy. |
+| `signal_actions` | **Optional** — present only when the vector has some. The signal-action sequence the mirror actually applied: `[{"step": N, "action": "…"}, …]`. **The Python side reads the sequence from here** (the golden is the single source it applies, exactly like the `signal_vocabulary` block) and cross-checks it against the vector's copy, so a golden that was not regenerated after a vector edit cannot hide the drift. |
 | `final_state.terminated` | The episode ended by a **termination** — success, collision or red light. |
 | `final_state.truncated` | The episode hit the **step limit** instead. The two flags are mutually exclusive (the limit is only reached when the episode has not terminated), and a truncated episode carries **no** termination reason: `reason` is the empty string. |
 | `final_state.reason` | The termination reason, or `""` when the episode was truncated. |
@@ -420,7 +479,45 @@ The third is a **known residual risk**, mitigated where it belongs:
   counts per axis pair.
 
 Nothing above is *enforced* by the cross-language contract: it compares the
-**vocabulary and the constants**, not the resulting timelines.
+**vocabulary and the constants**, not the resulting timelines. (The
+**mirror's** action semantics *are* asserted now — see the next section.)
+
+### The action semantics — asserted against the mirror (Plan 074, Sprint 3)
+
+The section above is about the **browser's** signal (`tick.ts` +
+`RLController`), whose 3 s yellow phase per light makes its axis-green
+projection differ from Python's at the transitions. That difference is
+structural and still stands.
+
+What **is** asserted cross-language is the **contract mirror**
+(`simCoreMirror.ts`) against the Python training sim: the five
+`signalled_light_*` vectors apply the **same action at the same step** on
+both sides, and the trajectories must still be bit-identical. The
+per-action semantics are therefore no longer "gated by each side's own
+unit tests only" — the contract gates them too:
+
+| Vector | Action | What the golden pins |
+|---|---|---|
+| `signalled_light_extend_green` | `extend_green` on step 10 | the swap moves from step 300 to step 350 |
+| `signalled_light_shorten_red` | `shorten_red` on step 10 | the swap moves from step 300 to step 250 |
+| `signalled_light_preempt` | `preempt` on step 10 | all-red on steps 10…39, the phase resumes inside step 40, the swap lands on step 330 |
+| `signalled_light_preempt_boundary` | `preempt` on steps 10 and 40 | the second clearance does **not** wedge the light: the phase resumes inside step 70, the swap lands on step 360 |
+
+Two limits of that assertion are worth stating plainly:
+
+1. **The browser is not in it.** The vectors drive the *mirror*, not the
+   product's signal — the browser's yellow phase is still a separate,
+   unaligned model.
+2. **The sample stride is 10 steps.** A phase change is observed at the
+   first sample after it, so an action applied one step later than the
+   contract says is visible only when the change lands on a sample
+   boundary. The `preempt` vectors are therefore scheduled on multiples
+   of 10 — otherwise the 30-step all-red window would hide a ±1 step
+   error. A ±1 step error in `extend_green` / `shorten_red` is invisible
+   at **any** stride: that is not a gap in the vectors but a property of
+   the model, because the phase clock is continuous — the swap is "5 s
+   later" whatever the clock happened to be, and a one-step shift of the
+   adjustment cancels out.
 
 ### Sprint 2 修复波 — 审阅中发现并修掉的信号灯永久卡死
 
@@ -459,6 +556,38 @@ Sprint 2 的交付审阅里复现了一个**真实缺陷**：两侧的「清空�
 Sprint 3 的策略是**照着这个动作空间训练**的，事后再改语义就作废了训练结果。
 上限沿用项目既有的 `MAX_GREEN_SECS` 约定（`ActuatedController` 同款），
 并作为第三个常量进入 L4 词汇断言。
+
+### The signal observation schema — schema only, never values (Plan 074)
+
+The traffic-signal agent has its **own** observation (the ego's 14-dim
+observation is a different agent's and is untouched). The shared schema is
+**six** dimensions:
+
+| idx | meaning | normalisation | browser side | Python side |
+|---|---|---|---|---|
+| 0 | north-south queue length | `min(q / MAX_QUEUE, 1)` | `getQueueLength(nsLight, network)` | `core.queue_length("ns")` |
+| 1 | east-west queue length | `min(q / MAX_QUEUE, 1)` | `getQueueLength(ewLight, network)` | `core.queue_length("ew")` |
+| 2 | north-south has right of way | 0 / 1 | the light's phase ∈ {Green, Yellow} | `light.ns_green` |
+| 3 | east-west has right of way | 0 / 1 | the light's phase ∈ {Green, Yellow} | `light.ew_green` |
+| 4 | all-red (neither axis may go) | 0 / 1 | both lights outside {Green, Yellow} | `not ns_green and not ew_green` |
+| 5 | current phase clock | the *elapsed* fraction on the Python side, the *remaining* fraction in the browser — the two are complements | `light.phaseRemaining / cycleSeconds` | `light.cycle_timer / cycle_duration` |
+
+**Why the values are NOT compared.** The two sides' traffic models are
+different objects: the browser's vehicles live on lanes (`s`, `roadId`,
+`stopLineS`) and Python's are free-space NPCs. "The queue on the north axis"
+has the same *meaning* on both sides and is computed from *different* things —
+comparing the numbers would be comparing two different quantities and would
+either be vacuous or produce false alarms. Only the **schema** is shared.
+
+**Why the schema is still worth pinning.** The dimension count, the order and
+the normalisation are exactly the things a policy transfer depends on: if the
+browser's observation were built in a different order, the exported weights
+would silently consume the wrong inputs. Pinning the schema makes that a
+compile-time/assertion failure instead of a mysteriously bad policy.
+
+⇒ The observation schema is asserted **inside each side** (each side has its
+own test); the *cross-language* assertion on it is deliberately **schema-only**
+and is recorded in Plan 074 §2 D1.
 
 ### The rest of the uncovered ground
 
@@ -520,13 +649,63 @@ cd ../TraffSim3D-backend
 `npm run test:contract` exits non-zero naming the stale files, and reports
 goldens that no vector produces. It never rewrites anything.
 
+## The discrete forward-pass contract (L5)
+
+The browser could only run a **continuous 2-dim** action policy. A
+traffic-signal agent has a **discrete 5-way** action, and SB3's
+`CategoricalPolicy` has **no** `log_std` — it produces action *logits*.
+So there are two halves:
+
+1. **The export** (`app/apps/rl/weights.py`): `log_std` is optional — it
+   exists only for a continuous (Box) policy — and the export carries an
+   explicit `action_space` field (`"discrete"` / `"continuous"`) so the
+   consumer knows which forward pass to use. The continuous export is
+   otherwise unchanged, so the fixtures exported before Plan 074 keep
+   working.
+2. **The forward pass** (`src/infrastructure/rl/mlpInference.ts`):
+   `mlpForwardDiscrete(obs, weights)` runs the same layer layout
+   (`policy_net.0 → Tanh → policy_net.2 → Tanh → action_net`) and takes
+   the **argmax** of the logits. No softmax: argmax is monotonically
+   equivalent for the decision and numerically steadier.
+
+The **gate** is a committed fixture. The backend generates it:
+
+```sh
+cd TraffSim3D-backend
+.\.venv\Scripts\python.exe scripts\gen_discrete_policy_fixture.py
+```
+
+It builds a real SB3 PPO with a `Discrete(5)` action space, exports it
+through `export_weights` (the path under test — the export must succeed
+*without* a `log_std`), and computes the expected action for a list of
+observations twice: once with **SB3's own policy forward** and once with
+a **pure-Python reference** on the exported weights. Both must agree, and
+the fixture carries the result. The generation is deterministic (a fixed
+seed), so re-running the script is a no-op in git.
+
+The fixture lands in
+`TraffSim3D-frontend/src/infrastructure/rl/fixtures/discrete-policy-fixture.json`
+(next to the Plan 049 MLP fixture). The frontend's
+`mlpInference.discrete.spec.ts` asserts that `mlpForwardDiscrete` returns
+the committed actions, and the backend's `tests/test_rl_discrete_forward.py`
+asserts the Python half.
+
+One deliberate detail: the generator scales the action layer by a positive
+constant before saving. SB3 initialises it with a gain of 0.01, so an
+*untrained* policy's logits are nearly uniform — the top-2 margin of a
+random observation would be ~1e-3, far too small for a float32 (SB3) vs
+float64 (Python / TypeScript) comparison to mean anything. Scaling by a
+positive constant leaves the **argmax unchanged** and multiplies the
+margin by the same factor, so the fixture stays a sharp test.
+
 ## Cross-language differences (status)
 
 | # | Dimension | Status |
 |---|---|---|
 | 1 | Traffic-light phase model | ⚠️ mitigated — the observation pair stays one-hot; the 3 s yellow shifts the flip point by 3 s. The phase **duration** is **partially observed**: the golden samples carry the light bits, so a drift is caught if the first flip lands inside the sampled window (≤ 25.0 s) — see above |
 | 1b | Signal-action **vocabulary** | ✅ aligned and **asserted cross-language** (Plan 073 Sprint 2, L4): the five names + the three semantics constants are compared item by item |
-| 1c | Signal-action **semantics** / phase timeline | ⚠️ **not** asserted cross-language — the browser has a 3 s yellow per light and Python has none, so the axis-green projections differ at the transitions. Each side's semantics are pinned by its own unit tests — see "The signal phase timeline — NOT covered" |
+| 1c | Signal-action **semantics** / phase timeline | ⚠️ **partially** asserted cross-language (Plan 074 Sprint 3): the **mirror's** per-action semantics are now compared at the trajectory level (the `signalled_light_*` vectors apply the same action at the same step on both sides and must stay bit-identical). The **browser's** phase timeline is still **not** asserted — it has a 3 s yellow per light and Python has none, so the axis-green projections differ at the transitions |
+| 1d | Signal agent's **observation values** | ⚠️ **schema only, never values** (Plan 074 D1): the two sides' traffic models are different objects, so "the queue on an axis" is the same *meaning* computed from different things. The schema (dims, order, normalisation) is shared and pinned; the numbers are not compared — see "the signal observation schema" |
 | 2 | `obs[6:8]` semantics | ✅ aligned (Plan 069) |
 | 3 | Pure Pursuit denominator | ❌ not covered by the contract vectors (see above) |
 | 4 | Steer clamp | ❌ not covered by the contract vectors (see above) |
@@ -549,6 +728,7 @@ tests/contract/
     ├── ts_cross_action_overrange.json
     ├── ts_t_junction_lights.json
     ├── ts_roundabout_truncation.json
+    ├── ts_signalled_light_*.json     # the action-driven vectors (Plan 074)
     ├── ts_kernel_*.json              # kernel-level goldens — COMMITTED
     └── python_*.json                 # regenerated per run — gitignored
 ```
