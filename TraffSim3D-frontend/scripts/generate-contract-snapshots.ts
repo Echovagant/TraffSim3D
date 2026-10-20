@@ -23,7 +23,13 @@ import { fileURLToPath } from 'node:url'
 import { runEpisode, type SceneKind } from '../src/application/services/simCoreMirror'
 import { tick } from '../src/application/services/tick'
 import { buildTestNetwork } from '../src/__fixtures__/testNetwork'
-import { PYTHON_SIM } from '../src/shared/constants/simulation'
+import {
+  ALL_RED_SECS,
+  MAX_GREEN_SECS,
+  PHASE_ADJUST_SECS,
+  PYTHON_SIM,
+  SIGNAL_ACTION_NAMES,
+} from '../src/shared/constants/simulation'
 import type { TickContext } from '../src/application/services/tick'
 
 interface Vector {
@@ -167,6 +173,17 @@ const main = (): void => {
       name: v.name,
       scene_kind: v.scene_kind,
       ego_id: v.ego_id,
+      // The shared signal-action vocabulary (Plan 073 Sprint 2). The Python
+      // side compares this block against its own `sim_core` constants, so a
+      // disagreement between the two sides' vocabularies turns the contract
+      // red. Each side owns its own copy of the list — a file both sides
+      // read would make the assertion vacuous.
+      signal_vocabulary: {
+        actions: [...SIGNAL_ACTION_NAMES],
+        all_red_seconds: ALL_RED_SECS,
+        phase_adjust_seconds: PHASE_ADJUST_SECS,
+        max_green_seconds: MAX_GREEN_SECS,
+      },
       final_state: {
         terminated: episode.terminated,
         truncated: episode.truncated,

@@ -9,6 +9,17 @@
 > 下文「What the contract does NOT cover」一节已按**实测**的变异盲区重写：
 > 信号相位时长在两侧都是**未被观测**的。修订前的版本只列了
 > `MAX_STEER` / `LOOKAHEAD_DISTANCE` 两个盲点。
+>
+> **状态（2026-10-21，Plan 073 Sprint 2 / A2a）：信号灯成为可被外部动作驱动的控制面。**
+> 两侧各持一份**自己拥有的**动作词表（五个动作名 + 两个语义常量），
+> 词表被写进 golden，由 Python 契约测试**逐项**比对 —— 这是本 Sprint 的
+> 跨语言门禁。
+> **注意：本 Sprint 没有引入「跨语言相位序列」断言**（原因见
+> 「What the contract does NOT cover」新增的一节），
+> 因此**每个动作的语义只由各自一侧的单元测试把关**。
+> 实测（2026-10-21）：`pytest tests/contract/` → **40 passed / 0 failed / 0 skipped**
+> （Sprint 2 交付 35；审阅中发现并修掉一个**信号灯永久卡死**的缺陷后 +5，见
+> 「Sprint 2 修复波」一节）。
 
 ## Why this exists
 
@@ -24,6 +35,19 @@ by a user noticing a bad drive.
 |---|---|---|---|
 | **L1 kernel** | ego speed integration | the **product replay path** (`tick.ts`) | `ts_kernel_<name>.json` |
 | **L3 scenario** | full SimCore semantics — termination rules, reason strings, trajectory | the **contract mirror** (`simCoreMirror.ts`) | `ts_<name>.json` |
+| **L4 vocabulary** | the five signal-action names + the three semantics constants | the **Python training sim**'s own copy (`sim_core.SIGNAL_ACTION_NAMES`) | the `signal_vocabulary` block inside `ts_<name>.json` |
+
+**L4 (the signal-action vocabulary)** was added in Plan 073 Sprint 2. The
+traffic signal became an externally-actionable control surface: both sides
+accept the same five action names, so a policy trained in Python can drive
+the browser's signal. Each side owns **its own copy** of the list —
+`SIGNAL_ACTION_NAMES` in
+`TraffSim3D-frontend/src/shared/constants/simulation.ts` and
+`sim_core.SIGNAL_ACTION_NAMES` in Python — on purpose: a file both sides
+read would make the assertion vacuous. The TypeScript generator writes its
+copy into every scenario golden; the Python contract test compares it
+**item by item** (the order is part of the contract), so if the two sides
+ever disagree on the vocabulary, `pytest tests/contract/` goes red.
 
 The **mirror** exists because the *product* TS sim is a lane-based,
 Rapier-driven sandbox, structurally incompatible with Python's free-space
@@ -111,6 +135,18 @@ the same shape — looks like this:
   "name": "t_junction_lights",
   "scene_kind": "t_junction",
   "ego_id": "v-1",
+  "signal_vocabulary": {
+    "actions": [
+      "extend_green",
+      "shorten_red",
+      "preempt",
+      "force_all_red",
+      "no_op"
+    ],
+    "all_red_seconds": 3,
+    "phase_adjust_seconds": 5,
+    "max_green_seconds": 60
+  },
   "final_state": {
     "terminated": true,
     "truncated": false,
@@ -136,6 +172,10 @@ the same shape — looks like this:
 
 | Field | Meaning |
 |---|---|
+| `signal_vocabulary.actions` | The five signal-action names, **in contract order**. The Python side compares this list item by item against `sim_core.SIGNAL_ACTION_NAMES`. |
+| `signal_vocabulary.all_red_seconds` | The all-red clearance (s) applied by `preempt` / `force_all_red`. Compared against `sim_core.ALL_RED_SECS`. |
+| `signal_vocabulary.phase_adjust_seconds` | The phase-adjust amount (s) applied by `extend_green` (+5 s) and `shorten_red` (-5 s). Compared against `sim_core.PHASE_ADJUST_SECS`. |
+| `signal_vocabulary.max_green_seconds` | The upper bound (s) on a green phase's **remaining** time after `extend_green`. Compared against `sim_core.MAX_GREEN_SECS`. |
 | `final_state.terminated` | The episode ended by a **termination** — success, collision or red light. |
 | `final_state.truncated` | The episode hit the **step limit** instead. The two flags are mutually exclusive (the limit is only reached when the episode has not terminated), and a truncated episode carries **no** termination reason: `reason` is the empty string. |
 | `final_state.reason` | The termination reason, or `""` when the episode was truncated. |
@@ -322,6 +362,104 @@ runs the `t_junction` episode at 30 s / 25.5 s / 25.0 s and checks that the
    the light is now compared directly instead of only through its side
    effect on the termination reason.
 
+### The signal phase timeline — NOT covered (Plan 073 Sprint 2)
+
+Sprint 2 made the signal an externally-actionable control surface on both
+sides and added the **vocabulary** assertion (L4, above). It did **not**
+add a cross-language **phase timeline** assertion — and it cannot: the two
+models of "the signal" are structurally different.
+
+| | browser (`tick.ts` + `RLController`) | Python (`sim_core.TrafficLight`) |
+|---|---|---|
+| unit of control | **one light** — the two axes of an intersection are separate entities | **one intersection** — a single object with two axis bits |
+| phases | 10-value enum: green / yellow (3 s) / red / … / allRed | two bits: which axis is green — **no yellow phase** |
+| "all red" | the `AllRed` phase, 3 s | `(ns_green=False, ew_green=False)` for 3 s |
+| phase clock | `phaseRemaining` per light, decremented by the frame delta | one `cycle_timer` for the axis pair |
+
+⇒ The **axis-green projections necessarily differ at the transitions**: the
+browser goes green → yellow → red over 3 s, Python goes green → red in one
+step. A timeline assertion would compare two different things.
+
+⇒ What the two sides **do** agree on **is** asserted: the **vocabulary**
+(L4). The **per-action semantics** are gated by each side's own unit
+tests:
+
+| Side | Test module | What it pins |
+|---|---|---|
+| TypeScript | `src/application/services/controllers/RLController.spec.ts` | each of the five actions, the "applyAction only queues" rule, the queue's single consumption, and the action-source seam |
+| TypeScript | `src/application/services/simCoreMirror.spec.ts` | the mirror's port of the Python light's action semantics |
+| Python | `tests/contract/test_signal_actions.py` | each of the five actions on the Python light, the default cycle, and the all-red clearance |
+
+Three semantic differences are known and deliberate:
+
+1. **`shorten_red`'s floor.** The browser floors the red phase at
+   `MIN_RED_SECS` (10 s — the `ActuatedController`'s existing convention).
+   Python has no minimum-red convention, so its `shorten_red` always takes
+   the full 5 s off (capped only by the cycle duration: if less than 5 s
+   remain, the swap happens on the next step).
+2. **What "shorten the red" means.** The browser's two axis-lights are
+   independent entities, so shortening one light's red does not touch the
+   other axis. Python has a single phase clock, so `extend_green` (delay
+   the swap by 5 s) also lengthens the red axis's wait, and `shorten_red`
+   (advance the swap by 5 s) also shortens the green axis's remaining.
+3. **The max-green bound is a *remaining* bound, not a wall-clock bound.**
+   Both sides cap the green's **remaining** time at `MAX_GREEN_SECS` (60 s)
+   — the browser's existing convention, and the constant the L4 assertion
+   compares. It does **not** bound how long the green lasts in wall-clock
+   terms: a policy that applies `extend_green` on *every* decision keeps
+   the remaining topped up and can hold one axis green indefinitely.
+
+The first two are consequences of the two models' shapes, not of the
+vocabulary; closing them means aligning the two signal models — later work.
+The third is a **known residual risk**, mitigated where it belongs:
+
+- the mitigation for a degenerate policy is the **reward function** — the
+  cross-axis delay has to be in it (Plan 073 Sprint 3 designs it);
+- a hard wall-clock bound on the green needs the two phase models aligned
+  (Plan 073 Sprint 5), because the browser counts per light and Python
+  counts per axis pair.
+
+Nothing above is *enforced* by the cross-language contract: it compares the
+**vocabulary and the constants**, not the resulting timelines.
+
+### Sprint 2 修复波 — 审阅中发现并修掉的信号灯永久卡死
+
+Sprint 2 的交付审阅里复现了一个**真实缺陷**：两侧的「清空结束」边界上，
+一次 `preempt` 会把**恢复点**记成全红状态，之后该路口的一个轴**永远不再变绿**。
+
+**实测复现**（Python，`roundabout` 场景 400 步）：
+
+| 施加 preempt 的步 | 结果 |
+|---|---|
+| 仅第 1 步 | 第 31 步恢复绿灯 ✅ |
+| 第 1 步 + 第 20 步（清空中途） | 第 50 步恢复绿灯 ✅（清空被延长，恢复点保留） |
+| 第 1 步 + **第 31 步（清空刚结束的那一步）** | **120 步内从未变绿 ❌ 永久卡死** |
+
+**根因**：清空在第 30 步结束，但灯的轴位要等到第 31 步的 step 内部才恢复成绿。
+在那个窗口里「是否正在清空」的判据（Python 的 `all_red_steps == 0`、浏览器的
+`simTime >= allRedUntil`）都判定为「不在清空」，于是新的 `preempt` 把恢复点
+覆盖成了全红状态。
+
+**修法**：两侧都改成**先恢复、后消费动作**——清空结束时先把相位恢复回原状，
+再消费本步的动作；并且恢复点**只记录真的有绿灯轴的状态**。两侧语义对称：
+
+- Python：`sim_core.py` 的 step 块把 `resume_state` 的恢复提到 `consume_actions()` **之前**；
+- TS 镜像：`simCoreMirror.ts` 逐句对应；
+- 浏览器：`RLController.decide()` 的「清空结束」恢复提到动作应用**之前**，
+  并且「是否正在清空」改用 `allRedUntil === -Infinity` 判定（与 Python 的
+  恢复先行顺序一致）。
+
+**验证**：两侧各加了回归测试；并做了**变异校验**——把浏览器的修复回退，
+新测试立刻失败（`expected 'allRed' to be 'green'`，正是卡死的症状），
+还原后重新变绿。默认行为**逐位不变**：5 个 golden 全部是**纯插入**
+（12 增 0 删），只有 `signal_vocabulary` 块多了一个常量。
+
+**同时做了一个决策**：`extend_green` 加 `MAX_GREEN_SECS`（60 s）上限。
+不加的话，一个策略可以在训练里学会「永远延长绿灯」，把对向饿死——而
+Sprint 3 的策略是**照着这个动作空间训练**的，事后再改语义就作废了训练结果。
+上限沿用项目既有的 `MAX_GREEN_SECS` 约定（`ActuatedController` 同款），
+并作为第三个常量进入 L4 词汇断言。
+
 ### The rest of the uncovered ground
 
 - **The product's full trajectory** — difference #6 (free space vs lane arc
@@ -387,6 +525,8 @@ goldens that no vector produces. It never rewrites anything.
 | # | Dimension | Status |
 |---|---|---|
 | 1 | Traffic-light phase model | ⚠️ mitigated — the observation pair stays one-hot; the 3 s yellow shifts the flip point by 3 s. The phase **duration** is **partially observed**: the golden samples carry the light bits, so a drift is caught if the first flip lands inside the sampled window (≤ 25.0 s) — see above |
+| 1b | Signal-action **vocabulary** | ✅ aligned and **asserted cross-language** (Plan 073 Sprint 2, L4): the five names + the three semantics constants are compared item by item |
+| 1c | Signal-action **semantics** / phase timeline | ⚠️ **not** asserted cross-language — the browser has a 3 s yellow per light and Python has none, so the axis-green projections differ at the transitions. Each side's semantics are pinned by its own unit tests — see "The signal phase timeline — NOT covered" |
 | 2 | `obs[6:8]` semantics | ✅ aligned (Plan 069) |
 | 3 | Pure Pursuit denominator | ❌ not covered by the contract vectors (see above) |
 | 4 | Steer clamp | ❌ not covered by the contract vectors (see above) |
@@ -402,6 +542,7 @@ tests/contract/
 ├── test_cross_lang_consistency.py    # the comparison (never skips) + the snapshot writer
 ├── test_python_snapshot.py           # refreshes python_<name>.json (same schema as above)
 ├── test_light_phase.py               # the phase-flip boundary, pinned on the Python side
+├── test_signal_actions.py            # the five signal actions, pinned on the Python side
 └── snapshots/
     ├── ts_cross_baseline.json        # TS goldens — COMMITTED
     ├── ts_corridor_baseline.json
@@ -411,6 +552,10 @@ tests/contract/
     ├── ts_kernel_*.json              # kernel-level goldens — COMMITTED
     └── python_*.json                 # regenerated per run — gitignored
 ```
+
+Each `ts_<name>.json` carries the `signal_vocabulary` block (the five
+action names + the three semantics constants) — that block is the **L4**
+cross-language assertion.
 
 `python_<name>.json` has the **same schema** as the `ts_<name>.json` goldens
 (light bits and `final_state` included). There is a single writer for it —
@@ -423,6 +568,10 @@ The TypeScript side lives in
 kernel), `TraffSim3D-frontend/src/application/services/simCoreMirror.ts`
 (the contract mirror) and
 `TraffSim3D-frontend/scripts/generate-contract-snapshots.ts` (the generator).
+The **TypeScript copy of the action vocabulary** lives in
+`TraffSim3D-frontend/src/shared/constants/simulation.ts`
+(`SIGNAL_ACTION_NAMES`, `ALL_RED_SECS`, `PHASE_ADJUST_SECS`); the
+**Python copy** lives in `app/apps/rl/sim_core.py`.
 
 The design and the full verification evidence are in
 the cross-language contract (ADR-008); the task-by-task execution

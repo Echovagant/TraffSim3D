@@ -187,6 +187,49 @@ export const YELLOW_CLEAR_SECS = 3
 /** Default controller kind at app startup. */
 export const DEFAULT_CONTROLLER_KIND = 'actuated' as const
 
+// ===== Plan 073 Sprint 2 — the shared signal-action vocabulary =====
+//
+// The five action names are the **externally-actionable control surface**
+// of the traffic signal, defined in plans/legacy/007-m2-signal-controller.md
+// §2. The frontend's `RLController` consumes them and the Python training
+// sim (`app/apps/rl/sim_core.py`) accepts the same names, so a policy
+// trained in Python can drive the browser's signal.
+//
+// The two sides own **their own copy** of this list — there is no shared
+// file both sides read, because a file both sides read would make the
+// cross-language assertion vacuous. The contract compares the two copies
+// item by item (`tests/contract/test_cross_lang_consistency.py`), so if
+// they ever disagree the contract goes red.
+//
+// The ORDER matters: the contract compares the lists positionally.
+
+/**
+ * The five signal actions, in contract order. Mirrors Python's
+ * `sim_core.SIGNAL_ACTION_NAMES` exactly (same names, same order).
+ */
+export const SIGNAL_ACTION_NAMES = [
+  'extend_green',
+  'shorten_red',
+  'preempt',
+  'force_all_red',
+  'no_op',
+] as const
+
+/** One of the five signal action names. */
+export type SignalActionName = (typeof SIGNAL_ACTION_NAMES)[number]
+
+/**
+ * All-red clearance (s) applied by `preempt` / `force_all_red`.
+ * Mirrors Python's `sim_core.ALL_RED_SECS`.
+ */
+export const ALL_RED_SECS = 3
+
+/**
+ * Phase-adjust amount (s) applied by `extend_green` (+5 s) and
+ * `shorten_red` (-5 s). Mirrors Python's `sim_core.PHASE_ADJUST_SECS`.
+ */
+export const PHASE_ADJUST_SECS = 5
+
 // ===== M2-C — sensor + export constants =====
 //
 // 16-line default per 008 §1.1. 32/64 deferred to M2-D.

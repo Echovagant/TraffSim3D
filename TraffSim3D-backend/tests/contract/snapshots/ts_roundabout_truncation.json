@@ -2,6 +2,18 @@
   "name": "roundabout_truncation",
   "scene_kind": "roundabout",
   "ego_id": "v-1",
+  "signal_vocabulary": {
+    "actions": [
+      "extend_green",
+      "shorten_red",
+      "preempt",
+      "force_all_red",
+      "no_op"
+    ],
+    "all_red_seconds": 3,
+    "phase_adjust_seconds": 5,
+    "max_green_seconds": 60
+  },
   "final_state": {
     "terminated": false,
     "truncated": true,

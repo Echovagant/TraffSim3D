@@ -41,6 +41,50 @@ LOOKAHEAD_DISTANCE = 8.0
 MAX_STEER = 0.4         # rad
 DT = 0.1                # seconds per sim step (matches frontend 10Hz)
 
+# ===== Plan 073 Sprint 2 (A2a): the shared signal-action vocabulary =====
+#
+# The five action names are the externally-actionable control surface of
+# the traffic signal (plans/legacy/007-m2-signal-controller.md §2). The
+# frontend's `RLController` consumes the same names, so a policy trained
+# here can drive the browser's signal.
+#
+# Each side owns ITS OWN copy of this list on purpose: a file both sides
+# read would make the cross-language assertion vacuous. The contract
+# compares the two copies item by item
+# (tests/contract/test_cross_lang_consistency.py) — if they ever disagree,
+# the contract goes red.
+#
+# The ORDER matters: the contract compares the lists positionally.
+
+SIGNAL_ACTION_NAMES = (
+    "extend_green",
+    "shorten_red",
+    "preempt",
+    "force_all_red",
+    "no_op",
+)
+
+# All-red clearance (s) applied by `preempt` / `force_all_red`.
+# Mirrors `ALL_RED_SECS` in TraffSim3D-frontend/src/shared/constants/simulation.ts.
+ALL_RED_SECS = 3.0
+# Phase-adjust amount (s) applied by `extend_green` (+5 s) and
+# `shorten_red` (-5 s). Mirrors `PHASE_ADJUST_SECS` on the TS side.
+PHASE_ADJUST_SECS = 5.0
+# Upper bound (s) on the green phase's **remaining** time after
+# `extend_green` — the project's existing convention (the frontend's
+# `ActuatedController` caps the green the same way). Mirrors
+# `MAX_GREEN_SECS` in
+# TraffSim3D-frontend/src/shared/constants/simulation.ts.
+#
+# It bounds the remaining time, NOT the green's wall-clock duration:
+# a policy that applies `extend_green` on *every* decision keeps the
+# remaining topped up and can still hold one axis green indefinitely.
+# The mitigation is the reward function (the cross-axis delay must be
+# in it) — see `docs/contracts/sim-snapshot.md`.
+MAX_GREEN_SECS = 60.0
+# The all-red clearance expressed in sim steps (3 s at the contract's 10 Hz).
+ALL_RED_STEPS = int(round(ALL_RED_SECS / DT))
+
 
 @dataclass
 class Vehicle:
@@ -58,6 +102,88 @@ class TrafficLight:
     ew_green: bool = False
     cycle_timer: float = 0.0
     cycle_duration: float = 30.0  # seconds per phase
+    # --- Plan 073 Sprint 2 (A2a): the externally-actionable control surface ---
+    # Actions queued by `apply_action`; consumed by the next `SimCore.step()`.
+    pending_actions: list[str] = field(default_factory=list)
+    # Steps of all-red clearance left (0 = the normal cycle runs).
+    all_red_steps: int = 0
+    # The (ns_green, ew_green) pair to restore once the all-red ends
+    # (None = no pending resume).
+    resume_state: tuple[bool, bool] | None = None
+
+    def apply_action(self, action: str) -> None:
+        """Queue an external signal action.
+
+        Synchronous, and it does NOT change the light's phase: the action is
+        consumed by the next `SimCore.step()`. This mirrors the frontend's
+        `RLController.applyAction` (007 §2).
+
+        An unknown name is rejected loudly — the vocabulary is a contract,
+        not a free-form string.
+        """
+        if action not in SIGNAL_ACTION_NAMES:
+            raise ValueError(
+                f"unknown signal action {action!r}; expected one of {SIGNAL_ACTION_NAMES}"
+            )
+        self.pending_actions.append(action)
+
+    def consume_actions(self) -> None:
+        """Apply every queued action, in order.
+
+        Semantics (Plan 073 Sprint 2), expressed in this light's own model —
+        a single phase clock, so "the swap" is the one event both axes
+        hang off:
+
+        - `extend_green` — the green axis gets 5 s more: the swap is
+          **delayed** by `PHASE_ADJUST_SECS`. The timer may go negative,
+          which is exactly how "the green runs longer than
+          `cycle_duration`" is expressed — bounded by
+          `MAX_GREEN_SECS`, i.e. the green's *remaining* time never
+          exceeds it. (Not a wall-clock bound: a policy that extends
+          on every decision can still hold the axis green.)
+        - `shorten_red` — the red axis waits 5 s less: the swap is
+          **advanced** by `PHASE_ADJUST_SECS` (capped at `cycle_duration`,
+          so the swap happens on the next step at the latest).
+        - `preempt` / `force_all_red` — neither axis is green for
+          `ALL_RED_SECS` (the phase clock is frozen, so the interrupted
+          phase resumes where it left off). The resume point is only
+          recorded for a light that actually has a green axis: an
+          all-red resume point would wedge the light permanently.
+        - `no_op` — nothing.
+        """
+        if not self.pending_actions:
+            return
+        actions = self.pending_actions
+        self.pending_actions = []
+        for action in actions:
+            if action == "extend_green":
+                # The green may grow by 5 s, but never past
+                # `MAX_GREEN_SECS`. The floor on the elapsed clock is
+                # `cycle_duration - MAX_GREEN_SECS`, i.e. the remaining
+                # green is at most `MAX_GREEN_SECS`. (A bound on the
+                # remaining, not on the wall-clock duration.)
+                self.cycle_timer = max(
+                    self.cycle_timer - PHASE_ADJUST_SECS,
+                    self.cycle_duration - MAX_GREEN_SECS,
+                )
+            elif action == "shorten_red":
+                self.cycle_timer = min(
+                    self.cycle_timer + PHASE_ADJUST_SECS, self.cycle_duration
+                )
+            elif action in ("preempt", "force_all_red"):
+                if self.all_red_steps == 0 and (
+                    self.ns_green or self.ew_green
+                ):
+                    # Not already clearing, and the light has a green
+                    # axis: remember the phase to resume. An all-red
+                    # resume point would wedge the light permanently
+                    # (it would resume into "no axis is green" and never
+                    # recover).
+                    self.resume_state = (self.ns_green, self.ew_green)
+                self.all_red_steps = ALL_RED_STEPS
+                self.ns_green = False
+                self.ew_green = False
+            # "no_op" — nothing.
 
 
 @dataclass
@@ -254,12 +380,30 @@ class SimCore:
                     npc.z = -npc.z * 0.8
 
         # 4) Traffic light cycle
-        self.light.cycle_timer += DT
-        if self.light.cycle_timer >= self.light.cycle_duration:
-            self.light.cycle_timer = 0.0
-            self.light.ns_green, self.light.ew_green = (
-                self.light.ew_green, self.light.ns_green,
-            )
+        # The clearance that ended with the previous step resumes FIRST,
+        # so the actions consumed below observe the resumed phase and not
+        # the all-red state the light was left in. Without this order a
+        # preempt landing on that step would overwrite the resume point
+        # with (False, False) and the light would never go green again.
+        if self.light.all_red_steps == 0 and self.light.resume_state is not None:
+            self.light.ns_green, self.light.ew_green = self.light.resume_state
+            self.light.resume_state = None
+        self.light.consume_actions()
+        if self.light.all_red_steps > 0:
+            # All-red clearance (Plan 073 Sprint 2): neither axis is green
+            # and the phase clock is frozen, so the interrupted phase
+            # resumes where it left off.
+            self.light.ns_green = False
+            self.light.ew_green = False
+            self.light.all_red_steps -= 1
+        else:
+            self.light.cycle_timer += DT
+            if self.light.cycle_timer >= self.light.cycle_duration:
+                self.light.cycle_timer = 0.0
+                self.light.ns_green, self.light.ew_green = (
+                    self.light.ew_green,
+                    self.light.ns_green,
+                )
 
         self.sim_time += DT
         self.step_count += 1

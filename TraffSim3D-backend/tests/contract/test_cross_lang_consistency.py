@@ -29,7 +29,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from app.apps.rl.sim_core import MAX_STEPS_DEFAULT, SimCore
+from app.apps.rl.sim_core import (
+    ALL_RED_SECS,
+    MAX_GREEN_SECS,
+    MAX_STEPS_DEFAULT,
+    PHASE_ADJUST_SECS,
+    SIGNAL_ACTION_NAMES,
+    SimCore,
+)
 
 CONTRACT_DIR = Path(__file__).parent
 VECTOR_PATH = CONTRACT_DIR / "test_vector.json"
@@ -218,6 +225,59 @@ def test_contract_snapshots_are_present() -> None:
             if not p.exists():
                 missing.append(p.name)
     assert not missing, "missing TS contract snapshots: " + ", ".join(missing) + ". " + _REGEN_HINT
+
+
+@pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])
+def test_signal_action_vocabulary_matches_the_typescript_golden(vector_name: str) -> None:
+    """Plan 073 Sprint 2 (D4): the two sides speak the same action language.
+
+    The TypeScript side writes its copy of the five action names and the two
+    semantics constants into every scenario golden; this test compares them
+    against Python's own `sim_core` copy, **item by item** — the order is
+    part of the contract, not just the membership.
+
+    Each side owns its own copy on purpose: a file both sides read would
+    make this assertion vacuous.
+
+    What this does NOT assert: the per-action *semantics*. The browser's
+    signal has a 3 s yellow phase per light and Python's has none, so the
+    two phase timelines cannot be compared (see
+    `docs/contracts/sim-snapshot.md`, "What the contract does NOT cover").
+    The semantics are gated by each side's own unit tests.
+    """
+    v = _vector(vector_name)
+    ts = _require_snapshot(SNAPSHOT_DIR / f"ts_{v['name']}.json")
+    vocab = ts.get("signal_vocabulary")
+    assert vocab is not None, (
+        f"{v['name']}: the TS golden carries no 'signal_vocabulary' block. "
+        f"Regenerate it with: cd ../TraffSim3D-frontend && npm run contract:gen"
+    )
+
+    ts_actions = list(vocab["actions"])
+    assert ts_actions == list(SIGNAL_ACTION_NAMES), (
+        f"{v['name']}: signal-action vocabulary mismatch "
+        f"(typescript={ts_actions}, python={list(SIGNAL_ACTION_NAMES)})"
+    )
+    assert (
+        len(ts_actions) == 5
+    ), f"{v['name']}: expected the five signal actions, got {len(ts_actions)}"
+
+    ts_all_red = vocab["all_red_seconds"]
+    assert ts_all_red == ALL_RED_SECS, (
+        f"{v['name']}: all-red clearance mismatch "
+        f"(typescript={ts_all_red}, python={ALL_RED_SECS})"
+    )
+    ts_adjust = vocab["phase_adjust_seconds"]
+    assert ts_adjust == PHASE_ADJUST_SECS, (
+        f"{v['name']}: phase-adjust amount mismatch "
+        f"(typescript={ts_adjust}, python={PHASE_ADJUST_SECS})"
+    )
+
+    ts_max_green = vocab["max_green_seconds"]
+    assert ts_max_green == MAX_GREEN_SECS, (
+        f"{v['name']}: max-green bound mismatch "
+        f"(typescript={ts_max_green}, python={MAX_GREEN_SECS})"
+    )
 
 
 @pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])

@@ -19,7 +19,14 @@
 // Porting rules: see the cross-language contract (ADR-008) §4.1/§4.2.
 
 import { integrateEgo, type EgoState } from '@domain/services/egoKernel'
-import { PYTHON_SIM } from '@shared/constants/simulation'
+import {
+  ALL_RED_SECS,
+  MAX_GREEN_SECS,
+  PHASE_ADJUST_SECS,
+  PYTHON_SIM,
+  SIGNAL_ACTION_NAMES,
+  type SignalActionName,
+} from '@shared/constants/simulation'
 
 export type SceneKind = 'cross' | 'corridor' | 't_junction' | 'roundabout'
 
@@ -43,6 +50,12 @@ export interface MirrorLight {
   ewGreen: boolean
   cycleTimer: number
   cycleDuration: number
+  /** Python `pending_actions` — actions queued by `apply_action`. */
+  pendingActions: SignalActionName[]
+  /** Python `all_red_steps` — steps of all-red clearance left. */
+  allRedSteps: number
+  /** Python `resume_state` — the phase to restore after the all-red. */
+  resumeState: [boolean, boolean] | null
 }
 
 export interface MirrorSample {
@@ -98,6 +111,24 @@ const EGO_START = (): MirrorVehicle => ({
 })
 
 /**
+ * Python `sim_core.ALL_RED_STEPS` — the all-red clearance expressed in sim
+ * steps (3 s at the contract's 10 Hz). Derived from the same two constants
+ * on both sides, so the two derivations cannot drift.
+ */
+export const ALL_RED_STEPS = Math.round(ALL_RED_SECS / PYTHON_SIM.DT)
+
+/** Python `sim_core.TrafficLight()` — the default (NS-green) light. */
+const LIGHT_START = (): MirrorLight => ({
+  nsGreen: true,
+  ewGreen: false,
+  cycleTimer: 0,
+  cycleDuration: PYTHON_SIM.LIGHT_CYCLE_SECONDS,
+  pendingActions: [],
+  allRedSteps: 0,
+  resumeState: null,
+})
+
+/**
  * A port of Python's `SimCore`.
  *
  * Method names and the `step()` body follow `sim_core.py` statement by
@@ -108,12 +139,7 @@ export class SimCoreMirror {
   maxSteps: number
   ego: MirrorVehicle = EGO_START()
   npcs: MirrorVehicle[] = []
-  light: MirrorLight = {
-    nsGreen: true,
-    ewGreen: false,
-    cycleTimer: 0,
-    cycleDuration: PYTHON_SIM.LIGHT_CYCLE_SECONDS,
-  }
+  light: MirrorLight = LIGHT_START()
   simTime = 0
   stepCount = 0
   terminated = false
@@ -123,6 +149,20 @@ export class SimCoreMirror {
   constructor(sceneKind: SceneKind = 'cross', maxSteps: number = PYTHON_SIM.MAX_STEPS_DEFAULT) {
     this.sceneKind = sceneKind
     this.maxSteps = maxSteps
+  }
+
+  /**
+   * Port of Python's `TrafficLight.apply_action` — queue an external
+   * signal action. Synchronous: the light's phase does not change until
+   * the next `step()` consumes the queue.
+   */
+  applySignalAction(action: SignalActionName): void {
+    if (!SIGNAL_ACTION_NAMES.includes(action)) {
+      throw new Error(
+        `unknown signal action '${action}'; expected one of ${SIGNAL_ACTION_NAMES.join(', ')}`,
+      )
+    }
+    this.light.pendingActions.push(action)
   }
 
   reset(): void {
@@ -140,6 +180,9 @@ export class SimCoreMirror {
       ewGreen: this.sceneKind === 'roundabout',
       cycleTimer: 0,
       cycleDuration: PYTHON_SIM.LIGHT_CYCLE_SECONDS,
+      pendingActions: [],
+      allRedSteps: 0,
+      resumeState: null,
     }
     this.simTime = 0
     this.stepCount = 0
@@ -247,12 +290,32 @@ export class SimCoreMirror {
     }
 
     // 3) traffic light cycle
-    this.light.cycleTimer += PYTHON_SIM.DT
-    if (this.light.cycleTimer >= this.light.cycleDuration) {
-      this.light.cycleTimer = 0
-      const ns = this.light.nsGreen
-      this.light.nsGreen = this.light.ewGreen
-      this.light.ewGreen = ns
+    // The clearance that ended with the previous step resumes FIRST, so the
+    // actions consumed below observe the resumed phase and not the all-red
+    // state the light was left in. Without this order a preempt landing on
+    // that step would overwrite the resume point with (false, false) and the
+    // light would never go green again.
+    if (this.light.allRedSteps === 0 && this.light.resumeState !== null) {
+      this.light.nsGreen = this.light.resumeState[0]
+      this.light.ewGreen = this.light.resumeState[1]
+      this.light.resumeState = null
+    }
+    this.consumeLightActions()
+    if (this.light.allRedSteps > 0) {
+      // All-red clearance (Plan 073 Sprint 2): neither axis is green and
+      // the phase clock is frozen, so the interrupted phase resumes where
+      // it left off.
+      this.light.nsGreen = false
+      this.light.ewGreen = false
+      this.light.allRedSteps -= 1
+    } else {
+      this.light.cycleTimer += PYTHON_SIM.DT
+      if (this.light.cycleTimer >= this.light.cycleDuration) {
+        this.light.cycleTimer = 0
+        const ns = this.light.nsGreen
+        this.light.nsGreen = this.light.ewGreen
+        this.light.ewGreen = ns
+      }
     }
 
     this.simTime += PYTHON_SIM.DT
@@ -298,6 +361,47 @@ export class SimCoreMirror {
     // 5) truncation latch (Plan 067)
     if (this.stepCount >= this.maxSteps && !this.terminated) {
       this.truncated = true
+    }
+  }
+
+  /** Port of Python's `TrafficLight.consume_actions`. */
+  private consumeLightActions(): void {
+    if (this.light.pendingActions.length === 0) return
+    const actions = this.light.pendingActions
+    this.light.pendingActions = []
+    for (const action of actions) {
+      if (action === 'extend_green') {
+        // Delay the swap by 5 s. The timer may go negative — that is how
+        // "the green runs longer than cycle_duration" is expressed — bounded
+        // by MAX_GREEN_SECS. The floor on the elapsed clock is
+        // `cycleDuration - MAX_GREEN_SECS`, i.e. the remaining green is at
+        // most `MAX_GREEN_SECS`. (A bound on the remaining, not on the
+        // wall-clock duration: a policy that extends on every decision can
+        // still hold the axis green.)
+        this.light.cycleTimer = Math.max(
+          this.light.cycleTimer - PHASE_ADJUST_SECS,
+          this.light.cycleDuration - MAX_GREEN_SECS,
+        )
+      } else if (action === 'shorten_red') {
+        // Advance the swap by 5 s (capped, so the swap happens on the next
+        // step at the latest).
+        this.light.cycleTimer = Math.min(
+          this.light.cycleTimer + PHASE_ADJUST_SECS,
+          this.light.cycleDuration,
+        )
+      } else if (action === 'preempt' || action === 'force_all_red') {
+        if (this.light.allRedSteps === 0 && (this.light.nsGreen || this.light.ewGreen)) {
+          // Not already clearing, and the light has a green axis: remember
+          // the phase to resume. An all-red resume point would wedge the
+          // light permanently (it would resume into "no axis is green" and
+          // never recover).
+          this.light.resumeState = [this.light.nsGreen, this.light.ewGreen]
+        }
+        this.light.allRedSteps = ALL_RED_STEPS
+        this.light.nsGreen = false
+        this.light.ewGreen = false
+      }
+      // 'no_op' — nothing.
     }
   }
 

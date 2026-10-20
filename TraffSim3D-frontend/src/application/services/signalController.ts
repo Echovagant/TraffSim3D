@@ -12,6 +12,7 @@ import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { LightPhase } from '@domain/value-objects/Phase'
 import { roadLength } from '@domain/services/laneGeometry'
 import { STOP_LINE_DISTANCE } from '@shared/constants/simulation'
+import type { SignalActionName } from '@shared/constants/simulation'
 import {
   FixedCycleController,
   ActuatedController,
@@ -28,15 +29,53 @@ export interface SignalDecision {
 }
 
 export interface SignalAction {
-  name: 'extend_green' | 'shorten_red' | 'preempt' | 'force_all_red' | 'no_op'
+  /** The action name — one of the five in `SIGNAL_ACTION_NAMES`. */
+  name: SignalActionName
   available: boolean
+}
+
+/**
+ * Where the RL controller's next action comes from.
+ *
+ * This is the **seam** between "the signal can be driven" and "the signal
+ * is driven by a policy". Sprint 2 ships
+ * `createSequenceActionSource` — an injected list of action names, one per
+ * poll. Sprint 3 replaces it with a source backed by the trained policy.
+ *
+ * Both satisfy this one interface, so the swap is a **single line** at the
+ * construction site (`createSignalController`'s `rlActionSource` dep) and
+ * nothing else in the controller changes.
+ */
+export interface SignalActionSource {
+  /**
+   * The next action for `light`, or `null` when there is nothing to apply.
+   * Called once per `decide()`.
+   */
+  nextAction(light: TrafficLight, network: RoadNetwork, simTime: number): SignalActionName | null
+}
+
+/**
+ * Sprint 2's action source: a fixed sequence of action names.
+ *
+ * The sequence is consumed one entry per `decide()` call; once it is
+ * exhausted the source returns `null` and the controller keeps running its
+ * normal cycle. Sprint 3's policy-backed source replaces this — the
+ * controller cannot tell the difference.
+ */
+export const createSequenceActionSource = (
+  actions: readonly SignalActionName[],
+): SignalActionSource => {
+  let index = 0
+  return {
+    nextAction: () => (index < actions.length ? (actions[index++] ?? null) : null),
+  }
 }
 
 export interface SignalController {
   decide(light: TrafficLight, network: RoadNetwork, simTime: number): SignalDecision
   /** Synchronous: mutate internal pending-action queue.
    *  Next decide() consumes. See 007 §2 semantics. */
-  applyAction(light: TrafficLight, action: SignalAction['name']): void
+  applyAction(light: TrafficLight, action: SignalActionName): void
 }
 
 export type ControllerKind = 'fixed-cycle' | 'actuated' | 'coordinated' | 'rl'
@@ -100,6 +139,15 @@ export const getAxisQueueLength = (light: TrafficLight, network: RoadNetwork): n
 export interface CreateSignalControllerDeps {
   getCoordinatedOffsets: () => ReadonlyMap<string, number>
   isCoordinatedEnabled: () => boolean
+  /**
+   * The RL controller's action source (Plan 073 Sprint 2).
+   *
+   * Optional: with no source the controller still accepts actions through
+   * `applyAction` (the injected-sequence path). Sprint 3 passes the
+   * trained policy's source here — a one-line swap, because the source is
+   * the only thing that decides *where* the actions come from.
+   */
+  rlActionSource?: SignalActionSource
 }
 
 export const createSignalController = (
@@ -117,7 +165,7 @@ export const createSignalController = (
         isEnabled: deps.isCoordinatedEnabled,
       })
     case 'rl':
-      return new RLController()
+      return new RLController({ actionSource: deps.rlActionSource })
     default:
       return new ActuatedController()
   }

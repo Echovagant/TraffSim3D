@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { SimCoreMirror, runEpisode } from './simCoreMirror'
-import { PYTHON_SIM } from '@shared/constants/simulation'
+import { PYTHON_SIM, MAX_GREEN_SECS, type SignalActionName } from '@shared/constants/simulation'
 
 describe('simCoreMirror — cross scene', () => {
   it('reproduces the measured Python cross trajectory', () => {
@@ -169,5 +169,158 @@ describe('simCoreMirror — observation', () => {
     expect(obs[1]).toBe(-0.5) // -25 / 50
     expect(obs[2]).toBe(Math.PI / 2 / Math.PI)
     expect(obs[3]).toBe(0)
+  })
+})
+
+// Plan 073 Sprint 2 (A2a): the mirror carries the same five signal actions
+// as the Python light. These are the TS-side pins of the *semantics*; the
+// *vocabulary* is cross-language and asserted by the Python contract test.
+describe('simCoreMirror — signal actions', () => {
+  /**
+   * Run a long episode and report the 1-based steps at which the light
+   * changes.
+   *
+   * The roundabout is used because it is the only scene whose episode
+   * survives past the first 30 s flip (a parked ego is hit by an NPC in
+   * every signalled scene). Its light is overridden to a plain NS-green
+   * light, because the roundabout's own light is both-green — "no traffic
+   * lights there" — and its swap would be a no-op.
+   */
+  const lightChanges = (action?: SignalActionName): number[] => {
+    const core = new SimCoreMirror('roundabout', 500)
+    core.reset()
+    core.light.nsGreen = true
+    core.light.ewGreen = false
+    if (action !== undefined) core.applySignalAction(action)
+    const bits: boolean[] = []
+    for (let i = 0; i < 400; i++) {
+      core.step(0)
+      bits.push(core.light.nsGreen)
+    }
+    const changes: number[] = []
+    for (let i = 1; i < bits.length; i++) {
+      if (bits[i] !== bits[i - 1]) changes.push(i + 1)
+    }
+    return changes
+  }
+
+  it('queues an action without changing the light', () => {
+    const core = new SimCoreMirror('cross')
+    core.reset()
+    core.applySignalAction('preempt')
+    expect(core.light.nsGreen).toBe(true)
+    expect(core.light.ewGreen).toBe(false)
+    expect(core.light.pendingActions).toEqual(['preempt'])
+  })
+
+  it('rejects an unknown action name', () => {
+    const core = new SimCoreMirror('cross')
+    core.reset()
+    expect(() => core.applySignalAction('go_faster' as SignalActionName)).toThrow()
+  })
+
+  it('keeps the default cycle: the swap lands on step 300', () => {
+    expect(lightChanges()).toEqual([300])
+  })
+
+  it('extend_green delays the swap by 5 s (50 steps)', () => {
+    expect(lightChanges('extend_green')).toEqual([350])
+  })
+
+  it('shorten_red advances the swap by 5 s (50 steps)', () => {
+    expect(lightChanges('shorten_red')).toEqual([250])
+  })
+
+  it('preempt clears both axes for 3 s, then the phase resumes', () => {
+    const core = new SimCoreMirror('roundabout', 500)
+    core.reset()
+    core.light.nsGreen = true
+    core.light.ewGreen = false
+    core.applySignalAction('preempt')
+    const bits: Array<[boolean, boolean]> = []
+    for (let i = 0; i < 400; i++) {
+      core.step(0)
+      bits.push([core.light.nsGreen, core.light.ewGreen])
+    }
+    const allRed = bits.filter((b) => b[0] === false && b[1] === false)
+    expect(allRed).toHaveLength(30)
+    expect(bits[0]).toEqual([false, false])
+    expect(bits[29]).toEqual([false, false])
+    // The interrupted phase resumes on the next step ...
+    expect(bits[30]).toEqual([true, false])
+    // ... and the swap happens 30 steps later: the phase clock was frozen
+    // during the clearance. (`bits[i]` is the state *after* step i+1, so the
+    // swap observed at step 330 is `bits[329]`.)
+    expect(bits[328]).toEqual([true, false])
+    expect(bits[329]).toEqual([false, true])
+  })
+
+  it('force_all_red behaves like preempt', () => {
+    expect(lightChanges('force_all_red')).toEqual(lightChanges('preempt'))
+  })
+
+  it('no_op changes nothing', () => {
+    expect(lightChanges('no_op')).toEqual(lightChanges())
+  })
+
+  /**
+   * Run an episode, applying an action on the given **1-based** steps, and
+   * record the light bits after every step (`bits[i]` is the state after
+   * step `i + 1`).
+   */
+  const bitsWithActions = (
+    atSteps: Record<number, SignalActionName>,
+    steps = 400,
+  ): Array<[boolean, boolean]> => {
+    const core = new SimCoreMirror('roundabout', 500)
+    core.reset()
+    core.light.nsGreen = true
+    core.light.ewGreen = false
+    const bits: Array<[boolean, boolean]> = []
+    for (let step = 1; step <= steps; step++) {
+      const action = atSteps[step]
+      if (action !== undefined) core.applySignalAction(action)
+      core.step(0)
+      bits.push([core.light.nsGreen, core.light.ewGreen])
+    }
+    return bits
+  }
+
+  it('a preempt right after a clearance does not kill the light', () => {
+    // Regression (Plan 073 Sprint 2 fix wave). The clearance that ends
+    // resumes BEFORE the queued actions are consumed. Without that order a
+    // preempt landing on the boundary step recorded the all-red state as
+    // the resume point, and the light never went green again.
+    const bits = bitsWithActions({ 1: 'preempt', 31: 'preempt' })
+    // The first clearance: steps 1..30.
+    expect(bits[0]).toEqual([false, false])
+    expect(bits[29]).toEqual([false, false])
+    // The second clearance starts on the very step the phase resumed.
+    expect(bits[30]).toEqual([false, false])
+    expect(bits[59]).toEqual([false, false])
+    // ... and the phase must come back.
+    expect(bits[60]).toEqual([true, false])
+  })
+
+  it('a preempt during a clearance keeps the original resume point', () => {
+    // The case that already worked before the fix wave — pinned so the
+    // boundary fix does not regress it.
+    const bits = bitsWithActions({ 1: 'preempt', 20: 'preempt' })
+    expect(bits[48]).toEqual([false, false]) // step 49 — still clearing
+    expect(bits[49]).toEqual([true, false]) // step 50 — the phase resumes
+  })
+
+  it('extend_green never exceeds the max-green bound', () => {
+    // The bound is the project's existing `MAX_GREEN_SECS` convention, and
+    // the Python training sim uses the same one (the contract compares the
+    // constant).
+    const core = new SimCoreMirror('roundabout', 500)
+    core.reset()
+    const floor = core.light.cycleDuration - MAX_GREEN_SECS
+    for (let i = 0; i < 40; i++) {
+      core.applySignalAction('extend_green')
+      core.step(0)
+      expect(core.light.cycleTimer).toBeGreaterThanOrEqual(floor)
+    }
   })
 })
