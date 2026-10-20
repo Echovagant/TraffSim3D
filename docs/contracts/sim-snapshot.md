@@ -1,9 +1,9 @@
 # Cross-Language Sim Contract
 
-> **状态（2026-10-20，Plan 071 起）：契约已激活并真实执行。**
+> **状态（2026-10-20 起，Plan 071；2026-10-21 复测）：契约已激活并真实执行。**
 > 比对测试不再跳过 —— TS 侧快照缺失时**失败**而不是跳过。
 > 快照由 `TraffSim3D-frontend` 生成并入库，后端测试可独立跑完整契约。
-> 实测：`pytest tests/contract/` → **9 passed / 0 failed / 0 skipped**。
+> 实测（2026-10-21）：`pytest tests/contract/` → **16 passed / 0 failed / 0 skipped**。
 >
 > **状态（2026-10-21，Plan 072 修复波）：本文件此前高估了契约的覆盖面。**
 > 下文「What the contract does NOT cover」一节已按**实测**的变异盲区重写：
@@ -44,6 +44,8 @@ it needs a scalar-level entry point into the obs builder. See "Not covered".
 | `cross_baseline` | cross | The straight-line reference run: ego kinematics, the `success` termination at step 58. |
 | `corridor_baseline` | corridor | The same in the corridor scene (`success_corridor` termination). |
 | `cross_action_overrange` | cross | The **cross-language action clip**: every action is `2.0`, outside the policy's `[-1, 1]` range. |
+| `t_junction_lights` | t_junction | The **longest signalled episode**: a parked ego that collides at step 257, sampled every 10 steps (26 samples, steps 0…250). This is the vector that makes the traffic-light phase observable at all. |
+| `roundabout_truncation` | roundabout | The **truncation** path: the episode runs to the step limit (400) and ends `truncated` with no termination reason. Its light is both-green, so the phase swap is a no-op — the vector pins the truncation semantics, not the phase. |
 
 `cross_action_overrange`'s scenario golden is **identical to
 `cross_baseline`'s** — every sample and the whole `final_state` — because
@@ -55,15 +57,92 @@ baseline's 95-step speed series extended to 100 steps — the extra five steps
 carry the same values.) The name says "action over range", not "more
 acceleration": the vector does **not** accelerate harder than the baseline.
 
-`n_steps` in `test_vector.json` must equal the vector's action count
-(95 / 160 / 100). Neither side reads it today, but a wrong value is a trap
-for whoever adds the next vector.
+### The vector file's schema
 
-`tolerance: 0.01` in `test_vector.json` is **not** used by this contract —
-the assertions are exact equality (below). It is still read by the legacy
-sibling test `tests/contract/test_python_snapshot.py`, which copies it into
-the Python-side snapshot files it writes; it applies to that legacy test
-only.
+`test_vector.json` holds the fixed input both sides read. Its per-vector
+fields:
+
+| Field | Meaning |
+|---|---|
+| `name` | The vector's name. It selects the goldens `ts_<name>.json` and `ts_kernel_<name>.json`, and the regenerated `python_<name>.json`. |
+| `scene_kind` | The Python scene to run: `cross` / `corridor` / `t_junction` / `roundabout`. |
+| `ego_id` | The ego's id, recorded in every sample. |
+| `n_steps` | The **expanded** action count (see the expansion rule below). Neither side reads it today. |
+| `actions` | The literal action list. Each entry is a pair, but **only the first element is read**: it is the acceleration command, clipped to `[-1, 1]` and scaled to 3 m/s². The steer is *not* taken from the action — both sides compute it with Pure Pursuit. |
+| `repeat` | **Optional.** Expands `actions` this many times. Absent → the sequence is `actions` itself. |
+| `max_steps` | **Optional.** The episode's step limit (Python `SimCore.max_steps`). Absent → `MAX_STEPS_DEFAULT` (200). |
+
+The **expansion rule**, identical on both sides, one line each:
+
+> if the vector has `repeat`, the actual action sequence is `actions`
+> repeated `repeat` times; otherwise it is `actions` itself.
+
+`n_steps` in `test_vector.json` must therefore equal the vector's
+**expanded** action count — `len(actions)` when there is no `repeat`, and
+`len(actions) × repeat` when there is one. The five vectors expand to
+95 / 160 / 100 / 400 / 400 actions. The two long vectors declare a
+one-entry `actions` list plus `repeat: 400`; their *expanded* count is 400,
+not 1. Neither side reads `n_steps` today, but a wrong value is a trap for
+whoever adds the next vector.
+
+A malformed `repeat` — `null`, a non-integer, zero or negative — must fail
+**loudly on both sides**. Python raises; the TypeScript generator throws
+instead of silently running an empty episode (`Array.from({length: null})`
+would otherwise yield an empty action list and a vacuous "agreement").
+
+What the contract guarantees is that a divergence which changes the
+**observable** episode is caught — the sample count or a sampled value. It
+does not follow that *every* divergence is caught: when both episodes
+terminate at the same step, a count difference *beyond* that step (e.g. TS
+`repeat: 401` vs Python `repeat: 400` on a vector that ends at step 257)
+produces byte-identical output and no red.
+
+`tolerance: 0.01` in `test_vector.json` is **not** used by any assertion —
+the assertions are exact equality (below). The key is a leftover of the
+Plan 050 file format; nothing reads it.
+
+### The golden file's schema
+
+Each `ts_<name>.json` — and the regenerated `python_<name>.json`, which has
+the same shape — looks like this:
+
+```json
+{
+  "name": "t_junction_lights",
+  "scene_kind": "t_junction",
+  "ego_id": "v-1",
+  "final_state": {
+    "terminated": true,
+    "truncated": false,
+    "reason": "collision",
+    "final_step": 257,
+    "final_z": -25.0,
+    "final_x": 0.0,
+    "final_speed": 0.0
+  },
+  "samples": [
+    {
+      "step": 0,
+      "ego_id": "v-1",
+      "x": 0.0,
+      "z": -25.0,
+      "heading": 1.5707963267948966,
+      "speed": 0.0,
+      "light": { "nsGreen": true, "ewGreen": false }
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `final_state.terminated` | The episode ended by a **termination** — success, collision or red light. |
+| `final_state.truncated` | The episode hit the **step limit** instead. The two flags are mutually exclusive (the limit is only reached when the episode has not terminated), and a truncated episode carries **no** termination reason: `reason` is the empty string. |
+| `final_state.reason` | The termination reason, or `""` when the episode was truncated. |
+| `final_state.final_step` | The step the episode ended on. |
+| `final_state.final_z` / `final_x` / `final_speed` | The ego's final pose and speed. |
+| `samples[].step` | The step the sample was taken at. Steps 0, 10, 20, … are sampled (`sample_every`), plus the last action index. |
+| `samples[].light` | The traffic-light bits at that sample: which axis is green. This is the **only** common semantic between Python's `ns_green` / `ew_green` pair and the frontend's 10-value phase enum ("which axis is green"). Comparing them directly is what makes the signal phase **duration** observable — before Sprint 1, a change to the cycle length was invisible to every gate. |
 
 ## The assertions are exact, not approximate
 
@@ -123,20 +202,37 @@ test. Therefore:
 | **TS-side** — the mirror, the kernel, the replay path | `npm run test:contract` reports the goldens stale; the TS unit specs for the mutated module also go red |
 | **A missing golden** | `pytest tests/contract/` goes red (`test_contract_snapshots_are_present`) |
 
-⇒ **The repository has no CI.** There is no `.github/` directory and no other
-pipeline configuration, so **both oracles are run manually**:
+⇒ **The repository has CI**: `.github/workflows/ci.yml`. It runs four jobs.
+
+| Job | What it runs | Why it matters here |
+|---|---|---|
+| `backend` | `pytest --cov=app --cov-fail-under=70`, `ruff`, `black` | The Python side's own gates. |
+| `frontend` | `vitest run --coverage`, `vue-tsc --noEmit`, `eslint`, `prettier` | The TypeScript side's own gates — including the TS unit specs that pin the mirror's behaviour. |
+| `contract` | `pytest tests/contract/` **and** `npm run contract:check` | **The important one.** Both oracles, in one job. |
+| `e2e` | Playwright against a live frontend + backend | Non-blocking for now (`continue-on-error: true`) — the 25 visual baselines were recorded on Windows, so a Linux runner's pixel output is expected to differ. The visual specs are **not** excluded and the tolerance is **not** widened. |
+
+The `contract` job is the one that protects the model, and it needs **both**
+of its steps:
+
+1. `pytest tests/contract/` runs the **live Python sim** and compares it
+   with the committed TypeScript goldens.
+2. `npm run contract:check` re-generates those goldens from the
+   **TypeScript sources** and fails if they no longer match.
+
+Step 1 alone would not notice a change in the TypeScript sources at all,
+because the goldens are committed artefacts; step 2 alone would only prove
+that the goldens match the TypeScript code, not that the two
+implementations agree. Together they are the contract.
+
+### Run the same gates locally
 
 ```sh
 # backend oracle (Python vs the committed TS goldens)
 cd TraffSim3D-backend && .\.venv\Scripts\python.exe -m pytest tests/contract/ -v
 
 # TS oracle (the committed goldens vs what the TS code produces now)
-cd TraffSim3D-frontend && npm run test:contract     # alias of npm run contract:check
+cd TraffSim3D-frontend && npm run contract:check   # alias of npm run test:contract
 ```
-
-Running only the backend test would not notice a change in the TypeScript
-sources at all, because the goldens are committed artefacts — and nothing in
-the repository enforces that the TS oracle is ever run.
 
 ## What the contract does NOT cover
 
@@ -158,7 +254,7 @@ recomputed golden against the committed file).
 | `INTERSECTION_RADIUS` | **blind** | **blind** | **no** |
 | `ROUNDABOUT_RADIUS` | **blind** | **blind** | **no** |
 | `NPC_SPEED` | **blind** | **blind** | **no** |
-| **traffic-light phase duration** (`TrafficLight.cycle_duration` / `PYTHON_SIM.LIGHT_CYCLE_SECONDS`) | **partially covered** — caught when the first flip lands inside the observable window (≤ 25.7 s); a drift of 30 → 26 s is **not** caught | same | **no** (was fully blind) |
+| **traffic-light phase duration** (`TrafficLight.cycle_duration` / `PYTHON_SIM.LIGHT_CYCLE_SECONDS`) | **partially covered** — caught when the first flip lands inside the *sampled* window (≤ 25.0 s); a drift of 30 → 26 s is **not** caught | same | **no** (was fully blind) |
 
 ### The traffic-light phase duration — partially covered
 
@@ -173,18 +269,30 @@ were added, so an episode can now run past the old 58-step horizon.
 The phase flips at `duration × 10` steps, and the longest *signalled* episode
 is the `t_junction_lights` vector, which ends by **collision at step 257**.
 
-| phase duration | first flip | inside the observable window (episode ends at 257)? |
+**The observable window is the *sampled* window, 0…250 — not 0…257.**
+`sample_every` is 10, and the terminating step 257 is **not** a sample point
+(257 is neither a multiple of 10 nor the last action index), so the last
+sample the contract actually compares is **step 250**. A flip is observable
+only if it lands at or before step 250. Measured flip steps (Python side;
+the TS mirror accumulates the same bits):
+
+| phase duration | first flip | inside the sampled window (0…250)? |
 |---|---|---|
-| 30 s (shipped) | — (never) | baseline |
+| 30 s (shipped) | 300 | no → the episode ends at 257 first |
 | 26 s | 260 | **no → invisible** |
-| 25 s | 250 | yes → caught |
+| 25.5 s | 255 | **no → invisible** — between the last sample and the collision |
+| 25.0 s | 250 | yes → caught |
 | 20 s | 200 | yes → caught |
 | 10 s | 101 | yes → caught |
 
 ⇒ **A phase-duration drift is caught only if it moves the first flip into the
-observable window** — i.e. if the new duration is ≲ 25.7 s. A drift of
-30 → 26 s escapes every gate. Measured on both sides (Python instance
-attribute and the TS `PYTHON_SIM` object); the same bound holds.
+sampled window** — i.e. if the new duration is ≲ **25.0 s**. A drift of
+30 → 26 s (or 30 → 25.5 s) escapes every gate. Measured on both sides (Python
+instance attribute and the TS `PYTHON_SIM` object); the same bound holds.
+
+The bound is asserted, not just described: `tests/contract/test_light_phase.py`
+runs the `t_junction` episode at 30 s / 25.5 s / 25.0 s and checks that the
+25.5 s flip changes no sample while the 25.0 s flip does.
 
 ### Root cause of the remaining limit
 
@@ -278,7 +386,7 @@ goldens that no vector produces. It never rewrites anything.
 
 | # | Dimension | Status |
 |---|---|---|
-| 1 | Traffic-light phase model | ⚠️ mitigated — the observation pair stays one-hot; the 3 s yellow shifts the flip point by 3 s. The phase **duration** is **not observed** by the contract (see above) |
+| 1 | Traffic-light phase model | ⚠️ mitigated — the observation pair stays one-hot; the 3 s yellow shifts the flip point by 3 s. The phase **duration** is **partially observed**: the golden samples carry the light bits, so a drift is caught if the first flip lands inside the sampled window (≤ 25.0 s) — see above |
 | 2 | `obs[6:8]` semantics | ✅ aligned (Plan 069) |
 | 3 | Pure Pursuit denominator | ❌ not covered by the contract vectors (see above) |
 | 4 | Steer clamp | ❌ not covered by the contract vectors (see above) |
@@ -290,16 +398,25 @@ goldens that no vector produces. It never rewrites anything.
 
 ```
 tests/contract/
-├── __init__.py
 ├── test_vector.json                  # fixed inputs (git tracked)
-├── test_cross_lang_consistency.py    # the comparison (never skips)
+├── test_cross_lang_consistency.py    # the comparison (never skips) + the snapshot writer
+├── test_python_snapshot.py           # refreshes python_<name>.json (same schema as above)
+├── test_light_phase.py               # the phase-flip boundary, pinned on the Python side
 └── snapshots/
     ├── ts_cross_baseline.json        # TS goldens — COMMITTED
     ├── ts_corridor_baseline.json
     ├── ts_cross_action_overrange.json
+    ├── ts_t_junction_lights.json
+    ├── ts_roundabout_truncation.json
     ├── ts_kernel_*.json              # kernel-level goldens — COMMITTED
     └── python_*.json                 # regenerated per run — gitignored
 ```
+
+`python_<name>.json` has the **same schema** as the `ts_<name>.json` goldens
+(light bits and `final_state` included). There is a single writer for it —
+`_write_python_snapshot` in `test_cross_lang_consistency.py` — which the
+legacy sibling test calls; two writers with two schemas is what used to make
+the on-disk Python artefact lose the light bits.
 
 The TypeScript side lives in
 `TraffSim3D-frontend/src/domain/services/egoKernel.ts` (the shared ego

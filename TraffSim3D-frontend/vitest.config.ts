@@ -45,6 +45,18 @@ export default defineConfig({
         'src/shared/**/*.ts',
       ],
       exclude: ['**/*.spec.ts', '**/*.d.ts', '**/index.ts', '**/main.ts', '**/fixtures/**'],
+      // Plan 073: the documented "coverage >= 70%" gate is only real if it can
+      // fail. Without a threshold, `npm run test:coverage` merely *reports*
+      // the number and coverage could decay silently. The backend already
+      // gates on `pytest --cov=app --cov-fail-under=70`; this makes the
+      // frontend side symmetric. Measured 2026-10-21: 82.17% statements /
+      // 85.79% branches / 81.79% functions.
+      thresholds: {
+        statements: 70,
+        branches: 70,
+        functions: 70,
+        lines: 70,
+      },
     },
   },
 })

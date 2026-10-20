@@ -82,7 +82,7 @@ jobs:
         # `--cov-fail-under=70` is what turns the documented 70% threshold
         # into an actual gate: on its own `--cov=app` only *reports* the
         # number, so coverage could decay silently. Measured locally on
-        # 2026-10-21: 87%.
+        # 2026-10-21: 90%.
         run: python -m pytest --cov=app --cov-fail-under=70 -q
 
       - name: ruff
@@ -138,10 +138,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Unit tests
-        run: npm run test:run
-
       - name: Unit tests + coverage
+        # `test:coverage` runs the same suite as `test:run` (`vitest run`)
+        # and adds the coverage report, so running both would double the
+        # job's wall clock for no extra signal.
         run: npm run test:coverage
 
       - name: Type check
@@ -352,11 +352,10 @@ jobs:
           # direct-fetch counterpart used by AIPlaygroundView /
           # BackendView, so both point at the same backend.
           #
-          # Caveat: `app/main.py`'s CORS allow-list covers 5173 and 4173 but
-          # not 5188, so a *cross-origin* call from the CI frontend to
-          # :8001 would be refused by the browser. The e2e specs do not
-          # depend on that: they either stub the backend endpoints they
-          # exercise or go through the same-origin vite proxy.
+          # `app/main.py`'s CORS allow-list covers 5173, 4173 and 5188
+          # (both `localhost` and `127.0.0.1`), so a *cross-origin* call
+          # from the CI frontend on :5188 to the backend on :8001 is
+          # accepted by the browser.
           VITE_BACKEND_PORT: '8001'
           VITE_BACKEND_URL: 'http://localhost:8001'
         run: npx playwright test --config=playwright.ci.config.ts

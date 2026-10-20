@@ -45,12 +45,28 @@ interface Vector {
  *   if the vector has `repeat`, the actual action sequence is `actions`
  *   repeated `repeat` times; otherwise it is `actions` itself.
  *
- * The two sides cannot drift apart silently: a different expansion means a
- * different action count, hence a different sample count, hence a red
- * "sample count mismatch" in the contract.
+ * A malformed `repeat` (null, a non-integer, zero or negative) throws
+ * here rather than silently producing an empty or partial action list:
+ * `Array.from({length: null})` yields an *empty* array, which would run a
+ * vacuous episode and report a bogus "agreement". The Python side raises
+ * on the same malformed input, so both sides now fail loudly.
+ *
+ * What the contract guarantees is that a divergence which changes the
+ * **observable** episode is caught — the sample count or a sampled value.
+ * It does NOT follow that *every* divergence is caught: when both episodes
+ * terminate at the same step, a count difference *beyond* that step
+ * (e.g. TS `repeat: 401` vs Python `repeat: 400` on a vector that ends at
+ * step 257) produces byte-identical output and no red.
  */
-const expandActions = (v: Vector): number[][] =>
-  v.repeat === undefined ? v.actions : Array.from({ length: v.repeat }, () => v.actions).flat()
+const expandActions = (v: Vector): number[][] => {
+  if (v.repeat === undefined) return v.actions
+  if (!Number.isInteger(v.repeat) || v.repeat < 1) {
+    throw new Error(
+      `vector "${v.name}": "repeat" must be a positive integer, got ${JSON.stringify(v.repeat)}`,
+    )
+  }
+  return Array.from({ length: v.repeat }, () => v.actions).flat()
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const CONTRACT_DIR = process.env.TRAFFSIM3D_CONTRACT_DIR

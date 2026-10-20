@@ -85,14 +85,38 @@ def _sample(step: int, ego_id: str, core: SimCore) -> dict:
     }
 
 
+def _expand_actions(v: dict) -> list[list[float]]:
+    """Expand a vector's action list.
+
+    The rule — identical to the TS generator's, one line each:
+      if the vector has `repeat`, the actual action sequence is `actions`
+      repeated `repeat` times; otherwise it is `actions` itself.
+
+    A malformed `repeat` must fail **loudly on both sides**. Python raises
+    here, and the TS generator throws on the same malformed input instead
+    of silently running an empty episode — `Array.from({length: null})`
+    would otherwise yield an empty action list and a vacuous "agreement".
+
+    What the contract guarantees is that a divergence which changes the
+    **observable** episode is caught — the sample count or a sampled value.
+    It does NOT follow that *every* divergence is caught: when both
+    episodes terminate at the same step, a count difference *beyond* that
+    step (e.g. TS `repeat: 401` vs Python `repeat: 400` on a vector that
+    ends at step 257) produces byte-identical output and no red.
+    """
+    if "repeat" not in v:
+        return list(v["actions"])
+    repeat = v["repeat"]
+    if isinstance(repeat, bool) or not isinstance(repeat, int) or repeat < 1:
+        raise ValueError(
+            f"vector {v['name']!r}: 'repeat' must be a positive integer, got {repeat!r}"
+        )
+    return list(v["actions"]) * repeat
+
+
 def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
     """Generate the Python snapshot for vector `v` (live, every run)."""
-    # `repeat` expands the action list: the actual sequence is `actions`
-    # repeated `repeat` times; without it the sequence is `actions` itself.
-    # The TS generator implements the same rule — a disagreement there means
-    # a different action count, hence a different sample count, hence a
-    # "sample count mismatch". The contract catches it; no extra test needed.
-    actions = v["actions"] * v["repeat"] if "repeat" in v else v["actions"]
+    actions = _expand_actions(v)
     core = SimCore(
         scene_kind=v["scene_kind"],
         max_steps=v.get("max_steps", MAX_STEPS_DEFAULT),
@@ -122,6 +146,27 @@ def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
     }
 
 
+def _write_python_snapshot(v: dict, sample_every: int) -> dict:
+    """Run vector `v` and (re)write `snapshots/python_<name>.json`.
+
+    This is the **only** writer of the Python-side snapshot files. The
+    legacy sibling `tests/contract/test_python_snapshot.py` used to have its
+    own writer with the Plan 050 schema (no `light`, no `final_state`, plus
+    a `tolerance` key); because pytest collects `test_cross_lang_consistency.py`
+    first (alphabetically), that sibling overwrote these files at the end of
+    every session — so the artefact a reader is most likely to open was the
+    *older*, less informative one. Both modules now call this function, so
+    the two writers cannot disagree again.
+    """
+    snap = _ensure_python_snapshot(v, sample_every)
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    (SNAPSHOT_DIR / f"python_{v['name']}.json").write_text(
+        json.dumps(snap, indent=2),
+        encoding="utf-8",
+    )
+    return snap
+
+
 def _require_snapshot(path: Path) -> dict:
     """Load a TS golden, failing loudly when it is missing.
 
@@ -136,15 +181,10 @@ def _require_snapshot(path: Path) -> dict:
 def test_python_consistency_baseline() -> None:
     """Run Python sim for each vector, save snapshot, validate behavior."""
     data = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
-    snapshots = CONTRACT_DIR / "snapshots"
-    snapshots.mkdir(parents=True, exist_ok=True)
+    sample_every = data.get("sample_every", 5)
 
     for v in data["vectors"]:
-        snap = _ensure_python_snapshot(v, sample_every=data.get("sample_every", 5))
-        (snapshots / f"python_{v['name']}.json").write_text(
-            json.dumps(snap, indent=2),
-            encoding="utf-8",
-        )
+        snap = _write_python_snapshot(v, sample_every)
         final = snap["final_state"]
         # The episode must have ENDED for a reason: either a termination
         # (success / collision / red light) or the step limit. An episode

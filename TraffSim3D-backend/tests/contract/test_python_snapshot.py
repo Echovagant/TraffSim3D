@@ -1,71 +1,55 @@
 """Plan 050: cross-language contract test (Python sim ↔ TS sim).
 
-Generates a Python-side state trajectory by running `sim_core.SimCore`
-with a fixed action sequence (from `test_vector.json`). The result is
-written to `snapshots/python_<name>.json` so the TS-side snapshot
-(from Playwright e2e) can be compared.
+Regenerates the Python-side state trajectories in
+`snapshots/python_<name>.json` from `test_vector.json`, so the on-disk
+Python artefacts can be refreshed (and inspected) on demand.
+
+The **schema** of those files is owned by
+`tests/contract/test_cross_lang_consistency.py`, and this module reuses that
+module's writer instead of having its own. Two writers with two schemas was
+a real defect: this legacy writer emitted the Plan 050 shape (no `light`, no
+`final_state`, plus a `tolerance` key), and because pytest collects
+`test_cross_lang_consistency.py` first (alphabetically), it **overwrote** the
+newer, richer files at the end of every session — so the on-disk
+"Python-side snapshot" that a reader is most likely to open was missing
+exactly the traffic-light bits the contract exists to compare.
+
+The `python_*.json` files are gitignored and read by nobody: the contract
+compares Python's *live* output against the committed TS goldens. They are a
+debugging convenience, not a gate.
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-import numpy as np
-
-from app.apps.rl.sim_core import SimCore
+try:
+    # pytest's default ("prepend") import mode puts this directory on
+    # `sys.path`, so the sibling module is importable by its bare name.
+    from test_cross_lang_consistency import _write_python_snapshot
+except ImportError:  # pragma: no cover - alternative import mode
+    # `pythonpath = ["."]` in pyproject.toml makes the package path work too.
+    from tests.contract.test_cross_lang_consistency import _write_python_snapshot
 
 CONTRACT_DIR = Path(__file__).parent
 VECTOR_PATH = CONTRACT_DIR / "test_vector.json"
-SNAPSHOTS_DIR = CONTRACT_DIR / "snapshots"
-
-
-def _drive(core: SimCore, ego_id: str, actions: list[list[float]], sample_every: int) -> list[dict]:
-    """Run `SimCore` for the action sequence, sampling ego state every
-    `sample_every` steps. Returns a list of {step, x, y, z, heading, speed}.
-    """
-    samples: list[dict] = []
-    samples.append(_snapshot(0, ego_id, core))
-    for i, action in enumerate(actions, start=1):
-        core.step(np.asarray(action, dtype=np.float32))
-        if i % sample_every == 0 or i == len(actions):
-            samples.append(_snapshot(i, ego_id, core))
-    return samples
-
-
-def _snapshot(step: int, ego_id: str, core: SimCore) -> dict:
-    return {
-        "step": step,
-        "ego_id": ego_id,
-        "x": float(core.ego.x),
-        "z": float(core.ego.z),
-        "heading": float(core.ego.heading),
-        "speed": float(core.ego.speed),
-    }
 
 
 def test_python_snapshots_match_test_vector() -> None:
-    """Generate Python-side snapshots from test_vector.json. Runs every
-    CI to refresh snapshots on demand; consumers (the consistency test)
-    load the JSON files directly.
+    """Refresh the Python-side snapshots from `test_vector.json`.
+
+    The written files carry the same schema as the TS goldens — the light
+    bits (`nsGreen` / `ewGreen`) and the `final_state` block included —
+    because both sides are produced by the same `_write_python_snapshot`
+    helper.
     """
     vec = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
-    tolerance = vec["tolerance"]
     sample_every = vec.get("sample_every", 5)
-    SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
     for v in vec["vectors"]:
-        core = SimCore(scene_kind=v["scene_kind"])
-        core.reset()
-        samples = _drive(core, v["ego_id"], v["actions"], sample_every)
-        out_path = SNAPSHOTS_DIR / f"python_{v['name']}.json"
-        out_path.write_text(
-            json.dumps({
-                "name": v["name"],
-                "scene_kind": v["scene_kind"],
-                "ego_id": v["ego_id"],
-                "tolerance": tolerance,
-                "samples": samples,
-            }, indent=2),
-            encoding="utf-8",
-        )
-        # Sanity: at least one sample was captured
-        assert len(samples) >= 1
+        snap = _write_python_snapshot(v, sample_every)
+        # Sanity: at least one sample was captured, and it carries the
+        # traffic-light bits the contract compares.
+        assert len(snap["samples"]) >= 1
+        assert "light" in snap["samples"][0]
+        assert "final_state" in snap
