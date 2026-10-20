@@ -96,6 +96,24 @@
         [2.0, 0.0], [2.0, 0.0], [2.0, 0.0], [2.0, 0.0], [2.0, 0.0],
         [2.0, 0.0], [2.0, 0.0], [2.0, 0.0], [2.0, 0.0], [2.0, 0.0]
       ]
+    },
+    {
+      "name": "t_junction_lights",
+      "scene_kind": "t_junction",
+      "ego_id": "v-1",
+      "n_steps": 400,
+      "max_steps": 400,
+      "actions": [[0.0, 0.0]],
+      "repeat": 400
+    },
+    {
+      "name": "roundabout_truncation",
+      "scene_kind": "roundabout",
+      "ego_id": "v-1",
+      "n_steps": 400,
+      "max_steps": 400,
+      "actions": [[0.0, 0.0]],
+      "repeat": 400
     }
   ]
 }

@@ -28,6 +28,13 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:4173",  # Vite preview
         "http://127.0.0.1:4173",
+        # Plan 073: the CI e2e job and the "independent port" workflow both
+        # serve the frontend from 5188 (5173 is the project's default vite
+        # port and can be occupied by another project on a shared machine).
+        # Without these two origins a direct VITE_BACKEND_URL call from
+        # 5188 is refused by the browser.
+        "http://localhost:5188",
+        "http://127.0.0.1:5188",
     ],
     allow_credentials=True,
     allow_methods=["*"],

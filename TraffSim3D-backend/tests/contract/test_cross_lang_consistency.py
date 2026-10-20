@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from app.apps.rl.sim_core import SimCore
+from app.apps.rl.sim_core import MAX_STEPS_DEFAULT, SimCore
 
 CONTRACT_DIR = Path(__file__).parent
 VECTOR_PATH = CONTRACT_DIR / "test_vector.json"
@@ -39,6 +39,16 @@ _REGEN_HINT = (
     "Regenerate the TS contract snapshots with: "
     "cd ../TraffSim3D-frontend && npm run contract:gen"
 )
+
+# The reasons each scene may legitimately end with. A *truncated* episode
+# has no reason at all (""), which is checked separately — see
+# `test_python_consistency_baseline`.
+_SCENE_REASONS = {
+    "cross": ("success", "collision", "red_light"),
+    "corridor": ("success_corridor", "collision", "red_light"),
+    "t_junction": ("success_t_junction", "collision", "red_light"),
+    "roundabout": ("success_roundabout", "collision", "red_light"),
+}
 
 
 def _load_vectors() -> list[dict]:
@@ -53,35 +63,47 @@ def _vector(name: str) -> dict:
     raise KeyError(name)
 
 
+def _sample(step: int, ego_id: str, core: SimCore) -> dict:
+    """One contract sample: the ego pose plus the traffic-light bits.
+
+    The light bits are the *only* common semantic between Python's
+    `ns_green` / `ew_green` pair and the frontend's 10-value phase enum:
+    "which axis is green". The key names are the contract schema's, so the
+    two sides compare the same fields field-by-field.
+    """
+    return {
+        "step": step,
+        "ego_id": ego_id,
+        "x": float(core.ego.x),
+        "z": float(core.ego.z),
+        "heading": float(core.ego.heading),
+        "speed": float(core.ego.speed),
+        "light": {
+            "nsGreen": bool(core.light.ns_green),
+            "ewGreen": bool(core.light.ew_green),
+        },
+    }
+
+
 def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
     """Generate the Python snapshot for vector `v` (live, every run)."""
-    core = SimCore(scene_kind=v["scene_kind"])
-    core.reset()
-    samples = []
-    samples.append(
-        {
-            "step": 0,
-            "ego_id": v["ego_id"],
-            "x": float(core.ego.x),
-            "z": float(core.ego.z),
-            "heading": float(core.ego.heading),
-            "speed": float(core.ego.speed),
-        }
+    # `repeat` expands the action list: the actual sequence is `actions`
+    # repeated `repeat` times; without it the sequence is `actions` itself.
+    # The TS generator implements the same rule — a disagreement there means
+    # a different action count, hence a different sample count, hence a
+    # "sample count mismatch". The contract catches it; no extra test needed.
+    actions = v["actions"] * v["repeat"] if "repeat" in v else v["actions"]
+    core = SimCore(
+        scene_kind=v["scene_kind"],
+        max_steps=v.get("max_steps", MAX_STEPS_DEFAULT),
     )
-    for i, action in enumerate(v["actions"], start=1):
+    core.reset()
+    samples = [_sample(0, v["ego_id"], core)]
+    for i, action in enumerate(actions, start=1):
         core.step(np.asarray(action, dtype=np.float32))
-        if i % sample_every == 0 or i == len(v["actions"]):
-            samples.append(
-                {
-                    "step": i,
-                    "ego_id": v["ego_id"],
-                    "x": float(core.ego.x),
-                    "z": float(core.ego.z),
-                    "heading": float(core.ego.heading),
-                    "speed": float(core.ego.speed),
-                }
-            )
-        if core._terminated:
+        if i % sample_every == 0 or i == len(actions):
+            samples.append(_sample(i, v["ego_id"], core))
+        if core._terminated or core._truncated:
             break
     return {
         "name": v["name"],
@@ -89,6 +111,7 @@ def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
         "ego_id": v["ego_id"],
         "final_state": {
             "terminated": core._terminated,
+            "truncated": core._truncated,
             "reason": core._terminated_reason,
             "final_step": core.step_count,
             "final_z": float(core.ego.z),
@@ -122,15 +145,28 @@ def test_python_consistency_baseline() -> None:
             json.dumps(snap, indent=2),
             encoding="utf-8",
         )
-        assert snap["final_state"]["terminated"] is True
-        if v["scene_kind"] == "cross":
-            assert snap["final_state"]["reason"] in ("success", "collision", "red_light")
-        elif v["scene_kind"] == "corridor":
-            assert snap["final_state"]["reason"] in (
-                "success_corridor",
-                "collision",
-                "red_light",
+        final = snap["final_state"]
+        # The episode must have ENDED for a reason: either a termination
+        # (success / collision / red light) or the step limit. An episode
+        # that merely ran out of actions without either is a defect, so the
+        # assertion is "terminated OR truncated" — never "still running".
+        assert final["terminated"] is True or final["truncated"] is True, (
+            f"{v['name']}: episode ended for no reason "
+            f"(terminated={final['terminated']}, truncated={final['truncated']})"
+        )
+        allowed = _SCENE_REASONS.get(v["scene_kind"])
+        assert allowed is not None, f"no reason whitelist for scene {v['scene_kind']!r}"
+        if final["terminated"]:
+            assert final["reason"] in allowed, (
+                f"{v['name']}: unexpected termination reason {final['reason']!r} "
+                f"(allowed: {', '.join(allowed)})"
             )
+        else:
+            # Truncated: the world froze at the step limit, so there is no
+            # termination reason at all.
+            assert (
+                final["reason"] == ""
+            ), f"{v['name']}: truncated episode carries a reason {final['reason']!r}"
 
 
 def test_contract_snapshots_are_present() -> None:
@@ -164,6 +200,12 @@ def test_python_and_ts_agree_exactly(vector_name: str) -> None:
     ts_step = ts["final_state"]["final_step"]
     assert py_step == ts_step, f"{v['name']}: step count mismatch (python={py_step}, ts={ts_step})"
 
+    py_trunc = py["final_state"]["truncated"]
+    ts_trunc = ts["final_state"]["truncated"]
+    assert (
+        py_trunc == ts_trunc
+    ), f"{v['name']}: truncation flag mismatch (python={py_trunc}, ts={ts_trunc})"
+
     for key in ("final_z", "final_x", "final_speed"):
         py_value = py["final_state"][key]
         ts_value = ts["final_state"][key]
@@ -184,6 +226,15 @@ def test_python_and_ts_agree_exactly(vector_name: str) -> None:
             assert ps[key] == tsam[key], (
                 f"{v['name']}: sample step={ps['step']} field={key} "
                 f"(python={ps[key]!r}, ts={tsam[key]!r})"
+            )
+        # The traffic-light bits: the only cross-language common semantic
+        # of the phase ("which axis is green"). Comparing them directly is
+        # what makes the phase *duration* observable — before this, a
+        # change to the cycle length was invisible to every gate.
+        for key in ("nsGreen", "ewGreen"):
+            assert ps["light"][key] == tsam["light"][key], (
+                f"{v['name']}: sample step={ps['step']} light={key} "
+                f"(python={ps['light'][key]!r}, ts={tsam['light'][key]!r})"
             )
 
 
