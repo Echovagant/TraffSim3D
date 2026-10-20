@@ -51,6 +51,15 @@ export interface MirrorSample {
   z: number
   heading: number
   speed: number
+  /**
+   * The traffic-light bits — the only cross-language common semantic of
+   * the phase ("which axis is green"). The frontend's 10-value `LightPhase`
+   * enum projects onto this pair (Green / GreenLeft → that axis is green).
+   */
+  light: {
+    nsGreen: boolean
+    ewGreen: boolean
+  }
 }
 
 export interface MirrorEpisode {
@@ -329,6 +338,10 @@ const snapshot = (step: number, core: SimCoreMirror): MirrorSample => ({
   z: core.ego.z,
   heading: core.ego.heading,
   speed: core.ego.speed,
+  light: {
+    nsGreen: core.light.nsGreen,
+    ewGreen: core.light.ewGreen,
+  },
 })
 
 /**
@@ -336,18 +349,22 @@ const snapshot = (step: number, core: SimCoreMirror): MirrorSample => ({
  *
  * Sampling and stopping follow Python's `_ensure_python_snapshot` exactly:
  * sample at step 0, then every `sampleEvery`-th step, plus the **last
- * action index**; stop as soon as the episode terminates.
+ * action index**; stop as soon as the episode terminates or truncates.
  *
  * Note the terminating step is usually NOT sampled — it is only included
  * when it happens to be a multiple of `sampleEvery` or the last action.
  * (Measured on the `cross` vector: [0, 10, 20, 30, 40, 50].)
+ *
+ * `maxSteps` is appended last so the existing positional call sites
+ * (`runEpisode(scene, actions, sampleEvery)`) keep working unchanged.
  */
 export const runEpisode = (
   sceneKind: SceneKind,
   actions: number[],
   sampleEvery = 10,
+  maxSteps: number = PYTHON_SIM.MAX_STEPS_DEFAULT,
 ): MirrorEpisode => {
-  const core = new SimCoreMirror(sceneKind)
+  const core = new SimCoreMirror(sceneKind, maxSteps)
   core.reset()
   const samples: MirrorSample[] = [snapshot(0, core)]
   for (let i = 0; i < actions.length; i++) {
@@ -355,7 +372,7 @@ export const runEpisode = (
     if ((i + 1) % sampleEvery === 0 || i === actions.length - 1) {
       samples.push(snapshot(i + 1, core))
     }
-    if (core.terminated) break
+    if (core.terminated || core.truncated) break
   }
   return {
     terminated: core.terminated,

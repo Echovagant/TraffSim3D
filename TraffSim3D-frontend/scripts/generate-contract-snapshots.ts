@@ -31,8 +31,26 @@ interface Vector {
   scene_kind: SceneKind
   ego_id: string
   n_steps: number
+  /** Step limit (Python `SimCore.max_steps`). Defaults to `MAX_STEPS_DEFAULT`. */
+  max_steps?: number
   actions: number[][]
+  /** Expand `actions` this many times. Absent → the sequence is `actions`. */
+  repeat?: number
 }
+
+/**
+ * Expand a vector's action list.
+ *
+ * The rule — identical to the Python side's, one line each:
+ *   if the vector has `repeat`, the actual action sequence is `actions`
+ *   repeated `repeat` times; otherwise it is `actions` itself.
+ *
+ * The two sides cannot drift apart silently: a different expansion means a
+ * different action count, hence a different sample count, hence a red
+ * "sample count mismatch" in the contract.
+ */
+const expandActions = (v: Vector): number[][] =>
+  v.repeat === undefined ? v.actions : Array.from({ length: v.repeat }, () => v.actions).flat()
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const CONTRACT_DIR = process.env.TRAFFSIM3D_CONTRACT_DIR
@@ -122,10 +140,12 @@ const main = (): void => {
   const orphaned: string[] = []
   const expected = new Set<string>()
   for (const v of vectors) {
+    const actions = expandActions(v)
     const episode = runEpisode(
       v.scene_kind,
-      v.actions.map((a) => a[0]!),
+      actions.map((a) => a[0]!),
       sampleEvery,
+      v.max_steps,
     )
     const scenario = {
       name: v.name,
@@ -133,6 +153,7 @@ const main = (): void => {
       ego_id: v.ego_id,
       final_state: {
         terminated: episode.terminated,
+        truncated: episode.truncated,
         reason: episode.reason,
         final_step: episode.finalStep,
         final_z: episode.finalZ,
@@ -146,13 +167,17 @@ const main = (): void => {
         z: s.z,
         heading: s.heading,
         speed: s.speed,
+        light: {
+          nsGreen: s.light.nsGreen,
+          ewGreen: s.light.ewGreen,
+        },
       })),
     }
     const kernel = {
       name: v.name,
       scene_kind: v.scene_kind,
       dt: PYTHON_SIM.DT,
-      speed_series: kernelSpeedSeries(v.actions),
+      speed_series: kernelSpeedSeries(actions),
     }
 
     for (const [fileName, payload] of [

@@ -1,0 +1,362 @@
+# TraffSim3D — continuous integration.
+#
+# This repository had no CI at all before this file: every gate below was
+# run by hand. They are wired up here because the cross-language contract
+# test (Plan 071) compares two *independent* implementations of the same
+# traffic model with exact equality — without a machine-run gate, drift goes
+# unnoticed until somebody reads a diff by eye.
+#
+# Jobs
+# -----
+#   backend   pytest (+ coverage gate) + ruff + black
+#   frontend  vitest (+ coverage) + vue-tsc + eslint + prettier
+#   contract  Python sim  <->  TypeScript goldens   (the important one)
+#   e2e       Playwright against a live frontend + backend (NON-BLOCKING)
+#
+# Read the comment above the `contract` job before changing anything: it is
+# the one that protects the model. Read the comment above `e2e` before
+# making that job blocking.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Python 3.12 is what the project venv runs (requires-python = ">=3.12,<3.14").
+  PYTHON_VERSION: '3.12'
+  # package.json engines: "^20.19.0 || >=22.12.0" -> Node 22 is allowed.
+  NODE_VERSION: '22'
+  # Distinct ports, so the frontend and the backend can never collide with
+  # each other. 5173 is deliberately avoided: it is the project's default
+  # vite port and the one `playwright.config.ts` hard-codes.
+  FRONTEND_PORT: '5188'
+  BACKEND_PORT: '8001'
+  # Domestic PyPI mirror first (the project's toolchain note for slow
+  # networks). The install steps fall back to pypi.org if the mirror fails.
+  PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+
+jobs:
+  backend:
+    name: Backend — pytest / ruff / black
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: TraffSim3D-backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: TraffSim3D-backend/pyproject.toml
+
+      - name: Install the backend (dev + rl extras)
+        run: |
+          # Two things are easy to get wrong here:
+          #
+          # 1. `pytest-cov` is NOT part of the `dev` extra. It lives in the
+          #    `[dependency-groups]` table, and `pip install .` does not
+          #    install dependency groups. Without it, `pytest --cov=app`
+          #    dies with "unrecognized arguments: --cov". Hence the
+          #    explicit mention.
+          # 2. The `rl` extra pulls in stable-baselines3 (+ torch). It is
+          #    required: without SB3 the suite silently takes its "no-SB3
+          #    fallback" paths and the RL engine is never exercised.
+          #
+          # The mirror is tried first; if it is unreachable, retry against
+          # PyPI directly (the `--index-url` overrides the job-level
+          # PIP_INDEX_URL for that retry).
+          python -m pip install -e ".[dev,rl]" pytest-cov \
+            || python -m pip install -e ".[dev,rl]" pytest-cov \
+                 --index-url https://pypi.org/simple
+
+      - name: pytest + coverage
+        # `--cov-fail-under=70` is what turns the documented 70% threshold
+        # into an actual gate: on its own `--cov=app` only *reports* the
+        # number, so coverage could decay silently. Measured locally on
+        # 2026-10-21: 87%.
+        run: python -m pytest --cov=app --cov-fail-under=70 -q
+
+      - name: ruff
+        # The repository deliberately keeps 7 ruff findings. Each one is
+        # waived individually below — nothing is blanket-ignored, and no
+        # finding is deleted to make the linter quiet:
+        #
+        #   app/api/v1/maps.py       B008  x2 — FastAPI's `File()` in a
+        #                                        default argument is the
+        #                                        documented FastAPI idiom.
+        #   app/apps/rl/sim_core.py  N806  — the protected contract module;
+        #                                        `R` is intentional.
+        #   geojson/geojson2osm.py    UP009 — UTF-8 coding declaration.
+        #                             UP015 — redundant "r" file mode.
+        #                             F841  — unused local `node`.
+        #   tests/test_road_graph.py F841  — unused local `g`.
+        #
+        # Note that ruff's per-file-ignores need the fully-qualified
+        # "path:rule" form for every single rule: the shorthand
+        # "path:rule1,rule2" is rejected by ruff 0.17.
+        run: |
+          python -m ruff check . --output-format=concise \
+            --per-file-ignores="app/api/v1/maps.py:B008" \
+            --per-file-ignores="app/apps/rl/sim_core.py:N806" \
+            --per-file-ignores="geojson/geojson2osm.py:UP009" \
+            --per-file-ignores="geojson/geojson2osm.py:UP015" \
+            --per-file-ignores="geojson/geojson2osm.py:F841" \
+            --per-file-ignores="tests/test_road_graph.py:F841"
+
+      - name: black
+        # `--extend-exclude`, never `--exclude`: `black --exclude` REPLACES
+        # black's default exclusion list, which is why `.venv` is not in it.
+        # One `black . --exclude` run once reformatted 1983 files — the
+        # entire site-packages of the local venv — which git cannot undo
+        # because .venv is gitignored.
+        run: python -m black --check . --extend-exclude 'app/apps/rl/sim_core.py'
+
+  frontend:
+    name: Frontend — vitest / vue-tsc / eslint / prettier
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: TraffSim3D-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: TraffSim3D-frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm run test:run
+
+      - name: Unit tests + coverage
+        run: npm run test:coverage
+
+      - name: Type check
+        run: npx vue-tsc --noEmit
+
+      - name: Lint
+        # No `--fix` here: CI reports, it does not rewrite the tree.
+        run: npx eslint .
+
+      - name: Format check
+        run: npx prettier --check .
+
+  contract:
+    name: Contract — Python sim ⇄ TypeScript goldens
+    runs-on: ubuntu-latest
+    steps:
+      # BOTH sides are needed, and BOTH of the steps below are required.
+      #
+      #   1. `pytest tests/contract/` runs the **live Python sim** and
+      #      compares it, field by field, with the committed TypeScript
+      #      goldens in `tests/contract/snapshots/ts_*.json`. Equality is
+      #      exact — no tolerance — because both sides run the same
+      #      floating-point operation sequence.
+      #
+      #   2. `npm run contract:check` re-generates those goldens from the
+      #      **TypeScript sources** and fails if they no longer match.
+      #
+      # Step 1 alone is NOT enough, and this is the single most important
+      # thing to know about this file: the goldens are committed artefacts.
+      # If someone changes `src/application/services/simCoreMirror.ts` (or
+      # `tick.ts`), the Python sim still matches the *old* golden, so step 1
+      # stays green while the TypeScript implementation has silently drifted
+      # away from the model. Step 2 is what detects that.
+      #
+      # Conversely, step 2 alone is not enough either: it only proves the
+      # goldens match the TypeScript code, not that the two implementations
+      # agree.
+      #
+      # Together they are the contract. Keep both.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: TraffSim3D-backend/pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: TraffSim3D-frontend/package-lock.json
+
+      - name: Install the backend (dev + rl extras)
+        working-directory: TraffSim3D-backend
+        run: |
+          python -m pip install -e ".[dev,rl]" \
+            || python -m pip install -e ".[dev,rl]" \
+                 --index-url https://pypi.org/simple
+
+      - name: Install the frontend
+        working-directory: TraffSim3D-frontend
+        run: npm ci
+
+      - name: Python sim vs the committed TypeScript goldens
+        working-directory: TraffSim3D-backend
+        run: python -m pytest tests/contract/ -v
+
+      - name: TypeScript sources vs the committed goldens
+        working-directory: TraffSim3D-frontend
+        run: npm run contract:check
+
+  e2e:
+    name: E2E — Playwright (non-blocking)
+    runs-on: ubuntu-latest
+    # ------------------------------------------------------------------
+    # THIS JOB IS NOT A GATE YET, AND THAT IS A DELIBERATE, TEMPORARY STATE.
+    #
+    # The repository's 25 visual-regression baselines in `e2e-output/baseline/`
+    # were recorded on **Windows + Chromium 1228 (headless, SwiftShader)**.
+    # A Linux runner has a different Chromium build and a different font
+    # rasterisation, so the pixel comparisons are expected to differ even
+    # though nothing regressed. The measured tolerance
+    # (`maxDiffPixelRatio: 0.005`) is derived from real runs on the
+    # recording platform and MUST NOT be raised to paper over this: doing
+    # so would also hide genuine rendering regressions, which is the entire
+    # purpose of those baselines.
+    #
+    # So the honest options are (a) exclude the visual specs, (b) widen the
+    # tolerance, or (c) mark the job non-blocking. This file takes (c):
+    # `continue-on-error: true` keeps the job VISIBLE and its output
+    # READABLE — the specs still run, they are not silently dropped — while
+    # the red X does not block the pipeline.
+    #
+    # This job becomes blocking (drop `continue-on-error`) once the
+    # baselines have been re-recorded on Linux, i.e. once a Linux runner
+    # exists to re-record them. Until then it is a smoke test, not a gate.
+    #
+    # Note that `m1-perf-gate.spec.ts` is a *measurement*, not a
+    # comparison: it needs >= 30 FPS under software rasterisation, which
+    # depends on the runner's CPU. That is a second reason this job cannot
+    # gate the build yet.
+    # ------------------------------------------------------------------
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: TraffSim3D-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: TraffSim3D-backend/pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: TraffSim3D-frontend/package-lock.json
+
+      - name: Install the backend (base dependencies only)
+        # The e2e specs mostly exercise the frontend, and the ones that
+        # talk to the backend stub the endpoints they use. A minimal
+        # backend on :8001 is therefore enough — no RL extra, no torch.
+        working-directory: TraffSim3D-backend
+        run: |
+          python -m pip install -e . \
+            || python -m pip install -e . --index-url https://pypi.org/simple
+
+      - name: Install the frontend
+        run: npm ci
+
+      - name: Install the Playwright browser
+        # `--with-deps` pulls the Linux system libraries Chromium needs
+        # (libnss3, libatk, ...). Without it the browser fails to launch
+        # on a bare runner.
+        run: npx playwright install --with-deps chromium
+
+      - name: Start the backend on :8001
+        working-directory: TraffSim3D-backend
+        run: |
+          nohup python -m uvicorn app.main:app --port 8001 > /tmp/uvicorn.log 2>&1 &
+          echo "uvicorn started (pid $!)"
+
+      - name: Wait for the backend to answer /health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8001/health > /dev/null 2>&1; then
+              echo "backend is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "backend did not become healthy within 60s"
+          cat /tmp/uvicorn.log || true
+          exit 1
+
+      - name: Generate the CI-only Playwright config
+        # `playwright.config.ts` hard-codes use.baseURL and webServer.url
+        # to http://localhost:5173 and starts vite on its default port.
+        # The CI job must run the frontend on 5188 so it can never collide
+        # with the backend on 8001, and the shared `playwright.config.ts`
+        # is not this workflow's file to edit.
+        #
+        # Playwright gives the config's `use.baseURL` precedence over the
+        # PLAYWRIGHT_TEST_BASE_URL environment variable (the project `use`
+        # overrides the built-in option fixture), so the env var alone
+        # cannot redirect the browser — a config override is required.
+        #
+        # This file is generated inside the runner's working tree, is never
+        # committed, and inherits every other setting from the shared config
+        # (timeouts, snapshotPathTemplate, the measured 0.005 tolerance,
+        # viewport) so the CI run uses the same visual-regression settings
+        # as a local run.
+        run: |
+          cat > playwright.ci.config.ts <<'EOF'
+          // playwright.ci.config.ts — CI-only Playwright config.
+          // GENERATED by .github/workflows/ci.yml. Never committed.
+          // It only moves the frontend to :5188; every other setting is
+          // inherited from the shared playwright.config.ts.
+          import { defineConfig } from '@playwright/test'
+          import baseConfig from './playwright.config'
+
+          const FRONTEND_PORT = 5188
+
+          export default defineConfig(baseConfig, {
+            use: {
+              baseURL: `http://localhost:${FRONTEND_PORT}`,
+            },
+            webServer: {
+              command: `npm run dev -- --port ${FRONTEND_PORT} --strictPort`,
+              url: `http://localhost:${FRONTEND_PORT}`,
+              // In CI nothing else can be listening on 5188: if the port
+              // were busy we want a hard failure instead of silently
+              // testing someone else's server.
+              reuseExistingServer: false,
+              timeout: 120_000,
+            },
+          })
+          EOF
+
+      - name: Run the Playwright suite
+        env:
+          # VITE_BACKEND_PORT drives the vite dev-server proxy
+          # (/api and /health -> localhost:8001). VITE_BACKEND_URL is the
+          # direct-fetch counterpart used by AIPlaygroundView /
+          # BackendView, so both point at the same backend.
+          #
+          # Caveat: `app/main.py`'s CORS allow-list covers 5173 and 4173 but
+          # not 5188, so a *cross-origin* call from the CI frontend to
+          # :8001 would be refused by the browser. The e2e specs do not
+          # depend on that: they either stub the backend endpoints they
+          # exercise or go through the same-origin vite proxy.
+          VITE_BACKEND_PORT: '8001'
+          VITE_BACKEND_URL: 'http://localhost:8001'
+        run: npx playwright test --config=playwright.ci.config.ts

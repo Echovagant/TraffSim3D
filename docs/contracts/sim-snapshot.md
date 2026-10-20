@@ -158,53 +158,61 @@ recomputed golden against the committed file).
 | `INTERSECTION_RADIUS` | **blind** | **blind** | **no** |
 | `ROUNDABOUT_RADIUS` | **blind** | **blind** | **no** |
 | `NPC_SPEED` | **blind** | **blind** | **no** |
-| **traffic-light phase duration** (`TrafficLight.cycle_duration` / `PYTHON_SIM.LIGHT_CYCLE_SECONDS`) | **blind** | **blind** | **no** |
+| **traffic-light phase duration** (`TrafficLight.cycle_duration` / `PYTHON_SIM.LIGHT_CYCLE_SECONDS`) | **partially covered** — caught when the first flip lands inside the observable window (≤ 25.7 s); a drift of 30 → 26 s is **not** caught | same | **no** (was fully blind) |
 
-### The traffic-light phase duration is unobserved
+### The traffic-light phase duration — partially covered
 
-This is the important one, because the signal phase is cross-language
-difference #1 and the central topic of this document.
+The signal phase is cross-language difference #1 and the central topic of this
+document, so its coverage is stated precisely rather than as a yes/no.
 
-- **Python**: `cycle_duration` = 60 / 20 / 10 / 5 s all produce an
-  **identical** result — same reason, same step, same `z`, `x`, speed and
-  samples. It only becomes visible at **≤ 4.5 s**, and then only as a
-  `red_light` termination (at step 34–45).
-- **TS**: mutating `PYTHON_SIM.LIGHT_CYCLE_SECONDS` to 60 / 20 / 10 / 5 s
-  leaves the recomputed golden **byte-identical** to the committed one, so
-  `npm run test:contract` stays green. No unit spec under `frontend/src`
-  references the phase duration at all.
+**What changed (Plan 073 Sprint 1)**: the golden samples now carry the light
+bits (`nsGreen` / `ewGreen`) and the contract compares them. Two long vectors
+were added, so an episode can now run past the old 58-step horizon.
 
-⇒ **A change to the signal phase on either side passes all three gates
-silently.** The contract does **not** guarantee that the two sides agree on
-when the light changes.
+**The remaining limit is a property of the episodes, not of the assertion.**
+The phase flips at `duration × 10` steps, and the longest *signalled* episode
+is the `t_junction_lights` vector, which ends by **collision at step 257**.
 
-### Root cause
+| phase duration | first flip | inside the observable window (episode ends at 257)? |
+|---|---|---|
+| 30 s (shipped) | — (never) | baseline |
+| 26 s | 260 | **no → invisible** |
+| 25 s | 250 | yes → caught |
+| 20 s | 200 | yes → caught |
+| 10 s | 101 | yes → caught |
 
-Three structural facts about the vectors:
+⇒ **A phase-duration drift is caught only if it moves the first flip into the
+observable window** — i.e. if the new duration is ≲ 25.7 s. A drift of
+30 → 26 s escapes every gate. Measured on both sides (Python instance
+attribute and the TS `PYTHON_SIM` object); the same bound holds.
 
-1. **Every vector terminates at step 58 (5.8 s)**, far short of the 30 s
-   phase — the light never flips during an episode.
+### Root cause of the remaining limit
+
+1. **The longest signalled episode is 257 steps.** A parked ego (zero
+   acceleration) is hit by an NPC long before the 30 s phase: measured
+   reachable episode lengths are `cross` 39, `corridor` 45, `t_junction` 257,
+   `roundabout` 400 (truncation only, and its light is both-green so its swap
+   is a no-op). The `cross` scene is the worst case: the northbound NPC
+   respawns on the ego's own line.
 2. **Every vector is straight-line**, so `steer ≡ 0`. The Pure Pursuit
    denominator, the steer clamp and the wheelbase therefore cannot affect the
    trajectory at all.
-3. **The NPCs never interact with the ego** — no collision, no influence on
-   the ego's path — so `NPC_SPEED` and the scene radii are invisible.
+3. **The NPCs never interact with the ego** in the vectors that matter — no
+   collision, no influence on the ego's path — so `NPC_SPEED` and the scene
+   radii are invisible.
 
-The signal phase is observable only through its *side effect*: a `red_light`
-termination, i.e. only if the phase flips while the ego is inside the
-intersection box (`|x| < 8` and `|z| < 8`, roughly steps 34–47). Any phase of
-5 s or more flips too late to matter.
+### How to close the rest
 
-### How to close it
-
-1. **Add a vector that runs ≥ 300 steps**, so the light cycle is observable
-   (the phase flips at least once while the ego is inside the intersection).
-2. **Add a vector that actually steers** (a target off the ego's heading),
-   so `LOOKAHEAD_DISTANCE`, `MAX_STEER` and `EGO_WHEELBASE` become
-   observable.
-3. **Record the light bits (`obs[6:8]`) in the golden samples**, so the phase
-   is compared directly instead of only through its side effect on the
-   termination reason.
+1. **Add a Python scene whose signalled ego can idle for ≥ 300 steps** — the
+   phase flips at 300 steps, so the window must reach that far. This needs a
+   scene whose NPC layout never reaches the ego, which is scene-extension
+   work (Plan 073 Sprint 5), not a vector change: with the current four
+   scenes it is **provably impossible** (the reachability numbers above).
+2. **Add a vector that actually steers** (a target off the ego's heading), so
+   `LOOKAHEAD_DISTANCE`, `MAX_STEER` and `EGO_WHEELBASE` become observable.
+3. ~~**Record the light bits in the golden samples**~~ — **done** in Sprint 1:
+   the light is now compared directly instead of only through its side
+   effect on the termination reason.
 
 ### The rest of the uncovered ground
 
