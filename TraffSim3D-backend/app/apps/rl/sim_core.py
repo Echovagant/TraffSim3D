@@ -132,6 +132,32 @@ STOPPED_SPEED = 0.5  # m/s
 # Slack for the "is the vehicle still before the stop line?" comparison.
 STOP_LINE_EPS = 1e-9
 
+# ===== Plan 074 T8: the intersection conflict =====
+#
+# A vehicle may not enter the intersection while a vehicle of the
+# *other* axis occupies it - it has to wait behind the stop line, in
+# the queue.
+#
+# This is a *traffic* rule, exactly like the browser's
+# `applyCrossRoadYield` ("first to arrive has priority"), and it
+# lives in the responsive traffic model - NOT in the light model,
+# which is the cross-language contract's sensitive area and must
+# stay bit-identical.
+#
+# Why it is needed (Plan 074 §3 T8): without it the two axes never
+# block each other, so splitting the same green time into more,
+# shorter phases is a pure gain. A signal agent trained against
+# that world has no trade-off to learn - its optimum is a
+# fixed-time controller in disguise.
+#
+# The occupancy test is the intersection box itself: a vehicle is
+# inside it when `|x| < INTERSECTION_RADIUS` and
+# `|z| < INTERSECTION_RADIUS` (the same box the ego's own
+# red-light rule uses). The stop line sits exactly on the box edge
+# (`STOP_LINE_DISTANCE == INTERSECTION_RADIUS`), so for an
+# approaching vehicle "before the stop line" and "outside the box"
+# are the same statement.
+
 
 @dataclass
 class Vehicle:
@@ -635,13 +661,19 @@ class SimCore:
             npc.axis = approach_axis(npc.heading)
             lanes.setdefault(_lane_key(npc), []).append((approach_distance(npc), npc))
 
+        # Plan 074 T8: the intersection conflict. The occupancy is read
+        # **once**, from the state at the beginning of the step, so the
+        # outcome does not depend on the order in which the lanes are
+        # processed - the model stays deterministic.
+        occupied = self._occupied_axes()
+
         for group in lanes.values():
             # Front first: the largest distance along the travel direction
             # belongs to the vehicle closest to (or past) the stop line.
             group.sort(key=lambda item: item[0], reverse=True)
             leader: float | None = None
             for distance, npc in group:
-                limit = self._signal_limit(npc, distance)
+                limit = self._signal_limit(npc, distance, occupied)
                 if leader is not None:
                     follow = leader - MIN_GAP
                     limit = follow if limit is None else min(limit, follow)
@@ -655,11 +687,45 @@ class SimCore:
                 npc.z = -npc.z * 0.8
                 npc.stopped_at = None
 
-    def _signal_limit(self, npc: Vehicle, distance: float) -> float | None:
-        """The furthest the vehicle may travel this step, given the light.
+    def _occupied_axes(self) -> set[str]:
+        """The axes whose vehicles currently occupy the intersection.
 
-        `None` means "no limit from the signal": its axis is green, or it
-        has already entered the intersection.
+        Plan 074 T8. A vehicle is *in* the intersection when it is
+        inside the intersection box: `|x| < INTERSECTION_RADIUS` and
+        `|z| < INTERSECTION_RADIUS`.
+
+        Only the axis matters, not the individual vehicle: two vehicles
+        of the same axis run in different lanes of the same road and
+        pass each other, so they do not block each other - the
+        car-following rule already handles them (that is what makes
+        the queue form). Vehicles of different axes cross each other,
+        so they do block each other. That is the same granularity as
+        the browser's `applyCrossRoadYield`, which pairs vehicles by
+        *road*.
+        """
+        axes: set[str] = set()
+        for npc in self.npcs:
+            if abs(npc.x) < INTERSECTION_RADIUS and abs(npc.z) < INTERSECTION_RADIUS:
+                axes.add(approach_axis(npc.heading))
+        return axes
+
+    def _signal_limit(
+        self, npc: Vehicle, distance: float, occupied_axes: set[str]
+    ) -> float | None:
+        """The furthest the vehicle may travel this step.
+
+        Two rules can hold the vehicle back:
+
+        - the light: a vehicle whose axis is red stops at the stop
+          line;
+        - the intersection conflict (Plan 074 T8): a vehicle may not
+          *enter* the intersection while the other axis occupies it,
+          so it waits behind the stop line even when its axis is
+          green.
+
+        `None` means "no limit": the axis is green, the intersection
+        is free, or the vehicle has already entered the intersection
+        (it has committed to the crossing and keeps going).
         """
         if npc.axis == "ns":
             green = self.light.ns_green
@@ -667,14 +733,19 @@ class SimCore:
             green = self.light.ew_green
         else:
             return None
-        if green:
-            return None
         stop_distance = -STOP_LINE_DISTANCE
         if distance > stop_distance + STOP_LINE_EPS:
             # Already past the stop line: the vehicle is in the
             # intersection and keeps going.
             return None
-        return stop_distance
+        if not green:
+            return stop_distance
+        # Plan 074 T8: green, but the intersection is occupied by the
+        # *other* axis. The vehicle has to wait behind the stop line -
+        # this is what makes "serve one axis" block the other one.
+        if occupied_axes - {npc.axis}:
+            return stop_distance
+        return None
 
     def _drive_npc(
         self, npc: Vehicle, distance: float, limit: float | None
