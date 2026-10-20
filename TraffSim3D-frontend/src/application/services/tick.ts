@@ -32,6 +32,7 @@ import {
 } from '@domain/services/laneChange'
 import { smoothAccel, statusFromHysteresis, safeGapGipps } from '@domain/services/vehicleDynamics'
 import { computeSteeringAngle, steeringAngleToOmega } from '@domain/services/purePursuit'
+import { pythonSpeedStep } from '@domain/services/egoKernel'
 import { tickOobCleanup } from './oobCleanup'
 import {
   CRASH_IMPULSE_THRESHOLD,
@@ -104,6 +105,12 @@ export interface TickContext {
    *  the constraint layers (light / car-follow) skip this vehicle —
    *  PPO learned to handle them via its obs. */
   replayTargetId: string | null
+  /**
+   * Plan 071: a fixed action applied to the replay target this tick,
+   * overriding the policy's output. Lets the contract harness drive the
+   * product replay path deterministically, with no trained checkpoint.
+   */
+  replayAction?: readonly [number, number]
 }
 
 const GREEN_LIKE = new Set<LightPhase>([LightPhase.Green, LightPhase.GreenLeft])
@@ -202,15 +209,19 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   //      veto PPO's accel at red lights / follower distances — PPO
   //      learned to handle these via the obs's [6:8] light bits and
   //      [8:13] NPC-distance bits).
-  if (ctx.policy && ctx.replayTargetId) {
+  if (ctx.replayTargetId && (ctx.policy || ctx.replayAction)) {
     const replayV = network.vehicles[ctx.replayTargetId]
     if (replayV) {
       const obs = buildReplayObs(replayV, network)
-      const action = mlpForwardMean(obs, ctx.policy)
-      // Python maps action[0] ∈ [-1, 1] → accel_cmd ∈ [-3, 3] m/s².
-      const accelCmd = action[0] * 3.0
-      const nextSpeed = Math.max(0, Math.min(PYTHON_SIM_SPEED_LIMIT, replayV.speed + accelCmd * dt))
-      replayV.targetSpeed = nextSpeed
+      // Plan 071: an injected fixed action overrides the policy, so the
+      // replay path can be measured without a checkpoint.
+      const action: PolicyAction = ctx.replayAction
+        ? [ctx.replayAction[0], ctx.replayAction[1]]
+        : mlpForwardMean(obs, ctx.policy as PolicyWeights)
+      // Python: clip(action[0], -1, 1) * 3.0, then speed + accel * dt.
+      // The kernel carries the clip — the policy's output layer has no
+      // tanh, so raw actions can leave [-1, 1].
+      replayV.targetSpeed = pythonSpeedStep(replayV.speed, action[0], dt)
       // Surface to the AI Playground UI on next refresh.
       if (typeof window !== 'undefined') {
         const w = window as unknown as {
@@ -225,6 +236,11 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   for (const v of Object.values(network.vehicles)) {
     const road = network.roads[v.roadId]
     if (!road) continue
+    // Plan 071: the replay target's speed is owned by the policy (or by
+    // an injected action) and was written in step 2.5. Overwriting it
+    // here discarded the policy's output entirely — the replay vehicle
+    // drove at the road speed limit.
+    if (ctx.replayTargetId && v.id === ctx.replayTargetId) continue
     v.targetSpeed = road.speedLimit
     applyTrafficLightConstraint(v, road, network, ctx)
     applyCarFollowingConstraint(v, road, network, ctx)
@@ -378,7 +394,15 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     for (const v of Object.values(network.vehicles)) {
       const road = network.roads[v.roadId]
       if (!road) continue
-      v.speed = smoothAccel(v.speed, v.targetSpeed, dt, v.type)
+      // Plan 071: the replay target already carries the Python-exact next
+      // speed (step 2.5). Ramping it through smoothAccel would cap the
+      // acceleration at VEHICLE_DYN[type].accel (2.0 m/s²) instead of
+      // Python's 3.0 — cross-language difference #7.
+      if (ctx.replayTargetId && v.id === ctx.replayTargetId) {
+        v.speed = v.targetSpeed
+      } else {
+        v.speed = smoothAccel(v.speed, v.targetSpeed, dt, v.type)
+      }
       v.speed = Math.max(0, Math.min(MAX_SPEED, v.speed))
       const sign = laneForwardSign(v.laneIndex, road.laneCount)
       v.s += v.speed * sign * dt
