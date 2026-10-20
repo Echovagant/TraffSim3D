@@ -33,6 +33,7 @@ import {
   ALL_RED_SECS,
   MAX_GREEN_SECS,
   MIN_GREEN_SECS,
+  MIN_INTER_GREEN_SECS,
   PHASE_ADJUST_SECS,
   PYTHON_SIM,
   SIGNAL_ACTION_NAMES,
@@ -271,6 +272,7 @@ const main = (): void => {
         phase_adjust_seconds: PHASE_ADJUST_SECS,
         max_green_seconds: MAX_GREEN_SECS,
         min_green_seconds: MIN_GREEN_SECS,
+        inter_green_seconds: MIN_INTER_GREEN_SECS,
       },
       // The light override the mirror actually ran with (absent → the
       // scene's own light). The Python side cross-checks it against the

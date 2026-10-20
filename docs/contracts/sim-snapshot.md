@@ -47,7 +47,7 @@ by a user noticing a bad drive.
 |---|---|---|---|
 | **L1 kernel** | ego speed integration | the **product replay path** (`tick.ts`) | `ts_kernel_<name>.json` |
 | **L3 scenario** | full SimCore semantics — termination rules, reason strings, trajectory | the **contract mirror** (`simCoreMirror.ts`) | `ts_<name>.json` |
-| **L4 vocabulary** | the five signal-action names + the three semantics constants | the **Python training sim**'s own copy (`sim_core.SIGNAL_ACTION_NAMES`) | the `signal_vocabulary` block inside `ts_<name>.json` |
+| **L4 vocabulary** | the five signal-action names + the four semantics constants | the **Python training sim**'s own copy (`sim_core.SIGNAL_ACTION_NAMES`) | the `signal_vocabulary` block inside `ts_<name>.json` |
 | **L5 action-driven** | the **trajectory under an explicit action sequence** | the **contract mirror** (`simCoreMirror.ts`) applying the same actions at the same steps | the `ts_signalled_light_*.json` goldens |
 | **L6 forward pass** | the **discrete** policy's argmax over the action logits | the **Python training side**'s own forward pass (SB3's own policy forward + a pure-Python reference) | `discrete-policy-fixture.json` (in the frontend's fixtures folder) |
 
@@ -203,7 +203,8 @@ the same shape — looks like this:
     "all_red_seconds": 3,
     "phase_adjust_seconds": 5,
     "max_green_seconds": 60,
-    "min_green_seconds": 10
+    "min_green_seconds": 10,
+    "inter_green_seconds": 6
   },
   "final_state": {
     "terminated": true,
@@ -235,6 +236,7 @@ the same shape — looks like this:
 | `signal_vocabulary.phase_adjust_seconds` | The phase-adjust amount (s) applied by `extend_green` (+5 s) and `shorten_red` (-5 s). Compared against `sim_core.PHASE_ADJUST_SECS`. |
 | `signal_vocabulary.max_green_seconds` | The upper bound (s) on a green phase's **remaining** time after `extend_green`. Compared against `sim_core.MAX_GREEN_SECS`. |
 | `signal_vocabulary.min_green_seconds` | The lower bound (s) on a green phase's **remaining** time — a green may not be shortened below it (Plan 074 T7). Compared against `sim_core.MIN_GREEN_SECS`. |
+| `signal_vocabulary.inter_green_seconds` | The **inter-green clearance** (s) a phase change costs: the time between the end of one axis' green and the start of the other axis' green, during which no new vehicle may go (Plan 074 T9). The browser derives it from its clearance-yellow (3 s) plus the all-red the conflict resolution forces (3 s); the Python training sim charges the same 6 s on every phase change (`sim_core.CLEARANCE_SECS`). Compared against `sim_core.CLEARANCE_SECS`. |
 | `light_override` | **Optional** — present only when the vector has one. The light the mirror actually ran with: `{"ns_green": …, "ew_green": …}`. The Python side cross-checks it against the vector's copy. |
 | `signal_actions` | **Optional** — present only when the vector has some. The signal-action sequence the mirror actually applied: `[{"step": N, "action": "…"}, …]`. **The Python side reads the sequence from here** (the golden is the single source it applies, exactly like the `signal_vocabulary` block) and cross-checks it against the vector's copy, so a golden that was not regenerated after a vector edit cannot hide the drift. |
 | `final_state.terminated` | The episode ended by a **termination** — success, collision or red light. |
@@ -592,6 +594,67 @@ Plan 074 §2 D5 实测发现：模型允许一个「闪烁」调度（每步 `sh
 （没有黄灯、没有全红），车辆也完全能在 15 s 绿灯内清空路口，所以对「队列长度曲线下
 面积」这个延误指标而言，周期越短越划算。真正还缺的是 D5 诊断里的第 (b) 项——
 **路口冲突模型**（以及每次换相的清空时间），留给 Sprint 5 的「训练环境与浏览器同源」。
+
+### Sprint 3 T9 — 换相清空时间（inter-green）+ 稠密训练场景
+
+T7/T8 之后模型还缺两样物理，Plan 074 §3 T9 一次补齐：
+
+**（1）换相清空时间。** 浏览器每次换相要付 Green→**黄灯 3 s**→全红 **3 s**，
+两侧合计 **6 s** 的 inter-green——期间**没有新车获准起步**。Python 的灯模型原本
+**瞬时换相**，于是「切得越勤越划算」，信号灯 agent 的最优解就是一个固定周期
+控制器。
+
+- 清空时间由 **`SimCore`** 收取（**不是** `TrafficLight` 数据类——那是契约的敏感区，
+  一个字段都不能加），且**只在 `responsive_traffic` 打开时生效** ⇒ 默认路径逐位不变；
+- 语义与既有的全红清空一致：**两轴都不放行** + **相位钟冻结**；清空期间相位调整
+  也被中和（否则落在冻结的 0 上的调整会悄悄缩短**下一个**绿灯，绕过 T7 的最小绿灯
+  下限）；
+- 常量 `CLEARANCE_SECS = 6.0`，作为**第五个**常量进 L4 词汇断言
+  （`signal_vocabulary.inter_green_seconds`）；浏览器侧对应的是**推导**出来的
+  `MIN_INTER_GREEN_SECS = YELLOW_CLEAR_SECS + CONFLICT_ALL_RED_SECS`（= 6 s），
+  不是写死的字面量 ⇒ 数字不会与实现它的代码悄悄漂移。
+
+**（2）稠密训练场景。** 交叉场景每条车道只有 1 辆车（约每 9.4 s 一辆），红灯期排不出
+队列 ⇒ 「饿死对向」几乎免费。`SignalEnv` 现在在每条车道上铺一条**规则车流**
+（沿车道的循环路径每 24 m 一辆，从重生点开始），红灯期能堆起 6～8 辆的队列。
+
+**⚠ 两轴的需求刻意不等**（EW 轴比 NS 轴多 1/3 的车流）。这不是给测试放水，而是
+**模型可用性的前提**：奖励是「队列长度曲线下面积」，而队列长度**不可能超过该轴上
+的车数**⇒ 被饿死那一轴的延误有上限（车数 × episode 长度）。实测**需求平衡**的
+稠密场景里，模型把「永远吊着一轴绿灯」排在**交替调度之上**（−238.4 vs −241.8，
+600 步）：交替调度每次换相都要付 inter-green，而饿死调度根本不换相，被封顶的延误
+补不回来——那是个**退化最优解**（agent 会学会饿死一轴）。需求不平衡之后取舍才
+是真的：agent 必须决定把绿灯怎么分给忙轴和闲轴。
+
+**实测（600 步，同一初始状态，seed 0）**：
+
+| 调度 | T9 之前 | T9 之后 | 通过路口次数 | NPC 均速 | 换相次数 |
+|---|---|---|---|---|---|
+| 默认 `no_op`（30/30 交替） | −109.2 | **−423.1** | 44 | 3.80 | 2 |
+| 闪烁（每步 `shorten_red`） | −97.2 | **−437.2** | 38 | 3.54 | 5 |
+| 饿死对向（每步 `extend_green`） | −117.2 | **−455.4** | 40 | 3.63 | 0 |
+| 每步 `preempt` | −223.6 | **−777.6** | 2 | 0.53 | 0 |
+
+⇒ **两条不等式同时成立**：交替（−423.1）> 闪烁（−437.2）**且** > 饿死对向（−455.4）；
+而且在 600 / 900 / 1200 / 1800 / 2400 步各个 horizon 上都成立（分别
++14.1/+8.4/+11.1/+18.6/+56.7 与 +32.3/+57.4/+85.2/+129.2/+211.2）。
+
+**golden 改动**：只有 `signal_vocabulary` 块多了一个键——10 个 golden 全部是**纯插入**（20 增 10 删，删掉的那 10 行只是被插入行挤掉逗号的上一行，字段值未变），
+10 个 `ts_kernel_*.json` 逐字节不变；每个 `samples[]` 条目、每个 `final_state`
+字段、每个既有词汇值都**逐字节相同**（机械校验过）。
+
+**⚠ 覆盖边界（必须记下）**：**响应式交通模型目前是 Python 独有的**——契约镜像
+（`simCoreMirror.ts`）没有实现它，所以**交通模型本身没有被跨语言验证**，inter-green
+清空也一样。契约覆盖的仍然是「默认交通路径 + 信号语义」。「训练环境与浏览器同源」
+正是要把这块补齐（Sprint 5）。
+
+**⚠ 迁移风险（必须记下）**：Python 训练场景的车流是**闭合回路**——每条车道只有
+固定几辆车在循环 ⇒ **被饿死那一轴的延误有上限**（车数 × episode 长度）。
+浏览器的车流是**开放生成**的，饿死一个轴的代价会**无界增长**。
+⇒ 后果：在 Python 里训出来的策略，对「饿死一轴」的**惩罚偏轻**；
+搬到浏览器后，同样的策略会比训练时更倾向于饿死对向。
+⇒ 这是「训练环境 ≠ 浏览器」这条主线（A1 / Sprint 5）的一个具体实例，
+不是可以在奖励函数里调参掉的：**要改的是模型（开放车流），不是奖励**。
 
 ### The signal observation schema — schema only, never values (Plan 074)
 

@@ -102,6 +102,27 @@ MAX_GREEN_SECS = 60.0
 MIN_GREEN_SECS = 10.0
 # The all-red clearance expressed in sim steps (3 s at the contract's 10 Hz).
 ALL_RED_STEPS = int(round(ALL_RED_SECS / DT))
+# The inter-green clearance (s) charged on every phase change (Plan 074 T9).
+#
+# The browser charges a 3 s yellow plus a 3 s all-red before the other
+# axis may go - six seconds during which no new vehicle gets a green.
+# The Python light model swapped instantaneously, which made switching
+# phases FREE: splitting the same green time into more, shorter phases
+# was a pure gain, so a signal agent's optimum was a fixed-time
+# controller in disguise.
+#
+# The clearance is charged by `SimCore` - NOT by the `TrafficLight`
+# dataclass, which is the cross-language contract's sensitive area - and
+# only while the responsive traffic model is on. The default path is
+# therefore bit-identical and the committed goldens do not move.
+#
+# It matches the browser's minimum inter-green
+# (`MIN_INTER_GREEN_SECS` in
+# TraffSim3D-frontend/src/shared/constants/simulation.ts); the contract
+# compares the two numbers.
+CLEARANCE_SECS = 6.0
+# The inter-green clearance expressed in sim steps (6 s at the 10 Hz clock).
+CLEARANCE_STEPS = int(round(CLEARANCE_SECS / DT))
 
 # ===== Plan 074 Sprint 3 (S3a-1): traffic that answers to the light =====
 #
@@ -338,8 +359,22 @@ class SimCore:
     # leak into it. The signal training env (`signal_env.SignalEnv`) turns
     # it on; the contract vectors keep running the default path.
     responsive_traffic: bool = False
+    # Plan 074 T9: the inter-green clearance.
+    #
+    # `_clearance_steps` counts the clearance steps that are left (0 =
+    # the normal cycle runs); `_pending_swap` is the phase to show when
+    # the clearance ends (None = no swap pending).
+    #
+    # The state lives here, in `SimCore`, and NOT in the `TrafficLight`
+    # dataclass: that dataclass is the cross-language contract's
+    # sensitive area and must not grow.
+    _clearance_steps: int = 0
+    _pending_swap: tuple[bool, bool] | None = None
 
     def reset(self, seed: int | None = None) -> np.ndarray:
+        # Plan 074 T9: the inter-green clearance is per-episode state.
+        self._clearance_steps = 0
+        self._pending_swap = None
         if self.scene_kind == "corridor":
             return self._reset_corridor()
         if self.scene_kind == "t_junction":
@@ -523,7 +558,21 @@ class SimCore:
         if self.light.all_red_steps == 0 and self.light.resume_state is not None:
             self.light.ns_green, self.light.ew_green = self.light.resume_state
             self.light.resume_state = None
+        # Plan 074 T9: the inter-green clearance freezes the phase clock
+        # completely - it does not advance, and a phase adjustment may
+        # not move it either, so the next phase always starts with the
+        # full cycle.
+        #
+        # The all-red clearance above only freezes the clock's *advance*;
+        # here the adjustment is neutralised too, because the clock
+        # reads 0 during the clearance and an adjustment landing there
+        # would silently shorten the *next* green - below the minimum
+        # green time the T7 guard exists to protect.
+        clearing = self.responsive_traffic and self._clearance_steps > 0
+        clock_before_clearance = self.light.cycle_timer
         self.light.consume_actions()
+        if clearing:
+            self.light.cycle_timer = clock_before_clearance
         if self.light.all_red_steps > 0:
             # All-red clearance (Plan 073 Sprint 2): neither axis is green
             # and the phase clock is frozen, so the interrupted phase
@@ -531,14 +580,36 @@ class SimCore:
             self.light.ns_green = False
             self.light.ew_green = False
             self.light.all_red_steps -= 1
+        elif clearing:
+            # Plan 074 T9: the inter-green clearance. Neither axis may go
+            # and the phase clock is frozen; when the clearance runs out,
+            # the other axis gets its green.
+            self.light.ns_green = False
+            self.light.ew_green = False
+            self._clearance_steps -= 1
+            if self._clearance_steps == 0 and self._pending_swap is not None:
+                self.light.ns_green, self.light.ew_green = self._pending_swap
+                self._pending_swap = None
         else:
             self.light.cycle_timer += DT
             if self.light.cycle_timer >= self.light.cycle_duration:
                 self.light.cycle_timer = 0.0
-                self.light.ns_green, self.light.ew_green = (
-                    self.light.ew_green,
-                    self.light.ns_green,
-                )
+                if self.responsive_traffic:
+                    # Plan 074 T9: the swap is no longer instantaneous -
+                    # the two axes are separated by an inter-green
+                    # clearance during which no new vehicle may go.
+                    self._pending_swap = (
+                        self.light.ew_green,
+                        self.light.ns_green,
+                    )
+                    self._clearance_steps = CLEARANCE_STEPS
+                    self.light.ns_green = False
+                    self.light.ew_green = False
+                else:
+                    self.light.ns_green, self.light.ew_green = (
+                        self.light.ew_green,
+                        self.light.ns_green,
+                    )
 
         self.sim_time += DT
         self.step_count += 1
@@ -606,6 +677,21 @@ class SimCore:
         return self._obs(), float(reward), self._terminated, self._truncated, info
 
     # ===== Plan 074 Sprint 3 (S3a-1): signal-responsive traffic =====
+
+    @property
+    def in_clearance(self) -> bool:
+        """Is the light in its inter-green clearance (Plan 074 T9)?
+
+        During the clearance neither axis may go and the phase clock is
+        frozen. The controller layer uses this to refuse a phase
+        adjustment while the light is clearing - a `shorten_red` landing
+        there would silently shorten the *next* green.
+
+        (The browser has no counterpart to read: its phase model counts
+        per light and already carries the yellow + all-red clearance
+        itself.)
+        """
+        return self._clearance_steps > 0
 
     def queue_length(self, axis: str) -> int:
         """How many NPCs are queued on `axis`.

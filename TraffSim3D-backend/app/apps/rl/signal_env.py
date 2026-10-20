@@ -48,6 +48,7 @@ bound on its side.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import gymnasium as gym
@@ -58,9 +59,13 @@ from .sim_core import (
     DT,
     MAX_STEPS_DEFAULT,
     MIN_GREEN_SECS,
+    NPC_SPEED,
     PHASE_ADJUST_SECS,
     SIGNAL_ACTION_NAMES,
+    STOP_LINE_DISTANCE,
     SimCore,
+    Vehicle,
+    approach_axis,
 )
 
 # The observation dimensionality (Plan 074 §2 D1).
@@ -70,6 +75,114 @@ SIG_OBS_DIM = 6
 # The browser side must use the same value for the two observations to
 # be comparable at all.
 MAX_QUEUE = 10
+
+# ===== Plan 074 T9: the dense training scenario =====
+#
+# The cross scene has ONE vehicle per lane: an arrival every ~9 s. A red
+# phase therefore never builds a queue - the cross-axis queue holds one
+# or two vehicles - so "serve the other axis forever" costs almost
+# nothing and the signal agent has no trade-off to learn. The measured
+# consequence (Plan 074 §3 T9): starving one axis was only ~8 reward
+# worse than alternating, while the queue never built up at all.
+#
+# The dense scenario lays out a regular *stream* of traffic on every
+# lane of the scene, so that a red phase produces a queue of SEVERAL
+# vehicles. Three properties matter:
+#
+# - the stream is fully deterministic - there is no randomness
+#   anywhere. The contract compares trajectories for exact equality and
+#   a training run has to be reproducible;
+# - the vehicles keep the scene's own lanes (axis, direction of travel
+#   and lateral offset), so the car-following rule makes them queue
+#   behind each other instead of driving through each other;
+# - the stream is spread over the lane's whole circulation path, not
+#   stacked at the stop line. A stream that is already waiting at the
+#   line would rebuild its queue the instant the green ends, and the
+#   "queue rebuilds slowly" effect - the one that makes serving both
+#   axes pay off - would disappear.
+#
+# The scene itself (`SimCore._reset_cross`) is NOT touched: the contract
+# vectors run on it, and their goldens must not move.
+
+# The lane's circulation path: a vehicle respawns where the world ends
+# (32 m before the intersection centre, i.e. 24 m before the stop line)
+# and leaves it 40 m after the centre (48 m after the stop line). The
+# dense stream starts at the respawn point.
+DENSE_STREAM_START = -24.0
+# How far apart two vehicles of the stream are, in metres. 24 m is a
+# 3 s headway at the NPC speed - a busy road, but not a jam.
+DENSE_STREAM_SPACING = 24.0
+# How many vehicles each lane carries. The two axes do NOT carry the
+# same demand: the EW axis carries a third more traffic than the NS
+# axis, as real intersections do.
+#
+# WHY THE DEMAND IS UNBALANCED - this is not a thumb on the scale, it
+# is what makes the model usable. The reward is the *queue length
+# area*, and a queue can never be longer than the number of vehicles
+# that exist: a starved axis's delay is therefore capped at (vehicles on
+# that axis) x (episode length). Measured with a BALANCED dense stream,
+# the model ranks "hold one axis green forever" *above* an alternating
+# schedule (-238.4 vs -241.8 over 600 steps): the alternating schedule
+# pays the inter-green clearance on every switch while the starving
+# schedule never switches at all, and the capped delay cannot make up
+# for it. That is a degenerate optimum - the agent would learn to
+# starve an axis. With an unbalanced demand the trade-off is real: the
+# agent has to decide how to split the green between a busy and a quiet
+# axis, and the reward ranks the alternating schedule above both
+# degenerate policies (switching as fast as possible, and starving an
+# axis) at every horizon from 600 steps on.
+DENSE_NS_VEHICLES_PER_LANE = 3
+DENSE_EW_VEHICLES_PER_LANE = 4
+
+# The four approaches of the cross scene: (axis, direction of travel) ->
+# (the unit vector across the road, the unit vector along it, heading).
+#
+# The lateral offset itself comes from the scene's own vehicles, so the
+# dense scenario follows the scene if the scene ever moves a lane.
+_LANES: dict[tuple[str, int], tuple[tuple[float, float], tuple[float, float], float]] = {
+    ("ns", 1): ((1.0, 0.0), (0.0, 1.0), math.pi / 2),
+    ("ns", -1): ((1.0, 0.0), (0.0, -1.0), -math.pi / 2),
+    ("ew", 1): ((0.0, 1.0), (1.0, 0.0), 0.0),
+    ("ew", -1): ((0.0, 1.0), (-1.0, 0.0), math.pi),
+}
+
+
+def _lane_of(vehicle: Vehicle) -> tuple[str, int]:
+    """The (axis, direction of travel) a vehicle runs in.
+
+    The same rule the traffic model uses to tell the lanes apart: a
+    heading within 45° of ±Z is the north-south road, one within 45° of
+    ±X the east-west road; the sign is the direction of travel.
+    """
+    axis = approach_axis(vehicle.heading)
+    if axis == "ns":
+        direction = 1 if math.sin(vehicle.heading) >= 0 else -1
+    else:
+        direction = 1 if math.cos(vehicle.heading) >= 0 else -1
+    return axis, direction
+
+
+def _lateral_offset(vehicle: Vehicle, axis: str) -> float:
+    """How far the vehicle sits off its road's centre line."""
+    return vehicle.x if axis == "ns" else vehicle.z
+
+
+def _lane_point(
+    axis: str, lateral: float, along: tuple[float, float], distance: float
+) -> tuple[float, float]:
+    """A point on a lane.
+
+    `lateral` metres off the road's centre line, `distance` metres
+    along the lane measured from the stop line (negative = upstream,
+    further back and waiting).
+    """
+    x = lateral if axis == "ns" else 0.0
+    z = lateral if axis == "ew" else 0.0
+    # The stop line sits `STOP_LINE_DISTANCE` before the intersection
+    # centre, measured along the lane.
+    x += along[0] * (distance - STOP_LINE_DISTANCE)
+    z += along[1] * (distance - STOP_LINE_DISTANCE)
+    return x, z
 
 
 class SignalEnv(gym.Env[np.ndarray, int]):
@@ -121,6 +234,7 @@ class SignalEnv(gym.Env[np.ndarray, int]):
         super().reset(seed=seed)
         self.core.reset(seed=seed)
         self._park_ego()
+        self._densify_traffic()
         self._total_delay = 0.0
         return self._obs(), {}
 
@@ -189,6 +303,12 @@ class SignalEnv(gym.Env[np.ndarray, int]):
         its green phase, and the constant is the same number on both
         sides (a cross-language contract constant).
         """
+        if self.core.in_clearance:
+            # Plan 074 T9: the light is in its inter-green clearance. The
+            # phase clock is frozen there, so an adjustment would not
+            # shorten the red - it would shorten the *next* green, below
+            # the minimum green time. Refused.
+            return False
         light = self.core.light
         remaining = light.cycle_duration - light.cycle_timer
         return remaining - PHASE_ADJUST_SECS >= MIN_GREEN_SECS
@@ -203,6 +323,41 @@ class SignalEnv(gym.Env[np.ndarray, int]):
         self.core.ego.x = 0.0
         self.core.ego.z = -45.0
         self.core.ego.speed = 0.0
+
+    def _densify_traffic(self) -> None:
+        """Lay out the dense scenario's traffic (Plan 074 T9).
+
+        Every lane of the scene carries a regular *stream* of vehicles
+        along its circulation path, spaced `DENSE_STREAM_SPACING` metres
+        apart and starting at the respawn point. A red phase therefore
+        builds a queue of SEVERAL vehicles instead of one or two, which
+        is what gives the signal agent a real trade-off: serving one
+        axis too long now costs the other axis a real queue.
+
+        The lanes themselves (axis, direction of travel, lateral offset
+        and heading) come from the scene's own vehicles, so the dense
+        scenario follows the scene if the scene ever moves a lane; only
+        the *positions* are the scenario's own. The scene itself
+        (`SimCore._reset_cross`) is untouched - the contract vectors run
+        on it and their goldens must not move.
+
+        The placement is fully deterministic: no randomness anywhere.
+        """
+        core = self.core
+        stream: list[Vehicle] = []
+        for npc in core.npcs:
+            axis, direction = _lane_of(npc)
+            lane = _LANES.get((axis, direction))
+            if lane is None:
+                continue
+            _, along, heading = lane
+            lateral = _lateral_offset(npc, axis)
+            count = DENSE_EW_VEHICLES_PER_LANE if axis == "ew" else DENSE_NS_VEHICLES_PER_LANE
+            for index in range(count):
+                distance = DENSE_STREAM_START + DENSE_STREAM_SPACING * index
+                x, z = _lane_point(axis, lateral, along, distance)
+                stream.append(Vehicle(x=x, z=z, heading=heading, speed=NPC_SPEED))
+        core.npcs = stream
 
     def _obs(self) -> np.ndarray:
         """The six-dimensional signal observation (Plan 074 §2 D1)."""

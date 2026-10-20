@@ -43,6 +43,7 @@ import {
   STOP_LINE_DISTANCE,
   TIME_HEADWAY,
   TRAJECTORY_SAMPLE_INTERVAL,
+  CONFLICT_ALL_RED_SECS,
   DEFAULT_CONTROLLER_KIND,
   VEHICLE_PURE_PURSUIT,
   PYTHON_SIM_SPEED_LIMIT,
@@ -165,7 +166,7 @@ const resolveSignalConflicts = (inter: Intersection): void => {
       // force the second light.
       const target = a.phaseRemaining >= b.phaseRemaining ? a : b
       target.phase = LightPhase.Red
-      target.phaseRemaining = 3
+      target.phaseRemaining = CONFLICT_ALL_RED_SECS
     }
   }
 }

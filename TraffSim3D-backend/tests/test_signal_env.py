@@ -43,6 +43,19 @@ def _run(schedule: list[int], steps: int = 600) -> tuple[float, dict]:
     return total, info
 
 
+def _queued_steps(schedule: list[int], axis: str, steps: int = 600) -> int:
+    """How many steps the given axis had a non-empty queue."""
+    env = SignalEnv(max_steps=steps)
+    env.reset(seed=0)
+    count = 0
+    for index in schedule:
+        _, _, terminated, truncated, _ = env.step(index)
+        count += env.core.queue_length(axis) > 0
+        if terminated or truncated:
+            break
+    return count
+
+
 def test_the_env_turns_on_the_responsive_traffic_but_the_core_default_does_not() -> None:
     """The responsive traffic is opt-in: the contract vectors keep
     running the default path, which must stay bit-identical."""
@@ -161,8 +174,16 @@ def test_serving_both_axes_beats_starving_one_axis() -> None:
         f"(serve_both={serve_both}, serve_one={serve_one})"
     )
     # The mechanism behind the number: it is the *cross* axis that pays.
+    # Under the starving schedule the cross axis is queued on EVERY step
+    # of the episode (its queue never drains); under the "serve both"
+    # schedule it drains regularly.
     assert one_info["queue_ew"] > 0, "the starved axis must be queued"
-    assert both_info["queue_ew"] == 0, "the served axes must not queue"
+    assert (
+        _queued_steps([ACTION_INDEX["extend_green"]] * 600, "ew") == 600
+    ), "the starved axis must be queued on every step"
+    assert (
+        _queued_steps([ACTION_INDEX["shorten_red"]] * 600, "ew") < 600
+    ), "the alternating schedule must let the cross axis drain"
 
     # A less extreme "serve both" schedule must beat it as well, so the
     # result does not hinge on one particular action pattern.
@@ -302,31 +323,30 @@ def test_the_flicker_schedule_is_a_legal_timed_plan_now() -> None:
 
 
 def test_the_flicker_schedule_versus_the_default_schedule() -> None:
-    """The plan's comparison — and the measured result.
+    """The plan's comparison - and the measured result.
 
     Plan 074 T7 expected the masked flicker to score *worse* than the
-    default 30/30 cycle. **Measured, it does not**: the masked flicker
-    scores -97.2 against the default's -109.2 — it is still the better
-    schedule *in this model*.
+    default 30/30 cycle. **Measured then, it did not**: the masked
+    flicker scored -97.2 against the default's -109.2 - it was still
+    the better schedule *in this model*.
 
-    Why: the Python light model charges **no lost time** for a phase
-    change (the swap is instantaneous — no yellow, no all-red), and the
-    vehicles clear the intersection comfortably inside a 15 s green. So a
-    shorter cycle is pure gain for the delay metric (the area under the
-    queue-length curve). What is still missing is the second half of
-    D5's diagnosis: the intersection conflict model, plus the per-switch
-    clearance time — i.e. Sprint 5's "training env and browser from one
-    source" work.
+    Why: the Python light model charged **no lost time** for a phase
+    change (the swap was instantaneous - no yellow, no all-red), and
+    the vehicles cleared the intersection comfortably inside a 15 s
+    green. So a shorter cycle was pure gain for the delay metric (the
+    area under the queue-length curve).
 
-    This test pins the *measured* relationship on purpose: the day the
-    model gains its lost time / conflict model, this assertion flips and
-    the plan's gate (flicker < default) has to be re-derived.
+    **Plan 074 T9 added the lost time** (the 6 s inter-green clearance,
+    charged by `SimCore` on every phase change) and the dense training
+    scenario. The flicker is now worse than the alternating schedule
+    (-437.2 against -423.1): every extra switch costs six seconds during
+    which nobody may go. The plan's gate (flicker < default) holds.
     """
     flicker, _ = _run([ACTION_INDEX["shorten_red"]] * 600)
     default, _ = _run([ACTION_INDEX["no_op"]] * 600)
 
-    assert flicker > default, (
-        "the masked flicker used to beat the default schedule "
-        f"(flicker={flicker}, default={default}); when this flips, the "
-        "plan's gate (flicker < default) holds again — re-derive it"
+    assert flicker < default, (
+        "the flicker must not beat the default schedule: switching "
+        "phases costs the inter-green clearance "
+        f"(flicker={flicker}, default={default})"
     )

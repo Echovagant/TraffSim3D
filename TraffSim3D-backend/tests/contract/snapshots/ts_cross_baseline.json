@@ -13,7 +13,8 @@
     "all_red_seconds": 3,
     "phase_adjust_seconds": 5,
     "max_green_seconds": 60,
-    "min_green_seconds": 10
+    "min_green_seconds": 10,
+    "inter_green_seconds": 6
   },
   "final_state": {
     "terminated": true,

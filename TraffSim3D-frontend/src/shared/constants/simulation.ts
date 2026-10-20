@@ -199,6 +199,35 @@ export const MIN_RED_SECS = 10
 export const MIN_GREEN_SECS = 10
 /** Yellow clearance (s) — fixed, not shortened. */
 export const YELLOW_CLEAR_SECS = 3
+/**
+ * All-red clearance (s) forced by the intersection's conflict resolution
+ * when two perpendicular approaches would show green at the same time
+ * (`resolveSignalConflicts` in `application/services/tick.ts`).
+ *
+ * This is a *different* mechanism from `ALL_RED_SECS` (the clearance the
+ * `preempt` / `force_all_red` actions ask for): it is the safety net
+ * that keeps the law — "perpendicular approaches never display green
+ * simultaneously" — and it is what makes the browser's inter-green
+ * longer than a bare yellow.
+ */
+export const CONFLICT_ALL_RED_SECS = 3
+/**
+ * The browser's **minimum inter-green** (s): the time between the end of
+ * one axis' green and the start of the other axis' green.
+ *
+ * It is *derived* from the two pieces that implement it, so the number
+ * cannot silently drift away from the code:
+ *
+ * - `YELLOW_CLEAR_SECS` — the clearance-yellow the outgoing axis runs;
+ * - `CONFLICT_ALL_RED_SECS` — the all-red the conflict resolution
+ *   forces before the other axis may go.
+ *
+ * During those six seconds no new vehicle gets a green, which is the
+ * "lost time" every phase change costs. The Python training sim charges
+ * the same 6 s (`app/apps/rl/sim_core.py` `CLEARANCE_SECS`) and the
+ * cross-language contract compares the two numbers.
+ */
+export const MIN_INTER_GREEN_SECS = YELLOW_CLEAR_SECS + CONFLICT_ALL_RED_SECS
 /** Default controller kind at app startup. */
 export const DEFAULT_CONTROLLER_KIND = 'actuated' as const
 

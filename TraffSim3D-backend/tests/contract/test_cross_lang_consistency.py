@@ -31,6 +31,7 @@ import pytest
 
 from app.apps.rl.sim_core import (
     ALL_RED_SECS,
+    CLEARANCE_SECS,
     MAX_GREEN_SECS,
     MAX_STEPS_DEFAULT,
     MIN_GREEN_SECS,
@@ -378,6 +379,16 @@ def test_signal_action_vocabulary_matches_the_typescript_golden(vector_name: str
     assert ts_min_green == MIN_GREEN_SECS, (
         f"{v['name']}: min-green bound mismatch "
         f"(typescript={ts_min_green}, python={MIN_GREEN_SECS})"
+    )
+
+    # Plan 074 T9: the inter-green clearance - the lost time a phase
+    # change costs. The browser charges a 3 s yellow plus a 3 s all-red
+    # before the other axis may go; the Python training sim charges the
+    # same 6 s, and the two numbers are compared here.
+    ts_clearance = vocab["inter_green_seconds"]
+    assert ts_clearance == CLEARANCE_SECS, (
+        f"{v['name']}: inter-green clearance mismatch "
+        f"(typescript={ts_clearance}, python={CLEARANCE_SECS})"
     )
 
 

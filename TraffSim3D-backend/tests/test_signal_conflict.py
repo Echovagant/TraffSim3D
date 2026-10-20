@@ -320,34 +320,29 @@ def test_the_flicker_still_beats_starving_one_axis() -> None:
     ), f"the flicker must beat starving one axis (flicker={flicker}, starve={starve})"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Plan 074 §3 T8's reward gate is NOT met yet — this is the "
-        "measured gap, not a passing gate. The intersection conflict "
-        "only bites when the junction happens to be occupied at the very "
-        "moment of a phase change, and the training scenario is "
-        "undersaturated (2 vehicles per axis, one every ~9 s, the "
-        "junction occupied ~24% of the time), so in the 600-step "
-        "protocol the conflict fires 0 times. Measured (600 steps, seed "
-        "0): alternating -109.2, flicker -97.2, starve-one-axis -117.2 "
-        "— the flicker still beats the alternating schedule. What is "
-        "still missing is an explicit per-switch clearance time: the "
-        "browser charges a 3 s yellow + all-red per change, while the "
-        "Python light model swaps instantaneously. Adding it to the "
-        "LIGHT model is forbidden (the cross-language contract's "
-        "sensitive area) — it is the follow-up T8 leaves open."
-    ),
-)
 def test_the_reward_gate_alternating_beats_the_flicker() -> None:
-    """Plan 074 §3 T8's core gate: with the intersection conflict in
-    place, the **alternating** schedule must beat the **flicker**
-    (switch as often as legally possible), and the flicker must beat
-    starving one axis.
+    """Plan 074 §3 T8's core gate - and Plan 074 §3 T9's completion.
 
-    It does not hold yet — see the xfail reason above and the T8
-    report. The assertion is the plan's gate verbatim: it must not be
-    weakened to make the suite green.
+    The **alternating** schedule must beat the **flicker** (switch as
+    often as legally possible), and the flicker must beat starving one
+    axis.
+
+    It did NOT hold for T8: the intersection conflict only bites when
+    the junction happens to be occupied at the very moment of a phase
+    change, and the training scenario was undersaturated (2 vehicles per
+    axis, one every ~9 s), so the conflict fired 0 times and the flicker
+    was still the best schedule.
+
+    It holds now, because Plan 074 §3 T9 added the two missing pieces
+    of physics: the **inter-green clearance** (6 s during which neither
+    axis may go after a phase change) and the **dense training
+    scenario** (a red phase now builds a queue of several vehicles).
+    Measured (600 steps, seed 0): alternating -423.1, flicker -437.2,
+    starve-one-axis -455.4 - the alternating schedule beats both
+    degenerate policies.
+
+    The assertion is the plan's gate verbatim: it must not be weakened
+    to make the suite green.
     """
     alternating = _run([ACTION_INDEX["no_op"]] * 600)
     flicker = _run([ACTION_INDEX["shorten_red"]] * 600)
@@ -364,16 +359,18 @@ def test_the_reward_gate_alternating_beats_the_flicker() -> None:
 
 def test_the_measured_reward_ordering_under_the_conflict_rule() -> None:
     """Pin the *measured* numbers of the three schedules under the
-    conflict rule, so any drift is caught.
+    conflict rule, the inter-green clearance and the dense scenario.
 
-    They are the numbers Plan 074 §2 D5 / §3 T7 measured before T8 and
-    T8 did not move them: the conflict fires so rarely in this scenario
-    that the reward is unchanged to the last decimal.
+    They are the numbers Plan 074 §3 T9 measured (600 steps, seed 0).
+    Before T9 they were alternating -109.2, flicker -97.2 and
+    starve-one-axis -117.2: the conflict rule moved them not at all,
+    because the scenario was too thin for the junction to ever be
+    occupied at a phase change.
     """
     alternating = _run([ACTION_INDEX["no_op"]] * 600)
     flicker = _run([ACTION_INDEX["shorten_red"]] * 600)
     starve = _run([ACTION_INDEX["extend_green"]] * 600)
 
-    assert alternating == pytest.approx(-109.2, abs=0.05)
-    assert flicker == pytest.approx(-97.2, abs=0.05)
-    assert starve == pytest.approx(-117.2, abs=0.05)
+    assert alternating == pytest.approx(-423.1, abs=0.05)
+    assert flicker == pytest.approx(-437.2, abs=0.05)
+    assert starve == pytest.approx(-455.4, abs=0.05)
