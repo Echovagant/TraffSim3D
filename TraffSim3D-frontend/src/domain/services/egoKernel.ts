@@ -17,10 +17,12 @@
 //      computed from the state *before* the update.
 //   3. `wrapPi` must reproduce CPython's float-modulo algorithm: JS `%` is
 //      a truncated remainder (= `fmod`), and CPython's `%` is that plus ONE
-//      conditional add of the modulus when the remainder's sign differs.
-//      The naive "always add 2*pi and re-mod" spelling is NOT equivalent —
-//      it adds a rounding step and drifts 1 ULP away from Python on ~5% of
-//      angles.
+//      conditional add of the modulus — performed only when the remainder is
+//      NON-ZERO and its sign differs from the modulus's. The naive "always
+//      add 2*pi and re-mod" spelling is NOT equivalent: it is exact only for
+//      `|alpha| > pi`, and inside the reachable angle-error domain it
+//      disagrees with Python — usually in the last bit, but by up to ~1e-10
+//      absolute near the +-pi wrap boundary (measured, 200k-sample sweep).
 //   4. Statement order mirrors Python's, so the floating-point rounding
 //      sequence matches. `3.0 * 0.1` is 0.30000000000000004, so
 //      `speed + accel * dt` and `speed + accel * 0.1` can differ in the
@@ -54,17 +56,16 @@ export interface EgoState {
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
 /**
- * Wrap an angle into `[-pi, pi]` using floor-mod.
+ * Wrap an angle into `[-pi, pi]` the way CPython's float `%` does.
  *
- * Python: `(alpha + math.pi) % (2 * math.pi) - math.pi` — `%` there is
- * floor-mod, so the intermediate is never negative. JS `%` keeps the
- * dividend's sign, hence the extra normalisation.
+ * Python: `(alpha + math.pi) % (2 * math.pi) - math.pi`. CPython's `%` is
+ * `fmod` plus ONE conditional add of the modulus — only when the remainder
+ * is non-zero and its sign differs from the modulus's. JS `%` is the
+ * truncated remainder alone (`fmod`), so that conditional add is this
+ * function's job; a zero remainder must never be shifted to `2 * pi`.
  *
- * The normalisation is a single conditional add of `2 * pi` — the same
- * adjustment CPython's `float.__mod__` performs (`fmod`, then add the
- * modulus when the signs differ). Any other spelling (e.g. always adding
- * `2 * pi` and re-modding) introduces an extra rounding step and stops
- * being bit-identical to Python for some angles.
+ * Any other spelling (e.g. always adding `2 * pi` and re-modding) adds a
+ * rounding step and stops being bit-identical to Python for some angles.
  */
 const wrapPi = (a: number): number => {
   const period = 2 * Math.PI
