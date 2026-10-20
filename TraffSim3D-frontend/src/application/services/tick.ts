@@ -186,7 +186,7 @@ export const tick = (
   updateIntersectionEntry(network, simTime);
 
   // 2.5. (Plan 049) RL replay override. When a policy + replay target
-  //      are set, build a 13-dim obs matching Python's `SimCore._obs()`,
+  //      are set, build a 14-dim obs matching Python's `SimCore._obs()`,
   //      run the in-browser MlpPolicy forward pass, and write the
   //      resulting accel straight into the target's `targetSpeed`. The
   //      constraint layer below skips the target (it would otherwise
@@ -646,10 +646,16 @@ export { DEFAULT_CONTROLLER_KIND };
 // ===== Plan 049: RL replay obs builder =====
 //
 // Mirror of Python `SimCore._obs()` so the in-browser MlpPolicy sees
-// the same 13-dim input it was trained against. Offsets (50m for
+// the same 14-dim input it was trained against. Offsets (50m for
 // positions, π for heading, 16.67 m/s for speed, 50m for NPC distance)
 // MUST stay in sync with the Python sim — PPO is sensitive to scaling
 // and will drive erratically if they diverge.
+//
+// 2026-10-20 audit: the *scaling* matches, but the **light-bit semantics**
+// do not — Python's `obs[6:8]` is a raw `ns_green`/`ew_green` boolean that
+// stays 1 through a yellow phase, while here a Yellow phase reads 0, and
+// the TS sim has a 3s yellow phase that Python's sim does not have at all.
+// See `docs/contracts/sim-snapshot.md` → 「实际差异清单」.
 
 const OBS_DIM = 14;
 const NORMALIZE_DIST = 50.0;
