@@ -9,21 +9,21 @@
  *
  * Keep this file free of Vue/Pinia imports — it's plain infrastructure.
  */
-import type { HttpClient } from './httpClient';
+import type { HttpClient } from './httpClient'
 
 export interface PingResponse {
-  pong: true;
+  pong: true
 }
 
 export interface HealthResponse {
-  status: 'ok';
+  status: 'ok'
 }
 
 export interface BackendService {
   /** Liveness probe. Returns `{ status: 'ok' }` if the API is up. */
-  health(): Promise<HealthResponse>;
+  health(): Promise<HealthResponse>
   /** Smoke endpoint. Returns `{ pong: true }`. */
-  ping(): Promise<PingResponse>;
+  ping(): Promise<PingResponse>
 }
 
 /**
@@ -38,4 +38,4 @@ export const createBackendService = (
 ): BackendService => ({
   health: () => metaHttp.get<HealthResponse>('/health'),
   ping: () => apiHttp.get<PingResponse>('/ping'),
-});
+})

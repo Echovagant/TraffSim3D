@@ -1,40 +1,58 @@
-import { createRoadNetwork, type RoadNetwork } from '@domain/entities/RoadNetwork';
-import type { Vehicle } from '@domain/entities/Vehicle';
-import type { SpawnPoint } from '@domain/entities/SpawnPoint';
-import type { TrafficLight } from '@domain/entities/TrafficLight';
-import type { Intersection } from '@domain/entities/Intersection';
-import type { Road } from '@domain/entities/Road';
-import { LightPhase } from '@domain/value-objects/Phase';
-import { LaneId } from '@domain/value-objects/LaneId';
-import { lanePoint, roadLength } from '@domain/services/laneGeometry';
-import { DEFAULT_CYCLE_SECONDS } from '@shared/constants/simulation';
+import { createRoadNetwork, type RoadNetwork } from '@domain/entities/RoadNetwork'
+import type { Vehicle } from '@domain/entities/Vehicle'
+import type { SpawnPoint } from '@domain/entities/SpawnPoint'
+import type { TrafficLight } from '@domain/entities/TrafficLight'
+import type { Intersection } from '@domain/entities/Intersection'
+import type { Road } from '@domain/entities/Road'
+import { LightPhase } from '@domain/value-objects/Phase'
+import { LaneId } from '@domain/value-objects/LaneId'
+import { lanePoint, roadLength } from '@domain/services/laneGeometry'
+import { DEFAULT_CYCLE_SECONDS } from '@shared/constants/simulation'
 
-const NS_GREEN = DEFAULT_CYCLE_SECONDS * (30 / 63);  // ~30s
-const EW_GREEN = NS_GREEN;
+const NS_GREEN = DEFAULT_CYCLE_SECONDS * (30 / 63) // ~30s
+const EW_GREEN = NS_GREEN
 
 /**
  * Plan 037: register a spawn point for `road` on its outer forward
  * lane (lane 0). The returned spawn point is open (`occupiedBy = null`)
  * unless `occupiedBy` is supplied.
  */
-const defaultSpawnPoint = (
-  road: Road,
-  occupiedBy: string | null = null,
-): SpawnPoint => ({
+const defaultSpawnPoint = (road: Road, occupiedBy: string | null = null): SpawnPoint => ({
   id: `sp-${road.id}-0`,
   roadId: road.id,
   laneIndex: 0,
   s: 0,
   occupiedBy,
-});
+})
 
 /**
  * Place a vehicle on (road, laneIndex) at distance `s` along the lane.
  * Pulls position + heading from the lane geometry so the rest of the
  * code can stay in world-space.
  */
-const at = (road: Road, laneIndex: number, s: number, speed: number, v: Omit<Vehicle, 'position' | 'heading' | 'lane' | 's' | 'speed' | 'targetSpeed' | 'roadId' | 'laneIndex' | 'enteredIntersectionAt' | 'desiredLaneIndex' | 'laneChangeStartedAt' | 'spawnedAt' | 'desiredStatus'>): Vehicle => {
-  const lp = lanePoint(road, laneIndex, s);
+const at = (
+  road: Road,
+  laneIndex: number,
+  s: number,
+  speed: number,
+  v: Omit<
+    Vehicle,
+    | 'position'
+    | 'heading'
+    | 'lane'
+    | 's'
+    | 'speed'
+    | 'targetSpeed'
+    | 'roadId'
+    | 'laneIndex'
+    | 'enteredIntersectionAt'
+    | 'desiredLaneIndex'
+    | 'laneChangeStartedAt'
+    | 'spawnedAt'
+    | 'desiredStatus'
+  >,
+): Vehicle => {
+  const lp = lanePoint(road, laneIndex, s)
   return {
     ...v,
     roadId: road.id,
@@ -49,9 +67,9 @@ const at = (road: Road, laneIndex: number, s: number, speed: number, v: Omit<Veh
     desiredLaneIndex: null,
     laneChangeStartedAt: null,
     spawnedAt: 0,
-    desiredStatus: 'driving',  // Plan 037: intent-based state
-  };
-};
+    desiredStatus: 'driving', // Plan 037: intent-based state
+  }
+}
 
 /**
  * Plan 035: helper for the common case of a straight 2-point road. Saves
@@ -59,14 +77,21 @@ const at = (road: Road, laneIndex: number, s: number, speed: number, v: Omit<Veh
  * when the road is just a single segment. Plan 039: `level` parameter
  * defaults to 0 (ground). High-level roads pass `level: 1` etc.
  */
-const roadStraight = (id: string, start: { x: number; y?: number; z: number }, end: { x: number; y?: number; z: number }, laneCount: number, speedLimit: number, level: number = 0): Road => ({
+const roadStraight = (
+  id: string,
+  start: { x: number; y?: number; z: number },
+  end: { x: number; y?: number; z: number },
+  laneCount: number,
+  speedLimit: number,
+  level: number = 0,
+): Road => ({
   id,
   startNode: { x: start.x, y: start.y ?? 0, z: start.z },
   endNode: { x: end.x, y: end.y ?? 0, z: end.z },
   laneCount,
   speedLimit,
   level,
-});
+})
 
 /**
  * Build the default cross-intersection scene (renamed from
@@ -74,7 +99,7 @@ const roadStraight = (id: string, start: { x: number; y?: number; z: number }, e
  * long, 6 lanes, 6 default vehicles spread across all 4 directions.
  */
 export const buildCrossIntersectionNetwork = (): RoadNetwork => {
-  const net = createRoadNetwork();
+  const net = createRoadNetwork()
 
   // Roads: one NS, one EW, both 60u long, 6 lanes (3 each direction).
   // M1.5 — closer to a Chinese city arterial: 3 lanes forward
@@ -84,10 +109,10 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
   // (more lanes = more chances for two cars to be on perpendicular
   // inner lanes at the intersection — the case that was clipping in
   // the 4-lane version).
-  const roadNS: Road = roadStraight('r-ns', { x: 0, z: -30 }, { x: 0, z: 30 }, 6, 16.67);
-  const roadEW: Road = roadStraight('r-ew', { x: -30, z: 0 }, { x: 30, z: 0 }, 6, 16.67);
-  net.roads[roadNS.id] = roadNS;
-  net.roads[roadEW.id] = roadEW;
+  const roadNS: Road = roadStraight('r-ns', { x: 0, z: -30 }, { x: 0, z: 30 }, 6, 16.67)
+  const roadEW: Road = roadStraight('r-ew', { x: -30, z: 0 }, { x: 30, z: 0 }, 6, 16.67)
+  net.roads[roadNS.id] = roadNS
+  net.roads[roadEW.id] = roadEW
 
   // Traffic lights at the intersection. tl-ns governs the NS lanes
   // (forward = lane 0..2) and tl-ew governs the EW lanes.
@@ -98,44 +123,49 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
     phaseRemaining: NS_GREEN,
     cycleSeconds: DEFAULT_CYCLE_SECONDS,
     axis: 'ns',
-  };
+  }
   const lightEW: TrafficLight = {
     id: 'tl-ew',
     position: { x: 0, y: 0, z: -4 },
     phase: LightPhase.Red,
-    phaseRemaining: EW_GREEN + 3,  // yellow + red
+    phaseRemaining: EW_GREEN + 3, // yellow + red
     cycleSeconds: DEFAULT_CYCLE_SECONDS,
     axis: 'ew',
-  };
+  }
   const intersection: Intersection = {
     id: 'i-center',
     position: { x: 0, y: 0, z: 0 },
     trafficLights: [lightNS, lightEW],
     connectedRoads: ['r-ns', 'r-ew'],
     intersectionRadius: 8,
-  };
-  net.intersections[intersection.id] = intersection;
+  }
+  net.intersections[intersection.id] = intersection
 
   // 6 default vehicles: one per OUTER lane of each direction.
-  const nsLen = roadLength(roadNS);
-  const ewLen = roadLength(roadEW);
+  const nsLen = roadLength(roadNS)
+  const ewLen = roadLength(roadEW)
   const defaults: Vehicle[] = [
     at(roadNS, 0, nsLen * 0.25, 8, { id: 'v-1', type: 'car', color: '#3a86ff', status: 'driving' }),
     at(roadNS, 5, nsLen * 0.75, 8, { id: 'v-2', type: 'car', color: '#ef4444', status: 'driving' }),
     at(roadEW, 0, ewLen * 0.25, 8, { id: 'v-3', type: 'car', color: '#22c55e', status: 'driving' }),
     at(roadEW, 5, ewLen * 0.75, 8, { id: 'v-4', type: 'car', color: '#fbbf24', status: 'driving' }),
-    at(roadNS, 1, nsLen * 0.15, 6, { id: 'v-5', type: 'truck', color: '#f5f5f4', status: 'driving' }),
+    at(roadNS, 1, nsLen * 0.15, 6, {
+      id: 'v-5',
+      type: 'truck',
+      color: '#f5f5f4',
+      status: 'driving',
+    }),
     at(roadEW, 1, ewLen * 0.15, 6, { id: 'v-6', type: 'bus', color: '#22c55e', status: 'driving' }),
-  ];
-  for (const v of defaults) net.vehicles[v.id] = v;
+  ]
+  for (const v of defaults) net.vehicles[v.id] = v
   // Plan 037: register one open spawn point per road. Default vehicles
   // sit at s=15–25 (not s=0), so they don't conflict with spawn traffic.
   for (const road of [roadNS, roadEW]) {
-    const sp = defaultSpawnPoint(road);
-    net.spawnPoints[sp.id] = sp;
+    const sp = defaultSpawnPoint(road)
+    net.spawnPoints[sp.id] = sp
   }
-  return net;
-};
+  return net
+}
 
 /**
  * Back-compat alias: `buildDefaultNetwork` is the original name and is
@@ -143,7 +173,7 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
  * renames the implementation; the alias keeps the legacy callers
  * compiling until they migrate.
  */
-export const buildDefaultNetwork = buildCrossIntersectionNetwork;
+export const buildDefaultNetwork = buildCrossIntersectionNetwork
 
 /**
  * Plan 035: T-junction demo scene.
@@ -155,15 +185,15 @@ export const buildDefaultNetwork = buildCrossIntersectionNetwork;
  * because 3-way box is naturally smaller).
  */
 export const buildTJunctionNetwork = (): RoadNetwork => {
-  const net = createRoadNetwork();
-  const half = 50;
+  const net = createRoadNetwork()
+  const half = 50
 
-  const roadEW: Road = roadStraight('r-ew', { x: -half, z: 0 }, { x: half, z: 0 }, 4, 16.67);
-  const roadN: Road = roadStraight('r-n', { x: 0, z: 0 }, { x: 0, z: -half }, 4, 16.67);
-  const roadS: Road = roadStraight('r-s', { x: 0, z: 0 }, { x: 0, z: half }, 4, 16.67);
-  net.roads[roadEW.id] = roadEW;
-  net.roads[roadN.id] = roadN;
-  net.roads[roadS.id] = roadS;
+  const roadEW: Road = roadStraight('r-ew', { x: -half, z: 0 }, { x: half, z: 0 }, 4, 16.67)
+  const roadN: Road = roadStraight('r-n', { x: 0, z: 0 }, { x: 0, z: -half }, 4, 16.67)
+  const roadS: Road = roadStraight('r-s', { x: 0, z: 0 }, { x: 0, z: half }, 4, 16.67)
+  net.roads[roadEW.id] = roadEW
+  net.roads[roadN.id] = roadN
+  net.roads[roadS.id] = roadS
 
   const lightNS: TrafficLight = {
     id: 'tl-ns',
@@ -172,7 +202,7 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
     phaseRemaining: NS_GREEN,
     cycleSeconds: DEFAULT_CYCLE_SECONDS,
     axis: 'ns',
-  };
+  }
   const lightEW: TrafficLight = {
     id: 'tl-ew',
     position: { x: 0, y: 0, z: 3 },
@@ -180,33 +210,38 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
     phaseRemaining: EW_GREEN + 3,
     cycleSeconds: DEFAULT_CYCLE_SECONDS,
     axis: 'ew',
-  };
+  }
   const intersectionT: Intersection = {
     id: 'i-t',
     position: { x: 0, y: 0, z: 0 },
     trafficLights: [lightNS, lightEW],
-    connectedRoads: ['r-ew', 'r-n', 'r-s'],  // 3-way
+    connectedRoads: ['r-ew', 'r-n', 'r-s'], // 3-way
     intersectionRadius: 6,
-  };
-  net.intersections[intersectionT.id] = intersectionT;
+  }
+  net.intersections[intersectionT.id] = intersectionT
 
-  const ewLen = roadLength(roadEW);
-  const nsLen = roadLength(roadN);
+  const ewLen = roadLength(roadEW)
+  const nsLen = roadLength(roadN)
   const defaults: Vehicle[] = [
     at(roadEW, 0, ewLen * 0.2, 8, { id: 'v-t1', type: 'car', color: '#3a86ff', status: 'driving' }),
     at(roadN, 0, nsLen * 0.7, 7, { id: 'v-t2', type: 'car', color: '#22c55e', status: 'driving' }),
-    at(roadS, 1, nsLen * 0.3, 6, { id: 'v-t3', type: 'truck', color: '#f5f5f4', status: 'driving' }),
+    at(roadS, 1, nsLen * 0.3, 6, {
+      id: 'v-t3',
+      type: 'truck',
+      color: '#f5f5f4',
+      status: 'driving',
+    }),
     at(roadEW, 1, ewLen * 0.7, 8, { id: 'v-t4', type: 'bus', color: '#fbbf24', status: 'driving' }),
-  ];
-  for (const v of defaults) net.vehicles[v.id] = v;
+  ]
+  for (const v of defaults) net.vehicles[v.id] = v
   // Plan 037: spawn points on each of the 3 roads. EW gets the entry
   // from each side; NS arms each get one.
   for (const road of [roadEW, roadN, roadS]) {
-    const sp = defaultSpawnPoint(road);
-    net.spawnPoints[sp.id] = sp;
+    const sp = defaultSpawnPoint(road)
+    net.spawnPoints[sp.id] = sp
   }
-  return net;
-};
+  return net
+}
 
 /**
  * Plan 035: rectangular-loop demo scene.
@@ -223,56 +258,66 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
  * cornering via lookahead steering.
  */
 export const buildRectangularLoopNetwork = (): RoadNetwork => {
-  const net = createRoadNetwork();
-  const half = 60;
+  const net = createRoadNetwork()
+  const half = 60
 
   const corners: ReadonlyArray<{ x: number; y: number; z: number }> = [
-    { x: -half, y: 0, z: -half },  // SW
-    { x:  half, y: 0, z: -half },  // SE
-    { x:  half, y: 0, z:  half },  // NE
-    { x: -half, y: 0, z:  half },  // NW
-  ];
+    { x: -half, y: 0, z: -half }, // SW
+    { x: half, y: 0, z: -half }, // SE
+    { x: half, y: 0, z: half }, // NE
+    { x: -half, y: 0, z: half }, // NW
+  ]
 
   for (let i = 0; i < 4; i++) {
-    const a = corners[i]!;
-    const b = corners[(i + 1) % 4]!;
-    const id = `r-loop-${i}`;
-    const road: Road = roadStraight(id, a, b, 2, 13.89);
-    net.roads[id] = road;
+    const a = corners[i]!
+    const b = corners[(i + 1) % 4]!
+    const id = `r-loop-${i}`
+    const road: Road = roadStraight(id, a, b, 2, 13.89)
+    net.roads[id] = road
   }
 
   for (let i = 0; i < 4; i++) {
-    const a = corners[i]!;
-    const id = `i-corner-${i}`;
+    const a = corners[i]!
+    const id = `i-corner-${i}`
     const inter: Intersection = {
       id,
       position: a,
       trafficLights: [],
       connectedRoads: [`r-loop-${i}`, `r-loop-${(i + 3) % 4}`],
       intersectionRadius: 4,
-    };
-    net.intersections[id] = inter;
+    }
+    net.intersections[id] = inter
   }
 
   // 8 vehicles, 2 per road, spread out.
-  const defaults: Vehicle[] = [];
+  const defaults: Vehicle[] = []
   for (let i = 0; i < 4; i++) {
-    const road = net.roads[`r-loop-${i}`]!;
-    const len = roadLength(road);
+    const road = net.roads[`r-loop-${i}`]!
+    const len = roadLength(road)
     defaults.push(
-      at(road, 0, len * 0.20, 7, { id: `v-l1-${i}`, type: 'car', color: '#3a86ff', status: 'driving' }),
-      at(road, 1, len * 0.65, 7, { id: `v-l2-${i}`, type: 'car', color: '#22c55e', status: 'driving' }),
-    );
+      at(road, 0, len * 0.2, 7, {
+        id: `v-l1-${i}`,
+        type: 'car',
+        color: '#3a86ff',
+        status: 'driving',
+      }),
+      at(road, 1, len * 0.65, 7, {
+        id: `v-l2-${i}`,
+        type: 'car',
+        color: '#22c55e',
+        status: 'driving',
+      }),
+    )
   }
-  for (const v of defaults) net.vehicles[v.id] = v;
+  for (const v of defaults) net.vehicles[v.id] = v
   // Plan 037: 1 spawn point per road (4 total).
   for (let i = 0; i < 4; i++) {
-    const road = net.roads[`r-loop-${i}`]!;
-    const sp = defaultSpawnPoint(road);
-    net.spawnPoints[sp.id] = sp;
+    const road = net.roads[`r-loop-${i}`]!
+    const sp = defaultSpawnPoint(road)
+    net.spawnPoints[sp.id] = sp
   }
-  return net;
-};
+  return net
+}
 
 /**
  * Plan 039: 高架桥 demo scene.
@@ -295,75 +340,90 @@ export const buildRectangularLoopNetwork = (): RoadNetwork => {
  * 已通过 037c 验证能在 polyline 上正常转向 — ramp 自然被走完.
  */
 export const buildElevatedScene = (): RoadNetwork => {
-  const net = createRoadNetwork();
-  const LEVEL_HEIGHT = 4;  // 每个 level 抬 4 米
-  const EW_LEN_HALF = 30;  // 地面层 EW 半段长度
-  const RAMP_END_X = 20;   // ramp 在 x=20 处到达 level=1
-  const HIGH_END_X = 50;   // 高架 EW 在 x=50 处结束
-  const NS_HALF = 30;      // NS 道路半长度
+  const net = createRoadNetwork()
+  const LEVEL_HEIGHT = 4 // 每个 level 抬 4 米
+  const EW_LEN_HALF = 30 // 地面层 EW 半段长度
+  const RAMP_END_X = 20 // ramp 在 x=20 处到达 level=1
+  const HIGH_END_X = 50 // 高架 EW 在 x=50 处结束
+  const NS_HALF = 30 // NS 道路半长度
 
   // 地面层 NS (level=0, Y=0)
-  const roadNS: Road = roadStraight(
-    'r-ns',
-    { x: 0, z: -NS_HALF },
-    { x: 0, z: NS_HALF },
-    4, 16.67,
-  );
-  net.roads[roadNS.id] = roadNS;
+  const roadNS: Road = roadStraight('r-ns', { x: 0, z: -NS_HALF }, { x: 0, z: NS_HALF }, 4, 16.67)
+  net.roads[roadNS.id] = roadNS
 
   // 地面层 EW 西段 (level=0, Y=0) — 从 x=-EW_LEN_HALF 到 x=0
   const roadEWLow: Road = roadStraight(
     'r-ew-low',
     { x: -EW_LEN_HALF, z: 0 },
     { x: 0, z: 0 },
-    4, 16.67,
-  );
-  net.roads[roadEWLow.id] = roadEWLow;
+    4,
+    16.67,
+  )
+  net.roads[roadEWLow.id] = roadEWLow
 
   // Ramp: x=0..RAMP_END_X, Y 从 0 渐变到 LEVEL_HEIGHT. 5 段 polyline.
-  const RAMP_SEGMENTS = 5;
-  const rampWps: { x: number; y: number; z: number }[] = [];
+  const RAMP_SEGMENTS = 5
+  const rampWps: { x: number; y: number; z: number }[] = []
   for (let i = 0; i <= RAMP_SEGMENTS; i++) {
-    const t = i / RAMP_SEGMENTS;
+    const t = i / RAMP_SEGMENTS
     rampWps.push({
       x: RAMP_END_X * t,
-      y: LEVEL_HEIGHT * t,  // 均匀爬升
+      y: LEVEL_HEIGHT * t, // 均匀爬升
       z: 0,
-    });
+    })
   }
   const roadRamp: Road = {
     id: 'r-ramp',
     startNode: { x: rampWps[0]!.x, y: rampWps[0]!.y, z: rampWps[0]!.z },
-    endNode: { x: rampWps[rampWps.length - 1]!.x, y: rampWps[rampWps.length - 1]!.y, z: rampWps[rampWps.length - 1]!.z },
+    endNode: {
+      x: rampWps[rampWps.length - 1]!.x,
+      y: rampWps[rampWps.length - 1]!.y,
+      z: rampWps[rampWps.length - 1]!.z,
+    },
     waypoints: rampWps,
     laneCount: 4,
-    speedLimit: 13.89,  // 高架慢一点 (50 km/h)
+    speedLimit: 13.89, // 高架慢一点 (50 km/h)
     level: 1,
-  };
-  net.roads[roadRamp.id] = roadRamp;
+  }
+  net.roads[roadRamp.id] = roadRamp
 
   // 高架 EW 东段 (level=1, Y=LEVEL_HEIGHT)
   const roadEWHigh: Road = roadStraight(
     'r-ew-high',
     { x: RAMP_END_X, y: LEVEL_HEIGHT, z: 0 },
     { x: HIGH_END_X, y: LEVEL_HEIGHT, z: 0 },
-    4, 13.89,
-    1,  // level=1 (Plan 039)
-  );
-  net.roads[roadEWHigh.id] = roadEWHigh;
+    4,
+    13.89,
+    1, // level=1 (Plan 039)
+  )
+  net.roads[roadEWHigh.id] = roadEWHigh
 
   // 地面十字路口 (r-ns × r-ew-low) — 跟 cross scene 同样的样式
   const intersectionLow: Intersection = {
     id: 'i-low',
     position: { x: 0, y: 0, z: 0 },
     trafficLights: [
-      { id: 'tl-ns', position: { x: -3, y: 0, z: 0 }, phase: LightPhase.Green, phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ns' },
-      { id: 'tl-ew', position: { x: 0, y: 0, z: -3 }, phase: LightPhase.Red, phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ew' },
+      {
+        id: 'tl-ns',
+        position: { x: -3, y: 0, z: 0 },
+        phase: LightPhase.Green,
+        phaseRemaining: 30,
+        cycleSeconds: DEFAULT_CYCLE_SECONDS,
+        axis: 'ns',
+      },
+      {
+        id: 'tl-ew',
+        position: { x: 0, y: 0, z: -3 },
+        phase: LightPhase.Red,
+        phaseRemaining: 30,
+        cycleSeconds: DEFAULT_CYCLE_SECONDS,
+        axis: 'ew',
+      },
     ],
     connectedRoads: ['r-ns', 'r-ew-low'],
     intersectionRadius: 6,
-  };
-  net.intersections[intersectionLow.id] = intersectionLow;
+  }
+  net.intersections[intersectionLow.id] = intersectionLow
 
   // 高架 T 接 (r-ew-low+r-ramp 端点 + r-ew-high+r-ramp 端点 在 r-ramp 起点/终点处)
   // 这里不放红绿灯 — ramp 端点是直通点, 不算正式路口.
@@ -374,30 +434,50 @@ export const buildElevatedScene = (): RoadNetwork => {
     trafficLights: [],
     connectedRoads: ['r-ramp', 'r-ew-high'],
     intersectionRadius: 4,
-  };
-  net.intersections[intersectionHighStart.id] = intersectionHighStart;
+  }
+  net.intersections[intersectionHighStart.id] = intersectionHighStart
 
   // 4 辆默认车: 1 在 NS 南半, 1 在 EW 西段, 1 在 ramp 中, 1 在高架东段
-  const nsLen = roadLength(roadNS);
-  const ewLowLen = roadLength(roadEWLow);
-  const rampLen = roadLength(roadRamp);
-  const ewHighLen = roadLength(roadEWHigh);
+  const nsLen = roadLength(roadNS)
+  const ewLowLen = roadLength(roadEWLow)
+  const rampLen = roadLength(roadRamp)
+  const ewHighLen = roadLength(roadEWHigh)
   const defaults: Vehicle[] = [
-    at(roadNS, 0, nsLen * 0.25, 8, { id: 'v-e1', type: 'car', color: '#3a86ff', status: 'driving' }),
-    at(roadEWLow, 0, ewLowLen * 0.6, 7, { id: 'v-e2', type: 'car', color: '#22c55e', status: 'driving' }),
-    at(roadRamp, 0, rampLen * 0.5, 6, { id: 'v-e3', type: 'truck', color: '#fbbf24', status: 'driving' }),
-    at(roadEWHigh, 0, ewHighLen * 0.5, 8, { id: 'v-e4', type: 'car', color: '#ef4444', status: 'driving' }),
-  ];
-  for (const v of defaults) net.vehicles[v.id] = v;
+    at(roadNS, 0, nsLen * 0.25, 8, {
+      id: 'v-e1',
+      type: 'car',
+      color: '#3a86ff',
+      status: 'driving',
+    }),
+    at(roadEWLow, 0, ewLowLen * 0.6, 7, {
+      id: 'v-e2',
+      type: 'car',
+      color: '#22c55e',
+      status: 'driving',
+    }),
+    at(roadRamp, 0, rampLen * 0.5, 6, {
+      id: 'v-e3',
+      type: 'truck',
+      color: '#fbbf24',
+      status: 'driving',
+    }),
+    at(roadEWHigh, 0, ewHighLen * 0.5, 8, {
+      id: 'v-e4',
+      type: 'car',
+      color: '#ef4444',
+      status: 'driving',
+    }),
+  ]
+  for (const v of defaults) net.vehicles[v.id] = v
 
   // 每条 road 一个 spawn point
   for (const road of [roadNS, roadEWLow, roadRamp, roadEWHigh]) {
-    const sp = defaultSpawnPoint(road);
-    net.spawnPoints[sp.id] = sp;
+    const sp = defaultSpawnPoint(road)
+    net.spawnPoints[sp.id] = sp
   }
 
-  return net;
-};
+  return net
+}
 /**
  * Plan 040: 多路口走廊 demo scene.
  *
@@ -425,85 +505,142 @@ export const buildElevatedScene = (): RoadNetwork => {
  * - Coordinated offsets for both intersection pairs (Plan 028 绿波带扩展)
  */
 export const buildCorridorScene = (): RoadNetwork => {
-  const net = createRoadNetwork();
-  const NS_HALF = 30;
-  const EW_HALF = 30;
+  const net = createRoadNetwork()
+  const NS_HALF = 30
+  const EW_HALF = 30
 
   // NS corridor (the long road connecting the two intersections)
   const roadNS: Road = roadStraight(
     'r-ns-corridor',
     { x: 0, z: -NS_HALF },
     { x: 0, z: NS_HALF },
-    4, 16.67,
-  );
-  net.roads[roadNS.id] = roadNS;
+    4,
+    16.67,
+  )
+  net.roads[roadNS.id] = roadNS
 
   // EW at north intersection
   const roadEWNorth: Road = roadStraight(
     'r-ew-north',
     { x: -EW_HALF, z: -NS_HALF },
     { x: EW_HALF, z: -NS_HALF },
-    4, 16.67,
-  );
-  net.roads[roadEWNorth.id] = roadEWNorth;
+    4,
+    16.67,
+  )
+  net.roads[roadEWNorth.id] = roadEWNorth
 
   // EW at south intersection
   const roadEWSouth: Road = roadStraight(
     'r-ew-south',
     { x: -EW_HALF, z: NS_HALF },
     { x: EW_HALF, z: NS_HALF },
-    4, 16.67,
-  );
-  net.roads[roadEWSouth.id] = roadEWSouth;
+    4,
+    16.67,
+  )
+  net.roads[roadEWSouth.id] = roadEWSouth
 
   // North intersection (4-way: NS corridor + EW road)
   const intersectionNorth: Intersection = {
     id: 'i-north',
     position: { x: 0, y: 0, z: -NS_HALF },
     trafficLights: [
-      { id: 'tl-ns-n', position: { x: -3, y: 0, z: -NS_HALF }, phase: LightPhase.Green,
-        phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ns' },
-      { id: 'tl-ew-n', position: { x: 0, y: 0, z: -NS_HALF + 3 }, phase: LightPhase.Red,
-        phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ew' },
+      {
+        id: 'tl-ns-n',
+        position: { x: -3, y: 0, z: -NS_HALF },
+        phase: LightPhase.Green,
+        phaseRemaining: 30,
+        cycleSeconds: DEFAULT_CYCLE_SECONDS,
+        axis: 'ns',
+      },
+      {
+        id: 'tl-ew-n',
+        position: { x: 0, y: 0, z: -NS_HALF + 3 },
+        phase: LightPhase.Red,
+        phaseRemaining: 30,
+        cycleSeconds: DEFAULT_CYCLE_SECONDS,
+        axis: 'ew',
+      },
     ],
     connectedRoads: ['r-ns-corridor', 'r-ew-north'],
     intersectionRadius: 6,
-  };
-  net.intersections[intersectionNorth.id] = intersectionNorth;
+  }
+  net.intersections[intersectionNorth.id] = intersectionNorth
 
   // South intersection (4-way: NS corridor + EW road)
   const intersectionSouth: Intersection = {
     id: 'i-south',
     position: { x: 0, y: 0, z: NS_HALF },
     trafficLights: [
-      { id: 'tl-ns-s', position: { x: 3, y: 0, z: NS_HALF }, phase: LightPhase.Red,
-        phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ns' },
-      { id: 'tl-ew-s', position: { x: 0, y: 0, z: NS_HALF - 3 }, phase: LightPhase.Green,
-        phaseRemaining: 30, cycleSeconds: DEFAULT_CYCLE_SECONDS, axis: 'ew' },
+      {
+        id: 'tl-ns-s',
+        position: { x: 3, y: 0, z: NS_HALF },
+        phase: LightPhase.Red,
+        phaseRemaining: 30,
+        cycleSeconds: DEFAULT_CYCLE_SECONDS,
+        axis: 'ns',
+      },
+      {
+        id: 'tl-ew-s',
+        position: { x: 0, y: 0, z: NS_HALF - 3 },
+        phase: LightPhase.Green,
+        phaseRemaining: 30,
+        cycleSeconds: DEFAULT_CYCLE_SECONDS,
+        axis: 'ew',
+      },
     ],
     connectedRoads: ['r-ns-corridor', 'r-ew-south'],
     intersectionRadius: 6,
-  };
-  net.intersections[intersectionSouth.id] = intersectionSouth;
+  }
+  net.intersections[intersectionSouth.id] = intersectionSouth
 
   // 6 default vehicles spread across 4 road segments (Plan 039 OOB 教训: 拉开距离)
-  const nsLen = roadLength(roadNS);
-  const ewLen = roadLength(roadEWNorth);
+  const nsLen = roadLength(roadNS)
+  const ewLen = roadLength(roadEWNorth)
   const defaults: Vehicle[] = [
-    at(roadNS, 0, nsLen * 0.15, 7, { id: 'v-c1', type: 'car', color: '#3a86ff', status: 'driving' }),
-    at(roadNS, 0, nsLen * 0.50, 5, { id: 'v-c2', type: 'truck', color: '#fbbf24', status: 'driving' }),
-    at(roadNS, 0, nsLen * 0.85, 7, { id: 'v-c3', type: 'bus', color: '#22c55e', status: 'driving' }),
-    at(roadEWNorth, 0, ewLen * 0.7, 8, { id: 'v-c4', type: 'car', color: '#ef4444', status: 'driving' }),
-    at(roadEWSouth, 0, ewLen * 0.3, 8, { id: 'v-c5', type: 'car', color: '#a78bfa', status: 'driving' }),
-    at(roadEWNorth, 0, ewLen * 0.4, 6, { id: 'v-c6', type: 'truck', color: '#f5f5f4', status: 'driving' }),
-  ];
-  for (const v of defaults) net.vehicles[v.id] = v;
+    at(roadNS, 0, nsLen * 0.15, 7, {
+      id: 'v-c1',
+      type: 'car',
+      color: '#3a86ff',
+      status: 'driving',
+    }),
+    at(roadNS, 0, nsLen * 0.5, 5, {
+      id: 'v-c2',
+      type: 'truck',
+      color: '#fbbf24',
+      status: 'driving',
+    }),
+    at(roadNS, 0, nsLen * 0.85, 7, {
+      id: 'v-c3',
+      type: 'bus',
+      color: '#22c55e',
+      status: 'driving',
+    }),
+    at(roadEWNorth, 0, ewLen * 0.7, 8, {
+      id: 'v-c4',
+      type: 'car',
+      color: '#ef4444',
+      status: 'driving',
+    }),
+    at(roadEWSouth, 0, ewLen * 0.3, 8, {
+      id: 'v-c5',
+      type: 'car',
+      color: '#a78bfa',
+      status: 'driving',
+    }),
+    at(roadEWNorth, 0, ewLen * 0.4, 6, {
+      id: 'v-c6',
+      type: 'truck',
+      color: '#f5f5f4',
+      status: 'driving',
+    }),
+  ]
+  for (const v of defaults) net.vehicles[v.id] = v
 
   // 3 spawn points (one per road)
   for (const road of [roadNS, roadEWNorth, roadEWSouth]) {
-    const sp = defaultSpawnPoint(road);
-    net.spawnPoints[sp.id] = sp;
+    const sp = defaultSpawnPoint(road)
+    net.spawnPoints[sp.id] = sp
   }
 
-  return net;
-};
+  return net
+}

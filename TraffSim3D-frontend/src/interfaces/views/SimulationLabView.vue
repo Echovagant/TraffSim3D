@@ -26,17 +26,31 @@
           </label>
         </div>
         <div class="stat-grid">
-          <div class="stat"><span>车辆</span><b>{{ vehicleCount }}</b></div>
-          <div class="stat"><span>信号灯</span><b>{{ lightCount }}</b></div>
-          <div class="stat"><span>交叉口</span><b>{{ intersectionCount }}</b></div>
-          <div class="stat"><span>道路</span><b>{{ roadCount }}</b></div>
-          <div class="stat"><span>NS 轴队列</span><b>{{ nsQueue }}</b></div>
-          <div class="stat"><span>EW 轴队列</span><b>{{ ewQueue }}</b></div>
+          <div class="stat">
+            <span>车辆</span><b>{{ vehicleCount }}</b>
+          </div>
+          <div class="stat">
+            <span>信号灯</span><b>{{ lightCount }}</b>
+          </div>
+          <div class="stat">
+            <span>交叉口</span><b>{{ intersectionCount }}</b>
+          </div>
+          <div class="stat">
+            <span>道路</span><b>{{ roadCount }}</b>
+          </div>
+          <div class="stat">
+            <span>NS 轴队列</span><b>{{ nsQueue }}</b>
+          </div>
+          <div class="stat">
+            <span>EW 轴队列</span><b>{{ ewQueue }}</b>
+          </div>
           <div class="stat">
             <span>变道中</span>
             <b :class="{ changing: changingCount > 0 }">{{ changingCount }}</b>
           </div>
-          <div class="stat"><span>仿真 tick</span><b>{{ world.tickCount }}</b></div>
+          <div class="stat">
+            <span>仿真 tick</span><b>{{ world.tickCount }}</b>
+          </div>
         </div>
       </section>
 
@@ -57,7 +71,9 @@
             class="btn"
             :disabled="world.controllerKind !== 'coordinated'"
             @click="showCoordinated = true"
-          >⚙ 配置偏移</button>
+          >
+            ⚙ 配置偏移
+          </button>
           <button class="btn danger" @click="world.forceAllRed()">🚨 全红 3s</button>
         </div>
         <table class="phase-table">
@@ -71,9 +87,13 @@
           </thead>
           <tbody>
             <tr v-for="row in lightRows" :key="row.id">
-              <td><code>{{ row.id }}</code></td>
+              <td>
+                <code>{{ row.id }}</code>
+              </td>
               <td>{{ row.axis.toUpperCase() }}</td>
-              <td><span :class="`phase phase-${row.phase}`">{{ row.phase }}</span></td>
+              <td>
+                <span :class="`phase phase-${row.phase}`">{{ row.phase }}</span>
+              </td>
               <td>{{ row.phaseRemaining.toFixed(1) }}</td>
             </tr>
           </tbody>
@@ -84,11 +104,7 @@
       <section class="card">
         <h2>3. 传感器</h2>
         <label class="toggle">
-          <input
-            type="checkbox"
-            :checked="world.lidarEnabled"
-            @change="onLidarToggle"
-          />
+          <input type="checkbox" :checked="world.lidarEnabled" @change="onLidarToggle" />
           <span>LiDAR (16线)</span>
           <b :class="world.lidarEnabled ? 'ok' : ''">{{ world.lidarFrameCount }} 帧</b>
         </label>
@@ -101,17 +117,16 @@
           <span>LiDAR 点云渲染</span>
         </label>
         <label class="toggle">
-          <input
-            type="checkbox"
-            :checked="world.cameraEnabled"
-            @change="onCameraToggle"
-          />
+          <input type="checkbox" :checked="world.cameraEnabled" @change="onCameraToggle" />
           <span>📷 Camera (PiP)</span>
           <b :class="world.cameraEnabled ? 'ok' : ''">{{ world.cameraFrameCount }} 帧</b>
         </label>
         <div class="traj-row">
           <span>Trajectory</span>
-          <b>{{ world.trajectoryExporter.rowCount }} / {{ world.trajectoryExporter.maxBufferRows }} 行</b>
+          <b
+            >{{ world.trajectoryExporter.rowCount }} /
+            {{ world.trajectoryExporter.maxBufferRows }} 行</b
+          >
           <button class="btn" @click="exportTrajectoryCsv">⬇ CSV</button>
         </div>
       </section>
@@ -123,9 +138,15 @@
           <div class="stat" :class="{ warn: world.fps < M1_MIN_FPS }">
             <span>FPS</span><b>{{ world.fps }}</b>
           </div>
-          <div class="stat"><span>帧 ms (avg)</span><b>{{ frameAvg.toFixed(1) }}</b></div>
-          <div class="stat"><span>帧 ms (min)</span><b>{{ frameMin }}</b></div>
-          <div class="stat"><span>帧 ms (max)</span><b>{{ frameMax }}</b></div>
+          <div class="stat">
+            <span>帧 ms (avg)</span><b>{{ frameAvg.toFixed(1) }}</b>
+          </div>
+          <div class="stat">
+            <span>帧 ms (min)</span><b>{{ frameMin }}</b>
+          </div>
+          <div class="stat">
+            <span>帧 ms (max)</span><b>{{ frameMax }}</b>
+          </div>
           <div class="stat">
             <span>仿真速率</span>
             <b class="rate-control">
@@ -150,19 +171,63 @@
         <h2>5. M2 vs M1 — 每个交互的影响差异</h2>
         <table class="diff-table">
           <thead>
-            <tr><th>交互</th><th>M1 (手算几何)</th><th>M2 (Rapier + 传感器)</th></tr>
+            <tr>
+              <th>交互</th>
+              <th>M1 (手算几何)</th>
+              <th>M2 (Rapier + 传感器)</th>
+            </tr>
           </thead>
           <tbody>
-            <tr><td>+ 车辆</td><td>直线 lane-following</td><td>Rapier RigidBody, 真质量/摩擦</td></tr>
-            <tr><td>🚗 +50 车辆</td><td>N/A (无物理)</td><td>一键演示 Rapier 碰撞 → 部分车变 💥 crashed</td></tr>
-            <tr><td>车辆相撞</td><td>不会 (无碰撞检测)</td><td>contact graph → status=crashed</td></tr>
-            <tr><td>信号灯切换</td><td>写死 30/3/30</td><td>4 种 controller 可选</td></tr>
-            <tr><td>协调偏移</td><td>N/A</td><td>🚦 协调配置 → 绿波带 (028)</td></tr>
-            <tr><td>变道</td><td>N/A</td><td>Inspector ◀▶ Change Lane (029)</td></tr>
-            <tr><td>LiDAR</td><td>无</td><td>16 线 raycast 实时扫描</td></tr>
-            <tr><td>摄像头</td><td>无</td><td>PiP POV 渲染 (右下角)</td></tr>
-            <tr><td>轨迹导出</td><td>无</td><td>10Hz 采样 → CSV (025)</td></tr>
-            <tr><td>性能</td><td>~30fps 写死上限</td><td>~165fps with Rapier + 传感器 (实测)</td></tr>
+            <tr>
+              <td>+ 车辆</td>
+              <td>直线 lane-following</td>
+              <td>Rapier RigidBody, 真质量/摩擦</td>
+            </tr>
+            <tr>
+              <td>🚗 +50 车辆</td>
+              <td>N/A (无物理)</td>
+              <td>一键演示 Rapier 碰撞 → 部分车变 💥 crashed</td>
+            </tr>
+            <tr>
+              <td>车辆相撞</td>
+              <td>不会 (无碰撞检测)</td>
+              <td>contact graph → status=crashed</td>
+            </tr>
+            <tr>
+              <td>信号灯切换</td>
+              <td>写死 30/3/30</td>
+              <td>4 种 controller 可选</td>
+            </tr>
+            <tr>
+              <td>协调偏移</td>
+              <td>N/A</td>
+              <td>🚦 协调配置 → 绿波带 (028)</td>
+            </tr>
+            <tr>
+              <td>变道</td>
+              <td>N/A</td>
+              <td>Inspector ◀▶ Change Lane (029)</td>
+            </tr>
+            <tr>
+              <td>LiDAR</td>
+              <td>无</td>
+              <td>16 线 raycast 实时扫描</td>
+            </tr>
+            <tr>
+              <td>摄像头</td>
+              <td>无</td>
+              <td>PiP POV 渲染 (右下角)</td>
+            </tr>
+            <tr>
+              <td>轨迹导出</td>
+              <td>无</td>
+              <td>10Hz 采样 → CSV (025)</td>
+            </tr>
+            <tr>
+              <td>性能</td>
+              <td>~30fps 写死上限</td>
+              <td>~165fps with Rapier + 传感器 (实测)</td>
+            </tr>
           </tbody>
         </table>
       </section>
@@ -178,89 +243,94 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { useWorldStore, type SceneKind } from '@interfaces/stores/worldStore';
-import { getAxisQueueLength } from '@application/services/signalController';
-import { M1_MIN_FPS } from '@shared/constants/simulation';
-import { CoordinatedConfigModal } from '@interfaces/components/editor';
+import { computed, ref } from 'vue'
+import { useWorldStore, type SceneKind } from '@interfaces/stores/worldStore'
+import { getAxisQueueLength } from '@application/services/signalController'
+import { M1_MIN_FPS } from '@shared/constants/simulation'
+import { CoordinatedConfigModal } from '@interfaces/components/editor'
 
-const world = useWorldStore();
-const showCoordinated = ref(false);
+const world = useWorldStore()
+const showCoordinated = ref(false)
 
 // 1. 场景统计
-const vehicleCount = computed(() => Object.keys(world.network.vehicles).length);
-const intersectionCount = computed(() => Object.keys(world.network.intersections).length);
-const roadCount = computed(() => Object.keys(world.network.roads).length);
+const vehicleCount = computed(() => Object.keys(world.network.vehicles).length)
+const intersectionCount = computed(() => Object.keys(world.network.intersections).length)
+const roadCount = computed(() => Object.keys(world.network.roads).length)
 const lightCount = computed(() =>
-  Object.values(world.network.intersections).reduce((s, i) => s + i.trafficLights.length, 0));
+  Object.values(world.network.intersections).reduce((s, i) => s + i.trafficLights.length, 0),
+)
 
 const lightRows = computed(() => {
-  void world.tickCount;
+  void world.tickCount
   return Object.values(world.network.intersections)
     .flatMap((i) => i.trafficLights)
-    .sort((a, b) => a.id.localeCompare(b.id));
-});
+    .sort((a, b) => a.id.localeCompare(b.id))
+})
 
 // Queue length uses a synthesised light (only `axis` and `roadId` are
 // read inside getAxisQueueLength — see signalController.ts).
-const stubLight = (axis: 'ns' | 'ew'): never => ({
-  id: `__queue_${axis}`,
-  axis,
-  phase: 0 as never,
-  phaseRemaining: 0,
-  position: { x: 0, y: 0, z: 0 },
-  cycleSeconds: 63,
-} as never);
+const stubLight = (axis: 'ns' | 'ew'): never =>
+  ({
+    id: `__queue_${axis}`,
+    axis,
+    phase: 0 as never,
+    phaseRemaining: 0,
+    position: { x: 0, y: 0, z: 0 },
+    cycleSeconds: 63,
+  }) as never
 
 const nsQueue = computed(() => {
-  void world.tickCount;
-  return getAxisQueueLength(stubLight('ns'), world.network);
-});
+  void world.tickCount
+  return getAxisQueueLength(stubLight('ns'), world.network)
+})
 const ewQueue = computed(() => {
-  void world.tickCount;
-  return getAxisQueueLength(stubLight('ew'), world.network);
-});
+  void world.tickCount
+  return getAxisQueueLength(stubLight('ew'), world.network)
+})
 const changingCount = computed(() => {
-  void world.tickCount;
-  return Object.values(world.network.vehicles).filter(v => v.desiredLaneIndex !== null).length;
-});
+  void world.tickCount
+  return Object.values(world.network.vehicles).filter((v) => v.desiredLaneIndex !== null).length
+})
 
 // 2. 信号控制
 const onControllerKindChange = (e: Event): void => {
-  const v = (e.target as HTMLSelectElement).value;
+  const v = (e.target as HTMLSelectElement).value
   // world.setControllerKind 接受 ControllerKind union; 4 个 option 值都合法.
-  (world.setControllerKind as (k: string) => void)(v);
-};
+  ;(world.setControllerKind as (k: string) => void)(v)
+}
 
 // 1. 场景切换
 const onSceneChange = (e: Event): void => {
-  const v = (e.target as HTMLSelectElement).value;
-  world.switchScene(v as SceneKind);
-};
+  const v = (e.target as HTMLSelectElement).value
+  world.switchScene(v as SceneKind)
+}
 
 // 3. 传感器
-const onLidarToggle = (e: Event): void => world.setLidarEnabled((e.target as HTMLInputElement).checked);
-const onLidarCloudsToggle = (e: Event): void => world.setLidarCloudsEnabled((e.target as HTMLInputElement).checked);
-const onCameraToggle = (e: Event): void => world.setCameraEnabled((e.target as HTMLInputElement).checked);
+const onLidarToggle = (e: Event): void =>
+  world.setLidarEnabled((e.target as HTMLInputElement).checked)
+const onLidarCloudsToggle = (e: Event): void =>
+  world.setLidarCloudsEnabled((e.target as HTMLInputElement).checked)
+const onCameraToggle = (e: Event): void =>
+  world.setCameraEnabled((e.target as HTMLInputElement).checked)
 const exportTrajectoryCsv = (): void => {
   const blob = world.trajectoryExporter.exportAsBlob({
     kind: 'csv',
     includeCrashed: true,
     sampleInterval: 0.1,
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `trajectory-${Date.now()}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-};
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `trajectory-${Date.now()}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 // 4. 性能
-const frameMin = computed(() => (world.frameMsMin === Infinity ? 0 : world.frameMsMin.toFixed(1)));
-const frameMax = computed(() => (world.frameMsMax === -Infinity ? 0 : world.frameMsMax.toFixed(1)));
-const frameAvg = computed(() => world.frameMsAvg);
-const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
+const frameMin = computed(() => (world.frameMsMin === Infinity ? 0 : world.frameMsMin.toFixed(1)))
+const frameMax = computed(() => (world.frameMsMax === -Infinity ? 0 : world.frameMsMax.toFixed(1)))
+const frameAvg = computed(() => world.frameMsAvg)
+const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
 </script>
 
 <style scoped>
@@ -278,10 +348,23 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   color: #93c5fd;
   text-decoration: none;
 }
-.back-link:hover { text-decoration: underline; }
-.lab-header { max-width: 1100px; margin: 0 auto 24px; }
-.title-row h1 { margin: 8px 0 4px; font-size: 28px; letter-spacing: -0.01em; }
-.title-row .sub { margin: 0; color: #94a3b8; font-size: 14px; }
+.back-link:hover {
+  text-decoration: underline;
+}
+.lab-header {
+  max-width: 1100px;
+  margin: 0 auto 24px;
+}
+.title-row h1 {
+  margin: 8px 0 4px;
+  font-size: 28px;
+  letter-spacing: -0.01em;
+}
+.title-row .sub {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 14px;
+}
 .badge {
   display: inline-block;
   font-size: 11px;
@@ -289,7 +372,10 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   border-radius: 999px;
   font-weight: 600;
 }
-.badge-active { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+.badge-active {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+}
 
 .lab-grid {
   display: grid;
@@ -299,7 +385,9 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   margin: 0 auto;
 }
 @media (max-width: 900px) {
-  .lab-grid { grid-template-columns: 1fr; }
+  .lab-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .card {
   background: rgba(15, 23, 42, 0.65);
@@ -330,14 +418,31 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
-.stat span { color: #94a3b8; }
-.stat b { font-weight: 600; color: #f1f5f9; }
-.stat b.changing { color: #93c5fd; animation: changing-pulse 1s ease-in-out infinite; }
-.stat.warn b { color: #fbbf24; }
-.stat.paused b { color: #fde047; }
+.stat span {
+  color: #94a3b8;
+}
+.stat b {
+  font-weight: 600;
+  color: #f1f5f9;
+}
+.stat b.changing {
+  color: #93c5fd;
+  animation: changing-pulse 1s ease-in-out infinite;
+}
+.stat.warn b {
+  color: #fbbf24;
+}
+.stat.paused b {
+  color: #fde047;
+}
 @keyframes changing-pulse {
-  0%, 100% { opacity: 0.6; }
-  50%      { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .ctrl-row {
@@ -376,16 +481,29 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   font-family: inherit;
   line-height: 1.4;
 }
-.btn:hover:not(:disabled) { background: #1d4ed8; }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn.primary { background: #2563eb; padding: 8px 16px; font-size: 13px; }
+.btn:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn.primary {
+  background: #2563eb;
+  padding: 8px 16px;
+  font-size: 13px;
+}
 .btn.ghost {
   background: transparent;
   border: 1px solid rgba(148, 163, 184, 0.3);
   color: inherit;
 }
-.btn.danger { background: #7f1d1d; }
-.btn.danger:hover { background: #991b1b; }
+.btn.danger {
+  background: #7f1d1d;
+}
+.btn.danger:hover {
+  background: #991b1b;
+}
 
 .phase-table {
   width: 100%;
@@ -409,9 +527,15 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   padding: 1px 4px;
   border-radius: 3px;
 }
-.phase-red { color: #fca5a5; }
-.phase-yellow { color: #fde047; }
-.phase-green { color: #86efac; }
+.phase-red {
+  color: #fca5a5;
+}
+.phase-yellow {
+  color: #fde047;
+}
+.phase-green {
+  color: #86efac;
+}
 
 .toggle {
   display: flex;
@@ -425,8 +549,13 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.toggle input { cursor: pointer; }
-.toggle b.ok { color: #22c55e; margin-left: auto; }
+.toggle input {
+  cursor: pointer;
+}
+.toggle b.ok {
+  color: #22c55e;
+  margin-left: auto;
+}
 
 .traj-row {
   display: flex;
@@ -439,8 +568,13 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.traj-row b { color: #fbbf24; margin-left: auto; }
-.traj-row .btn { margin-left: 8px; }
+.traj-row b {
+  color: #fbbf24;
+  margin-left: auto;
+}
+.traj-row .btn {
+  margin-left: 8px;
+}
 
 .lab-footer {
   display: flex;
@@ -452,7 +586,9 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   margin-right: auto;
 }
 
-.diff-card { grid-column: 1 / -1; }
+.diff-card {
+  grid-column: 1 / -1;
+}
 .diff-table {
   width: 100%;
   border-collapse: collapse;
@@ -472,9 +608,15 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`;
   font-size: 10px;
   letter-spacing: 0.04em;
 }
-.diff-table td:first-child { color: #93c5fd; }
-.diff-table td:nth-child(2) { color: #94a3b8; }
-.diff-table td:nth-child(3) { color: #86efac; }
+.diff-table td:first-child {
+  color: #93c5fd;
+}
+.diff-table td:nth-child(2) {
+  color: #94a3b8;
+}
+.diff-table td:nth-child(3) {
+  color: #86efac;
+}
 
 .rate-control {
   display: inline-flex;

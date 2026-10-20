@@ -19,7 +19,9 @@
         </thead>
         <tbody>
           <tr v-for="[pair, val] in offsets" :key="pair">
-            <td><code>{{ pair }}</code></td>
+            <td>
+              <code>{{ pair }}</code>
+            </td>
             <td>
               <input
                 type="number"
@@ -41,11 +43,7 @@
       </table>
       <footer>
         <label class="enable-toggle">
-          <input
-            type="checkbox"
-            :checked="enabled"
-            @change="onToggle($event)"
-          />
+          <input type="checkbox" :checked="enabled" @change="onToggle($event)" />
           <span>启用 (需切到协调控制器才生效)</span>
         </label>
       </footer>
@@ -54,26 +52,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import { useWorldStore } from '@interfaces/stores/worldStore';
+import { computed } from 'vue'
+import { useWorldStore } from '@interfaces/stores/worldStore'
 
-const props = defineProps<{ open: boolean }>();
-const emit = defineEmits<{ (e: 'update:open', v: boolean): void }>();
+const props = defineProps<{ open: boolean }>()
+const emit = defineEmits<{ (e: 'update:open', v: boolean): void }>()
 
-const store = useWorldStore();
+const store = useWorldStore()
 const offsets = computed(() =>
-  Array.from(store.coordinatedOffsets.entries()).sort(([a], [b]) => a.localeCompare(b)));
-const enabled = computed(() => store.coordinatedOffsetsEnabled);
+  Array.from(store.coordinatedOffsets.entries()).sort(([a], [b]) => a.localeCompare(b)),
+)
+const enabled = computed(() => store.coordinatedOffsetsEnabled)
 
-const close = (): void => emit('update:open', false);
+const close = (): void => emit('update:open', false)
 
 const onChange = (pair: string, v: number): void => {
-  if (Number.isFinite(v)) store.setCoordinatedOffset(pair, v);
-};
-const onReset = (pair: string): void => store.setCoordinatedOffset(pair, 0);
+  if (Number.isFinite(v)) store.setCoordinatedOffset(pair, v)
+}
+const onReset = (pair: string): void => store.setCoordinatedOffset(pair, 0)
 const onToggle = (e: Event): void => {
-  store.toggleCoordinatedOffsets((e.target as HTMLInputElement).checked);
-};
+  store.toggleCoordinatedOffsets((e.target as HTMLInputElement).checked)
+}
 </script>
 
 <style scoped>
@@ -143,7 +142,7 @@ const onToggle = (e: Event): void => {
   font-size: 10px;
   letter-spacing: 0.04em;
 }
-.modal input[type="number"] {
+.modal input[type='number'] {
   background: #1e293b;
   color: #f1f5f9;
   border: 1px solid #334155;

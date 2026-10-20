@@ -1,12 +1,12 @@
-import type { Position } from '../value-objects/Position';
-import type { TrafficLight } from './TrafficLight';
+import type { Position } from '../value-objects/Position'
+import type { TrafficLight } from './TrafficLight'
 
 export interface Intersection {
-  readonly id: string;
-  position: Position;
-  trafficLights: TrafficLight[];
+  readonly id: string
+  position: Position
+  trafficLights: TrafficLight[]
   /** Road ids that terminate at this intersection. */
-  connectedRoads: string[];
+  connectedRoads: string[]
   /**
    * Plan 035: 路口 box 半径 (m). 决定 `inIntersectionBox` 检测范围
    * (`[mid - radius, mid + radius]`). 默认 8.
@@ -21,5 +21,5 @@ export interface Intersection {
    * 直角转弯 road 本身不进任何 intersection.connectedRoads, 所以
    * 不会被 inIntersectionBox 触发. 见 ADR-008.
    */
-  intersectionRadius: number;
+  intersectionRadius: number
 }

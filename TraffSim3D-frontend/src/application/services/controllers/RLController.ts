@@ -7,19 +7,19 @@
  *
  * M4 TODO: integrate PPO action queue via applyAction(). Until then: fixed cycle.
  */
-import type { TrafficLight } from '@domain/entities/TrafficLight';
-import type { RoadNetwork } from '@domain/entities/RoadNetwork';
-import type { SignalAction, SignalController, SignalDecision } from '../signalController';
-import { FixedCycleController } from './FixedCycleController';
+import type { TrafficLight } from '@domain/entities/TrafficLight'
+import type { RoadNetwork } from '@domain/entities/RoadNetwork'
+import type { SignalAction, SignalController, SignalDecision } from '../signalController'
+import { FixedCycleController } from './FixedCycleController'
 
 export class RLController implements SignalController {
-  private inner = new FixedCycleController();
+  private inner = new FixedCycleController()
   decide(light: TrafficLight, network: RoadNetwork, simTime: number): SignalDecision {
-    return this.inner.decide(light, network, simTime);
+    return this.inner.decide(light, network, simTime)
   }
   applyAction(light: TrafficLight, action: SignalAction['name']): void {
     // M4: PPO action queue integration goes here.
     // For M2-B this is a no-op — the inner fixed cycle runs.
-    this.inner.applyAction(light, action);
+    this.inner.applyAction(light, action)
   }
 }

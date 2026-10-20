@@ -29,11 +29,12 @@
         <div class="hero-card">
           <h1 class="gsap-hero-title">TraffSim3D</h1>
           <p class="hero-tagline gsap-hero-tagline">
-            面向智慧城市的 3D 交通仿真平台 — 前端 Vue3 + Three.js，后端 FastAPI + PyTorch，
-            通过 DDD 分层 + 多智能体 RL 引擎联合驱动。
+            面向智慧城市的 3D 交通仿真平台 — 前端 Vue3 + Three.js，后端 FastAPI + PyTorch， 通过 DDD
+            分层 + 多智能体 RL 引擎联合驱动。
           </p>
           <p class="hero-sub gsap-hero-sub">
-            M1–M4 已交付：场景编辑器、物理仿真、OSM 地图导入、智能体 RL 训练。M3 新增 SmartCity 3D 底图(基于 Cesium + 高德瓦片 + 真实建筑 3D 拉伸)。
+            M1–M4 已交付：场景编辑器、物理仿真、OSM 地图导入、智能体 RL 训练。M3 新增 SmartCity 3D
+            底图(基于 Cesium + 高德瓦片 + 真实建筑 3D 拉伸)。
           </p>
           <div class="hero-ctas gsap-hero-ctas">
             <router-link to="/scene-editor" class="btn">进入 SceneLab</router-link>
@@ -59,7 +60,9 @@
               </div>
               <p class="module-sub">场景编辑器 / SceneEditor</p>
               <p class="module-desc">
-                3D 场景：车辆、信号灯、道路。已实现车迹、车道线（黄实线 + 白虚线）、信号灯相位倒计时条、选中高亮环、LocalStorage 持久化、并通过 Vite proxy 调用后端 health/ping。
+                3D 场景：车辆、信号灯、道路。已实现车迹、车道线（黄实线 +
+                白虚线）、信号灯相位倒计时条、选中高亮环、LocalStorage 持久化、并通过 Vite proxy
+                调用后端 health/ping。
               </p>
             </div>
           </router-link>
@@ -73,7 +76,8 @@
               </div>
               <p class="module-sub">物理 + 传感器仿真</p>
               <p class="module-desc">
-                接入 Rapier WASM 做车辆动力学、碰撞检测；叠加 lidar / camera / IMU 传感器仿真，为 RL 训练提供真实可微的观测空间。
+                接入 Rapier WASM 做车辆动力学、碰撞检测；叠加 lidar / camera / IMU 传感器仿真，为 RL
+                训练提供真实可微的观测空间。
               </p>
             </div>
           </router-link>
@@ -87,8 +91,8 @@
               </div>
               <p class="module-sub">OSM 地图导入与路网生成</p>
               <p class="module-desc">
-                解析 OpenStreetMap 的 <code>.osm</code> / <code>.pbf</code> 文件 → 路网 graph → SceneLab 加载。
-                通过后端 <code>apps/maps</code> (PostGIS) 持久化, 前端拉取并渲染。
+                解析 OpenStreetMap 的 <code>.osm</code> / <code>.pbf</code> 文件 → 路网 graph →
+                SceneLab 加载。 通过后端 <code>apps/maps</code> (PostGIS) 持久化, 前端拉取并渲染。
               </p>
             </div>
           </router-link>
@@ -107,8 +111,9 @@
               </div>
               <p class="module-sub">智慧城市 3D 底图（Cesium + 高德瓦片）</p>
               <p class="module-desc">
-                Cesium 1.134 渲染高德瓦片 + OSM 3D 拉伸建筑 + 道路多段线,Three.js 透明 overlay 渲染车辆 + 信号灯 + LiDAR。
-                鸟瞰 / 平视 / 自由 切换;Overpass 数据经后端缓存,首次冷启动 &lt; 100ms。
+                Cesium 1.134 渲染高德瓦片 + OSM 3D 拉伸建筑 + 道路多段线,Three.js 透明 overlay
+                渲染车辆 + 信号灯 + LiDAR。 鸟瞰 / 平视 / 自由 切换;Overpass
+                数据经后端缓存,首次冷启动 &lt; 100ms。
               </p>
             </div>
           </router-link>
@@ -122,7 +127,8 @@
               </div>
               <p class="module-sub">RL 训练 + 回放</p>
               <p class="module-desc">
-                与后端 apps/rl (PyTorch + Gymnasium) 联动:多智能体策略训练、回放 buffer 可视化、学到策略的影子车在 SceneLab 里 replay。
+                与后端 apps/rl (PyTorch + Gymnasium) 联动:多智能体策略训练、回放 buffer
+                可视化、学到策略的影子车在 SceneLab 里 replay。
               </p>
             </div>
           </router-link>
@@ -136,8 +142,8 @@
               </div>
               <p class="module-sub">部署与交付物总览</p>
               <p class="module-desc">
-                本地部署清单、ADR 归档、API 文档、测试覆盖率报告的目录页。
-                不引入新功能, 只把前 4 个里程碑的可交付物集中展示给项目接手人。
+                本地部署清单、ADR 归档、API 文档、测试覆盖率报告的目录页。 不引入新功能, 只把前 4
+                个里程碑的可交付物集中展示给项目接手人。
               </p>
             </div>
           </router-link>
@@ -151,7 +157,9 @@
               </div>
               <p class="module-sub">FastAPI 服务面</p>
               <p class="module-desc">
-                所有模块的统一 API 入口。当前已暴露 <code>GET /health</code> 与 <code>GET /api/v1/ping</code> 两个 smoke 端点;scene sync、tick stream、RL control 等接口在 M2–M4 落地。
+                所有模块的统一 API 入口。当前已暴露 <code>GET /health</code> 与
+                <code>GET /api/v1/ping</code> 两个 smoke 端点;scene sync、tick stream、RL control
+                等接口在 M2–M4 落地。
               </p>
             </div>
           </router-link>
@@ -190,15 +198,15 @@
  * ScrollTriggers and reverts inline styles. Critical for hot-reload
  * during dev (otherwise Vue re-mounts leave dangling ScrollTriggers).
  */
-import { onMounted, onBeforeUnmount, ref } from 'vue';
-import { gsap } from 'gsap';
-import EnhancedWebGLBackground from '@interfaces/components/showcase/EnhancedWebGLBackground.vue';
+import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { gsap } from 'gsap'
+import EnhancedWebGLBackground from '@interfaces/components/showcase/EnhancedWebGLBackground.vue'
 
-const root = ref<HTMLElement | null>(null);
-let ctx: gsap.Context | null = null;
+const root = ref<HTMLElement | null>(null)
+let ctx: gsap.Context | null = null
 
 onMounted(() => {
-  if (!root.value) return;
+  if (!root.value) return
   ctx = gsap.context(() => {
     // 1) Hero — entrance stagger (no scroll)
     gsap.from('.gsap-hero-title', {
@@ -206,28 +214,28 @@ onMounted(() => {
       y: 28,
       duration: 0.7,
       ease: 'power3.out',
-    });
+    })
     gsap.from('.gsap-hero-tagline', {
       autoAlpha: 0,
       y: 16,
       duration: 0.6,
       ease: 'power2.out',
       delay: 0.15,
-    });
+    })
     gsap.from('.gsap-hero-sub', {
       autoAlpha: 0,
       y: 12,
       duration: 0.5,
       ease: 'power2.out',
       delay: 0.28,
-    });
+    })
     gsap.from('.gsap-hero-ctas', {
       autoAlpha: 0,
       y: 10,
       duration: 0.5,
       ease: 'power2.out',
       delay: 0.42,
-    });
+    })
     // 2) Modules header — fade up when in view
     gsap.from('.gsap-modules-header', {
       autoAlpha: 0,
@@ -240,30 +248,30 @@ onMounted(() => {
         once: true,
         toggleActions: 'play none none reverse',
       },
-    });
+    })
     // 3) Module cards — stagger fade-up when grid enters viewport
     gsap.from('.module-card', {
       autoAlpha: 0,
       y: 32,
       duration: 0.55,
       ease: 'power3.out',
-      stagger: 0.10,
+      stagger: 0.1,
       scrollTrigger: {
         trigger: '.gsap-module-grid',
         start: 'top 82%',
         once: true,
         toggleActions: 'play none none reverse',
       },
-    });
-  }, root.value);
-});
+    })
+  }, root.value)
+})
 
 onBeforeUnmount(() => {
   // Kill tweens + ScrollTriggers + revert inline styles. Critical
   // for hot-reload (otherwise ScrollTriggers accumulate across
   // HMR cycles and fire for elements that no longer exist).
-  ctx?.revert();
-});
+  ctx?.revert()
+})
 </script>
 
 <style>
@@ -279,7 +287,9 @@ onBeforeUnmount(() => {
   color: rgba(15, 23, 42, 0.92);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
-html { background: #f8fafc; }
+html {
+  background: #f8fafc;
+}
 
 /* === Top nav === */
 .top-nav {
@@ -340,9 +350,14 @@ html { background: #f8fafc; }
   font-size: 13px;
   color: rgba(15, 23, 42, 0.75);
   text-decoration: none;
-  transition: background 0.18s, color 0.18s;
+  transition:
+    background 0.18s,
+    color 0.18s;
 }
-.nav-link:hover { background: rgba(15, 23, 42, 0.06); color: rgba(15, 23, 42, 0.95); }
+.nav-link:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: rgba(15, 23, 42, 0.95);
+}
 .nav-link.router-link-active {
   background: rgba(59, 130, 246, 0.12);
   color: #1d4ed8;
@@ -413,7 +428,10 @@ html { background: #f8fafc; }
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
-  transition: transform 0.15s, background 0.18s, box-shadow 0.18s;
+  transition:
+    transform 0.15s,
+    background 0.18s,
+    box-shadow 0.18s;
   background: #1d4ed8;
   color: #fff;
   border: 1px solid #1d4ed8;
@@ -446,7 +464,10 @@ html { background: #f8fafc; }
   margin: 0 auto;
   padding: 40px 24px 80px;
 }
-.modules-header { text-align: center; margin-bottom: 32px; }
+.modules-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
 .modules-header h2 {
   font-size: 28px;
   font-weight: 700;
@@ -476,7 +497,10 @@ html { background: #f8fafc; }
   color: inherit;
   position: relative;
   overflow: hidden;
-  transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
+  transition:
+    transform 0.18s,
+    box-shadow 0.18s,
+    border-color 0.18s;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -519,7 +543,10 @@ html { background: #f8fafc; }
   background: linear-gradient(135deg, rgba(168, 85, 247, 0.18), rgba(59, 130, 246, 0.18));
 }
 
-.module-body { flex: 1 1 auto; min-width: 0; }
+.module-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .module-title-row {
   display: flex;
   align-items: center;

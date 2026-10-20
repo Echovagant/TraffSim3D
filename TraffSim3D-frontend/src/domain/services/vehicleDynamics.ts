@@ -22,8 +22,8 @@ import {
   DRIVING_SPEED_THRESHOLD,
   WAITING_SPEED_THRESHOLD,
   VEHICLE_DYN,
-} from '@shared/constants/simulation';
-import type { Vehicle, VehicleStatus, VehicleType } from '@domain/entities/Vehicle';
+} from '@shared/constants/simulation'
+import type { Vehicle, VehicleStatus, VehicleType } from '@domain/entities/Vehicle'
 
 /**
  * Ramp `currentSpeed` toward `targetSpeed` using the per-type accel
@@ -40,17 +40,17 @@ export const smoothAccel = (
   dt: number,
   type: VehicleType,
 ): number => {
-  if (dt <= 0) return currentSpeed;
-  const accelCap = VEHICLE_DYN[type].accel;
-  const decelCap = VEHICLE_DYN[type].decel;
+  if (dt <= 0) return currentSpeed
+  const accelCap = VEHICLE_DYN[type].accel
+  const decelCap = VEHICLE_DYN[type].decel
   // Use accel cap when speeding up, decel cap when slowing down.
-  const dv = targetSpeed - currentSpeed;
-  if (Math.abs(dv) < 1e-6) return targetSpeed;
-  const cap = dv > 0 ? accelCap : decelCap;
-  const maxDv = cap * dt;
-  if (Math.abs(dv) <= maxDv) return Math.max(0, targetSpeed);
-  return Math.max(0, currentSpeed + Math.sign(dv) * maxDv);
-};
+  const dv = targetSpeed - currentSpeed
+  if (Math.abs(dv) < 1e-6) return targetSpeed
+  const cap = dv > 0 ? accelCap : decelCap
+  const maxDv = cap * dt
+  if (Math.abs(dv) <= maxDv) return Math.max(0, targetSpeed)
+  return Math.max(0, currentSpeed + Math.sign(dv) * maxDv)
+}
 
 /**
  * Plan 037 (bug 1): simplified Gipps safe-following gap. Newell's
@@ -76,12 +76,12 @@ export const safeGapGipps = (
   minGap: number,
   leaderDecelCap: number = MAX_DECEL_COMFY,
 ): number => {
-  const dv = Math.abs(selfSpeed - leaderSpeed);
+  const dv = Math.abs(selfSpeed - leaderSpeed)
   // Gipps' braking component: how much extra gap to leave when
   // closing on a slower (or stationary) leader.
-  const brakingComponent = (selfSpeed * dv) / (2 * leaderDecelCap);
-  return selfSpeed * timeHeadway + minGap + brakingComponent;
-};
+  const brakingComponent = (selfSpeed * dv) / (2 * leaderDecelCap)
+  return selfSpeed * timeHeadway + minGap + brakingComponent
+}
 
 /**
  * Plan 037 (bug 2): hysteresis state machine.
@@ -112,10 +112,10 @@ export const statusFromHysteresis = (
   speed: number,
 ): VehicleStatus => {
   // Crashed is sticky — controller can't un-crash a vehicle mid-tick.
-  if (current === 'crashed') return 'crashed';
+  if (current === 'crashed') return 'crashed'
 
   // Controller asked for crash; honour it.
-  if (desired === 'crashed') return 'crashed';
+  if (desired === 'crashed') return 'crashed'
 
   if (desired === 'waiting') {
     // Controller wants to wait — honour the request unless we're
@@ -123,22 +123,22 @@ export const statusFromHysteresis = (
     // (this case is rare: it can happen if the controller flipped
     // intent during a single tick while the vehicle was already
     // cruising). Default: trust the controller.
-    return 'waiting';
+    return 'waiting'
   }
 
   // desired == 'driving'. Now decide based on speed.
   if (current === 'driving') {
     // Stay driving unless speed has dropped to the WAITING threshold
     // (lower than DRIVING so we don't bounce).
-    if (speed < WAITING_SPEED_THRESHOLD) return 'waiting';
-    return 'driving';
+    if (speed < WAITING_SPEED_THRESHOLD) return 'waiting'
+    return 'driving'
   }
 
   // current === 'waiting'. Promote only when speed has crossed the
   // higher DRIVING threshold (entry vs exit asymmetry = hysteresis).
-  if (speed >= DRIVING_SPEED_THRESHOLD) return 'driving';
-  return 'waiting';
-};
+  if (speed >= DRIVING_SPEED_THRESHOLD) return 'driving'
+  return 'waiting'
+}
 
 /**
  * Plan 037 (bug 3 helper): clamp a desired speed to the per-type
@@ -152,19 +152,17 @@ export const clampTargetSpeedByType = (
   type: VehicleType,
   roadSpeedLimit: number,
 ): number => {
-  const dyn = VEHICLE_DYN[type];
+  const dyn = VEHICLE_DYN[type]
   // Heuristic: a vehicle's practical top speed in this simulator is
   // roughly its road's speed limit; we cap to that and also enforce
   // a hard ceiling of 35 m/s (≈ 126 km/h) via MAX_SPEED.
-  return Math.max(0, Math.min(desired, roadSpeedLimit));
-};
+  return Math.max(0, Math.min(desired, roadSpeedLimit))
+}
 
 /**
  * Plan 037 (bug 1): compute the new speed for the hand-rolled (M1
  * fallback) tick path. Replaces the previous `v.speed += 3.5*dt`
  * one-liner with a per-type ramp.
  */
-export const handRolledStep = (
-  vehicle: Vehicle,
-  dt: number,
-): number => smoothAccel(vehicle.speed, vehicle.targetSpeed, dt, vehicle.type);
+export const handRolledStep = (vehicle: Vehicle, dt: number): number =>
+  smoothAccel(vehicle.speed, vehicle.targetSpeed, dt, vehicle.type)

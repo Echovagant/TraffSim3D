@@ -68,20 +68,21 @@
       </section>
 
       <p v-if="vehicleCount === 0 && lightCount === 0" class="empty">
-        场景为空 — 在顶部点 <code>+ Vehicle</code> / <code>+ Light</code>，或 <code>Load</code> 之前保存的场景。
+        场景为空 — 在顶部点 <code>+ Vehicle</code> / <code>+ Light</code>，或
+        <code>Load</code> 之前保存的场景。
       </p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { useEditor } from '@interfaces/composables/useEditor';
-import { useSelectionStore } from '@interfaces/stores/selectionStore';
-import { focusOnSelection } from '@interfaces/composables/useCameraFocus';
+import { computed, ref } from 'vue'
+import { useEditor } from '@interfaces/composables/useEditor'
+import { useSelectionStore } from '@interfaces/stores/selectionStore'
+import { focusOnSelection } from '@interfaces/composables/useCameraFocus'
 
-const { world } = useEditor(ref(null));
-const selection = useSelectionStore();
+const { world } = useEditor(ref(null))
+const selection = useSelectionStore()
 
 // `world.network` is a plain object mutated in place by the store
 // (add/remove/reset/hydrate). To make the computed list re-evaluate when
@@ -89,37 +90,37 @@ const selection = useSelectionStore();
 // read it inside the computeds — that flips the dep and Vue re-runs
 // `Object.values` against the new state.
 const vehicles = computed(() => {
-  void world.tickCount;
-  return Object.values(world.network.vehicles);
-});
+  void world.tickCount
+  return Object.values(world.network.vehicles)
+})
 const lights = computed(() => {
-  void world.tickCount;
-  return Object.values(world.network.intersections).flatMap((i) => i.trafficLights);
-});
-const vehicleRows = computed(() => [...vehicles.value].sort((a, b) => a.id.localeCompare(b.id)));
-const lightRows = computed(() => [...lights.value].sort((a, b) => a.id.localeCompare(b.id)));
-const vehicleCount = computed(() => vehicleRows.value.length);
-const lightCount = computed(() => lightRows.value.length);
+  void world.tickCount
+  return Object.values(world.network.intersections).flatMap((i) => i.trafficLights)
+})
+const vehicleRows = computed(() => [...vehicles.value].sort((a, b) => a.id.localeCompare(b.id)))
+const lightRows = computed(() => [...lights.value].sort((a, b) => a.id.localeCompare(b.id)))
+const vehicleCount = computed(() => vehicleRows.value.length)
+const lightCount = computed(() => lightRows.value.length)
 
-const vehiclesCollapsed = ref(false);
-const lightsCollapsed = ref(false);
+const vehiclesCollapsed = ref(false)
+const lightsCollapsed = ref(false)
 
 const isSelected = (kind: 'vehicle' | 'light', id: string): boolean =>
-  selection.kind === kind && selection.id === id;
+  selection.kind === kind && selection.id === id
 
 const onSelect = (kind: 'vehicle' | 'light', id: string): void => {
-  selection.select(kind, id);
+  selection.select(kind, id)
   // Fly the camera to the picked entity. No-op if the controls haven't
   // attached yet (e.g. HMR teardown).
-  focusOnSelection(kind, id, world);
-};
+  focusOnSelection(kind, id, world)
+}
 
 const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
-  if (s === 'driving') return '▶';
-  if (s === 'waiting') return '⏸';
-  if (s === 'crashed') return '💥';
-  return '?';
-};
+  if (s === 'driving') return '▶'
+  if (s === 'waiting') return '⏸'
+  if (s === 'crashed') return '💥'
+  return '?'
+}
 </script>
 
 <style scoped>
@@ -147,12 +148,24 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   border-bottom: 1px solid rgba(148, 163, 184, 0.2);
   flex-shrink: 0;
 }
-.head .title { font-weight: 600; }
-.head .counts { display: flex; gap: 8px; opacity: 0.7; font-size: 11px; }
+.head .title {
+  font-weight: 600;
+}
+.head .counts {
+  display: flex;
+  gap: 8px;
+  opacity: 0.7;
+  font-size: 11px;
+}
 
-.body { overflow-y: auto; padding: 4px 0; }
+.body {
+  overflow-y: auto;
+  padding: 4px 0;
+}
 
-.group { margin-bottom: 2px; }
+.group {
+  margin-bottom: 2px;
+}
 .group-head {
   width: 100%;
   display: flex;
@@ -168,12 +181,26 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.group-head:hover { background: rgba(148, 163, 184, 0.08); }
-.group-head .caret { width: 10px; opacity: 0.7; }
-.group-head .group-label { flex: 1; text-align: left; }
-.group-head .group-count { opacity: 0.5; }
+.group-head:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+.group-head .caret {
+  width: 10px;
+  opacity: 0.7;
+}
+.group-head .group-label {
+  flex: 1;
+  text-align: left;
+}
+.group-head .group-count {
+  opacity: 0.5;
+}
 
-.rows { list-style: none; margin: 0; padding: 0; }
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 .row {
   display: flex;
   align-items: center;
@@ -184,12 +211,16 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   user-select: none;
   font-size: 12px;
 }
-.row:hover { background: rgba(148, 163, 184, 0.08); }
+.row:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
 .row.active {
   background: rgba(59, 130, 246, 0.18);
   color: #f8fafc;
 }
-.row-id { flex: 1; }
+.row-id {
+  flex: 1;
+}
 .row-type {
   font-size: 10px;
   opacity: 0.7;
@@ -212,9 +243,15 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
 }
 
 /* Phase color hints so a green/red row is visible at a glance. */
-.row.red .row-status { color: #fca5a5; }
-.row.yellow .row-status { color: #fde047; }
-.row.green .row-status { color: #86efac; }
+.row.red .row-status {
+  color: #fca5a5;
+}
+.row.yellow .row-status {
+  color: #fde047;
+}
+.row.green .row-status {
+  color: #86efac;
+}
 
 /* Crashed vehicles: red border, slightly darker row, pulsing crash icon. */
 .row.crashed {
@@ -226,10 +263,17 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   font-size: 12px;
   filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.7));
 }
-.row.crashed .row-id { color: #fecaca; }
+.row.crashed .row-id {
+  color: #fecaca;
+}
 @keyframes crash-pulse {
-  0%, 100% { background: rgba(239, 68, 68, 0.10); }
-  50%      { background: rgba(239, 68, 68, 0.30); }
+  0%,
+  100% {
+    background: rgba(239, 68, 68, 0.1);
+  }
+  50% {
+    background: rgba(239, 68, 68, 0.3);
+  }
 }
 
 /* Plan 029 (M2 lane change): vehicles mid lane-change get a blue
@@ -239,8 +283,13 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   animation: lane-change-pulse 0.8s ease-in-out infinite;
 }
 @keyframes lane-change-pulse {
-  0%, 100% { background: rgba(59, 130, 246, 0.12); }
-  50%      { background: rgba(59, 130, 246, 0.32); }
+  0%,
+  100% {
+    background: rgba(59, 130, 246, 0.12);
+  }
+  50% {
+    background: rgba(59, 130, 246, 0.32);
+  }
 }
 
 .empty {

@@ -7,27 +7,25 @@
 // nested lists of weights / biases / log_std. The frontend uses this
 // to instantiate an in-browser MlpPolicy for replay.
 
-import type { HttpClient } from './httpClient';
-import type { PolicyWeights } from '@infrastructure/rl/types';
+import type { HttpClient } from './httpClient'
+import type { PolicyWeights } from '@infrastructure/rl/types'
 
 export interface CheckpointWeightsResponse extends PolicyWeights {
-  name: string;
-  obs_dim: number;
-  action_dim: number;
-  hidden_sizes: number[];
-  layers: PolicyWeights['layers'];
+  name: string
+  obs_dim: number
+  action_dim: number
+  hidden_sizes: number[]
+  layers: PolicyWeights['layers']
 }
 
 export interface RLWeightsClient {
   /** GET /rl/checkpoints/{name}/weights → JSON weights + architecture.
    *  Throws BackendError(404) when the checkpoint doesn't exist or
    *  BackendError(503) when SB3 isn't installed on the backend. */
-  getCheckpointWeights(name: string): Promise<CheckpointWeightsResponse>;
+  getCheckpointWeights(name: string): Promise<CheckpointWeightsResponse>
 }
 
 export const createRLWeightsClient = (http: HttpClient): RLWeightsClient => ({
   getCheckpointWeights: (name) =>
-    http.get<CheckpointWeightsResponse>(
-      `/rl/checkpoints/${encodeURIComponent(name)}/weights`,
-    ),
-});
+    http.get<CheckpointWeightsResponse>(`/rl/checkpoints/${encodeURIComponent(name)}/weights`),
+})

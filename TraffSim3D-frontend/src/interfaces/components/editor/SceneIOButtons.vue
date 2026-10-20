@@ -8,8 +8,8 @@
 </template>
 
 <script setup lang="ts">
-import { useSceneIO } from '@interfaces/composables/useSceneIO';
-const { save, load, clear, lastMessage } = useSceneIO();
+import { useSceneIO } from '@interfaces/composables/useSceneIO'
+const { save, load, clear, lastMessage } = useSceneIO()
 </script>
 
 <style scoped>
@@ -33,7 +33,9 @@ const { save, load, clear, lastMessage } = useSceneIO();
   cursor: pointer;
   font-size: 13px;
 }
-.io-buttons button:hover { background: #334155; }
+.io-buttons button:hover {
+  background: #334155;
+}
 .io-buttons .msg {
   margin-left: 8px;
   font-size: 12px;

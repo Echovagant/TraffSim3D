@@ -10,15 +10,15 @@
 </template>
 
 <script setup lang="ts">
-import WorldCanvas from '@interfaces/components/scene/WorldCanvas.vue';
-import DebugPanel from '@interfaces/components/debug/DebugPanel.vue';
-import EditorToolbar from '@interfaces/components/editor/EditorToolbar.vue';
-import EntityOutline from '@interfaces/components/editor/EntityOutline.vue';
-import InspectorPanel from '@interfaces/components/editor/InspectorPanel.vue';
-import CameraView from '@interfaces/components/debug/CameraView.vue';
-import { useEditorShortcuts } from '@interfaces/composables/useEditorShortcuts';
+import WorldCanvas from '@interfaces/components/scene/WorldCanvas.vue'
+import DebugPanel from '@interfaces/components/debug/DebugPanel.vue'
+import EditorToolbar from '@interfaces/components/editor/EditorToolbar.vue'
+import EntityOutline from '@interfaces/components/editor/EntityOutline.vue'
+import InspectorPanel from '@interfaces/components/editor/InspectorPanel.vue'
+import CameraView from '@interfaces/components/debug/CameraView.vue'
+import { useEditorShortcuts } from '@interfaces/composables/useEditorShortcuts'
 
-useEditorShortcuts();
+useEditorShortcuts()
 </script>
 
 <style scoped>

@@ -21,30 +21,30 @@
 
 export interface FixedStepSchedulerOptions {
   /** Fixed-step size in seconds. Default 0.1 = 10 Hz. */
-  fixedStepSec?: number;
+  fixedStepSec?: number
   /**
    * Cap on the accumulator (seconds). When a single wallDt pushes the
    * accumulator past this cap (e.g. browser GC pause, tab switch),
    * we clamp the *consumed* wallDt to this cap so the next call
    * doesn't fire dozens of "missed" steps. Default 0.5s = 5 steps.
    */
-  maxAccumulator?: number;
+  maxAccumulator?: number
 }
 
 export class FixedStepScheduler {
-  private accumulator = 0;
-  private readonly fixedStepSec: number;
-  private readonly maxAccumulator: number;
-  private simTime = 0;
+  private accumulator = 0
+  private readonly fixedStepSec: number
+  private readonly maxAccumulator: number
+  private simTime = 0
 
   constructor(opts: Partial<FixedStepSchedulerOptions> = {}) {
-    this.fixedStepSec = opts.fixedStepSec ?? 0.1;
-    this.maxAccumulator = opts.maxAccumulator ?? 0.5;
+    this.fixedStepSec = opts.fixedStepSec ?? 0.1
+    this.maxAccumulator = opts.maxAccumulator ?? 0.5
     if (this.fixedStepSec <= 0) {
-      throw new Error('FixedStepScheduler: fixedStepSec must be > 0');
+      throw new Error('FixedStepScheduler: fixedStepSec must be > 0')
     }
     if (this.maxAccumulator < this.fixedStepSec) {
-      throw new Error('FixedStepScheduler: maxAccumulator must be >= fixedStepSec');
+      throw new Error('FixedStepScheduler: maxAccumulator must be >= fixedStepSec')
     }
   }
 
@@ -62,30 +62,30 @@ export class FixedStepScheduler {
    * (vs. running the world at 2× speed to catch up).
    */
   advance(wallDt: number): boolean {
-    if (wallDt <= 0) return false;
-    const clamped = Math.min(wallDt, this.maxAccumulator);
-    this.accumulator += clamped;
+    if (wallDt <= 0) return false
+    const clamped = Math.min(wallDt, this.maxAccumulator)
+    this.accumulator += clamped
     if (this.accumulator >= this.fixedStepSec) {
-      this.accumulator -= this.fixedStepSec;
-      this.simTime += this.fixedStepSec;
-      return true;
+      this.accumulator -= this.fixedStepSec
+      this.simTime += this.fixedStepSec
+      return true
     }
-    return false;
+    return false
   }
 
   /** Monotonic simulation time in seconds, advanced by `fixedStepSec` per step. */
   getSimTime(): number {
-    return this.simTime;
+    return this.simTime
   }
 
   /** Current accumulator value, in [0, fixedStepSec). Useful for tests. */
   getAccumulator(): number {
-    return this.accumulator;
+    return this.accumulator
   }
 
   /** Reset both accumulator and simTime to 0. Called on world reset. */
   reset(): void {
-    this.accumulator = 0;
-    this.simTime = 0;
+    this.accumulator = 0
+    this.simTime = 0
   }
 }

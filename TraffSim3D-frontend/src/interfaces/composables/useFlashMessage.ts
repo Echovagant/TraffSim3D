@@ -1,13 +1,13 @@
-import { ref, type Ref } from 'vue';
+import { ref, type Ref } from 'vue'
 
-export type FlashLevel = 'info' | 'warn' | 'error';
+export type FlashLevel = 'info' | 'warn' | 'error'
 
 export interface FlashMessage {
-  text: string;
-  level: FlashLevel;
+  text: string
+  level: FlashLevel
   /** Set when the message was shown; the auto-clear timer compares against
    * this to avoid clearing a newer message that replaced the old one. */
-  ts: number;
+  ts: number
 }
 
 /**
@@ -19,24 +19,24 @@ export interface FlashMessage {
  * Module-level (not Pinia) because the flash message is ephemeral,
  * single-shot, and shared across many composables.
  */
-const current: Ref<FlashMessage | null> = ref(null);
+const current: Ref<FlashMessage | null> = ref(null)
 
-let clearTimer: number | null = null;
+let clearTimer: number | null = null
 
 export const showFlashMessage = (
   text: string,
   level: FlashLevel = 'info',
   durationMs = 3000,
 ): void => {
-  current.value = { text, level, ts: Date.now() };
-  if (clearTimer !== null) window.clearTimeout(clearTimer);
+  current.value = { text, level, ts: Date.now() }
+  if (clearTimer !== null) window.clearTimeout(clearTimer)
   clearTimer = window.setTimeout(() => {
     // Only clear if this is still the most recent message.
     if (current.value && Date.now() - current.value.ts >= durationMs - 50) {
-      current.value = null;
+      current.value = null
     }
-    clearTimer = null;
-  }, durationMs);
-};
+    clearTimer = null
+  }, durationMs)
+}
 
-export const _flashMessageRef = current;
+export const _flashMessageRef = current

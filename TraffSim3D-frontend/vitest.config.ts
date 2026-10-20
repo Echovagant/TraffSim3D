@@ -1,7 +1,7 @@
 // TraffSim3D-frontend/vitest.config.ts
-import { defineConfig } from 'vitest/config';
-import vue from '@vitejs/plugin-vue';
-import { fileURLToPath, URL } from 'node:url';
+import { defineConfig } from 'vitest/config'
+import vue from '@vitejs/plugin-vue'
+import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
   plugins: [vue()],
@@ -44,13 +44,7 @@ export default defineConfig({
         'src/interfaces/**/*.ts',
         'src/shared/**/*.ts',
       ],
-      exclude: [
-        '**/*.spec.ts',
-        '**/*.d.ts',
-        '**/index.ts',
-        '**/main.ts',
-        '**/fixtures/**',
-      ],
+      exclude: ['**/*.spec.ts', '**/*.d.ts', '**/index.ts', '**/main.ts', '**/fixtures/**'],
     },
   },
-});
+})

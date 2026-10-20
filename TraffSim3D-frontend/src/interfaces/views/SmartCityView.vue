@@ -7,11 +7,7 @@
     <!-- Three.js overlay: transparent background, vehicles + lights
          + LiDAR are drawn here. z=1 so it stacks above the basemap.
          Pointer events pass through to Cesium for camera control. -->
-    <canvas
-      ref="threeCanvas"
-      data-testid="world-canvas"
-      class="three-canvas"
-    />
+    <canvas ref="threeCanvas" data-testid="world-canvas" class="three-canvas" />
 
     <!-- Floating top dock (Plan 055: minimal toolbar — full UI
          redesign lives in Plan 057). -->
@@ -23,19 +19,20 @@
         :title="world.isRunning ? '暂停 (Space)' : '播放 (Space)'"
         data-testid="pause-button"
         @click="world.togglePause()"
-      >{{ world.isRunning ? '⏸ 暂停' : '▶ 播放' }}</button>
+      >
+        {{ world.isRunning ? '⏸ 暂停' : '▶ 播放' }}
+      </button>
       <span class="sep" />
       <button
         title="重新框选整个场景 (F)"
         data-testid="fit-scene-button"
         @click="world.requestFit()"
-      >🎯 适配场景</button>
+      >
+        🎯 适配场景
+      </button>
       <label class="view-mode" title="Cesium 视图模式">
         <span class="view-mode-label">视图</span>
-        <select
-          v-model="viewMode"
-          data-testid="view-mode-select"
-        >
+        <select v-model="viewMode" data-testid="view-mode-select">
           <option value="bird">鸟瞰 (1500m)</option>
           <option value="street">平视 (1.7m)</option>
           <option value="free">自由</option>
@@ -50,13 +47,27 @@
 
     <!-- Floating status panel (top-right) — simulation dashboard -->
     <aside class="status-panel" data-testid="status-panel">
-      <div><span>帧率</span><strong>{{ world.fps }}</strong></div>
-      <div><span>车辆数</span><strong data-testid="vehicle-count">{{ vehicleCount }}</strong></div>
-      <div><span>灯数</span><strong>{{ lightCount }}</strong></div>
-      <div><span>平均速度</span><strong>{{ avgSpeed.toFixed(1) }} m/s</strong></div>
-      <div><span>信号控制</span><strong>{{ controllerLabel }}</strong></div>
-      <div><span>仿真 tick</span><strong>{{ world.tickCount }}</strong></div>
-      <div><span>仿真</span><strong>{{ world.isRunning ? '运行' : '暂停' }}</strong></div>
+      <div>
+        <span>帧率</span><strong>{{ world.fps }}</strong>
+      </div>
+      <div>
+        <span>车辆数</span><strong data-testid="vehicle-count">{{ vehicleCount }}</strong>
+      </div>
+      <div>
+        <span>灯数</span><strong>{{ lightCount }}</strong>
+      </div>
+      <div>
+        <span>平均速度</span><strong>{{ avgSpeed.toFixed(1) }} m/s</strong>
+      </div>
+      <div>
+        <span>信号控制</span><strong>{{ controllerLabel }}</strong>
+      </div>
+      <div>
+        <span>仿真 tick</span><strong>{{ world.tickCount }}</strong>
+      </div>
+      <div>
+        <span>仿真</span><strong>{{ world.isRunning ? '运行' : '暂停' }}</strong>
+      </div>
       <div v-if="world.replayActive" class="replay-indicator">
         <span>RL 回放</span><strong>活跃 (step {{ world.replayStep }})</strong>
       </div>
@@ -95,77 +106,78 @@
  * mirrors it. The render loop calls `syncThreeCameraToCesium`
  * every frame.
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import * as Cesium from 'cesium';
-import { useWorldSimulation } from '@interfaces/composables/useWorldSimulation';
-import { useEditor } from '@interfaces/composables/useEditor';
-import { useCameraControls } from '@interfaces/composables/useCameraControls';
-import type { ThreeJSRenderer } from '@infrastructure/rendering';
-import { useWorldStore } from '@interfaces/stores/worldStore';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import * as Cesium from 'cesium'
+import { useWorldSimulation } from '@interfaces/composables/useWorldSimulation'
+import { useEditor } from '@interfaces/composables/useEditor'
+import { useCameraControls } from '@interfaces/composables/useCameraControls'
+import type { ThreeJSRenderer } from '@infrastructure/rendering'
+import { useWorldStore } from '@interfaces/stores/worldStore'
 import {
   createCesiumViewer,
   DEFAULT_TANGENT_ORIGIN,
   DEFAULT_IMAGERY,
-} from '@infrastructure/cesium/viewer';
+} from '@infrastructure/cesium/viewer'
 import {
   loadOSMScene,
   DEFAULT_BBOX,
   type LoadedOSMScene,
-} from '@infrastructure/cesium/loadOSMScene';
-import { syncThreeCameraToCesium } from '@infrastructure/cesium/cameraSync';
+} from '@infrastructure/cesium/loadOSMScene'
+import { syncThreeCameraToCesium } from '@infrastructure/cesium/cameraSync'
 
-const cesiumContainer = ref<HTMLDivElement | null>(null);
-const threeCanvas = ref<HTMLCanvasElement | null>(null);
-const viewMode = ref<'bird' | 'street' | 'free'>('bird');
-const status = ref<{ kind: 'info' | 'error'; text: string } | null>(null);
-const osmStats = ref<{ roadCount: number; buildingCount: number } | null>(null);
+const cesiumContainer = ref<HTMLDivElement | null>(null)
+const threeCanvas = ref<HTMLCanvasElement | null>(null)
+const viewMode = ref<'bird' | 'street' | 'free'>('bird')
+const status = ref<{ kind: 'info' | 'error'; text: string } | null>(null)
+const osmStats = ref<{ roadCount: number; buildingCount: number } | null>(null)
 
-const world = useWorldStore();
+const world = useWorldStore()
 
-let cesiumViewer: Cesium.Viewer | null = null;
-let syncRafId: number | null = null;
+let cesiumViewer: Cesium.Viewer | null = null
+let syncRafId: number | null = null
 
 // Reuse the simulation tick so the simulation keeps running.
-const { isReady, getRenderer } = useWorldSimulation(threeCanvas);
-const rendererRef = ref<ThreeJSRenderer | null>(null);
+const { isReady, getRenderer } = useWorldSimulation(threeCanvas)
+const rendererRef = ref<ThreeJSRenderer | null>(null)
 watch(isReady, (ready) => {
   if (ready) {
-    const r = getRenderer();
-    if (!r) return;
-    r.setRenderMode('smart-city');
-    rendererRef.value = r;
+    const r = getRenderer()
+    if (!r) return
+    r.setRenderMode('smart-city')
+    rendererRef.value = r
   }
-});
-useCameraControls(threeCanvas, rendererRef as unknown as Parameters<typeof useCameraControls>[1]);
-const { handleMouseDown, handleMouseMove, handleMouseUp } = useEditor(rendererRef as unknown as Parameters<typeof useEditor>[0]);
+})
+useCameraControls(threeCanvas, rendererRef as unknown as Parameters<typeof useCameraControls>[1])
+const { handleMouseDown, handleMouseMove, handleMouseUp } = useEditor(
+  rendererRef as unknown as Parameters<typeof useEditor>[0],
+)
 
-const vehicleCount = computed(() => Object.keys(world.network.vehicles).length);
-const lightCount = computed(
-  () => Object.values(world.network.intersections)
-    .reduce((s, i) => s + i.trafficLights.length, 0),
-);
+const vehicleCount = computed(() => Object.keys(world.network.vehicles).length)
+const lightCount = computed(() =>
+  Object.values(world.network.intersections).reduce((s, i) => s + i.trafficLights.length, 0),
+)
 
 const avgSpeed = computed(() => {
-  const vehicles = Object.values(world.network.vehicles);
-  if (vehicles.length === 0) return 0;
-  const totalSpeed = vehicles.reduce((sum, v) => sum + v.speed, 0);
-  return totalSpeed / vehicles.length;
-});
+  const vehicles = Object.values(world.network.vehicles)
+  if (vehicles.length === 0) return 0
+  const totalSpeed = vehicles.reduce((sum, v) => sum + v.speed, 0)
+  return totalSpeed / vehicles.length
+})
 
 const controllerLabel = computed(() => {
   const map: Record<string, string> = {
     'fixed-cycle': '固定',
-    'actuated': '感应',
-    'coordinated': '协调',
-    'rl': 'RL (stub)',
-  };
-  return map[world.controllerKind] || world.controllerKind;
-});
+    actuated: '感应',
+    coordinated: '协调',
+    rl: 'RL (stub)',
+  }
+  return map[world.controllerKind] || world.controllerKind
+})
 
 onMounted(async () => {
   if (!cesiumContainer.value) {
-    status.value = { kind: 'error', text: 'Cesium 容器未挂载' };
-    return;
+    status.value = { kind: 'error', text: 'Cesium 容器未挂载' }
+    return
   }
   // 1) Construct Cesium viewer (sync — the SDK init is fast).
   try {
@@ -173,44 +185,46 @@ onMounted(async () => {
       center: DEFAULT_TANGENT_ORIGIN,
       zoomLevel: 1500,
       imagery: DEFAULT_IMAGERY,
-    });
+    })
   } catch (e) {
     status.value = {
       kind: 'error',
       text: `Cesium 初始化失败: ${e instanceof Error ? e.message : String(e)}`,
-    };
-    return;
+    }
+    return
   }
 
   // 2) Async load OSM buildings + roads.
-  status.value = { kind: 'info', text: '正在从 Overpass 加载 OSM 数据...' };
+  status.value = { kind: 'info', text: '正在从 Overpass 加载 OSM 数据...' }
   try {
-    const loaded: LoadedOSMScene = await loadOSMScene(cesiumViewer, DEFAULT_BBOX);
+    const loaded: LoadedOSMScene = await loadOSMScene(cesiumViewer, DEFAULT_BBOX)
     osmStats.value = {
       roadCount: loaded.roadCount,
       buildingCount: loaded.buildingCount,
-    };
+    }
     status.value = {
       kind: 'info',
       text: `✓ 已加载 ${loaded.roadCount} 条道路 + ${loaded.buildingCount} 栋建筑`,
-    };
+    }
     // Fade the toast after 3s.
-    setTimeout(() => { status.value = null; }, 3000);
+    setTimeout(() => {
+      status.value = null
+    }, 3000)
   } catch (e) {
     status.value = {
       kind: 'error',
       text: `OSM 加载失败: ${e instanceof Error ? e.message : String(e)}`,
-    };
+    }
   }
 
   // 3) Start camera sync loop — Cesium → Three.js every frame.
-  startCameraSync();
-});
+  startCameraSync()
+})
 
 // View mode toggle: Cesium flyTo for bird/street; orbit controls
 // for free. We watch viewMode and react.
 watch(viewMode, (mode) => {
-  if (!cesiumViewer) return;
+  if (!cesiumViewer) return
   if (mode === 'bird') {
     cesiumViewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(
@@ -219,7 +233,7 @@ watch(viewMode, (mode) => {
         1500,
       ),
       duration: 2,
-    });
+    })
   } else if (mode === 'street') {
     cesiumViewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(
@@ -229,33 +243,33 @@ watch(viewMode, (mode) => {
       ),
       orientation: { heading: 0, pitch: 0, roll: 0 },
       duration: 2,
-    });
+    })
   }
   // 'free' mode is handled by OrbitControls directly (no Cesium change).
-});
+})
 
 /** Per-frame: read Cesium camera, write to Three.js camera. */
 const startCameraSync = (): void => {
   const tick = (): void => {
     if (!cesiumViewer || !rendererRef.value) {
-      syncRafId = requestAnimationFrame(tick);
-      return;
+      syncRafId = requestAnimationFrame(tick)
+      return
     }
     syncThreeCameraToCesium({
       cesiumViewer,
       threeCamera: rendererRef.value.getCamera(),
       tangent: DEFAULT_TANGENT_ORIGIN,
-    });
-    syncRafId = requestAnimationFrame(tick);
-  };
-  syncRafId = requestAnimationFrame(tick);
-};
+    })
+    syncRafId = requestAnimationFrame(tick)
+  }
+  syncRafId = requestAnimationFrame(tick)
+}
 
 onBeforeUnmount(() => {
-  if (syncRafId !== null) cancelAnimationFrame(syncRafId);
-  cesiumViewer?.destroy();
-  cesiumViewer = null;
-});
+  if (syncRafId !== null) cancelAnimationFrame(syncRafId)
+  cesiumViewer?.destroy()
+  cesiumViewer = null
+})
 </script>
 
 <style scoped>
@@ -320,8 +334,12 @@ onBeforeUnmount(() => {
 .dock-top button:hover {
   background: rgba(30, 41, 59, 0.95);
 }
-.dock-top button.sim { font-weight: 600; }
-.dock-top button.sim.paused { background: rgba(239, 68, 68, 0.25); }
+.dock-top button.sim {
+  font-weight: 600;
+}
+.dock-top button.sim.paused {
+  background: rgba(239, 68, 68, 0.25);
+}
 .dock-top .sep {
   width: 1px;
   height: 22px;
@@ -366,8 +384,13 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
 }
-.status-panel span { color: #94a3b8; }
-.status-panel strong { color: #f1f5f9; font-weight: 600; }
+.status-panel span {
+  color: #94a3b8;
+}
+.status-panel strong {
+  color: #f1f5f9;
+  font-weight: 600;
+}
 
 /* Bottom-center toast — replaces flash-message during initial load. */
 .status-toast {

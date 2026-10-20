@@ -5,7 +5,7 @@
 // needs (Rapier WASM, etc.), not to provide a fixture library. Tests
 // that need more should import it explicitly.
 
-import { vi } from 'vitest';
+import { vi } from 'vitest'
 
 // Rapier lazy-loads via `await import('@dimforge/rapier3d-compat')`.
 // In a unit test, we don't want to load the full WASM (slow + flaky).
@@ -19,7 +19,7 @@ vi.mock('@dimforge/rapier3d-compat', () => ({
   RigidBodyDesc: { dynamic: vi.fn(), fixed: vi.fn() },
   ColliderDesc: { cuboid: vi.fn() },
   Ray: vi.fn(),
-}));
+}))
 
 // Pinia in tests — use createPinia() in each test that needs it
 // (don't enable globally; the per-test pinia() pattern is cleaner).

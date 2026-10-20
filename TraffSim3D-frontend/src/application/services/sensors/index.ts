@@ -1,2 +1,2 @@
-export { SensorRegistry } from './SensorRegistry';
-export type { HostPoseLookup } from './SensorRegistry';
+export { SensorRegistry } from './SensorRegistry'
+export type { HostPoseLookup } from './SensorRegistry'

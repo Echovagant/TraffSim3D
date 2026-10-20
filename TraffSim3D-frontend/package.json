@@ -20,7 +20,8 @@
     "test:e2e:update": "playwright test --update-snapshots",
     "test:e2e:real": "playwright test tests/e2e/ai-playground-real.spec.ts",
     "lint": "eslint . --fix",
-    "format": "prettier --write src/"
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.14.0",

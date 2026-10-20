@@ -11,11 +11,9 @@
       <div class="modal-card">
         <header class="modal-header">
           <h2>键盘快捷键</h2>
-          <button
-            class="close-btn"
-            aria-label="关闭"
-            @click="$emit('update:open', false)"
-          >✕</button>
+          <button class="close-btn" aria-label="关闭" @click="$emit('update:open', false)">
+            ✕
+          </button>
         </header>
 
         <table class="shortcuts">
@@ -76,8 +74,8 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{ open: boolean }>();
-defineEmits<{ (e: 'update:open', value: boolean): void }>();
+defineProps<{ open: boolean }>()
+defineEmits<{ (e: 'update:open', value: boolean): void }>()
 </script>
 
 <style scoped>
@@ -122,7 +120,10 @@ defineEmits<{ (e: 'update:open', value: boolean): void }>();
   padding: 4px 8px;
   border-radius: 4px;
 }
-.close-btn:hover { background: rgba(148, 163, 184, 0.15); color: #e2e8f0; }
+.close-btn:hover {
+  background: rgba(148, 163, 184, 0.15);
+  color: #e2e8f0;
+}
 
 .shortcuts {
   width: 100%;
@@ -144,7 +145,9 @@ defineEmits<{ (e: 'update:open', value: boolean): void }>();
   border-bottom: 1px solid rgba(148, 163, 184, 0.08);
   color: #cbd5e1;
 }
-.shortcuts tr:last-child td { border-bottom: none; }
+.shortcuts tr:last-child td {
+  border-bottom: none;
+}
 kbd {
   display: inline-block;
   padding: 2px 8px;

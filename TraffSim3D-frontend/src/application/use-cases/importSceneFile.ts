@@ -1,5 +1,5 @@
-import { hydrateNetwork } from '@infrastructure/persistence';
-import type { RoadNetwork } from '@domain/entities/RoadNetwork';
+import { hydrateNetwork } from '@infrastructure/persistence'
+import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 
 /**
  * Result type for the file-import use case. Mirrors the LocalStorage
@@ -7,7 +7,7 @@ import type { RoadNetwork } from '@domain/entities/RoadNetwork';
  */
 export type ImportResult =
   | { ok: true; network: RoadNetwork; filename: string }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string }
 
 /**
  * Read a `File` (from a `<input type="file">` change event) and
@@ -21,23 +21,23 @@ export type ImportResult =
  */
 export const importSceneFile = (file: File): Promise<ImportResult> => {
   return new Promise((resolve) => {
-    const reader = new FileReader();
+    const reader = new FileReader()
     reader.onerror = () => {
-      resolve({ ok: false, reason: `FileReader error: ${reader.error?.message ?? 'unknown'}` });
-    };
+      resolve({ ok: false, reason: `FileReader error: ${reader.error?.message ?? 'unknown'}` })
+    }
     reader.onload = () => {
-      const text = reader.result;
+      const text = reader.result
       if (typeof text !== 'string') {
-        resolve({ ok: false, reason: 'file is not text' });
-        return;
+        resolve({ ok: false, reason: 'file is not text' })
+        return
       }
-      const result = hydrateNetwork(text);
+      const result = hydrateNetwork(text)
       if (!result.ok || !result.network) {
-        resolve({ ok: false, reason: result.reason ?? 'invalid scene file' });
-        return;
+        resolve({ ok: false, reason: result.reason ?? 'invalid scene file' })
+        return
       }
-      resolve({ ok: true, network: result.network, filename: file.name });
-    };
-    reader.readAsText(file);
-  });
-};
+      resolve({ ok: true, network: result.network, filename: file.name })
+    }
+    reader.readAsText(file)
+  })
+}

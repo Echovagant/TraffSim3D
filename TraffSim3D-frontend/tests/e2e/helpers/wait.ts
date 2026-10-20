@@ -1,14 +1,14 @@
-import { expect, type Page } from '@playwright/test';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { expect, type Page } from '@playwright/test'
+import * as path from 'path'
+import { fileURLToPath } from 'url'
 
 /** 等待 SceneEditor 路由加载完毕 + WorldCanvas 的 <canvas> 元素挂载。 */
 export const waitForSceneReady = async (page: Page): Promise<void> => {
-  await page.goto('/scene-editor');
-  await page.waitForSelector('[data-testid="world-canvas"]', { state: 'attached' });
+  await page.goto('/scene-editor')
+  await page.waitForSelector('[data-testid="world-canvas"]', { state: 'attached' })
   // 给 Three.js + Rapier WASM 初始化一些时间
-  await page.waitForTimeout(2000);
-};
+  await page.waitForTimeout(2000)
+}
 
 /** 等车辆数 = count（通过 window.__world 调试钩子）。 */
 export const waitForVehicleCount = async (
@@ -16,30 +16,43 @@ export const waitForVehicleCount = async (
   count: number,
   timeoutMs = 10_000,
 ): Promise<void> => {
-  const start = Date.now();
+  const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     const n = await page.evaluate(() => {
-      const w = window as unknown as { __world?: { network: { vehicles: Record<string, unknown> } } };
-      return w.__world?.network?.vehicles ? Object.keys(w.__world.network.vehicles).length : 0;
-    });
-    if (n === count) return;
-    await page.waitForTimeout(200);
+      const w = window as unknown as {
+        __world?: { network: { vehicles: Record<string, unknown> } }
+      }
+      return w.__world?.network?.vehicles ? Object.keys(w.__world.network.vehicles).length : 0
+    })
+    if (n === count) return
+    await page.waitForTimeout(200)
   }
-  throw new Error(`Vehicle count did not reach ${count} within ${timeoutMs}ms`);
-};
+  throw new Error(`Vehicle count did not reach ${count} within ${timeoutMs}ms`)
+}
 
 /** 切到指定场景，并等场景的车辆就位。 */
-export const switchScene = async (page: Page, kind: 'cross' | 't' | 'loop' | 'elevated' | 'corridor'): Promise<void> => {
-  await page.selectOption('[data-testid="scene-kind-select"]', kind);
-  await page.waitForTimeout(1500);
-};
+export const switchScene = async (
+  page: Page,
+  kind: 'cross' | 't' | 'loop' | 'elevated' | 'corridor',
+): Promise<void> => {
+  await page.selectOption('[data-testid="scene-kind-select"]', kind)
+  await page.waitForTimeout(1500)
+}
 
 /** 所有 e2e 截图统一输出到项目根 e2e-output/current/。
  *  用 path.resolve(__dirname, …) 锚定到测试文件目录，避免
  *  Playwright 在不同上下文里相对路径解析不一致。
  *  4 级 ..: helpers/ → e2e/ → tests/ → TraffSim3D-frontend/ → TraffSim3D/。 */
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const SCREENSHOT_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'e2e-output', 'current');
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+export const SCREENSHOT_DIR = path.resolve(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  '..',
+  'e2e-output',
+  'current',
+)
 
 /**
  * A float-free region of the 1280x800 scene-editor viewport.
@@ -57,7 +70,7 @@ export const SCREENSHOT_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'e
  *   - scene-outline / DebugPanel x < 258
  *   - bottom-centre camera widget y > 750
  */
-export const SCENE_CLIP = { x: 265, y: 270, width: 700, height: 460 } as const;
+export const SCENE_CLIP = { x: 265, y: 270, width: 700, height: 460 } as const
 
 /**
  * Freeze the simulation so a screenshot captures a static frame.
@@ -76,20 +89,20 @@ export const SCENE_CLIP = { x: 265, y: 270, width: 700, height: 460 } as const;
  */
 export const pauseSimulation = async (page: Page): Promise<void> => {
   await page.evaluate(() => {
-    const w = window as unknown as { __world?: { isRunning?: boolean } };
-    if (w.__world) w.__world.isRunning = false;
-  });
+    const w = window as unknown as { __world?: { isRunning?: boolean } }
+    if (w.__world) w.__world.isRunning = false
+  })
   // One more frame so the renderer picks up the frozen state.
-  await page.waitForTimeout(150);
-};
+  await page.waitForTimeout(150)
+}
 
 /**
  * Visual-regression assertion for the 3D scene viewport. Replaces the old
  * `page.screenshot({ path })`, which wrote a PNG nobody ever compared.
  */
 export const expectSceneScreenshot = async (page: Page, name: string): Promise<void> => {
-  await expect(page).toHaveScreenshot(name, { clip: SCENE_CLIP });
-};
+  await expect(page).toHaveScreenshot(name, { clip: SCENE_CLIP })
+}
 
 /**
  * Block until the camera has stopped moving.
@@ -113,39 +126,39 @@ export const waitForCameraIdle = async (
 ): Promise<void> => {
   const readCamera = (): Promise<string | null> =>
     page.evaluate(() => {
-      const w = window as unknown as { __camera?: () => unknown };
-      if (!w.__camera) return null;
+      const w = window as unknown as { __camera?: () => unknown }
+      if (!w.__camera) return null
       const c = w.__camera() as {
-        position?: { x: number; y: number; z: number };
-        target?: { x: number; y: number; z: number };
-      };
-      if (!c?.position || !c?.target) return null;
+        position?: { x: number; y: number; z: number }
+        target?: { x: number; y: number; z: number }
+      }
+      if (!c?.position || !c?.target) return null
       // Round so float noise does not read as movement.
-      return `${c.position.x.toFixed(4)},${c.position.y.toFixed(4)},${c.position.z.toFixed(4)}|${c.target.x.toFixed(4)},${c.target.y.toFixed(4)},${c.target.z.toFixed(4)}`;
-    });
+      return `${c.position.x.toFixed(4)},${c.position.y.toFixed(4)},${c.position.z.toFixed(4)}|${c.target.x.toFixed(4)},${c.target.y.toFixed(4)},${c.target.z.toFixed(4)}`
+    })
 
   const isSettled = (a: string, b: string, eps: number): boolean => {
-    const pa = a.split(/[|,]/).map(Number);
-    const pb = b.split(/[|,]/).map(Number);
-    if (pa.length !== pb.length || pa.some(Number.isNaN)) return false;
-    return pa.every((v, i) => Math.abs(v - pb[i]) <= eps);
-  };
+    const pa = a.split(/[|,]/).map(Number)
+    const pb = b.split(/[|,]/).map(Number)
+    if (pa.length !== pb.length || pa.some(Number.isNaN)) return false
+    return pa.every((v, i) => Math.abs(v - pb[i]) <= eps)
+  }
 
-  const deadline = Date.now() + maxWaitMs;
-  let stable = 0;
-  let previous = await readCamera();
+  const deadline = Date.now() + maxWaitMs
+  let stable = 0
+  let previous = await readCamera()
 
   while (Date.now() < deadline) {
-    await page.waitForTimeout(pollMs);
-    const current = await readCamera();
+    await page.waitForTimeout(pollMs)
+    const current = await readCamera()
     if (current !== null && previous !== null && isSettled(previous, current, epsilon)) {
-      stable += 1;
-      if (stable >= settleSamples) return;
+      stable += 1
+      if (stable >= settleSamples) return
     } else {
-      stable = 0;
+      stable = 0
     }
-    previous = current;
+    previous = current
   }
   // Exhausting maxWaitMs is not a hard failure: the camera may still be within
   // visual tolerance. The screenshot assertion downstream is the real gate.
-};
+}

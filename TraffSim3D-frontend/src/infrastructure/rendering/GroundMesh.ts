@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from 'three'
 
 /**
  * Plan 054: ground plane now accepts a configurable size. M1-M3 used
@@ -10,14 +10,14 @@ import * as THREE from 'three';
  * The default of 200u is kept for the synthetic demo scenes (cross,
  * t, loop) so they don't look "lost in space".
  */
-export const GROUND_PADDING = 1000;  // extra margin beyond bbox diagonal
-export const GROUND_DEFAULT_SIZE = 200;
+export const GROUND_PADDING = 1000 // extra margin beyond bbox diagonal
+export const GROUND_DEFAULT_SIZE = 200
 
 export const createGroundMesh = (size: number = GROUND_DEFAULT_SIZE): THREE.Mesh => {
-  const geom = new THREE.PlaneGeometry(size, size);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.9, metalness: 0.0 });
-  const mesh = new THREE.Mesh(geom, mat);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = 0;
-  return mesh;
-};
+  const geom = new THREE.PlaneGeometry(size, size)
+  const mat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.9, metalness: 0.0 })
+  const mesh = new THREE.Mesh(geom, mat)
+  mesh.rotation.x = -Math.PI / 2
+  mesh.position.y = 0
+  return mesh
+}

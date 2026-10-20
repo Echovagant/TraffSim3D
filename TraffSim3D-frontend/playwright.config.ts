@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig } from '@playwright/test'
 
 /**
  * Plan 042: Playwright e2e + screenshot baseline.
@@ -71,4 +71,4 @@ export default defineConfig({
     reuseExistingServer: true,
     timeout: 60_000,
   },
-});
+})

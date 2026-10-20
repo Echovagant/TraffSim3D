@@ -1,12 +1,12 @@
-import { ref, type Ref } from 'vue';
-import type { useEditor } from './useEditor';
-import type { NetworkBounds } from '@domain/services/networkBounds';
+import { ref, type Ref } from 'vue'
+import type { useEditor } from './useEditor'
+import type { NetworkBounds } from '@domain/services/networkBounds'
 
 export interface FocusTarget {
-  x: number;
-  y: number;
-  z: number;
-  durationMs?: number;
+  x: number
+  y: number
+  z: number
+  durationMs?: number
 }
 
 /**
@@ -17,10 +17,10 @@ export interface FocusTarget {
  * frames the entire network without clipping.
  */
 export interface FitTarget {
-  bounds: NetworkBounds;
+  bounds: NetworkBounds
   /** Canvas aspect ratio (width/height). Camera distance scales with it. */
-  aspect: number;
-  durationMs?: number;
+  aspect: number
+  durationMs?: number
 }
 
 /**
@@ -31,33 +31,33 @@ export interface FitTarget {
  * focus is an ephemeral, single-shot intent — there's nothing to persist
  * or persist-across-route.
  */
-const pendingFocus: Ref<FocusTarget | null> = ref(null);
-const pendingFit: Ref<FitTarget | null> = ref(null);
+const pendingFocus: Ref<FocusTarget | null> = ref(null)
+const pendingFit: Ref<FitTarget | null> = ref(null)
 
 export const requestCameraFocus = (target: FocusTarget): void => {
-  pendingFocus.value = target;
-};
+  pendingFocus.value = target
+}
 
 export const consumePendingFocus = (): FocusTarget | null => {
-  const t = pendingFocus.value;
-  pendingFocus.value = null;
-  return t;
-};
+  const t = pendingFocus.value
+  pendingFocus.value = null
+  return t
+}
 
-export const _pendingFocusRef = pendingFocus;
+export const _pendingFocusRef = pendingFocus
 
 /** Plan 053: request the camera to fit a network bbox. */
 export const requestFitToNetwork = (target: FitTarget): void => {
-  pendingFit.value = target;
-};
+  pendingFit.value = target
+}
 
 export const consumePendingFit = (): FitTarget | null => {
-  const t = pendingFit.value;
-  pendingFit.value = null;
-  return t;
-};
+  const t = pendingFit.value
+  pendingFit.value = null
+  return t
+}
 
-export const _pendingFitRef = pendingFit;
+export const _pendingFitRef = pendingFit
 
 /**
  * Resolve a `(kind, id)` to a world-space position and request a camera
@@ -70,20 +70,20 @@ export const focusOnSelection = (
   id: string,
   world: ReturnType<typeof useEditor>['world'],
 ): boolean => {
-  let pos: { x: number; y: number; z: number } | null = null;
+  let pos: { x: number; y: number; z: number } | null = null
   if (kind === 'vehicle') {
-    const v = world.network.vehicles[id];
-    if (v) pos = v.position;
+    const v = world.network.vehicles[id]
+    if (v) pos = v.position
   } else {
     for (const inter of Object.values(world.network.intersections)) {
-      const l = inter.trafficLights.find((tl) => tl.id === id);
+      const l = inter.trafficLights.find((tl) => tl.id === id)
       if (l) {
-        pos = l.position;
-        break;
+        pos = l.position
+        break
       }
     }
   }
-  if (!pos) return false;
-  requestCameraFocus({ ...pos, durationMs: 400 });
-  return true;
-};
+  if (!pos) return false
+  requestCameraFocus({ ...pos, durationMs: 400 })
+  return true
+}

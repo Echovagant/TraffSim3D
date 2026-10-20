@@ -1,11 +1,11 @@
-import { serializeNetwork } from '@infrastructure/persistence';
-import type { RoadNetwork } from '@domain/entities/RoadNetwork';
+import { serializeNetwork } from '@infrastructure/persistence'
+import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 
 /**
  * Result type for the file-export use case. Always succeeds unless
  * the browser refuses Blob/URL.createObjectURL (very old browser).
  */
-export type ExportResult = { ok: true; filename: string } | { ok: false; reason: string };
+export type ExportResult = { ok: true; filename: string } | { ok: false; reason: string }
 
 /**
  * Serialize `network` to a `.traffsim3d.json` file and trigger a
@@ -19,25 +19,25 @@ export type ExportResult = { ok: true; filename: string } | { ok: false; reason:
  */
 export const exportSceneFile = (network: RoadNetwork): ExportResult => {
   try {
-    const serialized = serializeNetwork(network);
-    const json = JSON.stringify(serialized, null, 2);  // pretty-print for human inspection
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+    const serialized = serializeNetwork(network)
+    const json = JSON.stringify(serialized, null, 2) // pretty-print for human inspection
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
 
-    const iso = new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
-    const filename = `traffsim3d-${iso}.json`;
+    const iso = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+    const filename = `traffsim3d-${iso}.json`
 
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
     // Revoke after a tick — revoking synchronously breaks some browsers' download tracking.
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
 
-    return { ok: true, filename };
+    return { ok: true, filename }
   } catch (err) {
-    return { ok: false, reason: (err as Error).message };
+    return { ok: false, reason: (err as Error).message }
   }
-};
+}

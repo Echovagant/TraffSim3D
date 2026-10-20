@@ -13,20 +13,20 @@
 // without occlusion. Camera sync (Cesium → Three.js) lives in
 // cameraSync.ts.
 
-import * as Cesium from 'cesium';
-import 'cesium/Build/Cesium/Widgets/widgets.css';
+import * as Cesium from 'cesium'
+import 'cesium/Build/Cesium/Widgets/widgets.css'
 
 export interface CesiumSceneOptions {
   /** World-space center (WGS84). Default: Tiananmen Square (116.3976, 39.9055). */
-  center: { lng: number; lat: number };
+  center: { lng: number; lat: number }
   /** Initial camera height in meters (default 1500m = bird's-eye). */
-  zoomLevel: number;
+  zoomLevel: number
   /** Tile service — defaults to Gaode (国内访问稳定, 无 token). */
   imagery?: {
-    urlTemplate: string;
-    subdomains: readonly string[];
-    maximumLevel?: number;
-  };
+    urlTemplate: string
+    subdomains: readonly string[]
+    maximumLevel?: number
+  }
 }
 
 export const DEFAULT_IMAGERY = {
@@ -37,7 +37,7 @@ export const DEFAULT_IMAGERY = {
     'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
   subdomains: ['1', '2', '3', '4'] as const,
   maximumLevel: 18,
-};
+}
 
 export const createCesiumViewer = (
   container: HTMLElement,
@@ -60,34 +60,34 @@ export const createCesiumViewer = (
     // as a thrown error from createCesiumViewer rather than silently
     // swallowing them.
     contextOptions: { webgl: { failIfMajorPerformanceCaveat: false } },
-  });
+  })
 
   // ---- Imagery (basemap) ----
-  const imagery = opts.imagery ?? DEFAULT_IMAGERY;
+  const imagery = opts.imagery ?? DEFAULT_IMAGERY
   viewer.imageryLayers.addImageryProvider(
     new Cesium.UrlTemplateImageryProvider({
       url: imagery.urlTemplate,
       subdomains: [...imagery.subdomains],
       maximumLevel: imagery.maximumLevel ?? 18,
     }),
-  );
+  )
 
   // ---- Performance tuning ----
   // Fog: hides distant geometry (buildings, basemap edge) smoothly
   // into the sky color. Density / near / far follow the user's
   // prior SmartCity.vue values — proven on real city scenes.
-  const scene = viewer.scene;
-  scene.fog.enabled = true;
-  scene.fog.density = 0.0002;
+  const scene = viewer.scene
+  scene.fog.enabled = true
+  scene.fog.density = 0.0002
   // near/far are distances from camera in meters. At 1500m height,
   // the basemap tile boundary is ~5km away horizontally so we want
   // the fog to start fading at 1km and fully opaque by 5km.
-  scene.fog.minimumBrightness = 0.03;
-  scene.postProcessStages.fxaa.enabled = true;
+  scene.fog.minimumBrightness = 0.03
+  scene.postProcessStages.fxaa.enabled = true
   // Cap to 60fps — Cesium's default is uncapped which can push GPU
   // usage to 100% on big scenes.
-  scene.maximumRenderTimeChange = Infinity;
-  scene.requestRenderMode = false;
+  scene.maximumRenderTimeChange = Infinity
+  scene.requestRenderMode = false
 
   // ---- Initial camera (bird's-eye fly-in over 2s) ----
   // Default Cesium camera orientation when destination is specified
@@ -96,12 +96,12 @@ export const createCesiumViewer = (
   viewer.camera.flyTo({
     destination: Cesium.Cartesian3.fromDegrees(opts.center.lng, opts.center.lat, opts.zoomLevel),
     duration: 2,
-  });
+  })
 
-  return viewer;
-};
+  return viewer
+}
 
 /** Default Tangent origin for ENU projection (天安门广场中央).
  *  All Three.js world coordinates are computed relative to this
  *  point via `eastNorthUpToFixedFrame` inverse. */
-export const DEFAULT_TANGENT_ORIGIN = { lng: 116.3976, lat: 39.9055 };
+export const DEFAULT_TANGENT_ORIGIN = { lng: 116.3976, lat: 39.9055 }

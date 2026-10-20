@@ -8,25 +8,25 @@
 
 export interface PolicyWeights {
   /** Source checkpoint filename, e.g. "ppo_step_0005000.zip". */
-  name: string;
+  name: string
   /** Input observation dimension reported by the checkpoint (14 for current sims). */
-  obs_dim: number;
+  obs_dim: number
   /** Action dimension. Defaults to 2 (accel, steer). */
-  action_dim: number;
+  action_dim: number
   /** Sizes of the two hidden layers. Defaults to [64, 64]. */
-  hidden_sizes: number[];
+  hidden_sizes: number[]
   /** All layer parameters, flattened to nested lists. */
   layers: {
-    'policy_net.0.weight': number[][];  // [hidden[0]][obs_dim]
-    'policy_net.0.bias': number[];      // [hidden[0]]
-    'policy_net.2.weight': number[][];  // [hidden[1]][hidden[0]]
-    'policy_net.2.bias': number[];      // [hidden[1]]
-    'action_net.weight': number[][];    // [action_dim][hidden[-1]]
-    'action_net.bias': number[];        // [action_dim]
+    'policy_net.0.weight': number[][] // [hidden[0]][obs_dim]
+    'policy_net.0.bias': number[] // [hidden[0]]
+    'policy_net.2.weight': number[][] // [hidden[1]][hidden[0]]
+    'policy_net.2.bias': number[] // [hidden[1]]
+    'action_net.weight': number[][] // [action_dim][hidden[-1]]
+    'action_net.bias': number[] // [action_dim]
     /** Diagonal Gaussian log-std, learnable parameter (action_dim,). */
-    log_std: number[];
-  };
+    log_std: number[]
+  }
 }
 
 /** A single (accel, steer) action sampled from a diagonal Gaussian. */
-export type PolicyAction = [number, number];
+export type PolicyAction = [number, number]

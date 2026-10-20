@@ -10,12 +10,12 @@
  * useWorldSimulation registers the renderer on creation; CameraView
  * reads it here instead of calling useWorldSimulation again.
  */
-import type { ThreeJSRenderer } from '@infrastructure/rendering';
+import type { ThreeJSRenderer } from '@infrastructure/rendering'
 
-let mainRenderer: ThreeJSRenderer | null = null;
+let mainRenderer: ThreeJSRenderer | null = null
 
 export const setMainRenderer = (r: ThreeJSRenderer | null): void => {
-  mainRenderer = r;
-};
+  mainRenderer = r
+}
 
-export const getMainRenderer = (): ThreeJSRenderer | null => mainRenderer;
+export const getMainRenderer = (): ThreeJSRenderer | null => mainRenderer

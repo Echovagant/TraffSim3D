@@ -14,9 +14,9 @@
 //      glitches produce an out-of-range sample it is silently
 //      dropped instead of poisoning the buffer.
 
-import type { RoadNetwork } from '@domain/entities/RoadNetwork';
+import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 
-export const TRAJECTORY_EXPORT_SCHEMA_VERSION = 1;
+export const TRAJECTORY_EXPORT_SCHEMA_VERSION = 1
 
 /** Plan 038: dirty-data thresholds. Conservative — false positives
  *  (legitimate samples dropped) are far less costly than false
@@ -31,28 +31,28 @@ export const DIRTY_DATA_THRESHOLDS = {
   /** Hard cap on Δspeed / Δt. Real-world accel rarely exceeds 8 m/s²;
    *  anything above 25 m/s² is a Rapier impulse event. */
   MAX_ACCEL_MS2: 25,
-} as const;
+} as const
 
 export interface TrajectoryRow {
-  t: number;        // simTime (s)
+  t: number // simTime (s)
   /** Plan 038: actual sampling interval in seconds. Equal to the
    *  sampleInterval passed to record() (== scheduler.fixedStepSec). */
-  dt: number;
-  vehicleId: string;
-  roadId: string;
-  laneIndex: number;
-  type: 'car' | 'truck' | 'bus';
-  x: number;
-  z: number;
-  heading: number;  // radians
-  speed: number;    // m/s
-  status: 'driving' | 'waiting' | 'crashed';
+  dt: number
+  vehicleId: string
+  roadId: string
+  laneIndex: number
+  type: 'car' | 'truck' | 'bus'
+  x: number
+  z: number
+  heading: number // radians
+  speed: number // m/s
+  status: 'driving' | 'waiting' | 'crashed'
 }
 
 export interface ExportFormat {
-  kind: 'csv' | 'json';
-  includeCrashed: boolean;
-  sampleInterval: number;  // s
+  kind: 'csv' | 'json'
+  includeCrashed: boolean
+  sampleInterval: number // s
 }
 
 /**
@@ -66,40 +66,37 @@ export interface ExportFormat {
  *     (collision response frame)
  *   - implied acceleration > MAX_ACCEL_MS2 (collision impulse)
  */
-const isValidSample = (
-  curr: TrajectoryRow,
-  prev: TrajectoryRow | null,
-): boolean => {
-  if (curr.speed > DIRTY_DATA_THRESHOLDS.MAX_SPEED_MS) return false;
-  if (!prev) return true;
-  const dx = curr.x - prev.x;
-  const dz = curr.z - prev.z;
-  const dist = Math.hypot(dx, dz);
+const isValidSample = (curr: TrajectoryRow, prev: TrajectoryRow | null): boolean => {
+  if (curr.speed > DIRTY_DATA_THRESHOLDS.MAX_SPEED_MS) return false
+  if (!prev) return true
+  const dx = curr.x - prev.x
+  const dz = curr.z - prev.z
+  const dist = Math.hypot(dx, dz)
   if (dist < 1e-3 && curr.speed > DIRTY_DATA_THRESHOLDS.ZERO_DELTA_SPEED_MS) {
-    return false;
+    return false
   }
   if (prev.dt > 0) {
-    const dSpeed = curr.speed - prev.speed;
-    const accel = Math.abs(dSpeed) / prev.dt;
-    if (accel > DIRTY_DATA_THRESHOLDS.MAX_ACCEL_MS2) return false;
+    const dSpeed = curr.speed - prev.speed
+    const accel = Math.abs(dSpeed) / prev.dt
+    if (accel > DIRTY_DATA_THRESHOLDS.MAX_ACCEL_MS2) return false
   }
-  return true;
-};
+  return true
+}
 
 export class TrajectoryExporter {
-  private buffer: TrajectoryRow[] = [];
-  private lastSampleSimTime = -Infinity;
+  private buffer: TrajectoryRow[] = []
+  private lastSampleSimTime = -Infinity
   /** Plan 038: per-vehicle previous sample for dirty-data validation. */
-  private lastSamplePerVehicle = new Map<string, TrajectoryRow>();
-  private cap: number;
+  private lastSamplePerVehicle = new Map<string, TrajectoryRow>()
+  private cap: number
 
   constructor(cap: number) {
-    this.cap = cap;
+    this.cap = cap
   }
 
   record(network: RoadNetwork, simTime: number, sampleInterval: number): void {
-    if (simTime - this.lastSampleSimTime < sampleInterval) return;
-    this.lastSampleSimTime = simTime;
+    if (simTime - this.lastSampleSimTime < sampleInterval) return
+    this.lastSampleSimTime = simTime
     for (const v of Object.values(network.vehicles)) {
       const row: TrajectoryRow = {
         t: simTime,
@@ -113,36 +110,50 @@ export class TrajectoryExporter {
         heading: v.heading,
         speed: v.speed,
         status: v.status,
-      };
-      const prev = this.lastSamplePerVehicle.get(v.id) ?? null;
-      if (!isValidSample(row, prev)) continue;
-      this.buffer.push(row);
-      this.lastSamplePerVehicle.set(v.id, row);
+      }
+      const prev = this.lastSamplePerVehicle.get(v.id) ?? null
+      if (!isValidSample(row, prev)) continue
+      this.buffer.push(row)
+      this.lastSamplePerVehicle.set(v.id, row)
     }
     if (this.buffer.length >= this.cap) {
       // Auto-flush: download as CSV.
-      const blob = this.exportAsBlob({ kind: 'csv', includeCrashed: true, sampleInterval });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `trajectory-autoflush-${Date.now()}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      this.buffer = [];
+      const blob = this.exportAsBlob({ kind: 'csv', includeCrashed: true, sampleInterval })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `trajectory-autoflush-${Date.now()}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      this.buffer = []
     }
   }
 
   exportAsBlob(format: ExportFormat): Blob {
     const filtered = format.includeCrashed
       ? this.buffer
-      : this.buffer.filter((r) => r.status !== 'crashed');
+      : this.buffer.filter((r) => r.status !== 'crashed')
     if (format.kind === 'csv') {
       // Plan 038: header now includes the `dt` column for ML training.
-      const header = 't,dt,vehicleId,roadId,laneIndex,type,x,z,heading,speed,status\n';
-      const rows = filtered.map((r) =>
-        [r.t, r.dt, r.vehicleId, r.roadId, r.laneIndex, r.type, r.x.toFixed(3), r.z.toFixed(3), r.heading.toFixed(3), r.speed.toFixed(3), r.status].join(',')
-      ).join('\n');
-      return new Blob([header + rows + '\n'], { type: 'text/csv' });
+      const header = 't,dt,vehicleId,roadId,laneIndex,type,x,z,heading,speed,status\n'
+      const rows = filtered
+        .map((r) =>
+          [
+            r.t,
+            r.dt,
+            r.vehicleId,
+            r.roadId,
+            r.laneIndex,
+            r.type,
+            r.x.toFixed(3),
+            r.z.toFixed(3),
+            r.heading.toFixed(3),
+            r.speed.toFixed(3),
+            r.status,
+          ].join(','),
+        )
+        .join('\n')
+      return new Blob([header + rows + '\n'], { type: 'text/csv' })
     } else {
       const body = {
         schemaVersion: TRAJECTORY_EXPORT_SCHEMA_VERSION,
@@ -151,19 +162,23 @@ export class TrajectoryExporter {
         includeCrashed: format.includeCrashed,
         sampleInterval: format.sampleInterval,
         rows: filtered,
-      };
-      return new Blob([JSON.stringify(body, null, 2)], { type: 'application/json' });
+      }
+      return new Blob([JSON.stringify(body, null, 2)], { type: 'application/json' })
     }
   }
 
   clear(): void {
-    this.buffer = [];
-    this.lastSampleSimTime = -Infinity;
+    this.buffer = []
+    this.lastSampleSimTime = -Infinity
     // Plan 038: drop the per-vehicle "previous sample" cache so a
     // fresh scene doesn't inherit stale speed deltas.
-    this.lastSamplePerVehicle.clear();
+    this.lastSamplePerVehicle.clear()
   }
 
-  get rowCount(): number { return this.buffer.length; }
-  get maxBufferRows(): number { return this.cap; }
+  get rowCount(): number {
+    return this.buffer.length
+  }
+  get maxBufferRows(): number {
+    return this.cap
+  }
 }

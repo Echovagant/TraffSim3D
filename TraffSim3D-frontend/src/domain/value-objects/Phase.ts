@@ -15,5 +15,5 @@ export const LightPhase = {
   FlashingRed: 'flashingRed',
   AllRed: 'allRed',
   Dark: 'dark',
-} as const;
-export type LightPhase = (typeof LightPhase)[keyof typeof LightPhase];
+} as const
+export type LightPhase = (typeof LightPhase)[keyof typeof LightPhase]

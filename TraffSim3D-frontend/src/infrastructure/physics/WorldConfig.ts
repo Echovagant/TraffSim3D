@@ -8,28 +8,28 @@
 // physics barrel reaching into the domain layer. The single
 // source-of-truth shape lives in `src/domain/value-objects/Position.ts`.
 
-import type { Position } from '@domain/value-objects/Position';
+import type { Position } from '@domain/value-objects/Position'
 
 /** Vec3 = Position (alias). Defined here so the M2 contract
  *  (plans/m2-interface-contract.md §2) can import from a
  *  physics-adjacent module without dragging in the domain. */
-export type Vec3 = Position;
+export type Vec3 = Position
 
 export interface WorldConfig {
   /** Rapier solver seed. Determinism (R3) — M2-B green-wave timing
    *  depends on reproducible physics. */
-  seed: number;
+  seed: number
   /** Fixed physics timestep (s). I5 mandates 1/60. */
-  fixedDt: number;
+  fixedDt: number
   /** Gravity vector. Default earth gravity. */
-  gravity: Vec3;
+  gravity: Vec3
   /** Ground collider thickness (m). */
-  groundThickness: number;
+  groundThickness: number
 }
 
 export const DEFAULT_WORLD_CONFIG: WorldConfig = {
-  seed: 0xDEFA17,
+  seed: 0xdefa17,
   fixedDt: 1 / 60,
   gravity: { x: 0, y: -9.81, z: 0 },
   groundThickness: 0.1,
-};
+}

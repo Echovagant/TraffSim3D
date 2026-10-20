@@ -10,13 +10,13 @@
 // single-use.
 
 export interface SpawnPoint {
-  readonly id: string;
+  readonly id: string
   /** Road id this spawn point lives on. */
-  roadId: string;
+  roadId: string
   /** Lane index on that road (forward lanes = 0..N/2-1). */
-  laneIndex: number;
+  laneIndex: number
   /** Arc-length at which the vehicle enters. Typically 0 (road start). */
-  s: number;
+  s: number
   /** vehicleId currently sitting on this spawn point; `null` = free. */
-  occupiedBy: string | null;
+  occupiedBy: string | null
 }

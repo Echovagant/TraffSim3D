@@ -12,10 +12,10 @@
 // The TS implementation must produce `expected_mean` to within 1e-4
 // absolute tolerance. This catches layer-shape / transpose bugs that
 // would silently degrade replay quality.
-import { describe, it, expect } from 'vitest';
-import fixture from './fixtures/mlp-policy-fixture.json';
-import { mlpForwardMean, mlpForwardSample } from './mlpInference';
-import type { PolicyWeights } from './types';
+import { describe, it, expect } from 'vitest'
+import fixture from './fixtures/mlp-policy-fixture.json'
+import { mlpForwardMean, mlpForwardSample } from './mlpInference'
+import type { PolicyWeights } from './types'
 
 const POLICY: PolicyWeights = {
   name: 'ppo_step_fixture.zip',
@@ -23,38 +23,38 @@ const POLICY: PolicyWeights = {
   action_dim: 2,
   hidden_sizes: [64, 64],
   layers: fixture.weights as PolicyWeights['layers'],
-};
+}
 
-const OBS: number[] = fixture.obs as number[];
-const EXPECTED_MEAN: [number, number] = fixture.expected_mean as [number, number];
+const OBS: number[] = fixture.obs as number[]
+const EXPECTED_MEAN: [number, number] = fixture.expected_mean as [number, number]
 
 describe('mlpInference (Plan 049)', () => {
   it('matches SB3 reference forward pass to 1e-4 tolerance', () => {
-    const [a0, a1] = mlpForwardMean(OBS, POLICY);
-    expect(Math.abs(a0 - EXPECTED_MEAN[0])).toBeLessThan(1e-4);
-    expect(Math.abs(a1 - EXPECTED_MEAN[1])).toBeLessThan(1e-4);
-  });
+    const [a0, a1] = mlpForwardMean(OBS, POLICY)
+    expect(Math.abs(a0 - EXPECTED_MEAN[0])).toBeLessThan(1e-4)
+    expect(Math.abs(a1 - EXPECTED_MEAN[1])).toBeLessThan(1e-4)
+  })
 
   it('rejects an observation whose dimension differs from the policy weights', () => {
-    const mismatchedObs = [...OBS, 0.0];
+    const mismatchedObs = [...OBS, 0.0]
     expect(() => mlpForwardMean(mismatchedObs, POLICY)).toThrow(
       /obs dim mismatch: got \d+, weights expect 14/,
-    );
-  });
+    )
+  })
 
   it('mlpForwardMean is deterministic (same obs → same action)', () => {
-    const m1 = mlpForwardMean(OBS, POLICY);
-    const m2 = mlpForwardMean(OBS, POLICY);
-    expect(m1).toEqual(m2);
-  });
+    const m1 = mlpForwardMean(OBS, POLICY)
+    const m2 = mlpForwardMean(OBS, POLICY)
+    expect(m1).toEqual(m2)
+  })
 
   it('sample adds Gaussian noise around the mean', () => {
     // Box-Muller with deterministic rng: z0=0, z1=0 → no noise → mean exactly.
-    const noiseFreeRng = (): number => 0.5;  // u1=0.5 → r=sqrt(2*ln(2))≈1.18; tests will differ
-    const [a0, a1] = mlpForwardSample(OBS, POLICY, noiseFreeRng);
-    expect(typeof a0).toBe('number');
-    expect(typeof a1).toBe('number');
-    expect(Number.isFinite(a0)).toBe(true);
-    expect(Number.isFinite(a1)).toBe(true);
-  });
-});
+    const noiseFreeRng = (): number => 0.5 // u1=0.5 → r=sqrt(2*ln(2))≈1.18; tests will differ
+    const [a0, a1] = mlpForwardSample(OBS, POLICY, noiseFreeRng)
+    expect(typeof a0).toBe('number')
+    expect(typeof a1).toBe('number')
+    expect(Number.isFinite(a0)).toBe(true)
+    expect(Number.isFinite(a1)).toBe(true)
+  })
+})

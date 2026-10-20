@@ -35,10 +35,10 @@ function in `src/application/services/`.
 
 ## Architecture cheat sheet
 
-| Layer            | Path                | Imports from       |
-|------------------|---------------------|--------------------|
-| Domain           | `src/domain/`       | nothing (pure)     |
-| Application      | `src/application/`  | domain             |
-| Infrastructure   | `src/infrastructure/`| domain, three, browser APIs |
-| Interfaces       | `src/interfaces/`   | application, infrastructure, shared |
-| Shared           | `src/shared/`       | nothing            |
+| Layer          | Path                  | Imports from                        |
+| -------------- | --------------------- | ----------------------------------- |
+| Domain         | `src/domain/`         | nothing (pure)                      |
+| Application    | `src/application/`    | domain                              |
+| Infrastructure | `src/infrastructure/` | domain, three, browser APIs         |
+| Interfaces     | `src/interfaces/`     | application, infrastructure, shared |
+| Shared         | `src/shared/`         | nothing                             |

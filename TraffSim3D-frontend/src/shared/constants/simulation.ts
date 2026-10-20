@@ -1,9 +1,9 @@
 /** Target frame budget for M1. Anything below this fails the perf gate. */
-export const M1_MIN_FPS = 30;
+export const M1_MIN_FPS = 30
 /** Default render scale (device pixel ratio cap). */
-export const MAX_DPR = 2;
+export const MAX_DPR = 2
 /** Default intersection cycle: 30s green, 3s yellow, 30s red per axis. */
-export const DEFAULT_CYCLE_SECONDS = 63;
+export const DEFAULT_CYCLE_SECONDS = 63
 
 /**
  * Plan B — visual constants shared between the scene builder and the
@@ -17,15 +17,15 @@ export const DEFAULT_CYCLE_SECONDS = 63;
  * was the *total* road width and gave each lane only 1u, narrower than
  * the car body (2u) — vehicles visibly straddled multiple lanes.
  */
-export const ROAD_LANE_WIDTH = 3.5;
+export const ROAD_LANE_WIDTH = 3.5
 /** Number of historical positions kept per vehicle for the trail line. 60 frames ≈ 1s at 60fps. */
-export const TRAIL_LENGTH = 60;
+export const TRAIL_LENGTH = 60
 /** Per-phase duration in seconds for the default cycle. Used by the phase-countdown bar. */
 export const PHASE_DURATIONS = {
   green: 30,
   yellow: 3,
-  red: DEFAULT_CYCLE_SECONDS - 33,  // 30s for the default 63s cycle
-} as const;
+  red: DEFAULT_CYCLE_SECONDS - 33, // 30s for the default 63s cycle
+} as const
 
 // ===== M1.5 — basic traffic physics (no Rapier) =====
 //
@@ -35,7 +35,7 @@ export const PHASE_DURATIONS = {
 // nothing else does.
 
 /** Maximum forward acceleration in m/s² (≈ 0–100 km/h in 8s, gentle). */
-export const MAX_ACCEL = 3.5;
+export const MAX_ACCEL = 3.5
 
 // ===== Plan 037: vehicle dynamics hierarchy =====
 //
@@ -50,15 +50,15 @@ export const MAX_ACCEL = 3.5;
 // behaviour the user reported in bug 1.
 
 /** Comfortable acceleration in m/s² (≈ 0–100 km/h in 14s). */
-export const MAX_ACCEL_COMFY = 2.0;
+export const MAX_ACCEL_COMFY = 2.0
 /** Acceleration ceiling before collision-avoidance overrides. */
-export const MAX_ACCEL_LIMIT = 3.5;
+export const MAX_ACCEL_LIMIT = 3.5
 /** Comfortable deceleration in m/s² (≈ 0.25g). */
-export const MAX_DECEL_COMFY = 2.5;
+export const MAX_DECEL_COMFY = 2.5
 /** Hard brake ceiling for emergency stops (≈ 0.6g, below ABS). */
-export const MAX_DECEL_LIMIT = 6.0;
+export const MAX_DECEL_LIMIT = 6.0
 /** Panic brake (e.g. contact response); only used by the safety layer. */
-export const HARD_STOP_DECEL = 10.0;
+export const HARD_STOP_DECEL = 10.0
 
 // ===== Plan 037: state-machine hysteresis =====
 //
@@ -70,15 +70,15 @@ export const HARD_STOP_DECEL = 10.0;
 // just because it briefly dipped under 0.5 m/s during startup.
 
 /** Speed (m/s) above which a vehicle is eligible to enter `driving`. */
-export const DRIVING_SPEED_THRESHOLD = 1.0;
+export const DRIVING_SPEED_THRESHOLD = 1.0
 /** Speed (m/s) below which a vehicle drops back to `waiting`. */
-export const WAITING_SPEED_THRESHOLD = 0.3;
+export const WAITING_SPEED_THRESHOLD = 0.3
 
 // ===== Plan 037: spawn-point release =====
 //
 // Distance past the spawn arc-length at which a spawn point is
 // considered "released" — the next spawn is free to reuse it.
-export const SPAWN_POINT_RELEASE_DISTANCE = 20;
+export const SPAWN_POINT_RELEASE_DISTANCE = 20
 
 /**
  * Plan 037: per-type dynamics parameters. Cars are baseline; trucks
@@ -88,14 +88,11 @@ export const SPAWN_POINT_RELEASE_DISTANCE = 20;
  * controller also slows down because the user perceives a truck
  * accelerating briskly as unrealistic).
  */
-export const VEHICLE_DYN: Record<
-  'car' | 'truck' | 'bus',
-  { accel: number; decel: number }
-> = {
-  car:   { accel: MAX_ACCEL_COMFY,       decel: MAX_DECEL_COMFY },
+export const VEHICLE_DYN: Record<'car' | 'truck' | 'bus', { accel: number; decel: number }> = {
+  car: { accel: MAX_ACCEL_COMFY, decel: MAX_DECEL_COMFY },
   truck: { accel: MAX_ACCEL_COMFY * 0.7, decel: MAX_DECEL_LIMIT * 0.8 },
-  bus:   { accel: MAX_ACCEL_COMFY * 0.6, decel: MAX_DECEL_LIMIT * 0.7 },
-};
+  bus: { accel: MAX_ACCEL_COMFY * 0.6, decel: MAX_DECEL_LIMIT * 0.7 },
+}
 
 /**
  * Plan 037c: per-type Pure Pursuit parameters.
@@ -108,10 +105,10 @@ export const VEHICLE_PURE_PURSUIT: Record<
   'car' | 'truck' | 'bus',
   { wheelbase: number; lookahead: number }
 > = {
-  car:   { wheelbase: 2.5, lookahead: 8 },
+  car: { wheelbase: 2.5, lookahead: 8 },
   truck: { wheelbase: 4.0, lookahead: 12 },
-  bus:   { wheelbase: 3.0, lookahead: 10 },
-};
+  bus: { wheelbase: 3.0, lookahead: 10 },
+}
 
 /**
  * Plan 037: crash impulse threshold (N·s). Below this, a contact is
@@ -125,22 +122,22 @@ export const VEHICLE_PURE_PURSUIT: Record<
  * behaviour. When Rapier contact-force wiring lands, raising this to
  * e.g. 50 N·s becomes a real filter.
  */
-export const CRASH_IMPULSE_THRESHOLD = 0;
+export const CRASH_IMPULSE_THRESHOLD = 0
 /**
  * Maximum braking deceleration in m/s² (≈ 1.0 g, hard-but-not-panic).
  * Real-world emergency braking with ABS is ~9–10 m/s², so this is
  * already a hard brake — drivers don't go harder than this. Used as
  * the normal stop-at-red-light decel ceiling.
  */
-export const MAX_DECEL = 10.0;
+export const MAX_DECEL = 10.0
 /** Time-headway target in seconds for car-following. Newell's rule of thumb. */
-export const TIME_HEADWAY = 1.5;
+export const TIME_HEADWAY = 1.5
 /** Minimum bumper-to-bumper gap in world units. */
-export const MIN_GAP = 2.0;
+export const MIN_GAP = 2.0
 /** Hard speed ceiling so user-set speeds never run away. */
-export const MAX_SPEED = 35;  // m/s ≈ 126 km/h
+export const MAX_SPEED = 35 // m/s ≈ 126 km/h
 /** Stop line offset from intersection center, in world units along the road. */
-export const STOP_LINE_DISTANCE = 5.0;
+export const STOP_LINE_DISTANCE = 5.0
 /**
  * Plan 049: Python sim speed limit (60 km/h, m/s). The Python RL sim
  * (`app/apps/rl/sim_core.py`) normalizes obs[3] (ego speed) by this
@@ -148,7 +145,7 @@ export const STOP_LINE_DISTANCE = 5.0;
  * "smaller than trained" speeds and drives erratically. Differs from
  * `MAX_SPEED` (126 km/h) which is the TS Rapier / hand-rolled cap.
  */
-export const PYTHON_SIM_SPEED_LIMIT = 16.67;
+export const PYTHON_SIM_SPEED_LIMIT = 16.67
 /**
  * How early the traffic-light brake kicks in, on top of the physical
  * braking distance `v²/(2a)`. Models the "I saw the light and
@@ -156,7 +153,7 @@ export const PYTHON_SIM_SPEED_LIMIT = 16.67;
  * safety margin so cars don't overshoot the stop line when the
  * physics is borderline.
  */
-export const STOP_LINE_BUFFER = 4.0;
+export const STOP_LINE_BUFFER = 4.0
 
 // ===== M2-A — Rapier body specs =====
 //
@@ -175,10 +172,10 @@ export const VEHICLE_BODY_SPEC: Record<
   'car' | 'truck' | 'bus',
   { length: number; width: number; mass: number }
 > = {
-  car:   { length: 4.2, width: 1.8, mass: 1500 },
+  car: { length: 4.2, width: 1.8, mass: 1500 },
   truck: { length: 6.5, width: 2.2, mass: 4500 },
-  bus:   { length: 9.0, width: 2.5, mass: 8000 },
-};
+  bus: { length: 9.0, width: 2.5, mass: 8000 },
+}
 
 // ===== M2-B — signal controller constants =====
 //
@@ -187,16 +184,16 @@ export const VEHICLE_BODY_SPEC: Record<
 
 /** Max green duration for ActuatedController (s). After this the
  *  light MUST cycle to yellow even with queue. */
-export const MAX_GREEN_SECS = 60;
+export const MAX_GREEN_SECS = 60
 /** Green extension step when queue > 0 (s). */
-export const GREEN_EXTENSION_STEP = 5;
+export const GREEN_EXTENSION_STEP = 5
 /** Min red duration for ActuatedController (s). Below this the
  *  light won't go green even with empty opposite axis. */
-export const MIN_RED_SECS = 10;
+export const MIN_RED_SECS = 10
 /** Yellow clearance (s) — fixed, not shortened. */
-export const YELLOW_CLEAR_SECS = 3;
+export const YELLOW_CLEAR_SECS = 3
 /** Default controller kind at app startup. */
-export const DEFAULT_CONTROLLER_KIND = 'actuated' as const;
+export const DEFAULT_CONTROLLER_KIND = 'actuated' as const
 
 // ===== M2-C — sensor + export constants =====
 //
@@ -204,53 +201,53 @@ export const DEFAULT_CONTROLLER_KIND = 'actuated' as const;
 
 /** Per-type LiDAR mount height (m). 008 §1.2. */
 export const LIDAR_MOUNT_HEIGHT: Record<'car' | 'truck' | 'bus', number> = {
-  car:   1.5,
+  car: 1.5,
   truck: 2.2,
-  bus:   2.6,
-};
+  bus: 2.6,
+}
 /** Plan 033: Horizontal rays. 360 → 90 (4× fewer rays per scan;
  *  per 032 §Issue 1 mitigation C). 90° 前向扇形 符合主流车载 LiDAR
  *  (Waymo / Mobileye). 32/64-line + 360° 升级到 M5+. */
-export const LIDAR_HORIZONTAL_RAYS = 90;
+export const LIDAR_HORIZONTAL_RAYS = 90
 /** Vertical rays. M2-C default = 16 (008 §1.1). */
-export const LIDAR_VERTICAL_RAYS = 16;
+export const LIDAR_VERTICAL_RAYS = 16
 /** Max range (m). */
-export const LIDAR_MAX_RANGE = 100;
+export const LIDAR_MAX_RANGE = 100
 /** Gaussian noise stddev (m). 008 §2 R2. */
-export const LIDAR_NOISE_STDDEV = 0.02;
+export const LIDAR_NOISE_STDDEV = 0.02
 /** Plan 033: scan interval in seconds. Default 0.1 = 10Hz throttle.
  *  Combined with LIDAR_HORIZONTAL_RAYS=90 and LIDAR_MAX_ACTIVE_SENSORS=10,
  *  total sensor cost drops from ~205ms/tick to ~5ms/tick. */
-export const LIDAR_SCAN_INTERVAL_S = 0.1;
+export const LIDAR_SCAN_INTERVAL_S = 0.1
 /** Plan 033: max sensors that actually scan per tick. 45 vehicles
  *  registered, but only the first 10 (sorted by vehicleId) scan. Others
  *  keep their last frame. */
-export const LIDAR_MAX_ACTIVE_SENSORS = 10;
+export const LIDAR_MAX_ACTIVE_SENSORS = 10
 /** Plan 033: horizontal field of view in degrees. Default 90 (前向扇形).
  *  Future 360 全向升级. */
-export const LIDAR_AZIMUTH_DEG = 90;
+export const LIDAR_AZIMUTH_DEG = 90
 
 /** Trajectory sample interval (s). 10Hz. */
-export const TRAJECTORY_SAMPLE_INTERVAL = 0.1;
+export const TRAJECTORY_SAMPLE_INTERVAL = 0.1
 /** Trajectory buffer cap (rows). 100k ≈ 30min @ 30车 × 10Hz. */
-export const TRAJECTORY_BUFFER_CAP = 100_000;
+export const TRAJECTORY_BUFFER_CAP = 100_000
 
 // ===== M2-D — camera sensor constants =====
 /** Default offscreen camera resolution. Lower than viewport to
  *  keep the per-frame GPU→CPU pixel-read cost manageable. */
-export const CAMERA_DEFAULT_WIDTH = 256;
-export const CAMERA_DEFAULT_HEIGHT = 192;
+export const CAMERA_DEFAULT_WIDTH = 256
+export const CAMERA_DEFAULT_HEIGHT = 192
 /** Field of view (degrees). Matches main editor camera. */
-export const CAMERA_DEFAULT_FOV = 60;
+export const CAMERA_DEFAULT_FOV = 60
 /** Throttle camera capture to 5 Hz to avoid GPU stalls. */
-export const CAMERA_SAMPLE_INTERVAL = 0.2;
+export const CAMERA_SAMPLE_INTERVAL = 0.2
 
 /**
  * Plan 034: 车辆位置距其 (road, lane, s) 几何 > 此值 → respawn.
  * 默认 50m. 道路长 60u, 50 远大于任何合法偏离 (lane change ~3.5m).
  * tick.ts 的 OOB branch 用这个常量决定是否 respawn.
  */
-export const OUT_OF_BOUNDS_M = 50;
+export const OUT_OF_BOUNDS_M = 50
 
 /**
  * Lateral drift threshold (metres). When a vehicle's Rapier position
@@ -263,4 +260,4 @@ export const OUT_OF_BOUNDS_M = 50;
  * lane change (~3.5m) but catches divergence before the vehicle
  * leaves the visible area.
  */
-export const LATERAL_DRIFT_THRESHOLD_M = 15;
+export const LATERAL_DRIFT_THRESHOLD_M = 15
