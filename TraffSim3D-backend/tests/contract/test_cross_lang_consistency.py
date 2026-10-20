@@ -36,7 +36,8 @@ VECTOR_PATH = CONTRACT_DIR / "test_vector.json"
 SNAPSHOT_DIR = CONTRACT_DIR / "snapshots"
 
 _REGEN_HINT = (
-    "Regenerate the TS contract snapshots with: " "cd TraffSim3D-frontend && npm run contract:gen"
+    "Regenerate the TS contract snapshots with: "
+    "cd ../TraffSim3D-frontend && npm run contract:gen"
 )
 
 
@@ -50,22 +51,6 @@ def _vector(name: str) -> dict:
         if v["name"] == name:
             return v
     raise KeyError(name)
-
-
-def _drive_to_completion(core: SimCore, actions: list[list[float]]) -> dict:
-    """Run actions until termination or exhausted. Returns summary."""
-    for action in actions:
-        if core._terminated:
-            break
-        core.step(np.asarray(action, dtype=np.float32))
-    return {
-        "terminated": core._terminated,
-        "reason": core._terminated_reason,
-        "final_step": core.step_count,
-        "final_z": core.ego.z,
-        "final_x": core.ego.x,
-        "final_speed": core.ego.speed,
-    }
 
 
 def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
@@ -102,12 +87,13 @@ def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
         "name": v["name"],
         "scene_kind": v["scene_kind"],
         "ego_id": v["ego_id"],
-        "tolerance": 0,
         "final_state": {
             "terminated": core._terminated,
             "reason": core._terminated_reason,
             "final_step": core.step_count,
             "final_z": float(core.ego.z),
+            "final_x": float(core.ego.x),
+            "final_speed": float(core.ego.speed),
         },
         "samples": samples,
     }
@@ -178,9 +164,12 @@ def test_python_and_ts_agree_exactly(vector_name: str) -> None:
     ts_step = ts["final_state"]["final_step"]
     assert py_step == ts_step, f"{v['name']}: step count mismatch (python={py_step}, ts={ts_step})"
 
-    py_z = py["final_state"]["final_z"]
-    ts_z = ts["final_state"]["final_z"]
-    assert py_z == ts_z, f"{v['name']}: final z mismatch (python={py_z!r}, ts={ts_z!r})"
+    for key in ("final_z", "final_x", "final_speed"):
+        py_value = py["final_state"][key]
+        ts_value = ts["final_state"][key]
+        assert (
+            py_value == ts_value
+        ), f"{v['name']}: {key} mismatch (python={py_value!r}, ts={ts_value!r})"
 
     py_samples = py["samples"]
     ts_samples = ts["samples"]
@@ -202,11 +191,15 @@ def test_python_and_ts_agree_exactly(vector_name: str) -> None:
 def test_python_and_ts_kernel_speed_series_agree(vector_name: str) -> None:
     """L1: the product replay path's speed series matches Python exactly.
 
-    The TS series covers the whole action list. Past the step where Python
-    terminates, Python's `SimCore.step()` freezes (its early return leaves
-    the ego untouched), so the speed stays at the terminal value; the TS
-    side keeps integrating but is clamped by the same speed limit. Both
-    tails therefore agree.
+    Only the steps Python actually simulated are compared. Past its
+    termination step, `SimCore.step()` early-returns and leaves the ego
+    untouched, so Python's series freezes at the terminal speed while the TS
+    side keeps integrating — the two tails agree only when the ego happened
+    to saturate `SPEED_LIMIT` before terminating. That is a property of the
+    current vectors, not of the contract, so relying on it would turn a
+    correct TS implementation into a false drift report for any vector that
+    terminates earlier (e.g. a collision at step 20 with speed 6.0).
+    Comparing the prefix keeps the assertion meaningful for every vector.
     """
     v = _vector(vector_name)
 
@@ -216,13 +209,15 @@ def test_python_and_ts_kernel_speed_series_agree(vector_name: str) -> None:
     for action in v["actions"]:
         core.step(np.asarray(action, dtype=np.float32))
         py_series.append(float(core.ego.speed))
+        if core._terminated:
+            break
 
     kernel = _require_snapshot(SNAPSHOT_DIR / f"ts_kernel_{v['name']}.json")
     ts_series = kernel["speed_series"]
 
-    assert len(py_series) == len(ts_series), (
-        f"{v['name']}: kernel series length mismatch "
-        f"(python={len(py_series)}, ts={len(ts_series)})"
+    assert len(ts_series) >= len(py_series), (
+        f"{v['name']}: kernel series too short " f"(python={len(py_series)}, ts={len(ts_series)})"
     )
-    for i, (a, b) in enumerate(zip(py_series, ts_series, strict=True)):
+    comparable = ts_series[: len(py_series)]
+    for i, (a, b) in enumerate(zip(py_series, comparable, strict=True)):
         assert a == b, f"{v['name']}: kernel speed[{i}] mismatch " f"(python={a!r}, ts={b!r})"
