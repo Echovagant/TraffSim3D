@@ -21,6 +21,14 @@
 //      sequence matches. `3.0 * 0.1` is 0.30000000000000004, so
 //      `speed + accel * dt` and `speed + accel * 0.1` can differ in the
 //      last bits — and the contract asserts bit-exact equality.
+//   5. The action is rounded to float32 BEFORE it is clipped and scaled.
+//      Python never sees a float64 action: `apps/rl/env.py` does
+//      `action.astype(np.float32)` and the contract test does
+//      `np.asarray(action, dtype=np.float32)`. `Math.fround` is IEEE
+//      round-to-nearest-even to binary32 — the same rounding `np.float32`
+//      applies. The policy's output layer has no tanh, so real actions are
+//      arbitrary float64 values and skipping this cast moves the trajectory
+//      by ~1e-10 per step.
 //
 // Pure functions only: no DOM, no Three.js, no Rapier.
 
@@ -59,14 +67,15 @@ const wrapPi = (a: number): number => {
 /**
  * One speed-integration step, Python semantics:
  *
- *   accel_cmd = clip(action0, -1, 1) * 3.0
+ *   accel_cmd = clip(np.float32(action0), -1, 1) * 3.0
  *   speed     = clip(speed + accel_cmd * dt, 0, 16.67)
  *
- * The action is clipped here — the Python sim clips it too, and the
- * policy's output layer has no tanh, so raw actions can exceed [-1, 1].
+ * The action is rounded to float32 and then clipped — the Python sim does
+ * both (`np.float32` cast upstream, `np.clip` here), and the policy's output
+ * layer has no tanh, so raw actions can exceed [-1, 1].
  */
 export const pythonSpeedStep = (speed: number, action0: number, dt: number): number => {
-  const accelCmd = clamp(action0, -1, 1) * PYTHON_SIM.ACCEL_SCALE
+  const accelCmd = clamp(Math.fround(action0), -1, 1) * PYTHON_SIM.ACCEL_SCALE
   return clamp(speed + accelCmd * dt, 0, PYTHON_SIM.SPEED_LIMIT)
 }
 
@@ -104,7 +113,7 @@ export const integrateEgo = (
   dt: number,
   target: readonly [number, number],
 ): EgoState => {
-  const accelCmd = clamp(action0, -1, 1) * PYTHON_SIM.ACCEL_SCALE
+  const accelCmd = clamp(Math.fround(action0), -1, 1) * PYTHON_SIM.ACCEL_SCALE
   const speed = clamp(ego.speed + accelCmd * dt, 0, PYTHON_SIM.SPEED_LIMIT)
   const steer = pythonSteer(ego, target)
   const heading = ego.heading + steer * dt

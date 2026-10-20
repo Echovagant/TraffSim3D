@@ -139,14 +139,6 @@ export const MAX_SPEED = 35 // m/s ≈ 126 km/h
 /** Stop line offset from intersection center, in world units along the road. */
 export const STOP_LINE_DISTANCE = 5.0
 /**
- * Plan 049: Python sim speed limit (60 km/h, m/s). The Python RL sim
- * (`app/apps/rl/sim_core.py`) normalizes obs[3] (ego speed) by this
- * value. The TS replay must use the SAME denominator or PPO sees
- * "smaller than trained" speeds and drives erratically. Differs from
- * `MAX_SPEED` (126 km/h) which is the TS Rapier / hand-rolled cap.
- */
-export const PYTHON_SIM_SPEED_LIMIT = 16.67
-/**
  * How early the traffic-light brake kicks in, on top of the physical
  * braking distance `v²/(2a)`. Models the "I saw the light and
  * started slowing well before I had to" human behaviour, and gives a
@@ -310,3 +302,16 @@ export const PYTHON_SIM = {
   /** Python: `TrafficLight.cycle_duration = 30.0` (s per phase) */
   LIGHT_CYCLE_SECONDS: 30.0,
 } as const
+
+/**
+ * Plan 049 back-compat alias: the Python sim speed limit (60 km/h, m/s) that
+ * `tick.ts` uses to normalise obs[3] (ego speed). The Python RL sim
+ * (`app/apps/rl/sim_core.py`) normalizes obs[3] by this value, and the TS
+ * replay must use the SAME denominator or PPO sees "smaller than trained"
+ * speeds and drives erratically. Differs from `MAX_SPEED` (126 km/h) which is
+ * the TS Rapier / hand-rolled cap.
+ *
+ * Alias of `PYTHON_SIM.SPEED_LIMIT` — the contract constants have a single
+ * source of truth; this name only exists for the pre-Plan-071 importers.
+ */
+export const PYTHON_SIM_SPEED_LIMIT = PYTHON_SIM.SPEED_LIMIT

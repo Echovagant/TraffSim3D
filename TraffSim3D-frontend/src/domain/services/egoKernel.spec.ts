@@ -38,6 +38,13 @@ describe('egoKernel — pythonSpeedStep', () => {
     expect(pythonSpeedStep(PYTHON_SIM.SPEED_LIMIT, 1.0, PYTHON_SIM.DT)).toBe(PYTHON_SIM.SPEED_LIMIT)
   })
 
+  it('converts the action to float32 first, like Python`s np.float32 cast', () => {
+    // Python: np.float32(0.1) = 0.10000000149011612
+    // 0.1 (float64) would give a different accel and a different speed.
+    expect(pythonSpeedStep(0, 0.1, PYTHON_SIM.DT)).toBe(Math.fround(0.1) * 3.0 * PYTHON_SIM.DT)
+    expect(pythonSpeedStep(0, 0.1, PYTHON_SIM.DT)).not.toBe(0.1 * 3.0 * PYTHON_SIM.DT)
+  })
+
   it('reproduces the measured Python trajectory over 58 steps', () => {
     // Python cross scene: ego starts at (0, -25) heading pi/2, target (0, 0).
     let ego = { x: 0, z: -25, heading: Math.PI / 2, speed: 0 }
