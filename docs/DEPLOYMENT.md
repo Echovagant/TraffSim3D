@@ -439,7 +439,7 @@ cd TraffSim3D-backend
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-本会话执行 `pytest --collect-only -q` 实测**收集到 275 个用例**（约 2 秒）。
+2026-10-21 实测**收集到 292 个用例**（约 2 秒）。
 完整运行结果见 `docs/M4-VERIFICATION.md`。
 
 覆盖率（需先装 `pytest-cov`）：
@@ -459,6 +459,47 @@ cd TraffSim3D-frontend
 npm run test:run        # Vitest 单元测试
 npm run test:e2e        # Playwright 端到端
 npm run lint            # ESLint（会自动修复）
+```
+
+### 10.3 CI（自动门禁）
+
+仓库自 2026-10-21 起有 CI：[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)，
+每次 push / PR 自动跑四个 job：
+
+| job | 内容 | 阻塞合并 |
+|---|---|---|
+| `backend` | `pytest --cov=app --cov-fail-under=70` + `ruff` + `black --check` | ✅ |
+| `frontend` | `npm run test:coverage`（含 70% 覆盖率阈值）+ `vue-tsc` + `eslint` + `prettier --check` | ✅ |
+| `contract` | 后端契约测试 **+** `npm run contract:check` | ✅ |
+| `e2e` | Playwright 全量 | ⚠️ 暂时不阻塞（见下） |
+
+**`contract` job 必须同时跑那两步**，缺一不可：
+
+1. `pytest tests/contract/` —— 跑**活的 Python sim**，与入库的 TS golden 逐字段
+   **精确相等**地比较；
+2. `npm run contract:check` —— 从 **TS 源码**重新生成 golden，对不上就失败。
+
+只跑第 1 步**看不到 TS 源码的任何变化**（golden 是入库的静态产物），改
+`simCoreMirror.ts` 或 `tick.ts` 时它照样绿；只跑第 2 步则只证明 golden 与 TS
+代码一致，不证明两个实现一致。**两者合起来才是契约。**
+
+> **e2e job 为什么暂时不阻塞**：仓库的 25 张视觉回归基线是在 **Windows +
+> Chromium 1228（headless, SwiftShader）** 上录的。Linux runner 的 Chromium
+> 版本与字体光栅化都不同，像素比对**预期**会不一致，而本机没有 Linux runner
+> 可以验证。因此该 job 标了 `continue-on-error: true`，并且**没有**排除视觉
+> spec、**没有**放宽容差（`maxDiffPixelRatio: 0.005` 是实测推导的）—— 规格不
+> 排除、不放宽容差、不假装它是绿的。等有 Linux 基线后去掉
+> `continue-on-error` 即可转为阻塞。
+
+本地想复现 CI 的 e2e（用独立端口，避免和别的项目抢 5173/8000）：
+
+```powershell
+cd TraffSim3D-backend
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8001   # 另开一个终端
+cd ..\TraffSim3D-frontend
+$env:VITE_BACKEND_PORT = '8001'
+$env:VITE_BACKEND_URL = 'http://localhost:8001'
+npx playwright test --config=<临时配置，端口 5188>                    # 配置跑完即删
 ```
 
 ---
