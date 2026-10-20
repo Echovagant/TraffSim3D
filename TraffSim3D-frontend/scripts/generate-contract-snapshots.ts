@@ -16,7 +16,7 @@
 // The goldens are committed: the backend's test suite must be able to run
 // the full contract on its own, without the frontend toolchain.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -74,20 +74,58 @@ const kernelSpeedSeries = (actions: number[][]): number[] => {
   return series
 }
 
+/**
+ * Is the on-disk golden's *content* the same as what we would write?
+ *
+ * A byte-exact comparison would report every golden as stale on a checkout
+ * whose line endings differ from the generator's: Windows with
+ * `core.autocrlf=true` rewrites the committed LF files as CRLF, and the
+ * generator writes LF. Such a difference is indistinguishable from drift
+ * with a byte compare, so the check would exit 1 on a pristine tree.
+ *
+ * Comparing the parsed JSON is insensitive to line endings, indentation and
+ * a trailing newline, and leaves only genuine drift — including a golden
+ * someone reformatted by hand, which is not a change worth failing on.
+ */
+const sameContent = (raw: string | null, payload: unknown): boolean => {
+  if (raw === null) return false
+  try {
+    return JSON.stringify(JSON.parse(raw)) === JSON.stringify(payload)
+  } catch {
+    // An unparseable golden is stale state, not a crash.
+    return false
+  }
+}
+
 const main = (): void => {
   const checkOnly = process.argv.includes('--check')
   if (!existsSync(VECTOR_PATH)) {
     throw new Error(`vector file not found: ${VECTOR_PATH}`)
   }
-  const vectors = (JSON.parse(readFileSync(VECTOR_PATH, 'utf-8')) as { vectors: Vector[] }).vectors
+  const vectorFile = JSON.parse(readFileSync(VECTOR_PATH, 'utf-8')) as {
+    sample_every?: number
+    vectors: Vector[]
+  }
+  const vectors = vectorFile.vectors
+  // The sample stride comes from the vector file — the same source the
+  // Python side reads. Python's fallback is 5 (`data.get("sample_every", 5)`),
+  // so use 5 here too: dropping the key must not silently change one side's
+  // stride and not the other's, which would surface as a bare
+  // "sample count mismatch" that does not name the cause.
+  const sampleEvery = vectorFile.sample_every ?? 5
 
-  if (!existsSync(SNAPSHOT_DIR)) mkdirSync(SNAPSHOT_DIR, { recursive: true })
+  // Only the write path creates the directory: `contract:check` must not
+  // touch the filesystem.
+  if (!checkOnly && !existsSync(SNAPSHOT_DIR)) mkdirSync(SNAPSHOT_DIR, { recursive: true })
 
   const stale: string[] = []
+  const orphaned: string[] = []
+  const expected = new Set<string>()
   for (const v of vectors) {
     const episode = runEpisode(
       v.scene_kind,
       v.actions.map((a) => a[0]!),
+      sampleEvery,
     )
     const scenario = {
       name: v.name,
@@ -121,20 +159,39 @@ const main = (): void => {
       [`ts_${v.name}.json`, scenario],
       [`ts_kernel_${v.name}.json`, kernel],
     ] as const) {
+      expected.add(fileName)
       const target = resolve(SNAPSHOT_DIR, fileName)
-      const content = `${JSON.stringify(payload, null, 2)}\n`
       if (checkOnly) {
         const current = existsSync(target) ? readFileSync(target, 'utf-8') : null
-        if (current !== content) stale.push(fileName)
+        if (!sameContent(current, payload)) stale.push(fileName)
       } else {
-        writeFileSync(target, content, 'utf-8')
+        writeFileSync(target, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
         console.log(`wrote ${fileName}`)
       }
     }
   }
 
+  // A golden left behind by a removed or renamed vector is stale state too:
+  // no vector produces it, and the snapshot directory should contain exactly
+  // the expected set. It is reported separately because `contract:gen`
+  // cannot repair it — the file has to be deleted.
+  if (checkOnly && existsSync(SNAPSHOT_DIR)) {
+    for (const entry of readdirSync(SNAPSHOT_DIR)) {
+      if (!entry.startsWith('ts_') || !entry.endsWith('.json')) continue
+      if (expected.has(entry)) continue
+      orphaned.push(entry)
+    }
+  }
+
   if (checkOnly && stale.length > 0) {
     console.error(`stale contract snapshots: ${stale.join(', ')}\n` + 'Run: npm run contract:gen')
+    process.exitCode = 1
+  }
+  if (checkOnly && orphaned.length > 0) {
+    console.error(
+      `orphaned contract snapshots (no vector produces them): ${orphaned.join(', ')}\n` +
+        'Delete them, or restore the vector they belong to.',
+    )
     process.exitCode = 1
   }
 }

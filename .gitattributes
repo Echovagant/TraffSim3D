@@ -1,6 +1,5 @@
-# Plan 071 - the cross-language contract goldens are compared byte-exactly by
-# `npm run contract:check`, so their on-disk line endings must be stable.
-# Without this rule, git checks them out with CRLF on Windows
-# (core.autocrlf=true) and the check reports every golden as stale on a
-# pristine clone.
+# Plan 071 - the cross-language contract goldens are checked for content
+# equality by `npm run contract:check`, and git's CRLF checkout on Windows
+# (core.autocrlf=true) would otherwise make every golden look stale on a
+# pristine clone. Pinning them to LF keeps the on-disk form canonical.
 TraffSim3D-backend/tests/contract/snapshots/*.json text eol=lf
