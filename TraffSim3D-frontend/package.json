@@ -23,7 +23,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "contract:gen": "vite-node --config vite.contract.config.ts scripts/generate-contract-snapshots.ts",
-    "contract:check": "vite-node --config vite.contract.config.ts scripts/generate-contract-snapshots.ts --check"
+    "contract:check": "vite-node --config vite.contract.config.ts scripts/generate-contract-snapshots.ts --check",
+    "test:contract": "vite-node --config vite.contract.config.ts scripts/generate-contract-snapshots.ts --check"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.14.0",

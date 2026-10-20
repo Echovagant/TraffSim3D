@@ -6,7 +6,7 @@
       "name": "cross_baseline",
       "scene_kind": "cross",
       "ego_id": "v-1",
-      "n_steps": 100,
+      "n_steps": 95,
       "actions": [
         [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0],
         [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0],
@@ -33,7 +33,7 @@
       "name": "corridor_baseline",
       "scene_kind": "corridor",
       "ego_id": "v-c1",
-      "n_steps": 150,
+      "n_steps": 160,
       "actions": [
         [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0],
         [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0],
@@ -70,7 +70,7 @@
       ]
     },
     {
-      "name": "cross_overaccel",
+      "name": "cross_action_overrange",
       "scene_kind": "cross",
       "ego_id": "v-1",
       "n_steps": 100,

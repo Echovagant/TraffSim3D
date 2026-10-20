@@ -1,5 +1,5 @@
 {
-  "name": "cross_overaccel",
+  "name": "cross_action_overrange",
   "scene_kind": "cross",
   "dt": 0.1,
   "speed_series": [

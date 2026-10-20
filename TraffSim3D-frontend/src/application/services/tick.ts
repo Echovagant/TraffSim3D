@@ -260,6 +260,14 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     // an injected action) and was written in step 2.5. Overwriting it
     // here discarded the policy's output entirely — the replay vehicle
     // drove at the road speed limit.
+    //
+    // The road-end clamp below is therefore deliberately NOT applied to
+    // the replay target: re-arming it would hand the constraint layer
+    // ownership of a speed the policy is supposed to own. The accepted
+    // consequence: a replay vehicle that stalls at a road end reports
+    // `desiredStatus: 'driving'` while its speed is 0 (the Rapier branch
+    // still zeroes the speed). Cosmetic — the vehicle was already stuck
+    // there before this change.
     if (isReplayDriven(ctx, v)) continue
     v.targetSpeed = road.speedLimit
     applyTrafficLightConstraint(v, road, network, ctx)

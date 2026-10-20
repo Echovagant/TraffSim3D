@@ -35,6 +35,15 @@
 //      applies. The policy's output layer has no tanh, so real actions are
 //      arbitrary float64 values and skipping this cast moves the trajectory
 //      by ~1e-10 per step.
+//   6. The two clamp flavours are NOT interchangeable. The action and the
+//      steer are clipped with numpy's `np.clip`, which **propagates NaN**.
+//      The speed is clamped with Python's `max(lo, min(hi, v))`, which
+//      **collapses NaN to the upper bound** (CPython's `min` keeps the
+//      first argument when the comparison is False). A NaN action — a
+//      corrupt checkpoint whose forward pass produced NaN — therefore
+//      saturates the ego at SPEED_LIMIT in Python, and must do the same
+//      here; a NaN-propagating speed clamp would poison the browser
+//      replay's position with NaN instead.
 //
 // The bit-exactness asserted against Python holds for V8's `Math.sin` /
 // `Math.cos` / `Math.atan2`, which ECMA-262 leaves implementation-approximated
@@ -52,8 +61,34 @@ export interface EgoState {
   speed: number
 }
 
-/** Clamp `v` into `[lo, hi]`. Mirrors Python's `max(lo, min(hi, v))`. */
-const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
+/**
+ * numpy's `np.clip(v, lo, hi)`.
+ *
+ * numpy **propagates NaN**: `NaN < lo` and `NaN > hi` are both false, so
+ * neither bound fires and the NaN survives. Python clips the action and
+ * the steer with `np.clip`, so this is the correct helper for both.
+ *
+ * NOT interchangeable with `pythonMaxMin` below — see porting rule 6.
+ */
+const npClip = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
+
+/**
+ * Python's `max(lo, min(hi, v))`.
+ *
+ * CPython's `min(a, b)` keeps `a` when the comparison is False, so
+ * `min(16.67, NaN)` is `16.67` (because `NaN < 16.67` is False), and
+ * `max(0.0, 16.67)` is `16.67`. A NaN argument therefore collapses to the
+ * UPPER bound — unlike numpy's `np.clip`, which propagates it.
+ *
+ * Python's speed update is exactly this expression
+ * (`max(0.0, min(SPEED_LIMIT, speed + accel_cmd * DT))`), so the speed
+ * clamp must use this helper. For every finite value the result is
+ * identical to `npClip`; only NaN differs.
+ */
+const pythonMaxMin = (v: number, lo: number, hi: number): number => {
+  const upper = v < hi ? v : hi
+  return upper > lo ? upper : lo
+}
 
 /**
  * Wrap an angle into `[-pi, pi]` the way CPython's float `%` does.
@@ -82,10 +117,14 @@ const wrapPi = (a: number): number => {
  * The action is rounded to float32 and then clipped — the Python sim does
  * both (`np.float32` cast upstream, `np.clip` here), and the policy's output
  * layer has no tanh, so raw actions can exceed [-1, 1].
+ *
+ * The two clips use **different** helpers on purpose: the action clip is
+ * numpy's `np.clip` (NaN propagates), the speed clamp is Python's
+ * `max(lo, min(hi, v))` (NaN collapses to `hi`). See porting rule 6.
  */
 export const pythonSpeedStep = (speed: number, action0: number, dt: number): number => {
-  const accelCmd = clamp(Math.fround(action0), -1, 1) * PYTHON_SIM.ACCEL_SCALE
-  return clamp(speed + accelCmd * dt, 0, PYTHON_SIM.SPEED_LIMIT)
+  const accelCmd = npClip(Math.fround(action0), -1, 1) * PYTHON_SIM.ACCEL_SCALE
+  return pythonMaxMin(speed + accelCmd * dt, 0, PYTHON_SIM.SPEED_LIMIT)
 }
 
 /**
@@ -106,7 +145,9 @@ export const pythonSteer = (ego: EgoState, target: readonly [number, number]): n
     2 * PYTHON_SIM.EGO_WHEELBASE * Math.sin(alpha),
     PYTHON_SIM.LOOKAHEAD_DISTANCE,
   )
-  return clamp(steer, -PYTHON_SIM.MAX_STEER, PYTHON_SIM.MAX_STEER)
+  // Python: `np.clip(steer, -MAX_STEER, MAX_STEER)` — numpy semantics, so a
+  // NaN steer propagates (the speed clamp is the opposite; see above).
+  return npClip(steer, -PYTHON_SIM.MAX_STEER, PYTHON_SIM.MAX_STEER)
 }
 
 /**

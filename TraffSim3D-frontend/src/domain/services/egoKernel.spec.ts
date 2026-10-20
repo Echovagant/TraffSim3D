@@ -38,6 +38,24 @@ describe('egoKernel — pythonSpeedStep', () => {
     expect(pythonSpeedStep(PYTHON_SIM.SPEED_LIMIT, 1.0, PYTHON_SIM.DT)).toBe(PYTHON_SIM.SPEED_LIMIT)
   })
 
+  it('clamps a NaN action to SPEED_LIMIT, like Python`s max/min tie-breaking', () => {
+    // Python: max(0.0, min(16.67, 5 + nan)) == 16.67.
+    //
+    // CPython's `min(a, b)` keeps `a` when the comparison is False, so
+    // `min(16.67, NaN)` is 16.67 (NaN < 16.67 is False) and the NaN
+    // collapses to the UPPER bound. numpy's `np.clip` would have propagated
+    // it — so the two clamp flavours are not interchangeable, and the
+    // browser replay must saturate exactly like the training sim.
+    //
+    // Measured: `max(0.0, min(16.67, 5 + nan))` -> 16.67.
+    expect(pythonSpeedStep(5, Number.NaN, 0.1)).toBe(16.67)
+    expect(pythonSpeedStep(5, Number.NaN, PYTHON_SIM.DT)).toBe(PYTHON_SIM.SPEED_LIMIT)
+    // The NaN has to survive the ACTION clip (numpy semantics) to reach the
+    // speed clamp — otherwise the ego would accelerate normally instead of
+    // saturating.
+    expect(pythonSpeedStep(0, Number.NaN, PYTHON_SIM.DT)).toBe(PYTHON_SIM.SPEED_LIMIT)
+  })
+
   it('converts the action to float32 first, like Python`s np.float32 cast', () => {
     // Python: float(np.clip(np.float32(0.1), -1, 1)) * 3.0 * 0.1
     //        = 0.03000000044703484
@@ -85,6 +103,16 @@ describe('egoKernel — pythonSteer', () => {
     // yields -0.39425420560955776 here — 1 ULP off from Python.
     expect(pythonSteer({ x: 0, z: 0, heading: -0.7283761257056431, speed: 0 }, [1, 0])).toBe(
       -0.39425420560955743,
+    )
+  })
+
+  it('propagates a NaN steer (numpy clip semantics), unlike the speed clamp', () => {
+    // Python: `np.clip(nan, -MAX_STEER, MAX_STEER)` is nan — numpy's clip
+    // propagates NaN. The steer clip therefore uses the numpy helper and
+    // must NOT collapse to MAX_STEER the way the speed clamp collapses to
+    // SPEED_LIMIT.
+    expect(Number.isNaN(pythonSteer({ x: Number.NaN, z: 0, heading: 0, speed: 0 }, [0, 0]))).toBe(
+      true,
     )
   })
 })
