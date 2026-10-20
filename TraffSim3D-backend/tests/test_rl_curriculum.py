@@ -727,3 +727,61 @@ def test_env_advances_against_the_real_sim_core() -> None:
     assert env._prev_episode_reward == 0.0
     # truncated episodes carry reason "" -> no success credit
     assert env.get_curriculum_status()["success_rate"] == 0.0
+
+
+def test_extra_steps_after_the_time_limit_do_not_record_extra_episodes() -> None:
+    """The truncation flag must be an *edge*, not a level.
+
+    `sim_core` recomputed `truncated` from `step_count >= max_steps` on every
+    step, so once the limit was reached **every** following step also reported
+    `truncated=True`. `CurriculumEnv.step` records an episode whenever
+    `terminated or truncated`, so a caller that did not reset promptly (which
+    Gymnasium forbids but does not prevent) recorded one episode per extra
+    step — and each of those could advance the curriculum again.
+    """
+    env = CurriculumEnv(max_steps=3, eval_window=1)
+    env.reset()
+
+    # Run well past the 3-step limit without resetting.
+    for _ in range(6):
+        env.step(np.array([0.0, 0.0], dtype=np.float32))
+
+    # Exactly ONE episode must have been recorded, not six.
+    assert env.scheduler.state.episodes_on_current_scene == 1
+
+
+def test_extra_steps_after_termination_do_not_record_extra_episodes() -> None:
+    """Same edge-vs-level problem for the terminated flag.
+
+    `sim_core` has always re-reported `terminated=True` on every step after a
+    terminal state (it early-returns `(obs, 0.0, True, False, ...)`), so this
+    was never specific to truncation.
+    """
+    env = CurriculumEnv(max_steps=500, eval_window=1)
+    env.reset()
+
+    # Drive until the episode actually ends on its own.
+    ended = False
+    for _ in range(400):
+        _, _, terminated, truncated, _ = env.step(np.array([1.0, 0.0], dtype=np.float32))
+        if terminated or truncated:
+            ended = True
+            break
+    assert ended, "the episode should have terminated within 400 steps"
+
+    # Keep stepping without resetting.
+    for _ in range(5):
+        env.step(np.array([1.0, 0.0], dtype=np.float32))
+
+    # The observable here is the number of *advancements*, not the episode
+    # counter: `advance()` resets `episodes_on_current_scene` to 0, so that
+    # counter cannot show how many episodes were recorded. `scene_history`
+    # can — one entry per advancement, each carrying the lifetime episode
+    # count for the scene it left behind.
+    #
+    # Before the fix the extra steps re-reported `terminated=True`, so each
+    # one recorded another episode and advanced again: one episode walked the
+    # whole curriculum (4 history entries, current_scene_idx=4).
+    history = env.scheduler.state.scene_history
+    assert len(history) == 1, f"expected exactly one advancement, got {history}"
+    assert history[0]["episodes"] == 1, f"expected one recorded episode, got {history}"

@@ -69,6 +69,51 @@ def test_max_steps_truncates() -> None:
     assert truncated
 
 
+def test_truncation_latches_and_freezes_the_world() -> None:
+    """Plan 067: once the time limit is hit, the episode is over.
+
+    Before the fix, `truncated` was *recomputed* from
+    `step_count >= max_steps` on every step, so the world kept simulating
+    past the limit: the ego kept moving and kept accruing the alive bonus,
+    and the episode's "final" state was not stable or reproducible. The flag
+    is now latched, and a step taken after the limit short-circuits.
+    """
+    s = SimCore(max_steps=5)
+    s.reset()
+
+    # Step until the limit is reached.
+    truncated = False
+    for _ in range(5):
+        _, _, _, truncated, _ = s.step(np.array([0.0, 0.0], dtype=np.float32))
+    assert truncated is True
+
+    # The world must now be frozen: no reward, no motion, no step advance.
+    z_at_limit = s.ego.z
+    steps_at_limit = s.step_count
+    _, reward, _, still_truncated, _ = s.step(np.array([0.0, 0.0], dtype=np.float32))
+    assert still_truncated is True
+    assert reward == 0.0
+    assert s.ego.z == z_at_limit
+    assert s.step_count == steps_at_limit
+
+
+def test_reset_clears_the_truncation_latch() -> None:
+    """A new episode must not inherit the previous one's truncation."""
+    s = SimCore(max_steps=3)
+    s.reset()
+    for _ in range(3):
+        _, _, _, truncated, _ = s.step(np.array([0.0, 0.0], dtype=np.float32))
+    assert truncated is True
+    assert s._truncated is True
+
+    s.reset()
+    assert s._truncated is False
+    assert s.step_count == 0
+    # The first step of the new episode is not truncated.
+    _, _, _, truncated, _ = s.step(np.array([0.0, 0.0], dtype=np.float32))
+    assert truncated is False
+
+
 def test_pure_pursuit_drives_north() -> None:
     """Running 30 steps with mild forward accel moves ego significantly north."""
     s = SimCore()

@@ -70,6 +70,13 @@ class SimCore:
     max_steps: int = MAX_STEPS_DEFAULT
     _terminated: bool = False
     _terminated_reason: str = ""
+    # Plan 067: the time-limit (truncation) flag is *latched*, mirroring
+    # `_terminated`. It used to be recomputed from `step_count >= max_steps`
+    # on every step, so once the limit was reached the world kept simulating
+    # and kept accruing the alive bonus, and every following step re-reported
+    # `truncated=True` — which made `CurriculumEnv` record one episode per
+    # extra step. Now the episode's final state is stable once truncated.
+    _truncated: bool = False
     # Plan 048: scene_kind determines road topology and Pure Pursuit target.
     # 'cross' (default, 044 behavior): single 4-way intersection.
     # 'corridor' (048): 2 4-way intersections + 60m NS corridor between.
@@ -99,6 +106,7 @@ class SimCore:
         self.step_count = 0
         self._terminated = False
         self._terminated_reason = ""
+        self._truncated = False
         return self._obs()
 
     def _reset_corridor(self) -> np.ndarray:
@@ -129,6 +137,7 @@ class SimCore:
         self.step_count = 0
         self._terminated = False
         self._terminated_reason = ""
+        self._truncated = False
         return self._obs()
 
     def _reset_t_junction(self) -> np.ndarray:
@@ -151,6 +160,7 @@ class SimCore:
         self.step_count = 0
         self._terminated = False
         self._terminated_reason = ""
+        self._truncated = False
         return self._obs()
 
     def _reset_roundabout(self) -> np.ndarray:
@@ -177,12 +187,18 @@ class SimCore:
         self.step_count = 0
         self._terminated = False
         self._terminated_reason = ""
+        self._truncated = False
         return self._obs()
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         """One 0.1s step. Returns (obs, reward, terminated, truncated, info)."""
         if self._terminated:
             return self._obs(), 0.0, True, False, {"reason": self._terminated_reason}
+        if self._truncated:
+            # Plan 067: the time limit was already reached — the episode is
+            # over. Freeze the world so the final state is stable and
+            # reproducible instead of drifting on for every extra step.
+            return self._obs(), 0.0, False, True, {"reason": self._terminated_reason, "progress": 0.0}
 
         # 1) Apply ego control via accel + Pure Pursuit steer
         accel_cmd = float(np.clip(action[0], -1.0, 1.0)) * 3.0   # m/s²
@@ -300,12 +316,15 @@ class SimCore:
                     reward += 5.0
 
         # Check max steps
-        truncated = False
+        # Plan 067: latch the truncation instead of recomputing it every
+        # step. The step that reaches the limit reports `truncated=True` and
+        # still earns its reward; every later step short-circuits at the top
+        # of `step()`.
         if self.step_count >= self.max_steps and not self._terminated:
-            truncated = True
+            self._truncated = True
 
         info = {"reason": self._terminated_reason, "progress": progress}
-        return self._obs(), float(reward), self._terminated, truncated, info
+        return self._obs(), float(reward), self._terminated, self._truncated, info
 
     def _check_red_light_run(self) -> bool:
         """Ego is in intersection AND light is red for its direction."""
