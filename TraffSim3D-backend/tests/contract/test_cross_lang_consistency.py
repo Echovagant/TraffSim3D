@@ -1,32 +1,55 @@
-"""Plan 050: cross-language consistency test.
+"""Plan 071: cross-language consistency test (executable).
 
-The Python sim (sim_core.py) and TS sim (worldStore + tick.ts) are
-independent implementations — not a 1:1 port. They share the same
-ego dynamics formula (Pure Pursuit + Euler integration) but differ
-in NPC behavior, signals, and physics. A state-trajectory diff
-would be brittle (NPC positions diverge immediately).
+The Python training sim (`app/apps/rl/sim_core.py`) and the TypeScript
+contract mirror (`TraffSim3D-frontend/src/application/services/simCoreMirror.ts`)
+are two independent implementations of the same model. This test asserts
+they agree **exactly** — not within a tolerance.
 
-This test verifies the **behavioral contract** instead:
-  - Both sims start ego at the same initial state
-  - Both sims produce the same termination reason for the same
-    fixed input action sequence (action=[0, 0] = no-op)
-  - Both sims terminate within ±20% of expected step count
-  - Both sims achieve the same final ego z position (≈ z_start + speed * dt * n_steps)
+Why exact equality: both sides execute the same floating-point operation
+sequence (see the cross-language contract (ADR-008) §4.1 constraint 4),
+so their trajectories are bit-identical. Measured on the `cross` vector:
+0 differences across all 58 steps of the `speed` and `x` series, and
+identical `final_z` (26.20100000000003) and `final_x` (1.467525924532092e-14).
+A tolerance would hide exactly the failure this contract exists to catch:
+silent drift on one side.
 
-The test runs both sims against a test vector and compares only the
-"shape" of the outcome. NPC state is intentionally not compared.
+Two golden files are published per vector by the TS side:
+  - `ts_<name>.json`       — scenario level (mirror trajectory)
+  - `ts_kernel_<name>.json` — kernel level (product replay speed series)
+
+Regenerate them with:
+    cd TraffSim3D-frontend && npm run contract:gen
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from app.apps.rl.sim_core import SimCore
 
 CONTRACT_DIR = Path(__file__).parent
 VECTOR_PATH = CONTRACT_DIR / "test_vector.json"
+SNAPSHOT_DIR = CONTRACT_DIR / "snapshots"
+
+_REGEN_HINT = (
+    "Regenerate the TS contract snapshots with: " "cd TraffSim3D-frontend && npm run contract:gen"
+)
+
+
+def _load_vectors() -> list[dict]:
+    data = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
+    return data["vectors"]
+
+
+def _vector(name: str) -> dict:
+    for v in _load_vectors():
+        if v["name"] == name:
+            return v
+    raise KeyError(name)
 
 
 def _drive_to_completion(core: SimCore, actions: list[list[float]]) -> dict:
@@ -46,32 +69,40 @@ def _drive_to_completion(core: SimCore, actions: list[list[float]]) -> dict:
 
 
 def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
-    """Generate (or refresh) the Python snapshot for vector `v`."""
+    """Generate the Python snapshot for vector `v` (live, every run)."""
     core = SimCore(scene_kind=v["scene_kind"])
     core.reset()
     samples = []
-    samples.append({
-        "step": 0,
-        "ego_id": v["ego_id"],
-        "x": float(core.ego.x), "z": float(core.ego.z),
-        "heading": float(core.ego.heading), "speed": float(core.ego.speed),
-    })
+    samples.append(
+        {
+            "step": 0,
+            "ego_id": v["ego_id"],
+            "x": float(core.ego.x),
+            "z": float(core.ego.z),
+            "heading": float(core.ego.heading),
+            "speed": float(core.ego.speed),
+        }
+    )
     for i, action in enumerate(v["actions"], start=1):
         core.step(np.asarray(action, dtype=np.float32))
         if i % sample_every == 0 or i == len(v["actions"]):
-            samples.append({
-                "step": i,
-                "ego_id": v["ego_id"],
-                "x": float(core.ego.x), "z": float(core.ego.z),
-                "heading": float(core.ego.heading), "speed": float(core.ego.speed),
-            })
+            samples.append(
+                {
+                    "step": i,
+                    "ego_id": v["ego_id"],
+                    "x": float(core.ego.x),
+                    "z": float(core.ego.z),
+                    "heading": float(core.ego.heading),
+                    "speed": float(core.ego.speed),
+                }
+            )
         if core._terminated:
             break
     return {
         "name": v["name"],
         "scene_kind": v["scene_kind"],
         "ego_id": v["ego_id"],
-        "tolerance": 0.01,
+        "tolerance": 0,
         "final_state": {
             "terminated": core._terminated,
             "reason": core._terminated_reason,
@@ -82,78 +113,116 @@ def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
     }
 
 
+def _require_snapshot(path: Path) -> dict:
+    """Load a TS golden, failing loudly when it is missing.
+
+    A missing golden used to make this test *skip* — a silent pass that
+    hid the fact that the contract had never run.
+    """
+    if not path.exists():
+        pytest.fail(f"missing TS contract snapshot: {path.name}. {_REGEN_HINT}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def test_python_consistency_baseline() -> None:
     """Run Python sim for each vector, save snapshot, validate behavior."""
-    vec = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
+    data = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
     snapshots = CONTRACT_DIR / "snapshots"
     snapshots.mkdir(parents=True, exist_ok=True)
 
-    for v in vec["vectors"]:
-        snap = _ensure_python_snapshot(v, sample_every=vec.get("sample_every", 5))
-        # Save snapshot for the TS-side comparison
+    for v in data["vectors"]:
+        snap = _ensure_python_snapshot(v, sample_every=data.get("sample_every", 5))
         (snapshots / f"python_{v['name']}.json").write_text(
-            json.dumps(snap, indent=2), encoding="utf-8",
+            json.dumps(snap, indent=2),
+            encoding="utf-8",
         )
-        # Python sim sanity checks
         assert snap["final_state"]["terminated"] is True
-        # cross: ego passes through 1 intersection, terminates at z > 5
-        # corridor: ego passes through 2 intersections, terminates at z > 25
         if v["scene_kind"] == "cross":
             assert snap["final_state"]["reason"] in ("success", "collision", "red_light")
-            # The action sequence is mild accel; for cross, success is likely
-            # but we accept any physical termination reason
         elif v["scene_kind"] == "corridor":
             assert snap["final_state"]["reason"] in (
-                "success_corridor", "collision", "red_light",
+                "success_corridor",
+                "collision",
+                "red_light",
             )
 
 
-def test_python_and_ts_terminations_match_when_ts_snapshot_exists() -> None:
-    """If a TS snapshot exists (from Playwright e2e), verify the two
-    sims agree on termination reason and final state within tolerance.
+def test_contract_snapshots_are_present() -> None:
+    """Guard the guard — a missing TS snapshot must FAIL, never skip."""
+    missing = []
+    for v in _load_vectors():
+        for prefix in ("ts_", "ts_kernel_"):
+            p = SNAPSHOT_DIR / f"{prefix}{v['name']}.json"
+            if not p.exists():
+                missing.append(p.name)
+    assert not missing, "missing TS contract snapshots: " + ", ".join(missing) + ". " + _REGEN_HINT
 
-    This test is the core contract check. When the TS snapshot is
-    missing, it skips (the e2e test generates it; CI should run e2e
-    before backend).
+
+@pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])
+def test_python_and_ts_agree_exactly(vector_name: str) -> None:
+    """L3: the TS contract mirror reproduces the Python sim exactly."""
+    v = _vector(vector_name)
+    data = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
+    sample_every = data.get("sample_every", 5)
+
+    py = _ensure_python_snapshot(v, sample_every=sample_every)
+    ts = _require_snapshot(SNAPSHOT_DIR / f"ts_{v['name']}.json")
+
+    py_reason = py["final_state"]["reason"]
+    ts_reason = ts["final_state"]["reason"]
+    assert py_reason == ts_reason, (
+        f"{v['name']}: termination reason mismatch " f"(python={py_reason}, ts={ts_reason})"
+    )
+
+    py_step = py["final_state"]["final_step"]
+    ts_step = ts["final_state"]["final_step"]
+    assert py_step == ts_step, f"{v['name']}: step count mismatch (python={py_step}, ts={ts_step})"
+
+    py_z = py["final_state"]["final_z"]
+    ts_z = ts["final_state"]["final_z"]
+    assert py_z == ts_z, f"{v['name']}: final z mismatch (python={py_z!r}, ts={ts_z!r})"
+
+    py_samples = py["samples"]
+    ts_samples = ts["samples"]
+    assert len(py_samples) == len(ts_samples), (
+        f"{v['name']}: sample count mismatch " f"(python={len(py_samples)}, ts={len(ts_samples)})"
+    )
+    for ps, tsam in zip(py_samples, ts_samples, strict=True):
+        assert ps["step"] == tsam["step"], (
+            f"{v['name']}: sample step mismatch " f"(python={ps['step']}, ts={tsam['step']})"
+        )
+        for key in ("x", "z", "heading", "speed"):
+            assert ps[key] == tsam[key], (
+                f"{v['name']}: sample step={ps['step']} field={key} "
+                f"(python={ps[key]!r}, ts={tsam[key]!r})"
+            )
+
+
+@pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])
+def test_python_and_ts_kernel_speed_series_agree(vector_name: str) -> None:
+    """L1: the product replay path's speed series matches Python exactly.
+
+    The TS series covers the whole action list. Past the step where Python
+    terminates, Python's `SimCore.step()` freezes (its early return leaves
+    the ego untouched), so the speed stays at the terminal value; the TS
+    side keeps integrating but is clamped by the same speed limit. Both
+    tails therefore agree.
     """
-    vec = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
-    snapshots = CONTRACT_DIR / "snapshots"
+    v = _vector(vector_name)
 
-    for v in vec["vectors"]:
-        py_path = snapshots / f"python_{v['name']}.json"
-        ts_path = snapshots / f"ts_{v['name']}.json"
-        if not py_path.exists():
-            # Run the python generator first
-            snap = _ensure_python_snapshot(v, sample_every=vec.get("sample_every", 5))
-            py_path.write_text(json.dumps(snap, indent=2), encoding="utf-8")
-        if not ts_path.exists():
-            # No TS snapshot yet — skip (e2e test creates it)
-            continue
-        py = json.loads(py_path.read_text(encoding="utf-8"))
-        ts = json.loads(ts_path.read_text(encoding="utf-8"))
+    core = SimCore(scene_kind=v["scene_kind"])
+    core.reset()
+    py_series: list[float] = []
+    for action in v["actions"]:
+        core.step(np.asarray(action, dtype=np.float32))
+        py_series.append(float(core.ego.speed))
 
-        # Both must terminate with the same kind of reason (success* or fail*)
-        py_reason = py["final_state"]["reason"]
-        ts_reason = ts["final_state"]["reason"]
-        assert py_reason == ts_reason, (
-            f"{v['name']}: termination reason mismatch "
-            f"(python={py_reason}, ts={ts_reason})"
-        )
+    kernel = _require_snapshot(SNAPSHOT_DIR / f"ts_kernel_{v['name']}.json")
+    ts_series = kernel["speed_series"]
 
-        # Final z should be close (within 1m of each other)
-        py_z = py["final_state"]["final_z"]
-        ts_z = ts["final_state"]["final_z"]
-        assert abs(py_z - ts_z) < 1.0, (
-            f"{v['name']}: final z diverges "
-            f"(python={py_z:.2f}, ts={ts_z:.2f})"
-        )
-
-        # Step counts within 20% of each other
-        py_step = py["final_state"]["final_step"]
-        ts_step = ts["final_state"]["final_step"]
-        if py_step > 0 and ts_step > 0:
-            ratio = abs(py_step - ts_step) / max(py_step, ts_step)
-            assert ratio < 0.20, (
-                f"{v['name']}: step count diverges > 20% "
-                f"(python={py_step}, ts={ts_step})"
-            )
+    assert len(py_series) == len(ts_series), (
+        f"{v['name']}: kernel series length mismatch "
+        f"(python={len(py_series)}, ts={len(ts_series)})"
+    )
+    for i, (a, b) in enumerate(zip(py_series, ts_series, strict=True)):
+        assert a == b, f"{v['name']}: kernel speed[{i}] mismatch " f"(python={a!r}, ts={b!r})"
