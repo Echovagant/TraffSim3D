@@ -32,6 +32,18 @@ axes are priced, which is what makes the reward a mitigation for the
 green's *remaining* time, not its wall-clock duration, so a policy that
 extends on every step would starve the cross traffic — and the
 cross traffic's waiting is in the reward.
+
+Minimum green time — Plan 074 T7 (§2 D5). A controller that shortens the
+phase on every decision would *flicker* the light: 0.6 s per phase,
+which no driver can react to and which — because the vehicles never come
+to a full stop — was scored as "no delay at all" and therefore looked
+optimal inside the model. The fix is a lower bound on the green phase's
+remaining time, ``MIN_GREEN_SECS``. It is enforced **here**, in the
+environment (the action is masked and the light is not touched), and NOT
+in the physical light model (``sim_core``) — that model is the
+cross-language contract's sensitive area and its default behaviour must
+stay bit-identical. The browser's ``RLController`` enforces the same
+bound on its side.
 """
 
 from __future__ import annotations
@@ -42,7 +54,14 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from .sim_core import DT, MAX_STEPS_DEFAULT, SIGNAL_ACTION_NAMES, SimCore
+from .sim_core import (
+    DT,
+    MAX_STEPS_DEFAULT,
+    MIN_GREEN_SECS,
+    PHASE_ADJUST_SECS,
+    SIGNAL_ACTION_NAMES,
+    SimCore,
+)
 
 # The observation dimensionality (Plan 074 §2 D1).
 SIG_OBS_DIM = 6
@@ -112,9 +131,17 @@ class SignalEnv(gym.Env[np.ndarray, int]):
                 f"signal action index {index} out of range; expected 0..{len(SIGNAL_ACTION_NAMES) - 1}"
             )
         name = SIGNAL_ACTION_NAMES[index]
-        # The action is queued and consumed by this step's light update
-        # (Plan 074 D3: applied *before* the step, consumed *in* it).
-        self.core.light.apply_action(name)
+        # Plan 074 T7 (§2 D5): the minimum green time. `shorten_red`
+        # advances the swap, which takes `PHASE_ADJUST_SECS` off the
+        # *current green's* remaining time — so applying it when the green
+        # has less than `MIN_GREEN_SECS + PHASE_ADJUST_SECS` left would
+        # push the green below the minimum. The action is then **masked**:
+        # the light is not touched at all.
+        masked = name == "shorten_red" and not self._may_shorten_red()
+        if not masked:
+            # The action is queued and consumed by this step's light update
+            # (Plan 074 D3: applied *before* the step, consumed *in* it).
+            self.core.light.apply_action(name)
 
         _, _, terminated, truncated, core_info = self.core.step(self._ego_action)
 
@@ -128,6 +155,7 @@ class SignalEnv(gym.Env[np.ndarray, int]):
 
         info: dict[str, Any] = {
             "action": name,
+            "masked": masked,
             "queue_ns": queue_ns,
             "queue_ew": queue_ew,
             "delay": delay,
@@ -142,6 +170,28 @@ class SignalEnv(gym.Env[np.ndarray, int]):
         pass
 
     # -- internals ----------------------------------------------------
+
+    def _may_shorten_red(self) -> bool:
+        """May a `shorten_red` action be applied right now?
+
+        Plan 074 T7 (§2 D5): the minimum green time.
+
+        The Python light model has a single phase clock, and `shorten_red`
+        advances the swap by `PHASE_ADJUST_SECS` — so it takes exactly that
+        much off the *current green's* remaining time, which is
+        `cycle_duration - cycle_timer` (the clock advances one second per
+        second of wall clock, so that value is the green's remaining
+        seconds). Applying the action when the result would be below
+        `MIN_GREEN_SECS` is refused: the action is masked and the light is
+        not touched.
+
+        The rule is the same one the browser's `RLController` applies to
+        its green phase, and the constant is the same number on both
+        sides (a cross-language contract constant).
+        """
+        light = self.core.light
+        remaining = light.cycle_duration - light.cycle_timer
+        return remaining - PHASE_ADJUST_SECS >= MIN_GREEN_SECS
 
     def _park_ego(self) -> None:
         """Move the ego out of the traffic.

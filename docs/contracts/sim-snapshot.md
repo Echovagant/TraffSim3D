@@ -202,7 +202,8 @@ the same shape — looks like this:
     ],
     "all_red_seconds": 3,
     "phase_adjust_seconds": 5,
-    "max_green_seconds": 60
+    "max_green_seconds": 60,
+    "min_green_seconds": 10
   },
   "final_state": {
     "terminated": true,
@@ -233,6 +234,7 @@ the same shape — looks like this:
 | `signal_vocabulary.all_red_seconds` | The all-red clearance (s) applied by `preempt` / `force_all_red`. Compared against `sim_core.ALL_RED_SECS`. |
 | `signal_vocabulary.phase_adjust_seconds` | The phase-adjust amount (s) applied by `extend_green` (+5 s) and `shorten_red` (-5 s). Compared against `sim_core.PHASE_ADJUST_SECS`. |
 | `signal_vocabulary.max_green_seconds` | The upper bound (s) on a green phase's **remaining** time after `extend_green`. Compared against `sim_core.MAX_GREEN_SECS`. |
+| `signal_vocabulary.min_green_seconds` | The lower bound (s) on a green phase's **remaining** time — a green may not be shortened below it (Plan 074 T7). Compared against `sim_core.MIN_GREEN_SECS`. |
 | `light_override` | **Optional** — present only when the vector has one. The light the mirror actually ran with: `{"ns_green": …, "ew_green": …}`. The Python side cross-checks it against the vector's copy. |
 | `signal_actions` | **Optional** — present only when the vector has some. The signal-action sequence the mirror actually applied: `[{"step": N, "action": "…"}, …]`. **The Python side reads the sequence from here** (the golden is the single source it applies, exactly like the `signal_vocabulary` block) and cross-checks it against the vector's copy, so a golden that was not regenerated after a vector edit cannot hide the drift. |
 | `final_state.terminated` | The episode ended by a **termination** — success, collision or red light. |
@@ -556,6 +558,40 @@ Sprint 2 的交付审阅里复现了一个**真实缺陷**：两侧的「清空�
 Sprint 3 的策略是**照着这个动作空间训练**的，事后再改语义就作废了训练结果。
 上限沿用项目既有的 `MAX_GREEN_SECS` 约定（`ActuatedController` 同款），
 并作为第三个常量进入 L4 词汇断言。
+
+### Sprint 3 T7 — 最小绿灯时间（约束加在控制器层，不动物理灯模型）
+
+Plan 074 §2 D5 实测发现：模型允许一个「闪烁」调度（每步 `shorten_red`），每个相位
+只剩 0.6 s，车辆**不停车**因而不计延误，奖励恰好 **0.0**——严格优于任何诚实调度，
+是个退化策略。
+
+**修法**：加最小绿灯时间 `MIN_GREEN_SECS = 10`，与既有的 `MIN_RED_SECS` 对称——
+「红灯不短于 10 s，绿灯也不短于 10 s」。**加在控制器 / 环境层**：
+
+- Python：`SignalEnv` 把会破坏下限的 `shorten_red` **屏蔽**（动作不施加，灯不动作）；
+  `sim_core.TrafficLight.consume_actions` 与换相逻辑**一字未动**；
+- 浏览器：`RLController.shrinkRed` 给绿灯相位加同样的下限（红灯相位的
+  `MIN_RED_SECS` 下限保持不变，黄灯/全红仍然无下限）；
+- 两侧各持一份常量，作为第四个常量进 L4 词汇断言
+  （`signal_vocabulary.min_green_seconds`）。
+
+**为什么不动物理灯模型**：物理灯模型是跨语言契约的敏感区，而默认周期 30 s > 10 s，
+本来也不受这条约束影响 ⇒ 契约黄金的**轨迹部分零改动**。本次只有
+`signal_vocabulary` 块多了一个字段：10 个 golden 全部是**纯插入**（20 增 10 删，
+删掉的那 10 行只是被插入行挤掉逗号的上一行，字段值未变），10 个 `ts_kernel_*.json`
+逐字节不变。
+
+**实测（600 步，同一初始状态）**：
+
+| 调度 | T7 之前 | T7 之后 |
+|---|---|---|
+| 默认（`no_op`，30/30 交替） | −109.2 | −109.2（未变） |
+| 闪烁（每步 `shorten_red`） | **0.0** | **−97.2**（退化成 15 s/15 s 的合法定时方案） |
+
+⇒ 「0 延误白拿」的退化没了，但**闪烁仍然优于默认**：Python 的灯模型**换相零损耗**
+（没有黄灯、没有全红），车辆也完全能在 15 s 绿灯内清空路口，所以对「队列长度曲线下
+面积」这个延误指标而言，周期越短越划算。真正还缺的是 D5 诊断里的第 (b) 项——
+**路口冲突模型**（以及每次换相的清空时间），留给 Sprint 5 的「训练环境与浏览器同源」。
 
 ### The signal observation schema — schema only, never values (Plan 074)
 

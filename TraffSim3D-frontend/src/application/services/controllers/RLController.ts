@@ -11,7 +11,8 @@
 //   extend_green          the current light's remaining time grows by 5 s
 //                         (never past MAX_GREEN_SECS)
 //   shorten_red           the current light's remaining time shrinks by 5 s
-//                         (never below the minimum-red floor)
+//                         (never below the minimum-red floor on a red,
+//                         never below the minimum-green floor on a green)
 //   preempt /
 //   force_all_red         the light holds AllRed for 3 s
 //   no_op                 nothing
@@ -41,6 +42,7 @@ import { LightPhase } from '@domain/value-objects/Phase'
 import {
   ALL_RED_SECS,
   MAX_GREEN_SECS,
+  MIN_GREEN_SECS,
   MIN_RED_SECS,
   PHASE_ADJUST_SECS,
   type SignalActionName,
@@ -65,14 +67,22 @@ export interface RLControllerDeps {
 /**
  * Shorten a phase by the phase-adjust step.
  *
- * The minimum-red floor (`MIN_RED_SECS` — the `ActuatedController`'s
- * existing convention) applies to the **red** phase only: a red light
- * never drops below it. A green light must still be able to expire,
- * otherwise it could never turn yellow, so there the floor is zero.
+ * The floors are the project's existing convention, applied per phase:
+ * a **red** light never drops below `MIN_RED_SECS` and a **green** light
+ * never drops below `MIN_GREEN_SECS` (Plan 074 T7). The green floor is
+ * what stops a controller that shortens on every decision from
+ * *flickering* the light — 0.6 s per phase, which no driver can react
+ * to. The yellow and all-red phases have no floor: they are clearance
+ * intervals, not service intervals.
+ *
+ * Mirrors the Python training sim, where the same bound is enforced by
+ * the environment masking the action (`app/apps/rl/signal_env.py`) — the
+ * physical light model itself is untouched.
  */
 const shrinkRed = (duration: number, phase: LightPhase): number => {
   const next = duration - PHASE_ADJUST_SECS
   if (phase === LightPhase.Red) return Math.max(next, MIN_RED_SECS)
+  if (phase === LightPhase.Green) return Math.max(next, MIN_GREEN_SECS)
   return Math.max(next, 0)
 }
 

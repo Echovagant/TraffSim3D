@@ -33,6 +33,7 @@ from app.apps.rl.sim_core import (
     ALL_RED_SECS,
     MAX_GREEN_SECS,
     MAX_STEPS_DEFAULT,
+    MIN_GREEN_SECS,
     PHASE_ADJUST_SECS,
     SIGNAL_ACTION_NAMES,
     SimCore,
@@ -368,6 +369,15 @@ def test_signal_action_vocabulary_matches_the_typescript_golden(vector_name: str
     assert ts_max_green == MAX_GREEN_SECS, (
         f"{v['name']}: max-green bound mismatch "
         f"(typescript={ts_max_green}, python={MAX_GREEN_SECS})"
+    )
+
+    # Plan 074 T7: the minimum green time is a contract constant too —
+    # it is what stops a controller from flickering the light (a phase
+    # shorter than the minimum is never shorter than this).
+    ts_min_green = vocab["min_green_seconds"]
+    assert ts_min_green == MIN_GREEN_SECS, (
+        f"{v['name']}: min-green bound mismatch "
+        f"(typescript={ts_min_green}, python={MIN_GREEN_SECS})"
     )
 
 

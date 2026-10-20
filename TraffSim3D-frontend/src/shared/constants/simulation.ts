@@ -182,6 +182,21 @@ export const GREEN_EXTENSION_STEP = 5
 /** Min red duration for ActuatedController (s). Below this the
  *  light won't go green even with empty opposite axis. */
 export const MIN_RED_SECS = 10
+/**
+ * Min green duration (s). Below this the light won't turn yellow — a
+ * green must last long enough for a driver to react to it.
+ *
+ * Plan 074 T7: the symmetric counterpart of `MIN_RED_SECS` — "a red is
+ * never shorter than `MIN_RED_SECS`, a green is never shorter than
+ * `MIN_GREEN_SECS`". It exists because a controller that shortens the
+ * phase on every decision would otherwise *flicker* the light (0.6 s per
+ * phase), which no driver can react to.
+ *
+ * It is a **cross-language contract constant**: the Python training sim
+ * owns its own copy (`app/apps/rl/sim_core.py` `MIN_GREEN_SECS`) and the
+ * contract compares the two.
+ */
+export const MIN_GREEN_SECS = 10
 /** Yellow clearance (s) — fixed, not shortened. */
 export const YELLOW_CLEAR_SECS = 3
 /** Default controller kind at app startup. */

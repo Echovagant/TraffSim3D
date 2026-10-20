@@ -14,6 +14,7 @@ import { LightPhase } from '@domain/value-objects/Phase'
 import {
   ALL_RED_SECS,
   MAX_GREEN_SECS,
+  MIN_GREEN_SECS,
   MIN_RED_SECS,
   PHASE_ADJUST_SECS,
 } from '@shared/constants/simulation'
@@ -137,13 +138,33 @@ describe('RLController — the five actions', () => {
     expect(c.decide(light, net, 0).duration).toBe(MIN_RED_SECS)
   })
 
-  it('shorten_red on a non-red light has no minimum-red floor', () => {
-    // The floor protects the *red* phase: a green light must still be able
-    // to expire, otherwise it could never turn yellow.
+  it('shorten_red never drops a green below the minimum-green floor', () => {
+    // Plan 074 T7: the symmetric counterpart of the red floor — "a red
+    // is never shorter than MIN_RED_SECS, a green is never shorter than
+    // MIN_GREEN_SECS". Without it a controller that shortens on every
+    // decision flickers the light (0.6 s per phase), which no driver can
+    // react to (ADR-008).
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 6 })
+    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: MIN_GREEN_SECS + 2 })
     c.applyAction(light, 'shorten_red')
-    expect(c.decide(light, net, 0).duration).toBe(1)
+    expect(c.decide(light, net, 0).duration).toBe(MIN_GREEN_SECS)
+  })
+
+  it('shorten_red still shrinks a green while there is room', () => {
+    const c = new RLController()
+    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
+    c.applyAction(light, 'shorten_red')
+    expect(c.decide(light, net, 0).duration).toBe(30 - PHASE_ADJUST_SECS)
+  })
+
+  it('shorten_red on a yellow light has no floor', () => {
+    // The clearance phases are not service intervals: the yellow must
+    // keep its zero floor (it has to expire), and the all-red clearance
+    // is not shortened at all.
+    const c = new RLController()
+    const light = makeTestLight({ phase: LightPhase.Yellow, phaseRemaining: 3 })
+    c.applyAction(light, 'shorten_red')
+    expect(c.decide(light, net, 0).duration).toBe(0)
   })
 
   it('preempt holds the light AllRed for 3 s, then the phase resumes', () => {

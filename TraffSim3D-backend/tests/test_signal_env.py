@@ -16,7 +16,9 @@ import pytest
 from app.apps.rl.signal_env import MAX_QUEUE, SIG_OBS_DIM, SignalEnv
 from app.apps.rl.sim_core import (
     DT,
+    MIN_GREEN_SECS,
     NPC_SPEED,
+    PHASE_ADJUST_SECS,
     SIGNAL_ACTION_NAMES,
     SimCore,
     Vehicle,
@@ -191,3 +193,140 @@ def test_an_out_of_range_action_is_rejected() -> None:
 
     with pytest.raises(ValueError):
         env.step(len(SIGNAL_ACTION_NAMES))
+
+
+# --------------------------------------------------------------------------
+# Plan 074 T7: the minimum green time (§2 D5)
+# --------------------------------------------------------------------------
+
+
+def test_the_env_refuses_to_shorten_a_green_below_the_minimum_green_time() -> None:
+    """The environment masks `shorten_red` when the green has too little
+    time left — and the light is not touched at all.
+
+    The mask lives in the environment, not in the physical light model:
+    `sim_core.TrafficLight.consume_actions` is untouched, so the
+    cross-language contract's default behaviour stays bit-identical.
+    """
+    env = SignalEnv(max_steps=60)
+    env.reset(seed=0)
+    light = env.core.light
+
+    # 12 s of green left: a shorten would take it to 7 s, below the
+    # 10 s minimum → the action must be masked.
+    light.cycle_timer = light.cycle_duration - 12.0
+    before = light.cycle_timer
+    _, _, _, _, info = env.step(ACTION_INDEX["shorten_red"])
+
+    assert info["masked"] is True
+    # The light was not touched by the action: the only clock movement is
+    # the step's own DT tick.
+    assert light.cycle_timer == pytest.approx(before + DT)
+
+    # With 20 s of green left there IS room: the shorten is applied and
+    # takes the phase-adjust step off the green's remaining time.
+    light.cycle_timer = light.cycle_duration - 20.0
+    before = light.cycle_timer
+    _, _, _, _, info = env.step(ACTION_INDEX["shorten_red"])
+
+    assert info["masked"] is False
+    assert light.cycle_timer == pytest.approx(before + PHASE_ADJUST_SECS + DT)
+    # ... and the green's remaining is still at or above the minimum.
+    assert light.cycle_duration - light.cycle_timer >= MIN_GREEN_SECS
+
+
+def test_the_minimum_green_time_boundary_is_exact() -> None:
+    """A shorten is allowed exactly when the green's *remaining* would
+    still be at least `MIN_GREEN_SECS` afterwards."""
+    env = SignalEnv(max_steps=60)
+    env.reset(seed=0)
+    light = env.core.light
+
+    # remaining == MIN_GREEN_SECS + PHASE_ADJUST_SECS → the shorten lands
+    # exactly on the minimum → allowed.
+    light.cycle_timer = light.cycle_duration - (MIN_GREEN_SECS + PHASE_ADJUST_SECS)
+    _, _, _, _, info = env.step(ACTION_INDEX["shorten_red"])
+    assert info["masked"] is False
+
+    # A hair below → the shorten would break the minimum → masked.
+    env.reset(seed=0)
+    light = env.core.light
+    light.cycle_timer = light.cycle_duration - (MIN_GREEN_SECS + PHASE_ADJUST_SECS) + 0.1
+    _, _, _, _, info = env.step(ACTION_INDEX["shorten_red"])
+    assert info["masked"] is True
+
+
+def test_the_flicker_schedule_no_longer_scores_a_free_lunch() -> None:
+    """D5's regression, pinned (Plan 074 T7).
+
+    Before the minimum green time the "flicker" schedule — `shorten_red`
+    on every step — drove the light at 0.6 s per phase. The vehicles
+    never came to a full stop, so they were never counted as queued and
+    the schedule's reward was *exactly* 0.0: strictly better than any
+    honest schedule, and a degenerate policy to learn.
+
+    With the minimum green time the same schedule degenerates into a
+    legal timed plan (15 s / 15 s here), the vehicles do stop at the
+    stop line, and the delay is real again.
+    """
+    flicker, info = _run([ACTION_INDEX["shorten_red"]] * 600)
+
+    assert flicker < 0.0, (
+        "the flicker schedule must incur a real delay — a zero reward means "
+        f"the vehicles never came to a stop (flicker={flicker})"
+    )
+    assert info["total_delay"] > 0.0
+
+
+def test_the_flicker_schedule_is_a_legal_timed_plan_now() -> None:
+    """The masked flicker must respect the minimum green time.
+
+    It is no longer the 0.6 s jitter of D5: the light alternates on a
+    fixed, legal cycle, and every phase it runs is at least
+    `MIN_GREEN_SECS` long.
+    """
+    env = SignalEnv(max_steps=600)
+    env.reset(seed=0)
+
+    phase_started_at = 0.0
+    previous_green = env.core.light.ns_green
+    for _ in range(600):
+        env.step(ACTION_INDEX["shorten_red"])
+        green = env.core.light.ns_green
+        if green != previous_green:
+            # The phase that just ended must have run at least the
+            # minimum green time.
+            assert env.core.sim_time - phase_started_at >= MIN_GREEN_SECS
+            phase_started_at = env.core.sim_time
+            previous_green = green
+
+
+def test_the_flicker_schedule_versus_the_default_schedule() -> None:
+    """The plan's comparison — and the measured result.
+
+    Plan 074 T7 expected the masked flicker to score *worse* than the
+    default 30/30 cycle. **Measured, it does not**: the masked flicker
+    scores -97.2 against the default's -109.2 — it is still the better
+    schedule *in this model*.
+
+    Why: the Python light model charges **no lost time** for a phase
+    change (the swap is instantaneous — no yellow, no all-red), and the
+    vehicles clear the intersection comfortably inside a 15 s green. So a
+    shorter cycle is pure gain for the delay metric (the area under the
+    queue-length curve). What is still missing is the second half of
+    D5's diagnosis: the intersection conflict model, plus the per-switch
+    clearance time — i.e. Sprint 5's "training env and browser from one
+    source" work.
+
+    This test pins the *measured* relationship on purpose: the day the
+    model gains its lost time / conflict model, this assertion flips and
+    the plan's gate (flicker < default) has to be re-derived.
+    """
+    flicker, _ = _run([ACTION_INDEX["shorten_red"]] * 600)
+    default, _ = _run([ACTION_INDEX["no_op"]] * 600)
+
+    assert flicker > default, (
+        "the masked flicker used to beat the default schedule "
+        f"(flicker={flicker}, default={default}); when this flips, the "
+        "plan's gate (flicker < default) holds again — re-derive it"
+    )

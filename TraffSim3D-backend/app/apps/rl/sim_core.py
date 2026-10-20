@@ -82,6 +82,24 @@ PHASE_ADJUST_SECS = 5.0
 # The mitigation is the reward function (the cross-axis delay must be
 # in it) — see `docs/contracts/sim-snapshot.md`.
 MAX_GREEN_SECS = 60.0
+# Lower bound (s) on the green phase's **remaining** time: a controller
+# may not shorten a green below it. It is the symmetric counterpart of
+# the browser's `MIN_RED_SECS` (a red is never shorter than 10 s) — the
+# full rule is "a red is never shorter than MIN_RED_SECS, a green is
+# never shorter than MIN_GREEN_SECS". Mirrors `MIN_GREEN_SECS` in
+# TraffSim3D-frontend/src/shared/constants/simulation.ts.
+#
+# It exists because a controller that shrinks the phase on every
+# decision would otherwise *flicker* the light (0.6 s per phase) —
+# which no driver can react to, and which made the "flicker" schedule
+# look optimal inside the model (ADR-008).
+#
+# It is enforced at the **controller / environment** layer (the Python
+# `SignalEnv` masks the `shorten_red` action; the browser's
+# `RLController` floors the phase) and NOT in the physical light model
+# below — that model is the cross-language contract's sensitive area and
+# its default behaviour must stay bit-identical.
+MIN_GREEN_SECS = 10.0
 # The all-red clearance expressed in sim steps (3 s at the contract's 10 Hz).
 ALL_RED_STEPS = int(round(ALL_RED_SECS / DT))
 
