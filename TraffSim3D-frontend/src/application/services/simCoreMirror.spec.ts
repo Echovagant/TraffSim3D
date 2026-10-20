@@ -64,12 +64,44 @@ describe('simCoreMirror — termination rules', () => {
 })
 
 describe('simCoreMirror — observation', () => {
+  it('reproduces the measured Python t_junction trajectory', () => {
+    const ep = runEpisode('t_junction', new Array(100).fill(1.0), 10)
+    expect(ep.terminated).toBe(true)
+    expect(ep.reason).toBe('success_t_junction')
+    expect(ep.finalStep).toBe(38)
+    expect(ep.finalZ).toBe(-2.769999999999997)
+  })
+
+  it('reproduces the measured Python roundabout trajectory', () => {
+    const ep = runEpisode('roundabout', new Array(100).fill(1.0), 10)
+    expect(ep.terminated).toBe(true)
+    expect(ep.reason).toBe('success_roundabout')
+    expect(ep.finalStep).toBe(45)
+    expect(ep.finalZ).toBe(6.05000000000001)
+  })
+
+  it('gives the roundabout a both-green light, like Python (no signals there)', () => {
+    const core = new SimCoreMirror('roundabout')
+    core.reset()
+    expect(core.light.nsGreen).toBe(true)
+    expect(core.light.ewGreen).toBe(true)
+    // The swap of (true, true) is a no-op, so the light never changes.
+    for (let i = 0; i < 400; i++) core.step(1.0)
+    expect(core.light.nsGreen).toBe(true)
+    expect(core.light.ewGreen).toBe(true)
+  })
+
   it('produces a 14-dim one-hot light pair like Python', () => {
     const core = new SimCoreMirror('cross')
     core.reset()
     const obs = core.obs()
     expect(obs).toHaveLength(14)
+    // One-hot for the signalised scenes; the roundabout is (1, 1) in Python.
     expect(obs[6] + obs[7]).toBe(1)
+    const roundabout = new SimCoreMirror('roundabout')
+    roundabout.reset()
+    expect(roundabout.obs()[6]).toBe(1)
+    expect(roundabout.obs()[7]).toBe(1)
     expect(obs[0]).toBe(0)
     expect(obs[1]).toBe(-0.5) // -25 / 50
     expect(obs[2]).toBe(Math.PI / 2 / Math.PI)

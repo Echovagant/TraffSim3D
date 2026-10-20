@@ -66,8 +66,19 @@ export interface MirrorEpisode {
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
-/** Floor-mod, matching Python's `%`. */
-const floorMod = (a: number, m: number): number => ((a % m) + m) % m
+/**
+ * CPython's float `%`: `fmod(a, b)` plus a single conditional add of the
+ * modulus when the remainder is non-zero and carries the opposite sign.
+ *
+ * JS `%` is itself IEEE remainder-truncated — exactly `fmod` — so replaying
+ * the same two steps gives the same bits. The shorter `((a % m) + m) % m` is
+ * NOT equivalent: it adds a rounding step for non-negative inputs
+ * (e.g. `a = 0.1` gives `0.099999999999999644729` instead of `0.1`).
+ */
+const floorMod = (a: number, m: number): number => {
+  const r = a % m
+  return r !== 0 && r < 0 !== m < 0 ? r + m : r
+}
 
 const EGO_START = (): MirrorVehicle => ({
   x: 0,
@@ -107,9 +118,17 @@ export class SimCoreMirror {
 
   reset(): void {
     this.ego = EGO_START()
+    // Python: `_reset_cross` / `_reset_corridor` / `_reset_t_junction` all use
+    // `ns_green=True, ew_green=False`; `_reset_roundabout` uses
+    // `ns_green=True, ew_green=True` ("Roundabout has no traffic lights").
+    // The difference is load-bearing: with `ew_green=False` the mirror's light
+    // cycles at 30 s and can raise a `red_light` termination that Python can
+    // never raise, and `obs[6:8]` reports `(1, 0)` instead of Python's `(1, 1)`.
+    // Swapping `(true, true)` is a no-op, so Python's roundabout light never
+    // changes.
     this.light = {
       nsGreen: true,
-      ewGreen: false,
+      ewGreen: this.sceneKind === 'roundabout',
       cycleTimer: 0,
       cycleDuration: PYTHON_SIM.LIGHT_CYCLE_SECONDS,
     }
