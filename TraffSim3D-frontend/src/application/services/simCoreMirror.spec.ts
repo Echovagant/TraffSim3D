@@ -17,7 +17,7 @@ describe('simCoreMirror — cross scene', () => {
     expect(ep.reason).toBe('success')
     expect(ep.finalStep).toBe(58)
     expect(ep.finalZ).toBe(26.20100000000003)
-    expect(ep.finalX).toBe(1.467525924532092e-14)
+    expect(ep.finalX).toBe(-8.404945169006555e-15)
     expect(ep.finalSpeed).toBe(16.67)
   })
 
@@ -399,8 +399,8 @@ describe('simCoreMirror — contract vector options (Plan 074)', () => {
 // The Python side applies the same override to `core.ego` right after
 // `reset()` — see `tests/contract/test_cross_lang_consistency.py`.
 describe('simCoreMirror — the ego start override (Plan 076 S5a)', () => {
-  const lateral = { x: 6, z: -25, heading: Math.PI / 2, speed: 0 }
-  const headingOffset = { x: 0, z: -25, heading: Math.PI / 2 + 0.4, speed: 0 }
+  const lateral = { x: 60, z: -25, heading: Math.PI / 2, speed: 0 }
+  const headingOffset = { x: 0, z: -25, heading: Math.PI / 2 + 2.0, speed: 0 }
 
   it('starts the ego at the overridden pose', () => {
     const ep = runEpisode('roundabout', new Array(60).fill(0.2), 10, 60, {
@@ -409,7 +409,7 @@ describe('simCoreMirror — the ego start override (Plan 076 S5a)', () => {
     })
     expect(ep.samples[0]).toEqual({
       step: 0,
-      x: 6,
+      x: 60,
       z: -25,
       heading: Math.PI / 2,
       speed: 0,
@@ -437,7 +437,14 @@ describe('simCoreMirror — the ego start override (Plan 076 S5a)', () => {
     expect(headings[0]).not.toBe(headings[headings.length - 1])
     // The turn is material, not a last-bit wobble: the Pure Pursuit angle
     // is non-zero from the first step on.
-    expect(Math.abs(headings[headings.length - 1]! - headings[0]!)).toBeGreaterThan(0.5)
+    //
+    // The **span** is the right measure, not the first-to-last difference:
+    // the ego *converges* on its target (it overshoots and swings back),
+    // so the heading can end up near where it started even though the
+    // vehicle turned hard in between. The span must also sit far above the
+    // libm noise floor (1e-9 rad) that the contract's comparison allows.
+    const span = Math.max(...headings) - Math.min(...headings)
+    expect(span).toBeGreaterThan(0.1)
   })
 
   it('reproduces the measured Python steering trajectories', () => {
@@ -449,8 +456,8 @@ describe('simCoreMirror — the ego start override (Plan 076 S5a)', () => {
     })
     expect(lateralEp.truncated).toBe(true)
     expect(lateralEp.finalStep).toBe(60)
-    expect(lateralEp.finalX).toBe(14.811088744631318)
-    expect(lateralEp.finalZ).toBe(-21.60160869957244)
+    expect(lateralEp.finalX).toBe(51.48737247857822)
+    expect(lateralEp.finalZ).toBe(-18.31828005457018)
 
     const headingEp = runEpisode('roundabout', new Array(60).fill(0.2), 10, 60, {
       lightOverride: { nsGreen: true, ewGreen: false },
@@ -458,7 +465,7 @@ describe('simCoreMirror — the ego start override (Plan 076 S5a)', () => {
     })
     expect(headingEp.truncated).toBe(true)
     expect(headingEp.finalStep).toBe(60)
-    expect(headingEp.finalX).toBe(-8.858151131677884)
-    expect(headingEp.finalZ).toBe(-28.203646331227798)
+    expect(headingEp.finalX).toBe(-4.620250835521059)
+    expect(headingEp.finalZ).toBe(-16.27592974962582)
   })
 })

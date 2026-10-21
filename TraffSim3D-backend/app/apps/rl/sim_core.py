@@ -508,7 +508,7 @@ class SimCore:
         dx = target[0] - self.ego.x
         dz = target[1] - self.ego.z
         target_angle = math.atan2(dz, dx)
-        alpha = self.ego.heading - target_angle
+        alpha = target_angle - self.ego.heading
         # Wrap alpha to [-π, π]
         alpha = (alpha + math.pi) % (2 * math.pi) - math.pi
         steer = math.atan2(2.0 * EGO_WHEELBASE * math.sin(alpha), LOOKAHEAD_DISTANCE)

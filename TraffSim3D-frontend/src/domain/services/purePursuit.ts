@@ -86,9 +86,21 @@ export const computeSteeringAngle = (
   const lookaheadAngle = Math.atan2(dz, dx)
 
   // 4. Alpha: angle from vehicle heading to lookahead direction.
-  //    Positive alpha → lookahead is to the LEFT of heading → steer LEFT.
-  //    Pure Pursuit steering law δ = atan(2L·sin(α)/ld) gives the correct
-  //    sign when α is measured this way (Coulter 1992 convention).
+  //    NOTE the sign: this is `heading - lookaheadAngle`, i.e. the
+  //    **negative** of the textbook Pure Pursuit alpha. That is deliberate
+  //    here and must not be "corrected" to match
+  //    `src/domain/services/egoKernel.ts` (the training sim's kernel, which
+  //    uses the textbook `targetAngle - heading`):
+  //
+  //      - this controller's `delta` is handed to Rapier as an angular
+  //        velocity about the **y axis**, whose sense is opposite to the
+  //        (x, z) plane's `heading` convention the sim integrates;
+  //      - the kernel's steer is integrated directly as `heading += steer*dt`
+  //        in that same (x, z) convention.
+  //
+  //    So the two files compute the same-looking expression with opposite
+  //    signs, and **both are correct** — in their own frame. Flipping this
+  //    one would make the browser's traffic leave the lanes.
   let alpha = heading - lookaheadAngle
 
   // 5. Normalize to (-π, π]

@@ -75,7 +75,11 @@ describe('egoKernel — pythonSpeedStep', () => {
     // let the trajectory drift silently.
     expect(ego.speed).toBe(16.67)
     expect(ego.z).toBe(26.20100000000003)
-    expect(ego.x).toBe(1.467525924532092e-14)
+    // The lateral value is the last-bit wobble of the Pure Pursuit angle
+    // after the ego passes its target (alpha -> +-pi, sin(alpha) -> +-1.2e-16).
+    // It flipped sign with the alpha fix (Plan 076 T11); the magnitude is
+    // unchanged, and Python measures the same value.
+    expect(ego.x).toBe(-8.404945169006555e-15)
   })
 })
 
@@ -87,7 +91,12 @@ describe('egoKernel — pythonSteer', () => {
 
   it('clamps to MAX_STEER when the misalignment is large', () => {
     const ego = { x: 0, z: -25, heading: 0, speed: 0 } // target is due north
-    expect(pythonSteer(ego, [0, 0])).toBe(-PYTHON_SIM.MAX_STEER)
+    // The target is to the vehicle's **left** (a larger targetAngle in the
+    // (x, z) plane), so the textbook alpha is positive and the steer is
+    // positive — the vehicle turns towards the target. (The sign flipped
+    // with the alpha fix, Plan 076 T11; the old expectation encoded the
+    // inverted alpha, which made the ego steer away from its target.)
+    expect(pythonSteer(ego, [0, 0])).toBe(PYTHON_SIM.MAX_STEER)
   })
 
   it('never exceeds MAX_STEER in magnitude', () => {
@@ -98,11 +107,13 @@ describe('egoKernel — pythonSteer', () => {
   })
 
   it('wraps alpha exactly like CPython float %', () => {
-    // CPython: steer = -0.39425420560955743 (verified against sim_core.py's
+    // CPython: steer = 0.39425420560955743 (verified against sim_core.py's
     // (alpha + pi) % (2*pi) - pi). The "always add 2*pi and re-mod" spelling
-    // yields -0.39425420560955776 here — 1 ULP off from Python.
+    // yields 0.39425420560955776 here — 1 ULP off from Python.
+    // (The sign flipped with the alpha fix, Plan 076 T11; the magnitude is
+    // unchanged.)
     expect(pythonSteer({ x: 0, z: 0, heading: -0.7283761257056431, speed: 0 }, [1, 0])).toBe(
-      -0.39425420560955743,
+      0.39425420560955743,
     )
   })
 

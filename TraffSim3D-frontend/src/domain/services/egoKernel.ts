@@ -44,6 +44,13 @@
 //      saturates the ego at SPEED_LIMIT in Python, and must do the same
 //      here; a NaN-propagating speed clamp would poison the browser
 //      replay's position with NaN instead.
+//   7. The Pure Pursuit **alpha sign** is the textbook one:
+//      `alpha = atan2(dz, dx) - heading` (the angle from the heading to the
+//      target), so the steer turns **towards** the target. Python computed
+//      the opposite until Plan 076 T11 (2026-10-21), which made the trained
+//      ego steer away from its target — invisible while every scenario put
+//      the target straight ahead. The contract's `steer_*` vectors keep this
+//      dimension covered; see `pythonSteer`'s docstring.
 //
 // The bit-exactness asserted against Python holds for V8's `Math.sin` /
 // `Math.cos` / `Math.atan2`, which ECMA-262 leaves implementation-approximated
@@ -130,17 +137,41 @@ export const pythonSpeedStep = (speed: number, action0: number, dt: number): num
 /**
  * Pure Pursuit steering, Python semantics:
  *
- *   alpha = wrapPi(heading - atan2(dz, dx))
+ *   alpha = wrapPi(atan2(dz, dx) - heading)
  *   steer = atan2(2 * wheelbase * sin(alpha), LOOKAHEAD_DISTANCE)
  *   steer = clip(steer, -MAX_STEER, MAX_STEER)
  *
  * `target` is `[x, z]` in world space.
+ *
+ * The alpha sign is the textbook one (Coulter 1992): `alpha` is the angle
+ * **from the vehicle's heading to the target direction**, so
+ * `sin(alpha) > 0` means the target is ahead and to the left, and the steer
+ * turns **towards** it.
+ *
+ * It was the other way round until Plan 076 T11 (2026-10-21): the sim
+ * computed `alpha = heading - atan2(dz, dx)`, and the steering law is only
+ * correct for the textbook sign — so the ego steered **away** from its
+ * target. It was invisible for years because every scenario put the target
+ * straight ahead (`alpha ≈ 0` ⇒ `steer ≡ 0` ⇒ the sign did not matter).
+ * Measured before/after (120 steps, full throttle, target 25.7 m away):
+ * the distance to the target went 25.7 → **150.9 m** with the old sign and
+ * 25.7 → **5.8 m** with this one.
+ *
+ * ⇒ The contract's `steer_*` vectors exist to keep this dimension covered:
+ * a vector that never steers cannot see a sign error.
+ *
+ * NOTE: this is the **training sim's** convention, and this kernel is its
+ * 1:1 port. The browser's *lane-following* controller
+ * (`src/domain/services/purePursuit.ts`) computes an alpha with the opposite
+ * sign **on purpose** — there the steering is handed to Rapier as an angular
+ * velocity about the **y axis**, whose sense is opposite to this plane's
+ * `heading`. Do not "fix" one to match the other.
  */
 export const pythonSteer = (ego: EgoState, target: readonly [number, number]): number => {
   const dx = target[0] - ego.x
   const dz = target[1] - ego.z
   const targetAngle = Math.atan2(dz, dx)
-  const alpha = wrapPi(ego.heading - targetAngle)
+  const alpha = wrapPi(targetAngle - ego.heading)
   const steer = Math.atan2(
     2 * PYTHON_SIM.EGO_WHEELBASE * Math.sin(alpha),
     PYTHON_SIM.LOOKAHEAD_DISTANCE,

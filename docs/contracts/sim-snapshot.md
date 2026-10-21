@@ -138,8 +138,23 @@ it needs a scalar-level entry point into the obs builder. See "Not covered".
 | `signalled_light_shorten_red` | roundabout | `shorten_red`: the swap moves 5 s earlier (step 300 → 250). |
 | `signalled_light_preempt` | roundabout | `preempt`: all-red for 3 s, then the interrupted phase resumes and the swap lands 30 steps later (step 330). |
 | `signalled_light_preempt_boundary` | roundabout | The **clearance-boundary** case: a second `preempt` on the very step the phase resumed (step 40). The light must come back (step 70) — the regression the Plan 073 Sprint 2 fix wave repaired, now pinned at the trajectory level. |
-| `steer_lateral_offset` | roundabout | **Plan 076 S5a — the turning vectors.** The ego starts 6 m to the side of its target line (`ego_start`), so Pure Pursuit's angle is non-zero from the first step: `steer ≠ 0` on every step and the `MAX_STEER` clamp is actually reached. This is what makes `LOOKAHEAD_DISTANCE` / `MAX_STEER` / `EGO_WHEELBASE` observable. 60 steps, truncated at the limit. |
-| `steer_heading_offset` | roundabout | The **other** turning trigger: the ego starts on its target line but with its heading offset by 0.4 rad, so it has to correct immediately. Same coverage, a different path into the Pure Pursuit. |
+| `steer_lateral_offset` | roundabout | **Plan 076 S5a — the turning vectors.** The ego starts **60 m** to the side of its target line (`ego_start`), so Pure Pursuit's angle is non-zero from the first step: `steer ≠ 0` on every step and the `MAX_STEER` clamp is actually reached (8 consecutive steps). This is what makes `LOOKAHEAD_DISTANCE` / `MAX_STEER` / `EGO_WHEELBASE` observable. 60 steps, truncated at the limit. |
+| `steer_heading_offset` | roundabout | The **other** turning trigger: the ego starts on its target line but with its heading offset by **2.0 rad**, so it has to correct hard and immediately (the clamp binds for 34 steps). Same coverage, a different path into the Pure Pursuit. |
+
+> **这两条向量是刻意极端的压力用例**，不是现实场景（偏出 60 m、航向偏 115°）。
+> 极端是有理由的：契约比较的是**采样点**（每 10 步一个），
+> 而限幅只在**原始转向超过 0.4 rad** 的那些步上起作用。
+> 实测（60 步、采样比较）：
+>
+> | 几何 | 限幅咬住步数 | `MAX_STEER` 变异的采样漂移 |
+> |---|---|---|
+> | 偏出 6 m | 1 | 1.0e-03 m（被采样网格稀释到阈值边缘） |
+> | 偏出 33 m | 1 | 1.0e-03 m |
+> | 偏出 60 m | 8 | 1.2e-01 m |
+> | 航向偏 1.2 rad | 12 | 2.2e-01 m |
+> | **航向偏 2.0 rad** | **34** | **1.7e+00 m** |
+>
+> ⇒ 选定 **60 m / 2.0 rad**：限幅长期咬住，采样漂移比 1e-9 的比较地板高 5～6 个量级。
 
 `cross_action_overrange`'s scenario golden is **identical to
 `cross_baseline`'s** — every sample and the whole `final_state` — because
@@ -280,23 +295,27 @@ The assertions therefore use **exact equality** (`==`). A tolerance would hide
 exactly the failure this contract exists to catch: silent drift on one side.
 
 This is only possible because of the porting rules, all enforced in
-`egoKernel.ts` and `simCoreMirror.ts`. Five are listed here; the sixth — the
+`egoKernel.ts` and `simCoreMirror.ts`. Six are listed here; the seventh — the
 platform assumption about V8's transcendental functions — has its own section
 below.
 
 1. The Pure Pursuit denominator is the **constant** `LOOKAHEAD_DISTANCE = 8.0`,
    never the actual distance to the target.
-2. Update order is speed → heading → position, and `steer` is computed from
+2. The Pure Pursuit **alpha sign** is the textbook one:
+   `alpha = target_angle - heading` — the angle **from the heading to the
+   target**, so the steer turns **towards** the target. It was the other way
+   round until Plan 076 T11 (2026-10-21); see "The Pure Pursuit sign" below.
+3. Update order is speed → heading → position, and `steer` is computed from
    the state *before* the update.
-3. `wrapPi` replays CPython's float-modulo algorithm exactly (`fmod` plus one
+4. `wrapPi` replays CPython's float-modulo algorithm exactly (`fmod` plus one
    conditional add of the modulus). The shorter "always add 2π and re-mod"
    spelling is **not** equivalent — it adds a rounding step.
-4. Statement order mirrors Python's, and the action is converted with
+5. Statement order mirrors Python's, and the action is converted with
    `Math.fround` before clipping — Python's actions always pass through
    `np.float32`, and the policy's output layer has no tanh, so raw actions can
    leave `[-1, 1]`. Skipping the cast made the two sides differ on 11584 of
    12000 steps in a randomised cross-check.
-5. **NaN semantics are pinned, and the two clamp flavours are not
+6. **NaN semantics are pinned, and the two clamp flavours are not
    interchangeable.** Python clips the *action* and the *steer* with numpy's
    `np.clip`, which **propagates** NaN; it clamps the *speed* with
    `max(0.0, min(16.67, v))`, and CPython's `min` keeps its first argument
@@ -308,6 +327,39 @@ below.
    NaN positions in the browser replay while Python silently clamped to the
    speed limit — the "same floating-point operation sequence" claim did not
    hold for NaN.
+
+### The Pure Pursuit sign (Plan 076 T11, 2026-10-21)
+
+The steering law `steer = atan2(2·L·sin(alpha), lookahead)` is only correct for
+the **textbook** alpha — the angle from the vehicle's heading to the target
+direction. The sim computed the **negative** of it, so the ego steered **away**
+from its target.
+
+Measured (120 steps, full throttle, target 25.7 m away):
+
+| | distance to the target |
+|---|---|
+| before the fix (`alpha = heading - target_angle`) | 25.7 m → **150.9 m** (driving away) |
+| after the fix (`alpha = target_angle - heading`) | 25.7 m → **5.8 m** (arriving) |
+
+**Why it survived for years**: every scene and every contract vector put the ego
+on a **straight line** to its target, so `alpha ≈ 0` and `steer ≡ 0` — the sign
+was invisible. The contract could not see it either: both sides implemented the
+same wrong sign, so they matched bit for bit. Only a vector whose target is
+**off** the ego's heading exposes it (the `steer_*` vectors above).
+
+**What did NOT change**: the browser's lane-following controller
+(`src/domain/services/purePursuit.ts`) computes the same-looking expression
+with the opposite sign — **on purpose**. There the steering is handed to Rapier
+as an angular velocity about the **y axis**, whose sense is opposite to the
+(x, z) plane's `heading` convention the sim integrates. Both files are correct
+in their own frame; the browser's traffic demonstrably follows the lanes.
+The product's RL replay path uses only the kernel's **speed** half, so the
+browser's behaviour is unaffected by the fix either way.
+
+**Consequence for the trained policies**: an ego agent trained before this fix
+learned to steer the wrong way ⇒ **it has to be retrained**. The checkpoints
+are not committed, so nothing stale is left in the repository.
 
 ## The contract is two-sided, with two different oracles
 
