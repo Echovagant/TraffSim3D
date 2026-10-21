@@ -1,0 +1,297 @@
+{
+  "name": "off_road_no_success",
+  "scene_kind": "cross",
+  "ego_id": "v-1",
+  "signal_vocabulary": {
+    "actions": [
+      "extend_green",
+      "shorten_red",
+      "preempt",
+      "force_all_red",
+      "no_op"
+    ],
+    "all_red_seconds": 3,
+    "phase_adjust_seconds": 5,
+    "max_green_seconds": 60,
+    "min_green_seconds": 10,
+    "inter_green_seconds": 6
+  },
+  "road_rules": {
+    "road_half_width": 3.5,
+    "scene_goal_z": {
+      "cross": 25,
+      "corridor": 25,
+      "t_junction": -3,
+      "roundabout": 5
+    }
+  },
+  "ego_start": {
+    "x": 6,
+    "z": -25,
+    "heading": 1.5707963267948966,
+    "speed": 0
+  },
+  "final_state": {
+    "terminated": false,
+    "truncated": true,
+    "reason": "",
+    "final_step": 200,
+    "final_z": 43.76027754313552,
+    "final_x": -124.90474874767736,
+    "final_speed": 16.67
+  },
+  "samples": [
+    {
+      "step": 0,
+      "ego_id": "v-1",
+      "x": 6,
+      "z": -25,
+      "heading": 1.5707963267948966,
+      "speed": 0,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 10,
+      "ego_id": "v-1",
+      "x": 5.861902139125478,
+      "z": -23.356330949958103,
+      "heading": 1.6838413225868456,
+      "speed": 3,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 20,
+      "ego_id": "v-1",
+      "x": 5.138404974699585,
+      "z": -18.76376142933564,
+      "heading": 1.7515790153954738,
+      "speed": 5.999999999999998,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 30,
+      "ego_id": "v-1",
+      "x": 3.544557820720654,
+      "z": -11.282372059273992,
+      "heading": 1.8004007379062992,
+      "speed": 9,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 40,
+      "ego_id": "v-1",
+      "x": 0.7909305824703219,
+      "z": -0.9965247031275721,
+      "heading": 1.866766413470289,
+      "speed": 12.000000000000007,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 50,
+      "ego_id": "v-1",
+      "x": -4.429616261353532,
+      "z": 11.609253408074995,
+      "heading": 1.9924633969427437,
+      "speed": 15.000000000000014,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 60,
+      "ego_id": "v-1",
+      "x": -11.357241465857543,
+      "z": 26.34661676256278,
+      "heading": 2.0231345122157927,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 70,
+      "ego_id": "v-1",
+      "x": -18.88229324034586,
+      "z": 41.220823714929956,
+      "heading": 2.052907698361633,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 80,
+      "ego_id": "v-1",
+      "x": -26.898977620315378,
+      "z": 55.835510070293786,
+      "heading": 2.0901707254764186,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 90,
+      "ego_id": "v-1",
+      "x": -35.55916966107741,
+      "z": 70.07721997598678,
+      "heading": 2.1420309845118775,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 100,
+      "ego_id": "v-1",
+      "x": -45.11616390493744,
+      "z": 83.73056730040014,
+      "heading": 2.2184539007196946,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 110,
+      "ego_id": "v-1",
+      "x": -55.944533570704266,
+      "z": 96.39204159195234,
+      "heading": 2.3347645687357876,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 120,
+      "ego_id": "v-1",
+      "x": -68.51846360601336,
+      "z": 107.30167653390777,
+      "heading": 2.5139186301759575,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 130,
+      "ego_id": "v-1",
+      "x": -83.2031067017761,
+      "z": 115.0794409129768,
+      "heading": 2.785768682113412,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 140,
+      "ego_id": "v-1",
+      "x": -99.57508398487755,
+      "z": 117.61712006404295,
+      "heading": 3.16473049440696,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 150,
+      "ego_id": "v-1",
+      "x": -115.64819706759266,
+      "z": 113.6302643472435,
+      "heading": 3.56473049440696,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 160,
+      "ego_id": "v-1",
+      "x": -128.8999598360192,
+      "z": 103.69896200537171,
+      "heading": 3.9647304944069606,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 170,
+      "ego_id": "v-1",
+      "x": -137.23821032885886,
+      "z": 89.39114730867593,
+      "heading": 4.3647304944069605,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 180,
+      "ego_id": "v-1",
+      "x": -139.34652213479214,
+      "z": 72.96570959745233,
+      "heading": 4.764730494406961,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 190,
+      "ego_id": "v-1",
+      "x": -134.89203917723438,
+      "z": 57.015864323683935,
+      "heading": 5.164730494406961,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 200,
+      "ego_id": "v-1",
+      "x": -124.90474874767736,
+      "z": 43.76027754313552,
+      "heading": 5.497222473604979,
+      "speed": 16.67,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    }
+  ]
+}

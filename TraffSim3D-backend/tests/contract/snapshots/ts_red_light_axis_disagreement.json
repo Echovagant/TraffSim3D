@@ -1,0 +1,97 @@
+{
+  "name": "red_light_axis_disagreement",
+  "scene_kind": "cross",
+  "ego_id": "v-1",
+  "signal_vocabulary": {
+    "actions": [
+      "extend_green",
+      "shorten_red",
+      "preempt",
+      "force_all_red",
+      "no_op"
+    ],
+    "all_red_seconds": 3,
+    "phase_adjust_seconds": 5,
+    "max_green_seconds": 60,
+    "min_green_seconds": 10,
+    "inter_green_seconds": 6
+  },
+  "road_rules": {
+    "road_half_width": 3.5,
+    "scene_goal_z": {
+      "cross": 25,
+      "corridor": 25,
+      "t_junction": -3,
+      "roundabout": 5
+    }
+  },
+  "light_override": {
+    "ns_green": false,
+    "ew_green": true
+  },
+  "ego_start": {
+    "x": -15.555460154414252,
+    "z": -18.538275523479268,
+    "heading": 0.8726646259971648,
+    "speed": 0
+  },
+  "final_state": {
+    "terminated": true,
+    "truncated": false,
+    "reason": "red_light",
+    "final_step": 30,
+    "final_z": -7.851955541969518,
+    "final_x": -6.588572999287037,
+    "final_speed": 9
+  },
+  "samples": [
+    {
+      "step": 0,
+      "ego_id": "v-1",
+      "x": -15.555460154414252,
+      "z": -18.538275523479268,
+      "heading": 0.8726646259971648,
+      "speed": 0,
+      "light": {
+        "nsGreen": false,
+        "ewGreen": true
+      }
+    },
+    {
+      "step": 10,
+      "ego_id": "v-1",
+      "x": -14.494860598431464,
+      "z": -17.27430219233295,
+      "heading": 0.8726646259971648,
+      "speed": 3,
+      "light": {
+        "nsGreen": false,
+        "ewGreen": true
+      }
+    },
+    {
+      "step": 20,
+      "ego_id": "v-1",
+      "x": -11.50589821338906,
+      "z": -13.7121955318297,
+      "heading": 0.8726646259971648,
+      "speed": 5.999999999999998,
+      "light": {
+        "nsGreen": false,
+        "ewGreen": true
+      }
+    },
+    {
+      "step": 30,
+      "ego_id": "v-1",
+      "x": -6.588572999287037,
+      "z": -7.851955541969518,
+      "heading": 0.8726646259971647,
+      "speed": 9,
+      "light": {
+        "nsGreen": false,
+        "ewGreen": true
+      }
+    }
+  ]
+}

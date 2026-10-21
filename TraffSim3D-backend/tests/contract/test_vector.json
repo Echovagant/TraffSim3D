@@ -193,6 +193,36 @@
       "repeat": 60,
       "light_override": { "ns_green": true, "ew_green": false },
       "ego_start": { "x": 0.0, "z": -25.0, "heading": 3.5707963267948966, "speed": 0.0 }
+    },
+    {
+      "name": "red_light_axis_disagreement",
+      "scene_kind": "cross",
+      "ego_id": "v-1",
+      "n_steps": 60,
+      "max_steps": 60,
+      "actions": [[1.0, 0.0]],
+      "repeat": 60,
+      "light_override": { "ns_green": false, "ew_green": true },
+      "ego_start": { "x": -15.555460154414252, "z": -18.538275523479268, "heading": 0.8726646259971648, "speed": 0.0 }
+    },
+    {
+      "name": "off_road_no_success",
+      "scene_kind": "cross",
+      "ego_id": "v-1",
+      "n_steps": 200,
+      "max_steps": 200,
+      "actions": [[1.0, 0.0]],
+      "repeat": 200,
+      "ego_start": { "x": 6.0, "z": -25.0, "heading": 1.5707963267948966, "speed": 0.0 }
+    },
+    {
+      "name": "steer_residual",
+      "scene_kind": "cross",
+      "ego_id": "v-1",
+      "n_steps": 30,
+      "max_steps": 30,
+      "actions": [[0.25, 0.5]],
+      "repeat": 30
     }
   ]
 }

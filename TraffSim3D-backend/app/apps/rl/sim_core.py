@@ -36,10 +36,71 @@ COLLISION_DISTANCE = 2.0  # m — closer than this = collision
 MAX_STEPS_DEFAULT = 200
 OBS_DIM = 14
 
+# The road's half-width (m) - Plan 076 T12.
+#
+# The scenes carry no lane model; they place the NPCs at a **3.5 m lateral
+# offset** from the road's centreline (`_reset_cross`: the southbound NPC
+# at `x = 3.5`, the westbound one at `z = 3.5`), so 3.5 m is the
+# half-width the scene itself implies. It is the number the success
+# condition uses to decide whether the ego stayed on the road.
+ROAD_HALF_WIDTH = 3.5
+
+# The **goal line** of each scene: the z the ego has to pass to score the
+# success. The success condition and the progress reward both read it, so
+# they cannot drift apart.
+#
+# Plan 076 T12: the progress reward is the *signed* advance towards this
+# line, bounded by it. That is what keeps the reward from being farmed:
+# an ego that leaves the road (and is therefore never terminated by the
+# success) cannot keep earning progress past the goal, and a step
+# backwards cancels the step before it instead of being clipped away.
+SCENE_GOAL_Z = {
+    "cross": 25.0,
+    "corridor": 25.0,
+    "t_junction": -3.0,
+    "roundabout": 5.0,
+}
+
 # Pure Pursuit (Coulter 1992) — see ADR-004
 LOOKAHEAD_DISTANCE = 8.0
 MAX_STEER = 0.4         # rad
 DT = 0.1                # seconds per sim step (matches frontend 10Hz)
+
+# ===== Plan 076 T12: the ego's reward =====
+#
+# The per-step "alive" bonus used to be a flat 0.05 **per step**. It paid a
+# policy for *existing* - and, because a step is a unit of *time*, it
+# implicitly paid for being **slow**: the more steps an episode took, the
+# more it earned. The measured consequence (Plan 076 T11's re-measurement)
+# was that the trained ego policy beat "constant full throttle" (+1.13)
+# only because it drove slower (86 steps against 58), and still lost to the
+# best constant throttle (60.227 against 60.835) - the whole margin came
+# from the bonus, not from the driving.
+#
+# T12 turns that term around: the passage of time is now **charged**:
+#
+#   reward = PROGRESS_WEIGHT * progress - TIME_COST
+#
+# so the direction of the speed signal is right (arriving sooner is
+# better) and there is nothing left to farm: standing still pays the cost
+# without earning anything, and creeping pays it for longer.
+#
+# `progress` is the **signed** advance towards the goal line, bounded by
+# it (see `step()`), so it cannot be farmed either: a step backwards
+# cancels the step before it, and driving past the goal earns nothing.
+#
+# The magnitude of TIME_COST is the **same 0.05 the old alive bonus paid**,
+# with the sign flipped: the old term paid for the passage of time, the
+# new one charges for it. It is deliberately smaller than the progress a
+# step earns at the slowest pace that still reaches the goal (throttle
+# 0.35 => 1.05 m/s => 0.105 m of progress per step, and 0.105 > 0.05), so
+# every step that makes progress still pays for itself, while a step that
+# makes none is a pure loss.
+#
+# The signal agent's reward is a separate quantity entirely (the negative
+# total delay, `signal_env.SignalEnv`), so this change does not touch it.
+PROGRESS_WEIGHT = 1.0    # per metre of progress
+TIME_COST = 0.05         # per step - the speed signal (less time = better)
 
 # ===== Plan 073 Sprint 2 (A2a): the shared signal-action vocabulary =====
 #
@@ -221,6 +282,20 @@ def approach_distance(vehicle: Vehicle) -> float:
     return vehicle.x * math.cos(vehicle.heading) + vehicle.z * math.sin(vehicle.heading)
 
 
+def lateral_offset(vehicle: Vehicle) -> float:
+    """The perpendicular distance from the centreline of the road the
+    vehicle runs along.
+
+    The scenes carry no lane model; which road a vehicle runs along
+    follows from its heading - the same `approach_axis` the traffic model
+    uses - so a north-south vehicle is measured against the `x = 0`
+    centreline and an east-west one against the `z = 0` centreline.
+    """
+    if approach_axis(vehicle.heading) == "ns":
+        return abs(vehicle.x)
+    return abs(vehicle.z)
+
+
 def _lane_key(vehicle: Vehicle) -> tuple[str, int, float]:
     """The lane a vehicle runs in: (axis, direction, lateral offset).
 
@@ -346,6 +421,14 @@ class SimCore:
     # `truncated=True` — which made `CurriculumEnv` record one episode per
     # extra step. Now the episode's final state is stable once truncated.
     _truncated: bool = False
+    # Plan 076 T12: has the ego left the road during this episode?
+    #
+    # The success condition used to be route-agnostic (`ego.z > 25`), so a
+    # wrong route that left the road scored the same success - and the same
+    # +5 bonus - as the right one. The latch is permanent: success needs
+    # the ego to have **stayed** on the road, not to be on it at the moment
+    # it crossed the line.
+    _off_road: bool = False
     # Plan 048: scene_kind determines road topology and Pure Pursuit target.
     # 'cross' (default, 044 behavior): single 4-way intersection.
     # 'corridor' (048): 2 4-way intersections + 60m NS corridor between.
@@ -375,6 +458,8 @@ class SimCore:
         # Plan 074 T9: the inter-green clearance is per-episode state.
         self._clearance_steps = 0
         self._pending_swap = None
+        # Plan 076 T12: the off-road latch is per-episode state too.
+        self._off_road = False
         if self.scene_kind == "corridor":
             return self._reset_corridor()
         if self.scene_kind == "t_junction":
@@ -513,6 +598,23 @@ class SimCore:
         alpha = (alpha + math.pi) % (2 * math.pi) - math.pi
         steer = math.atan2(2.0 * EGO_WHEELBASE * math.sin(alpha), LOOKAHEAD_DISTANCE)
         steer = float(np.clip(steer, -MAX_STEER, MAX_STEER))
+        # Plan 076 T12: the policy's steering authority is a **residual**
+        # on top of the scripted Pure Pursuit steer, not a replacement.
+        #
+        # The scripted controller is the natural baseline: a policy that
+        # commands no correction drives exactly as the baseline does, so
+        # "beating the baseline" means the policy has learned something.
+        # An *absolute* steering command would be meaningless in a
+        # free-space sim with no lanes to follow - the policy would just
+        # spin. The residual is scaled by MAX_STEER, so the total steer
+        # stays inside the same actuator limit as the scripted one.
+        #
+        # `float(...)` around the clip is load-bearing: without it the
+        # residual would be a numpy float32 and the addition would
+        # downcast the float64 steer, breaking the contract's bit-exact
+        # trajectory comparison.
+        steer_residual = float(np.clip(action[1], -1.0, 1.0)) * MAX_STEER
+        steer = float(np.clip(steer + steer_residual, -MAX_STEER, MAX_STEER))
 
         # 2) Update ego kinematics (Euler)
         prev_z = self.ego.z
@@ -615,9 +717,28 @@ class SimCore:
         self.step_count += 1
 
         # 5) Compute reward + termination
-        reward = 0.05  # alive bonus
-        progress = max(0.0, self.ego.z - prev_z)
-        reward += 1.0 * progress
+        #
+        # Plan 076 T12: the progress is the **signed** advance towards the
+        # goal line, bounded by that line:
+        #
+        #   progress = min(ego.z, goal_z) - min(prev_z, goal_z)
+        #
+        # The old `max(0, ego.z - prev_z)` was farmable twice over: an ego
+        # that zig-zagged earned the same progress again and again, and an
+        # ego that drove past the goal kept earning it. The second one
+        # became reachable as soon as T12 let an off-road ego skip the
+        # success: the first training run found it (episode returns of 283
+        # against a ceiling of ~59).
+        #
+        # Signed and bounded, the progress is path-independent: every run
+        # that reaches the goal earns exactly the distance to it.
+        goal_z = self.goal_z
+        progress = min(self.ego.z, goal_z) - min(prev_z, goal_z)
+        # The per-step charge is a **cost**, not an alive bonus: the passage
+        # of time is priced the right way round (sooner is better), and
+        # there is nothing to farm - standing still pays the cost without
+        # earning anything, and creeping pays it for longer.
+        reward = PROGRESS_WEIGHT * progress - TIME_COST
 
         # Check collision
         for npc in self.npcs:
@@ -634,33 +755,43 @@ class SimCore:
             self._terminated_reason = "red_light"
             reward -= 5.0
 
+        # Plan 076 T12: has the ego left the road? The latch is permanent
+        # - the success needs the ego to have STAYED on the road.
+        if lateral_offset(self.ego) > ROAD_HALF_WIDTH:
+            self._off_road = True
+
         # Plan 048: corridor has TWO intersections and a "pass through
         # both" success condition.
-        if not self._terminated:
+        #
+        # Plan 076 T12: success also needs the ego to have stayed on the
+        # road - the old condition (`ego.z > 25`) was route-agnostic, so a
+        # wrong route that left the road scored the same success and the
+        # same bonus as the right one.
+        if not self._terminated and not self._off_road:
             if self.scene_kind == "corridor":
                 # Both intersections green = ego can pass through corridor
                 # successfully when ego reaches z=+30 (north of i-south)
-                if self.ego.z > 25.0:
+                if self.ego.z > self.goal_z:
                     self._terminated = True
                     self._terminated_reason = "success_corridor"
                     reward += 10.0  # larger bonus for 2-intersection pass
             elif self.scene_kind == "t_junction":
                 # T-junction: ego enters intersection from south arm.
                 # Intersection at z=0 with radius 6; success at z > -3.
-                if self.ego.z > -3.0:
+                if self.ego.z > self.goal_z:
                     self._terminated = True
                     self._terminated_reason = "success_t_junction"
                     reward += 5.0
             elif self.scene_kind == "roundabout":
                 # Roundabout: ego enters from south, navigates circle, exits north.
                 # Success when ego passes north exit (z > 5, past circle at z=10).
-                if self.ego.z > 5.0:
+                if self.ego.z > self.goal_z:
                     self._terminated = True
                     self._terminated_reason = "success_roundabout"
                     reward += 5.0
             else:
                 # Cross scene single-intersection success (original 044)
-                if self.ego.z > 25.0:
+                if self.ego.z > self.goal_z:
                     self._terminated = True
                     self._terminated_reason = "success"
                     reward += 5.0
@@ -673,10 +804,23 @@ class SimCore:
         if self.step_count >= self.max_steps and not self._terminated:
             self._truncated = True
 
-        info = {"reason": self._terminated_reason, "progress": progress}
+        info = {
+            "reason": self._terminated_reason,
+            "progress": progress,
+            "off_road": self._off_road,
+        }
         return self._obs(), float(reward), self._terminated, self._truncated, info
 
     # ===== Plan 074 Sprint 3 (S3a-1): signal-responsive traffic =====
+
+    @property
+    def goal_z(self) -> float:
+        """The z the ego has to pass to score the success.
+
+        Plan 076 T12: the success condition and the progress reward both
+        read this number, so "the goal line" is one thing, not two.
+        """
+        return SCENE_GOAL_Z.get(self.scene_kind, SCENE_GOAL_Z["cross"])
 
     @property
     def in_clearance(self) -> bool:
@@ -879,13 +1023,20 @@ class SimCore:
         in_intersection = abs(self.ego.x) < INTERSECTION_RADIUS and abs(self.ego.z) < INTERSECTION_RADIUS
         if not in_intersection:
             return False
-        # Simpler heuristic: ego heading near north/south (π/2 ± 0.5) => NS
-        heading_ns = abs((self.ego.heading % (2 * math.pi)) - math.pi / 2) < 0.5
-        if heading_ns and not self.light.ns_green:
-            return True
-        if not heading_ns and not self.light.ew_green:
-            return True
-        return False
+        # Plan 076 T12: the axis comes from the **traffic model's own**
+        # classification (`approach_axis`), so the red-light rule and the
+        # traffic model can never disagree about which axis the ego is on.
+        #
+        # The old heuristic read the axis off the heading as "within 0.5 rad
+        # of north" (61.35deg - 118.65deg; 65deg - 115deg on the sampled
+        # 5deg grid), while the traffic model uses
+        # `|sin h| >= |cos h|` (45deg - 135deg and 225deg - 315deg): 26 of
+        # the 72 sampled headings (every 5deg) disagreed, so the rule both
+        # killed episodes on the green axis and let real red-light runs
+        # through.
+        if approach_axis(self.ego.heading) == "ns":
+            return not self.light.ns_green
+        return not self.light.ew_green
 
     def _obs(self) -> np.ndarray:
         """Build the 14-dim observation vector."""

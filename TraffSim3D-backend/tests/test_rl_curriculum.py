@@ -700,11 +700,11 @@ def test_episodes_counter_resets_when_the_scene_changes() -> None:
 
 
 def test_env_advances_against_the_real_sim_core() -> None:
-    """End-to-end with the genuine SimCore: 2 truncated episodes, bar 0.5."""
+    """End-to-end with the genuine SimCore: 2 truncated episodes, bar 0.15."""
     env = CurriculumEnv(
         max_steps=5,
         eval_window=2,
-        thresholds={"cross": {"avg_reward": 0.5, "success_rate": 1.0}},
+        thresholds={"cross": {"avg_reward": 0.15, "success_rate": 1.0}},
     )
     episode_totals: list[float] = []
     for _ in range(2):
@@ -718,8 +718,12 @@ def test_env_advances_against_the_real_sim_core() -> None:
             assert truncated is (i == 4)
         episode_totals.append(total)
 
-    # 0.08+0.11+0.14+0.17+0.20 per truncated episode -> avg 0.70 clears the 0.5 bar
-    assert episode_totals == [pytest.approx(0.70), pytest.approx(0.70)]
+    # Plan 076 T12: the reward is PROGRESS_WEIGHT * progress - TIME_COST, so
+    # a step pays its progress (0.03, 0.06, 0.09, 0.12, 0.15 m) and is
+    # charged 0.05 for the time it took:
+    # -0.02+0.01+0.04+0.07+0.10 per truncated episode -> 0.20, which clears
+    # the 0.15 bar.
+    assert episode_totals == [pytest.approx(0.20), pytest.approx(0.20)]
     assert env.scheduler.state.episode_rewards == []  # cleared by advance()
     assert env.scheduler.state.scene_history == [{"scene": "cross", "scene_idx": 0, "episodes": 2}]
     assert env.scheduler.state.current_scene == "t_junction"

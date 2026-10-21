@@ -22,11 +22,19 @@ stochastic scene only has to change this constant.
 
 What the ego's policy actually controls
 ---------------------------------------
-`SimCore.step` reads `action[0]` — the throttle — and computes the steering
-itself, with Pure Pursuit: `action[1]` never reaches the sim. A policy
-trained in this environment therefore modulates the **throttle**, and the
-harness measures the throttle channel. The steer channel is still reported
-(`steer_mean`), so a change to that becomes visible.
+`SimCore.step` reads **both** action channels (Plan 076 T12):
+
+- `action[0]` — the throttle, as an acceleration command;
+- `action[1]` — a **steering residual**, i.e. a *correction on top of* the
+  scripted Pure Pursuit steer, scaled by `MAX_STEER` and clipped with it.
+  It is not an absolute steering command: in a free-space sim with no
+  lanes to follow, an absolute command would just make the policy spin.
+
+So the scripted Pure Pursuit is the **baseline**: a policy that commands
+no correction drives exactly the trajectory the baseline drives. The
+gate is therefore "does the policy beat *scripted pursuit + the best
+constant throttle*", and a constant-throttle baseline is measured with
+`action[1] == 0` — i.e. with the scripted pursuit unmodified.
 """
 
 from __future__ import annotations
@@ -51,6 +59,25 @@ DEFAULT_SCENE = "cross"
 #: The throttle commands the baselines use.
 FULL_THROTTLE = 1.0
 ZERO_THROTTLE = 0.0
+#: The steering residual that leaves the scripted Pure Pursuit unmodified.
+#:
+#: Plan 076 T12: `action[1]` is a *correction* on the scripted steer, so
+#: `0.0` means "drive exactly as the scripted controller drives" — the
+#: baseline every policy has to beat.
+SCRIPTED_PURSUIT = 0.0
+#: A full steering residual (the maximum the action space can command).
+FULL_STEER = 1.0
+#: The tolerance used when comparing two returns for the tie-break.
+#:
+#: The reward is `PROGRESS_WEIGHT * progress - TIME_COST * steps`, and the
+#: progress term is mathematically identical on every *successful* run, so
+#: the returns differ only by floating-point noise (measured on the `cross`
+#: scene: 57.5 vs 57.500000000000014 — a difference of 1.4e-14). Returns
+#: within this tolerance count as equal, and the tie is broken on the
+#: **steps**: the fastest run wins. Without that, `max(sweep, key=return)`
+#: would pick an arbitrary ulp winner and the "strongest baseline" would
+#: be noise.
+RETURN_EPSILON = 1e-9
 
 
 def make_env(scene_kind: str = DEFAULT_SCENE, steps: int = EVAL_STEPS) -> Any:
@@ -98,6 +125,8 @@ def run_episode(
             sum(1 for t in throttles if t >= 0.9) / len(throttles) if throttles else 0.0
         ),
         "steer_mean": sum(steers) / len(steers) if steers else 0.0,
+        "steer_abs_mean": (sum(abs(s) for s in steers) / len(steers) if steers else 0.0),
+        "steer_max": max((abs(s) for s in steers), default=0.0),
         "throttle_histogram": _histogram(throttles),
         "final_z": float(env.core.ego.z),
         "final_x": float(env.core.ego.x),
@@ -116,6 +145,7 @@ def _histogram(values: list[float], buckets: int = 10) -> dict[str, int]:
 def evaluate_constant_throttle(
     throttle: float,
     *,
+    steer: float = SCRIPTED_PURSUIT,
     scene_kind: str = DEFAULT_SCENE,
     steps: int = EVAL_STEPS,
     seed: int = EVAL_SEED,
@@ -125,11 +155,20 @@ def evaluate_constant_throttle(
     The throttle is clipped into the action space's range, so a command of
     `2.0` is the same command as `1.0` (the sim clips it) — the baseline is
     therefore reported on the *clipped* value.
+
+    `steer` is the **steering residual** (Plan 076 T12): `0.0` — the
+    default — leaves the scripted Pure Pursuit unmodified, which is the
+    baseline the trained policy has to beat. A non-zero value adds a
+    constant correction on top of it.
     """
     env = make_env(scene_kind, steps)
     command = float(np.clip(throttle, -1.0, 1.0))
-    result = run_episode(env, lambda _obs: np.array([command, 0.0], dtype=np.float32), seed)
+    steer_command = float(np.clip(steer, -1.0, 1.0))
+    result = run_episode(
+        env, lambda _obs: np.array([command, steer_command], dtype=np.float32), seed
+    )
     result["throttle"] = command
+    result["steer"] = steer_command
     result["scene_kind"] = scene_kind
     return result
 
@@ -185,6 +224,8 @@ def evaluate_policy(
         "throttle_max": last.get("throttle_max", 0.0),
         "throttle_full_share": last.get("throttle_full_share", 0.0),
         "steer_mean": last.get("steer_mean", 0.0),
+        "steer_abs_mean": last.get("steer_abs_mean", 0.0),
+        "steer_max": last.get("steer_max", 0.0),
         "throttle_histogram": last.get("throttle_histogram", {}),
         "final_z": last.get("final_z", 0.0),
         "final_x": last.get("final_x", 0.0),
@@ -198,13 +239,16 @@ def evaluate_sweep(
     steps: int = EVAL_STEPS,
     seed: int = EVAL_SEED,
     resolution: int = 40,
+    steer: float = SCRIPTED_PURSUIT,
 ) -> list[dict[str, Any]]:
     """Every constant throttle on a `1 / resolution` grid — the strongest
     baseline the gate has to beat, not just full throttle."""
     results: list[dict[str, Any]] = []
     for index in range(resolution + 1):
         throttle = index / resolution
-        result = evaluate_constant_throttle(throttle, scene_kind=scene_kind, steps=steps, seed=seed)
+        result = evaluate_constant_throttle(
+            throttle, steer=steer, scene_kind=scene_kind, steps=steps, seed=seed
+        )
         results.append(result)
     return results
 
@@ -259,10 +303,35 @@ def scan_checkpoints(
 
 
 def select_best(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """The candidate with the highest measured return (ties: the earlier)."""
+    """The strongest of a set of scored schedules.
+
+    The rule, in order:
+
+    1. the **highest return**;
+    2. among the returns that count as equal (within `RETURN_EPSILON`),
+       the **fewest steps** — the fastest run;
+    3. among those, the **largest throttle**.
+
+    Step 2 is not a nicety. The reward is `PROGRESS_WEIGHT * progress -
+    TIME_COST * steps`, and on the *successful* runs the progress term is
+    mathematically identical, so the returns differ only by floating-point
+    noise — measured on the `cross` scene: 57.5, 57.50000000000001,
+    57.500000000000014, 57.499999999999986. Picking the raw maximum picks
+    whichever schedule happened to land on the last ulp, and the baseline
+    it produces is *arbitrary*: it can even be a slower run than another
+    one that scored exactly the same.
+    """
     if not candidates:
         return None
-    return max(candidates, key=lambda item: item["return"])
+    top = max(float(item["return"]) for item in candidates)
+    tied = [item for item in candidates if float(item["return"]) >= top - RETURN_EPSILON]
+    return min(
+        tied,
+        key=lambda item: (
+            int(item.get("steps", 0)),
+            -float(item.get("throttle", 0.0)),
+        ),
+    )
 
 
 def main() -> None:
@@ -290,6 +359,16 @@ def main() -> None:
         default=40,
         help="The constant-throttle grid: 40 => every 0.025.",
     )
+    parser.add_argument(
+        "--steer",
+        type=float,
+        default=SCRIPTED_PURSUIT,
+        help=(
+            "The steering residual the constant-throttle baselines command. "
+            "0.0 (the default) leaves the scripted Pure Pursuit unmodified — "
+            "that is the baseline the trained policy has to beat."
+        ),
+    )
     args = parser.parse_args()
 
     if args.scan is not None:
@@ -309,7 +388,10 @@ def main() -> None:
             )
         best = select_best(candidates)
         print("")
-        print(f"best: {best['checkpoint']}  return {best['return']:.3f}")
+        print(
+            f"best: {best['checkpoint']}  return {best['return']:.3f}  steps {best['steps']}  "
+            f"(ties within {RETURN_EPSILON:g} are broken on the fewest steps)"
+        )
         return
 
     if args.checkpoint is None:
@@ -324,18 +406,27 @@ def main() -> None:
         episodes=args.episodes,
     )
     full = evaluate_constant_throttle(
-        FULL_THROTTLE, scene_kind=args.scene_kind, steps=args.steps, seed=args.seed
+        FULL_THROTTLE,
+        steer=args.steer,
+        scene_kind=args.scene_kind,
+        steps=args.steps,
+        seed=args.seed,
     )
     zero = evaluate_constant_throttle(
-        ZERO_THROTTLE, scene_kind=args.scene_kind, steps=args.steps, seed=args.seed
+        ZERO_THROTTLE,
+        steer=args.steer,
+        scene_kind=args.scene_kind,
+        steps=args.steps,
+        seed=args.seed,
     )
     sweep = evaluate_sweep(
         scene_kind=args.scene_kind,
         steps=args.steps,
         seed=args.seed,
         resolution=args.sweep_resolution,
+        steer=args.steer,
     )
-    best = max(sweep, key=lambda item: item["return"])
+    best = select_best(sweep)
 
     print(f"scene: {args.scene_kind}   horizon: {args.steps} steps   seed: {args.seed}")
     print("")
@@ -351,19 +442,30 @@ def main() -> None:
         f"{'constant zero throttle':>28}   {zero['return']:>9.3f}  {zero['steps']:>6}  {zero['reason']}"
     )
     print(
-        f"{'best constant (sweep)':>28}   {best['return']:>9.3f}  {best['steps']:>6}  "
+        f"{'strongest constant':>28}   {best['return']:>9.3f}  {best['steps']:>6}  "
         f"{best['reason']}  (throttle {best['throttle']:.3f})"
     )
     print("")
-    print(f"margin over full throttle : {trained['return'] - full['return']:+.3f}")
-    print(f"margin over best constant : {trained['return'] - best['return']:+.3f}")
+    print(
+        "the strongest constant is the highest return; returns within "
+        f"{RETURN_EPSILON:g} count as equal (the reward's float noise is "
+        "of that size) and the tie is broken on the FEWEST STEPS, i.e. the "
+        "fastest run."
+    )
+    print("")
+    print(f"margin over full throttle  : {trained['return'] - full['return']:+.3f}")
+    print(f"margin over strongest const : {trained['return'] - best['return']:+.3f}")
     print("")
     print(
         f"throttle: mean {trained['throttle_mean']:.3f}  "
         f"min {trained['throttle_min']:.3f}  max {trained['throttle_max']:.3f}  "
         f"share >= 0.9: {trained['throttle_full_share']:.2%}"
     )
-    print(f"steer channel (discarded by the sim): mean {trained['steer_mean']:.3f}")
+    print(
+        f"steer residual (on top of the scripted Pure Pursuit): "
+        f"mean {trained['steer_mean']:.3f}  mean |residual| "
+        f"{trained['steer_abs_mean']:.3f}  max |residual| {trained['steer_max']:.3f}"
+    )
     print(f"throttle histogram: {trained['throttle_histogram']}")
     print(f"final pose: x {trained['final_x']:.3f}  z {trained['final_z']:.3f}")
 

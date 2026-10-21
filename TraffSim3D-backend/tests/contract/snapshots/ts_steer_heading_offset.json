@@ -16,6 +16,15 @@
     "min_green_seconds": 10,
     "inter_green_seconds": 6
   },
+  "road_rules": {
+    "road_half_width": 3.5,
+    "scene_goal_z": {
+      "cross": 25,
+      "corridor": 25,
+      "t_junction": -3,
+      "roundabout": 5
+    }
+  },
   "light_override": {
     "ns_green": true,
     "ew_green": false

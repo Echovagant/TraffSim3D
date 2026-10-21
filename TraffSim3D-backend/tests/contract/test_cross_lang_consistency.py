@@ -36,6 +36,8 @@ from app.apps.rl.sim_core import (
     MAX_STEPS_DEFAULT,
     MIN_GREEN_SECS,
     PHASE_ADJUST_SECS,
+    ROAD_HALF_WIDTH,
+    SCENE_GOAL_Z,
     SIGNAL_ACTION_NAMES,
     SimCore,
     TrafficLight,
@@ -507,6 +509,34 @@ def test_contract_snapshots_are_present() -> None:
             if not p.exists():
                 missing.append(p.name)
     assert not missing, "missing TS contract snapshots: " + ", ".join(missing) + ". " + _REGEN_HINT
+
+
+@pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])
+def test_the_road_rules_constants_match_the_typescript_golden(vector_name: str) -> None:
+    """Plan 076 T12: the road rules are contract constants too.
+
+    The road's half-width and each scene's goal line decide whether the
+    ego may score the success. Both sides own their own copy (Python in
+    `sim_core.py`, TypeScript in `@shared/constants/simulation`) — a file
+    both sides read would make this comparison vacuous — and the golden
+    carries the TS side's copy, which is compared here item by item.
+    """
+    v = _vector(vector_name)
+    golden = _require_snapshot(_golden_path(v["name"]))
+    rules = golden.get("road_rules")
+    assert rules is not None, (
+        f"{v['name']}: the TS golden carries no 'road_rules' block. "
+        "Regenerate it with: cd ../TraffSim3D-frontend && npm run contract:gen"
+    )
+
+    assert rules["road_half_width"] == ROAD_HALF_WIDTH, (
+        f"{v['name']}: the road half-width differs "
+        f"(typescript={rules['road_half_width']}, python={ROAD_HALF_WIDTH})"
+    )
+    assert rules["scene_goal_z"] == SCENE_GOAL_Z, (
+        f"{v['name']}: the scene goal lines differ "
+        f"(typescript={rules['scene_goal_z']}, python={SCENE_GOAL_Z})"
+    )
 
 
 @pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])

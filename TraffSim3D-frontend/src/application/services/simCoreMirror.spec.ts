@@ -469,3 +469,43 @@ describe('simCoreMirror — the ego start override (Plan 076 S5a)', () => {
     expect(headingEp.finalZ).toBe(-16.27592974962582)
   })
 })
+
+// Plan 076 T12: the rules the cross-language contract now covers.
+describe('simCoreMirror — Plan 076 T12 road rules', () => {
+  it('classifies the red-light axis like the traffic model', () => {
+    // 50 degrees is inside the band where the traffic model's
+    // `approach_axis` (ns) and the old "within 0.5 rad of north" heuristic
+    // (ew) disagree. The NS axis is red here, so the run must be punished.
+    const core = new SimCoreMirror('cross', 60)
+    core.reset()
+    core.light = { ...core.light, nsGreen: false, ewGreen: true }
+    core.ego = { x: 0, z: 0, heading: 0.8726646259971648, speed: 0, y: 0 }
+    core.step(0)
+    expect(core.terminated).toBe(true)
+    expect(core.terminatedReason).toBe('red_light')
+  })
+
+  it('denies the success to an ego that left the road', () => {
+    // The ego starts 6 m off the centreline — beyond the 3.5 m road
+    // half-width — and drives across the goal line.
+    const ep = runEpisode('cross', new Array(200).fill(1.0), 10, 200, {
+      egoStart: { x: 6.0, z: -25.0, heading: Math.PI / 2, speed: 0.0 },
+    })
+    expect(ep.reason).not.toBe('success')
+    // it really did cross the goal line — the rule is about the route
+    expect(ep.finalZ).toBeGreaterThan(PYTHON_SIM.SCENE_GOAL_Z.cross)
+  })
+
+  it('applies the steering residual on top of the scripted Pure Pursuit', () => {
+    // The residual is a *correction*, not a replacement: the neutral
+    // command drives exactly the scripted line, and a positive command
+    // adds to the scripted steer.
+    const neutral = runEpisode('cross', new Array(30).fill(0.25), 10, 30)
+    const residual = runEpisode('cross', new Array(30).fill(0.25), 10, 30, {
+      steerActions: new Array(30).fill(0.5),
+    })
+    expect(residual.finalX).not.toBeCloseTo(neutral.finalX, 6)
+    // the neutral run is the scripted pursuit: it drives the centreline
+    expect(Math.abs(neutral.finalX)).toBeLessThan(1e-6)
+  })
+})

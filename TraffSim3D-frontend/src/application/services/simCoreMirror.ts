@@ -148,23 +148,17 @@ export interface MirrorRunOptions {
   signalActions?: MirrorSignalAction[]
   /** Replace the ego's pose after `reset()`. */
   egoStart?: MirrorEgoStart
+  /**
+   * The **steering commands** (`action[1]`) of the episode, in step order.
+   *
+   * Plan 076 T12: the policy's steering authority is a residual on top of
+   * the scripted Pure Pursuit steer. Absent → every step uses `0`, i.e. the
+   * scripted controller drives unmodified (the pre-T12 behaviour).
+   */
+  steerActions?: number[]
 }
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
-
-/**
- * CPython's float `%`: `fmod(a, b)` plus a single conditional add of the
- * modulus when the remainder is non-zero and carries the opposite sign.
- *
- * JS `%` is itself IEEE remainder-truncated — exactly `fmod` — so replaying
- * the same two steps gives the same bits. The shorter `((a % m) + m) % m` is
- * NOT equivalent: it adds a rounding step for non-negative inputs
- * (e.g. `a = 0.1` gives `0.099999999999999644729` instead of `0.1`).
- */
-const floorMod = (a: number, m: number): number => {
-  const r = a % m
-  return r !== 0 && r < 0 !== m < 0 ? r + m : r
-}
 
 const EGO_START = (): MirrorVehicle => ({
   x: 0,
@@ -198,6 +192,34 @@ export const createMirrorLight = (nsGreen: boolean, ewGreen: boolean): MirrorLig
 /** Python `sim_core.TrafficLight()` — the default (NS-green) light. */
 const LIGHT_START = (): MirrorLight => createMirrorLight(true, false)
 
+/** Python `sim_core.approach_axis` — the signalised approach axis.
+ *
+ * Plan 076 T12. The NPCs drive straight through the intersection centre, so
+ * the axis follows from the heading alone: a heading within 45° of ±Z runs on
+ * the north-south road ("ns"), a heading within 45° of ±X on the east-west
+ * road ("ew").
+ *
+ * This is the **traffic model's own** classification, and the red-light rule
+ * below uses it too — the two must never disagree about which axis the ego
+ * is on. (The pre-T12 heuristic read the axis off "within 0.5 rad of north"
+ * instead, which disagreed with the traffic model on 26 of the 72 sampled
+ * headings — every 5° — so it both killed green-axis episodes and let real
+ * red-light runs through.)
+ */
+const approachAxis = (heading: number): 'ns' | 'ew' =>
+  Math.abs(Math.sin(heading)) >= Math.abs(Math.cos(heading)) ? 'ns' : 'ew'
+
+/** Python `sim_core.lateral_offset` — the perpendicular distance from the
+ * centreline of the road the vehicle runs along.
+ *
+ * The scenes carry no lane model; which road a vehicle runs along follows
+ * from its heading — the same `approachAxis` the traffic model uses — so a
+ * north-south vehicle is measured against the `x = 0` centreline and an
+ * east-west one against the `z = 0` centreline.
+ */
+const lateralOffset = (vehicle: MirrorVehicle): number =>
+  approachAxis(vehicle.heading) === 'ns' ? Math.abs(vehicle.x) : Math.abs(vehicle.z)
+
 /**
  * A port of Python's `SimCore`.
  *
@@ -215,6 +237,16 @@ export class SimCoreMirror {
   terminated = false
   truncated = false
   terminatedReason: TerminationReason = ''
+  /**
+   * Plan 076 T12: has the ego left the road during this episode?
+   *
+   * The success condition used to be route-agnostic (`ego.z > 25`), so a
+   * wrong route that left the road scored the same success — and the same
+   * bonus — as the right one. The latch is permanent: the success needs the
+   * ego to have **stayed** on the road, not to be on it at the moment it
+   * crossed the line.
+   */
+  offRoad = false
 
   constructor(sceneKind: SceneKind = 'cross', maxSteps: number = PYTHON_SIM.MAX_STEPS_DEFAULT) {
     this.sceneKind = sceneKind
@@ -251,6 +283,8 @@ export class SimCoreMirror {
     this.terminated = false
     this.truncated = false
     this.terminatedReason = ''
+    // Plan 076 T12: the off-road latch is per-episode state too.
+    this.offRoad = false
 
     switch (this.sceneKind) {
       case 'corridor':
@@ -320,12 +354,29 @@ export class SimCoreMirror {
     return [0, 0]
   }
 
-  step(action0: number): void {
+  /**
+   * One simulation step.
+   *
+   * `action1` is Plan 076 T12's **steering residual**: the policy's
+   * correction **on top of** the scripted Pure Pursuit steer, not a
+   * replacement. It is scaled by `MAX_STEER` and clipped together with the
+   * scripted steer, exactly like Python's
+   * `steer = clip(clip(steer) + clip(action[1], -1, 1) * MAX_STEER)`.
+   *
+   * The default `0` means "no correction" — the scripted controller drives
+   * exactly as before.
+   */
+  step(action0: number, action1 = 0): void {
     if (this.terminated) return
     if (this.truncated) return
 
     // 1) ego control + kinematics
-    const next = integrateEgo(this.ego, action0, PYTHON_SIM.DT, this.target())
+    // Python: `steer_residual = float(np.clip(action[1], -1.0, 1.0)) * MAX_STEER`
+    // (`Math.fround` is the float32 cast Python's env applies to the action;
+    // the clip's bounds are exact in float32, so clipping the rounded value
+    // in double gives the same bits as numpy's float32 clip.)
+    const steerResidual = clamp(Math.fround(action1), -1, 1) * PYTHON_SIM.MAX_STEER
+    const next = integrateEgo(this.ego, action0, PYTHON_SIM.DT, this.target(), steerResidual)
     this.ego.x = next.x
     this.ego.z = next.z
     this.ego.heading = next.heading
@@ -398,25 +449,29 @@ export class SimCoreMirror {
       this.terminatedReason = 'red_light'
     }
 
-    if (!this.terminated) {
-      if (this.sceneKind === 'corridor') {
-        if (this.ego.z > 25.0) {
-          this.terminated = true
-          this.terminatedReason = 'success_corridor'
-        }
-      } else if (this.sceneKind === 't_junction') {
-        if (this.ego.z > -3.0) {
-          this.terminated = true
-          this.terminatedReason = 'success_t_junction'
-        }
-      } else if (this.sceneKind === 'roundabout') {
-        if (this.ego.z > 5.0) {
-          this.terminated = true
-          this.terminatedReason = 'success_roundabout'
-        }
-      } else if (this.ego.z > 25.0) {
+    // Plan 076 T12: has the ego left the road? The latch is permanent —
+    // the success needs the ego to have STAYED on the road.
+    if (lateralOffset(this.ego) > PYTHON_SIM.ROAD_HALF_WIDTH) {
+      this.offRoad = true
+    }
+
+    // Plan 076 T12: the success also needs the ego to have stayed on the
+    // road — the old condition (`ego.z > 25`) was route-agnostic, so a wrong
+    // route that left the road scored the same success and the same bonus as
+    // the right one.
+    if (!this.terminated && !this.offRoad) {
+      const goalZ = PYTHON_SIM.SCENE_GOAL_Z[this.sceneKind]
+      if (this.ego.z > goalZ) {
         this.terminated = true
-        this.terminatedReason = 'success'
+        if (this.sceneKind === 'corridor') {
+          this.terminatedReason = 'success_corridor'
+        } else if (this.sceneKind === 't_junction') {
+          this.terminatedReason = 'success_t_junction'
+        } else if (this.sceneKind === 'roundabout') {
+          this.terminatedReason = 'success_roundabout'
+        } else {
+          this.terminatedReason = 'success'
+        }
       }
     }
 
@@ -473,10 +528,17 @@ export class SimCoreMirror {
       Math.abs(this.ego.x) < PYTHON_SIM.INTERSECTION_RADIUS &&
       Math.abs(this.ego.z) < PYTHON_SIM.INTERSECTION_RADIUS
     if (!inIntersection) return false
-    const headingNs = Math.abs(floorMod(this.ego.heading, 2 * Math.PI) - Math.PI / 2) < 0.5
-    if (headingNs && !this.light.nsGreen) return true
-    if (!headingNs && !this.light.ewGreen) return true
-    return false
+    // Plan 076 T12: the axis comes from the **traffic model's own**
+    // classification (`approachAxis`), so the red-light rule and the traffic
+    // model can never disagree about which axis the ego is on.
+    //
+    // The old heuristic read the axis off the heading as "within 0.5 rad of
+    // north" (61.35deg - 118.65deg), while the traffic model uses
+    // `|sin h| >= |cos h|` (45deg - 135deg and 225deg - 315deg): 26 of the
+    // 72 sampled headings (every 5deg) disagreed, so the rule both killed
+    // episodes on the green axis and let real red-light runs through.
+    if (approachAxis(this.ego.heading) === 'ns') return !this.light.nsGreen
+    return !this.light.ewGreen
   }
 
   /** Port of Python's `_obs()` — 14 dims. */
@@ -579,7 +641,7 @@ export const runEpisode = (
     for (const entry of signalActions) {
       if (entry.step === stepNo) core.applySignalAction(entry.action)
     }
-    core.step(actions[i]!)
+    core.step(actions[i]!, options.steerActions?.[i] ?? 0)
     if ((i + 1) % sampleEvery === 0 || i === actions.length - 1) {
       samples.push(snapshot(i + 1, core))
     }

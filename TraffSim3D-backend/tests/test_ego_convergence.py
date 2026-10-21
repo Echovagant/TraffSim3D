@@ -17,8 +17,10 @@ was invisible. The contract could not see it either — both sides implemented
 the same wrong sign, so they matched bit for bit.
 
 Measured before the fix (120 steps, full throttle, target 25.7 m away):
-the distance to the target grew to **150.9 m**. After the fix it shrinks to
-**5.8 m**.
+the distance to the target grew to **150.9 m**. After the fix the ego
+**converges**: its closest approach is **2.3 m** (the episode then
+overshoots and keeps going — see the note in
+`test_the_ego_converges_on_an_offset_target`).
 """
 
 from __future__ import annotations
@@ -65,17 +67,27 @@ def test_the_ego_converges_on_an_offset_target() -> None:
     With the inverted alpha the ego drove away from the target and the
     distance grew to 150.9 m (from 25.7 m) — the training environment was
     teaching the ego to steer the wrong way.
+
+    Plan 076 T12 note: this scenario starts the ego 6 m off the
+    centreline, which is **beyond the 3.5 m road half-width** T12 gave
+    the sim. The ego therefore cannot score the success any more, so the
+    episode no longer *ends* at the target — it converges, overshoots and
+    keeps going. The property under test is therefore the **closest
+    approach**, which is what "converges" means for a Pure Pursuit: it
+    tracks a point, it does not stop at it (see the sibling test below,
+    whose docstring says the same thing).
     """
     distances = _distances(OFFSET_START)
     assert distances, "the episode ran no step"
-    assert distances[-1] < distances[0], (
-        f"the ego did not approach its target: the distance went "
-        f"{distances[0]:.3f} -> {distances[-1]:.3f} m"
+    closest = min(distances)
+    assert closest < distances[0], (
+        f"the ego did not approach its target: the closest distance was "
+        f"{closest:.3f} m (it started at {distances[0]:.3f} m)"
     )
     # And it really arrives: the target is 25.7 m away at the start.
     assert (
-        distances[-1] < 0.5 * distances[0]
-    ), f"the ego only got halfway: {distances[0]:.3f} -> {distances[-1]:.3f} m"
+        closest < 0.5 * distances[0]
+    ), f"the ego only got halfway: {distances[0]:.3f} -> {closest:.3f} m"
 
 
 def test_the_steer_points_towards_the_target() -> None:

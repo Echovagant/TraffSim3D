@@ -1,5 +1,25 @@
 # Cross-Language Sim Contract
 
+> **状态（2026-10-21，Plan 076 T12）：道路规则进入契约 —— 两条规则从「隐含」变成「被向量覆盖」。**
+> T12 给 ego 的训练 sim 改了四条规则（转向残量 / 时间项从奖励翻成成本 / 成功条件加横向约束 /
+> 红灯轴向用交通模型的 `approach_axis`）。**其中两条是跨语言规则**：红灯的轴向判定与
+> 「成功必须有横向约束」。改动**只落在 Python 一侧** ⇒ 两侧一度含义不同，而契约
+> **测不出来**（没有任何向量驶出路面后再越过终点线，也没有向量在路口内带着两侧规则
+> 分歧的航向）—— 这是一次**潜伏的跨语言漂移**，「golden 零变化」正是它的症状，
+> **不是**规则等价的证据。
+> ⇒ 现在：① TS 镜像（`simCoreMirror.ts`）按**同一语义**实现（轴向用交通模型的分类；
+> 补 `lateral_offset` + 出路面锁存 + `SCENE_GOAL_Z` 单一常量；转向残量进内核的
+> `integrateEgo`，默认 0 ⇒ 产品回放路径逐位不变）；② 新增 3 条向量把规则**钉住**：
+> `red_light_axis_disagreement`（航向 50° = 两侧规则的分歧区，在路口内，NS 轴红灯
+> ⇒ 闯红灯终止）、`off_road_no_success`（从路面外出发、越过终点线 ⇒ 不得 success）、
+> `steer_residual`（非零转向通道 ⇒ 转向残量可观测）；③ 两条常量的拷贝（路半宽 +
+> 各场景终点线）写进 golden 的 `road_rules` 块，由 Python 侧**逐项**比对（两侧各持
+> 一份自己的拷贝 —— 共用一个文件会让这个比对变成空话）。
+> 实测（2026-10-21）：`pytest tests/contract/` → **128 passed / 0 failed / 0 skipped**
+> （原 89；新增 39 条来自 3 条新向量的场景/kernel/常量比对 + 6 条**变异门禁**）。
+> 既有 12 条向量的**轨迹、终止原因与最终状态逐位不变**：重录 golden 的 diff 只有新增的
+> `road_rules` 块（12 个文件各 +9 行、**0 删除**）。
+>
 > **状态（2026-10-20 起，Plan 071；2026-10-21 复测）：契约已激活并真实执行。**
 > 比对测试不再跳过 —— TS 侧快照缺失时**失败**而不是跳过。
 > 快照由 `TraffSim3D-frontend` 生成并入库，后端测试可独立跑完整契约。
@@ -140,6 +160,9 @@ it needs a scalar-level entry point into the obs builder. See "Not covered".
 | `signalled_light_preempt_boundary` | roundabout | The **clearance-boundary** case: a second `preempt` on the very step the phase resumed (step 40). The light must come back (step 70) — the regression the Plan 073 Sprint 2 fix wave repaired, now pinned at the trajectory level. |
 | `steer_lateral_offset` | roundabout | **Plan 076 S5a — the turning vectors.** The ego starts **60 m** to the side of its target line (`ego_start`), so Pure Pursuit's angle is non-zero from the first step: `steer ≠ 0` on every step and the `MAX_STEER` clamp is actually reached (8 consecutive steps). This is what makes `LOOKAHEAD_DISTANCE` / `MAX_STEER` / `EGO_WHEELBASE` observable. 60 steps, truncated at the limit. |
 | `steer_heading_offset` | roundabout | The **other** turning trigger: the ego starts on its target line but with its heading offset by **2.0 rad**, so it has to correct hard and immediately (the clamp binds for 34 steps). Same coverage, a different path into the Pure Pursuit. |
+| `red_light_axis_disagreement` | cross | **Plan 076 T12 — the red-light axis rule.** The ego **drives into** the intersection on a heading of **50°**, i.e. inside the band where the traffic model's `approach_axis()` (ns) and the old "within 0.5 rad of north" heuristic (ew) disagree, with the NS axis red. It starts on the 50° ray towards the Pure Pursuit target, so the scripted steer is exactly 0 and the heading cannot drift out of the band; it **enters the box at step 30** — a *sample point*, with a 0.54 m margin outside and 0.15 m inside, so a 1-ULP difference between the two runtimes cannot flip the entry. Both sides call it a red-light run; the old rule let it through. This is the vector that makes the axis rule **observable** instead of implicit. |
+| `off_road_no_success` | cross | **Plan 076 T12 — the success's road constraint.** The ego starts **6 m** off the centreline (beyond the 3.5 m road half-width) and drives **across** the goal line: the route is wrong, so neither side may score the success. The latch is permanent — leaving the road and coming back does not restore it. |
+| `steer_residual` | cross | **Plan 076 T12 — the steering residual.** A non-zero `action[1]` (0.5), i.e. the policy's correction **on top of** the scripted Pure Pursuit steer. The old mirror ignored `action[1]` entirely, so this vector is what makes the steering channel observable on both sides. 30 steps, truncated at the limit (a turning trajectory ⇒ compared within the libm noise floor). |
 
 > **这两条向量是刻意极端的压力用例**，不是现实场景（偏出 60 m、航向偏 115°）。
 > 极端是有理由的：契约比较的是**采样点**（每 10 步一个），
@@ -177,7 +200,7 @@ fields:
 | `scene_kind` | The Python scene to run: `cross` / `corridor` / `t_junction` / `roundabout`. |
 | `ego_id` | The ego's id, recorded in every sample. |
 | `n_steps` | The **expanded** action count (see the expansion rule below). Neither side reads it today. |
-| `actions` | The literal action list. Each entry is a pair, but **only the first element is read**: it is the acceleration command, clipped to `[-1, 1]` and scaled to 3 m/s². The steer is *not* taken from the action — both sides compute it with Pure Pursuit. |
+| `actions` | The literal action list. Each entry is a **pair**, and **both elements are read** (Plan 076 T12): the first is the acceleration command, clipped to `[-1, 1]` and scaled to 3 m/s²; the second is the **steering residual** — a correction *on top of* the scripted Pure Pursuit steer, clipped to `[-1, 1]`, scaled by `MAX_STEER` and clipped together with the scripted steer. It used to be that **only the first element was read** ("the steer is not taken from the action — both sides compute it with Pure Pursuit"), and every vector's second element was `0.0`, so the two sides *coincidentally* agreed. The `steer_residual` vector (second element `0.5`) is what makes the dimension observable. |
 | `repeat` | **Optional.** Expands `actions` this many times. Absent → the sequence is `actions` itself. |
 | `max_steps` | **Optional.** The episode's step limit (Python `SimCore.max_steps`). Absent → `MAX_STEPS_DEFAULT` (200). |
 | `light_override` | **Optional.** The light to install right after the scene's `reset()`: `{"ns_green": bool, "ew_green": bool}`. It exists because the roundabout's own light is both-green ("no traffic lights there"), so its swap is a no-op; the *signalled* vectors override it with a plain NS-green light — the same override `tests/contract/test_signal_actions.py` applies. |
@@ -439,6 +462,8 @@ recomputed golden against the committed file).
 | `INTERSECTION_RADIUS` | **blind** | **blind** | **no** |
 | `ROUNDABOUT_RADIUS` | **blind** | **blind** | **no** |
 | `NPC_SPEED` | **blind** | **blind** | **no** |
+| `ROAD_HALF_WIDTH` (Plan 076 T12) | **caught** — the golden's `road_rules` block carries the TS side's copy and the Python side compares it item by item | **caught** (same block) | **no** (it did not exist before T12) |
+| `SCENE_GOAL_Z` (Plan 076 T12) | **caught** — same block, per scene | **caught** (same block) | **no** (it did not exist before T12) |
 | **traffic-light phase duration** (`TrafficLight.cycle_duration` / `PYTHON_SIM.LIGHT_CYCLE_SECONDS`) | **partially covered** — caught when the first flip lands inside the *sampled* window (≤ 25.0 s); a drift of 30 → 26 s is **not** caught | same | **no** (was fully blind) |
 
 ### The traffic-light phase duration — partially covered

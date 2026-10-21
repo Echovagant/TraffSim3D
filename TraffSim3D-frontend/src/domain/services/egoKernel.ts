@@ -190,15 +190,28 @@ export const pythonSteer = (ego: EgoState, target: readonly [number, number]): n
  *
  * The speed update is `pythonSpeedStep` verbatim — the two must stay one
  * operation sequence, so the shared function is the single place to change.
+ *
+ * `steerResidual` is Plan 076 T12's **steering residual**: a correction the
+ * policy applies **on top of** the scripted Pure Pursuit steer, scaled by
+ * `MAX_STEER` by the caller and clipped together with it (Python:
+ * `steer = clip(clip(steer) + residual)`). The default is `0` — no
+ * correction — which keeps every pre-T12 caller bit-identical: the
+ * product replay path only uses `pythonSpeedStep`, and the contract mirror
+ * passes the vector's residual.
  */
 export const integrateEgo = (
   ego: EgoState,
   action0: number,
   dt: number,
   target: readonly [number, number],
+  steerResidual = 0,
 ): EgoState => {
   const speed = pythonSpeedStep(ego.speed, action0, dt)
-  const steer = pythonSteer(ego, target)
+  const steer = npClip(
+    pythonSteer(ego, target) + steerResidual,
+    -PYTHON_SIM.MAX_STEER,
+    PYTHON_SIM.MAX_STEER,
+  )
   const heading = ego.heading + steer * dt
   return {
     x: ego.x + speed * Math.cos(heading) * dt,

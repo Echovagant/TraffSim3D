@@ -62,9 +62,18 @@ CONTRACT_DIR = Path(__file__).parent
 VECTOR_PATH = CONTRACT_DIR / "test_vector.json"
 SNAPSHOT_DIR = CONTRACT_DIR / "snapshots"
 
-# The vectors whose trajectory turns (classified from the committed golden -
-# see `_vector_names`).
-TURNING_VECTORS = _vector_names(turning=True)
+# The vectors whose trajectory turns **through the Pure Pursuit** — i.e. the
+# ones that declare an `ego_start`, so the steer comes from the pursuit
+# geometry rather than from the policy's steering residual.
+#
+# The contract's own classification (`_vector_names(turning=True)`) is
+# broader: it also contains Plan 076 T12's `steer_residual` vector, whose
+# ego turns because the *policy* commands a residual. That vector is still
+# compared with the noise floor (the two runtimes' `sin`/`atan2` disagree in
+# the last bit on any turning trajectory) — but the assertions below are
+# about the **Pure Pursuit constants**, and they only make sense for the
+# vectors that exercise the pursuit.
+TURNING_VECTORS = [name for name in _vector_names(turning=True) if "ego_start" in _vector(name)]
 
 # The three constants that used to be blind, and a mutation that is large
 # enough to be unmistakable but small enough to stay physically plausible.

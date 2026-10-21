@@ -296,7 +296,15 @@ const main = (): void => {
       actions.map((a) => a[0]!),
       sampleEvery,
       v.max_steps,
-      { lightOverride, signalActions, egoStart },
+      {
+        lightOverride,
+        signalActions,
+        egoStart,
+        // Plan 076 T12: the steering channel (`action[1]`) is a residual on
+        // top of the scripted Pure Pursuit steer. The Python side reads the
+        // same vector, so both sides drive the same trajectory.
+        steerActions: actions.map((a) => a[1]!),
+      },
     )
     const scenario = {
       name: v.name,
@@ -314,6 +322,15 @@ const main = (): void => {
         max_green_seconds: MAX_GREEN_SECS,
         min_green_seconds: MIN_GREEN_SECS,
         inter_green_seconds: MIN_INTER_GREEN_SECS,
+      },
+      // Plan 076 T12: the road rules — the road's half-width and each
+      // scene's goal line. The Python side cross-checks these against its
+      // own `sim_core` copies, so a one-sided change of either turns the
+      // contract red (each side owns its own copy on purpose: a file both
+      // sides read would make the comparison vacuous).
+      road_rules: {
+        road_half_width: PYTHON_SIM.ROAD_HALF_WIDTH,
+        scene_goal_z: { ...PYTHON_SIM.SCENE_GOAL_Z },
       },
       // The light override the mirror actually ran with (absent → the
       // scene's own light). The Python side cross-checks it against the

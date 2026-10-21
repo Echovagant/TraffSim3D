@@ -388,6 +388,32 @@ export const PYTHON_SIM = {
   MAX_STEPS_DEFAULT: 200,
   /** Python: `TrafficLight.cycle_duration = 30.0` (s per phase) */
   LIGHT_CYCLE_SECONDS: 30.0,
+  /**
+   * Python: `ROAD_HALF_WIDTH = 3.5` (m) — the road's half-width.
+   *
+   * Plan 076 T12. The scenes carry no lane model; they place their NPCs at a
+   * **3.5 m lateral offset** from the road's centreline, so 3.5 m is the
+   * half-width the scene itself implies. An ego that leaves it may not score
+   * the success any more (the rule is latched for the whole episode).
+   *
+   * Each side owns its own copy on purpose: a file both sides read would
+   * make the contract's comparison of this constant vacuous.
+   */
+  ROAD_HALF_WIDTH: 3.5,
+  /**
+   * Python: `SCENE_GOAL_Z` — the **goal line** of each scene (the z the ego
+   * has to pass to score the success).
+   *
+   * Plan 076 T12: the success condition and the progress reward both read
+   * this number, so "the goal line" is one thing and not two. The contract
+   * compares the two sides' copies item by item.
+   */
+  SCENE_GOAL_Z: {
+    cross: 25.0,
+    corridor: 25.0,
+    t_junction: -3.0,
+    roundabout: 5.0,
+  },
 } as const
 
 /**
