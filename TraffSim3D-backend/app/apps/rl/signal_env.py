@@ -55,6 +55,16 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from .signal_conditions import (
+    DENSE_EW_VEHICLES_PER_LANE,
+    DENSE_NS_VEHICLES_PER_LANE,
+    DENSE_STREAM_SPACING,
+    DENSE_STREAM_START,
+    EVAL_CONDITION,
+    HOLDOUT_CONDITION,
+    TRAIN_CONDITION,
+    TrafficCondition,
+)
 from .sim_core import (
     DT,
     MAX_STEPS_DEFAULT,
@@ -68,6 +78,20 @@ from .sim_core import (
     approach_axis,
 )
 
+__all__ = [
+    "DENSE_EW_VEHICLES_PER_LANE",
+    "DENSE_NS_VEHICLES_PER_LANE",
+    "DENSE_STREAM_SPACING",
+    "DENSE_STREAM_START",
+    "EVAL_CONDITION",
+    "HOLDOUT_CONDITION",
+    "MAX_QUEUE",
+    "SIG_OBS_DIM",
+    "TRAIN_CONDITION",
+    "SignalEnv",
+    "TrafficCondition",
+]
+
 # The observation dimensionality (Plan 074 §2 D1).
 SIG_OBS_DIM = 6
 
@@ -76,63 +100,16 @@ SIG_OBS_DIM = 6
 # be comparable at all.
 MAX_QUEUE = 10
 
-# ===== Plan 074 T9: the dense training scenario =====
+# ===== Plan 074 T9/T10: the dense training scenario =====
 #
-# The cross scene has ONE vehicle per lane: an arrival every ~9 s. A red
-# phase therefore never builds a queue - the cross-axis queue holds one
-# or two vehicles - so "serve the other axis forever" costs almost
-# nothing and the signal agent has no trade-off to learn. The measured
-# consequence (Plan 074 §3 T9): starving one axis was only ~8 reward
-# worse than alternating, while the queue never built up at all.
-#
-# The dense scenario lays out a regular *stream* of traffic on every
-# lane of the scene, so that a red phase produces a queue of SEVERAL
-# vehicles. Three properties matter:
-#
-# - the stream is fully deterministic - there is no randomness
-#   anywhere. The contract compares trajectories for exact equality and
-#   a training run has to be reproducible;
-# - the vehicles keep the scene's own lanes (axis, direction of travel
-#   and lateral offset), so the car-following rule makes them queue
-#   behind each other instead of driving through each other;
-# - the stream is spread over the lane's whole circulation path, not
-#   stacked at the stop line. A stream that is already waiting at the
-#   line would rebuild its queue the instant the green ends, and the
-#   "queue rebuilds slowly" effect - the one that makes serving both
-#   axes pay off - would disappear.
+# The scenario itself (the demand, the headway and the lane layout) lives
+# in `signal_conditions.py` - it is the *training condition* of the
+# signal agent, and the evaluation condition has to be defined next to
+# it (Plan 074 T10). The constants are re-exported here so that the
+# scenario keeps one obvious home for the code that builds it.
 #
 # The scene itself (`SimCore._reset_cross`) is NOT touched: the contract
 # vectors run on it, and their goldens must not move.
-
-# The lane's circulation path: a vehicle respawns where the world ends
-# (32 m before the intersection centre, i.e. 24 m before the stop line)
-# and leaves it 40 m after the centre (48 m after the stop line). The
-# dense stream starts at the respawn point.
-DENSE_STREAM_START = -24.0
-# How far apart two vehicles of the stream are, in metres. 24 m is a
-# 3 s headway at the NPC speed - a busy road, but not a jam.
-DENSE_STREAM_SPACING = 24.0
-# How many vehicles each lane carries. The two axes do NOT carry the
-# same demand: the EW axis carries a third more traffic than the NS
-# axis, as real intersections do.
-#
-# WHY THE DEMAND IS UNBALANCED - this is not a thumb on the scale, it
-# is what makes the model usable. The reward is the *queue length
-# area*, and a queue can never be longer than the number of vehicles
-# that exist: a starved axis's delay is therefore capped at (vehicles on
-# that axis) x (episode length). Measured with a BALANCED dense stream,
-# the model ranks "hold one axis green forever" *above* an alternating
-# schedule (-238.4 vs -241.8 over 600 steps): the alternating schedule
-# pays the inter-green clearance on every switch while the starving
-# schedule never switches at all, and the capped delay cannot make up
-# for it. That is a degenerate optimum - the agent would learn to
-# starve an axis. With an unbalanced demand the trade-off is real: the
-# agent has to decide how to split the green between a busy and a quiet
-# axis, and the reward ranks the alternating schedule above both
-# degenerate policies (switching as fast as possible, and starving an
-# axis) at every horizon from 600 steps on.
-DENSE_NS_VEHICLES_PER_LANE = 3
-DENSE_EW_VEHICLES_PER_LANE = 4
 
 # The four approaches of the cross scene: (axis, direction of travel) ->
 # (the unit vector across the road, the unit vector along it, heading).
@@ -210,6 +187,7 @@ class SignalEnv(gym.Env[np.ndarray, int]):
         self,
         max_steps: int = MAX_STEPS_DEFAULT,
         scene_kind: str = "cross",
+        condition: TrafficCondition = TRAIN_CONDITION,
     ) -> None:
         super().__init__()
         # `responsive_traffic=True` — without it the NPCs would ignore
@@ -219,6 +197,10 @@ class SignalEnv(gym.Env[np.ndarray, int]):
             scene_kind=scene_kind,
             responsive_traffic=True,
         )
+        # Plan 074 T10: the initial condition of the scene. The default is
+        # the training condition, so the training episodes are exactly the
+        # ones Plan 074 T9 measured (-423.1 for the fixed 30/30 cycle).
+        self.condition = condition
         # The ego is a passenger here: no throttle, no steering.
         self._ego_action = np.zeros(2, dtype=np.float32)
         self._total_delay = 0.0
@@ -233,6 +215,10 @@ class SignalEnv(gym.Env[np.ndarray, int]):
     ) -> tuple[np.ndarray, dict[str, Any]]:
         super().reset(seed=seed)
         self.core.reset(seed=seed)
+        # Plan 074 T10: the condition's signal offset. `SimCore.reset`
+        # recreates the light, so the phase clock starts at 0 — the
+        # condition puts it where the condition says.
+        self.core.light.cycle_timer = self.condition.phase_offset
         self._park_ego()
         self._densify_traffic()
         self._total_delay = 0.0
@@ -342,6 +328,9 @@ class SignalEnv(gym.Env[np.ndarray, int]):
         on it and their goldens must not move.
 
         The placement is fully deterministic: no randomness anywhere.
+        The numbers come from the env's **condition** (Plan 074 T10):
+        the training condition reproduces the constants above, another
+        condition lays the same kind of traffic out differently.
         """
         core = self.core
         stream: list[Vehicle] = []
@@ -352,9 +341,12 @@ class SignalEnv(gym.Env[np.ndarray, int]):
                 continue
             _, along, heading = lane
             lateral = _lateral_offset(npc, axis)
-            count = DENSE_EW_VEHICLES_PER_LANE if axis == "ew" else DENSE_NS_VEHICLES_PER_LANE
+            condition = self.condition
+            count = (
+                condition.ew_vehicles_per_lane if axis == "ew" else condition.ns_vehicles_per_lane
+            )
             for index in range(count):
-                distance = DENSE_STREAM_START + DENSE_STREAM_SPACING * index
+                distance = condition.stream_start + condition.stream_spacing * index
                 x, z = _lane_point(axis, lateral, along, distance)
                 stream.append(Vehicle(x=x, z=z, heading=heading, speed=NPC_SPEED))
         core.npcs = stream

@@ -52,6 +52,29 @@ def save_checkpoint(
     return path
 
 
+def save_named_checkpoint(model: Any, name: str) -> Path:
+    """Save a checkpoint under an explicit file name.
+
+    `save_checkpoint` names the file after the training step, so two
+    runs that save at the same step overwrite each other. A multi-seed
+    run keeps one policy per seed (Plan 074 T10) and the name has to
+    say which seed it belongs to — e.g.
+    `signal_seed0_step_0210000.zip`.
+
+    The file lands in the same per-process directory as the regular
+    checkpoints. It is deliberately NOT matched by the `ppo_step_*`
+    pattern the checkpoint list reads, so a per-seed file never shows
+    up there as if it were the run's deliverable.
+    """
+    if not name.endswith(".zip") or "/" in name or "\\" in name or name.startswith("."):
+        raise ValueError(f"invalid checkpoint name {name!r}")
+    pdir = _per_process_dir()
+    pdir.mkdir(parents=True, exist_ok=True)
+    path = pdir / name
+    model.save(str(path))
+    return path
+
+
 def list_checkpoints() -> list[dict[str, Any]]:
     """List all checkpoints across all per-process subdirs, newest first.
 
