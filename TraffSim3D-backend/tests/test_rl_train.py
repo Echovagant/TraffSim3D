@@ -25,7 +25,9 @@ import time
 import pytest
 
 from app.apps.rl import capabilities as rl_caps
+from app.apps.rl import checkpoint as rl_checkpoint
 from app.apps.rl import control as rl_control
+from app.apps.rl import paths as rl_paths
 from app.apps.rl import status as rl_status
 from app.apps.rl import train
 
@@ -40,6 +42,13 @@ def _sb3_installed() -> bool:
 requires_no_sb3 = pytest.mark.skipif(
     _sb3_installed(),
     reason="stable_baselines3 installed — the no-SB3 fallback is unreachable",
+)
+
+#: Marks the tests that need the **real** PPO. They are skipped in a venv
+#: without stable-baselines3, where the training path is unreachable.
+requires_sb3 = pytest.mark.skipif(
+    not _sb3_installed(),
+    reason="stable_baselines3 not installed — the real training path is unreachable",
 )
 
 
@@ -539,3 +548,56 @@ def test_status_file_stays_inside_tmp(rl_state, monkeypatch) -> None:
     assert rl_state in written.parents
     assert json.loads(written.read_text(encoding="utf-8"))["total_steps"] == 200
     assert not (rl_state / "ppo_checkpoints").exists()
+
+
+# --------------------------------------------------------------------------
+# The real PPO path — the ego policy's export shape
+# --------------------------------------------------------------------------
+
+
+@requires_sb3
+def test_the_ego_training_path_exports_a_browser_loadable_policy(rl_state, monkeypatch) -> None:
+    """Train a few steps -> checkpoint -> export -> the shape the browser needs.
+
+    The browser's `mlpForwardMean` (`src/infrastructure/rl/mlpInference.ts`)
+    feeds a 14-dim observation into the exported layers and reads a 2-dim
+    action out of them, so a policy trained through `train.py` has to export
+    `obs_dim == 14`, `action_dim == 2` and the two hidden sizes.
+
+    The `--n-agents 1` path is the one that does: the multi-agent env stacks
+    the agents' observations into a `(n_agents, OBS_DIM)` box, and SB3's
+    flatten extractor turns that into `n_agents * 14` inputs and
+    `n_agents * 2` outputs — a policy the browser cannot load.
+    """
+    from app.apps.rl.weights import export_weights
+
+    # The checkpoint directory is resolved at **import** time
+    # (`checkpoint.py:_DEFAULT_DIR`), so the module attribute is what has to
+    # be patched — otherwise the run writes into the repository's `.data/`.
+    monkeypatch.setattr(rl_checkpoint, "_DEFAULT_DIR", rl_state / "ppo_checkpoints")
+
+    train.real_train(64, "cpu", 1, 1000, False, "cross")
+
+    zips = sorted(rl_paths.checkpoints_dir().rglob("ppo_step_*.zip"))
+    assert zips, "the training run produced no checkpoint"
+
+    weights = export_weights(zips[-1])
+    assert weights["obs_dim"] == 14
+    assert weights["action_dim"] == 2
+    assert weights["hidden_sizes"] == [64, 64]
+    # The ego's action space is a Box, so the export is the **continuous**
+    # one: the diagonal Gaussian log-std is present. The export must not
+    # depend on the action space being discrete.
+    assert weights["action_space"] == "continuous"
+    assert set(weights["layers"]) == {
+        "policy_net.0.weight",
+        "policy_net.0.bias",
+        "policy_net.2.weight",
+        "policy_net.2.bias",
+        "action_net.weight",
+        "action_net.bias",
+        "log_std",
+    }
+    # The layer the browser reads its input dimension from.
+    assert len(weights["layers"]["policy_net.0.weight"][0]) == 14
+    assert len(weights["layers"]["action_net.weight"]) == 2

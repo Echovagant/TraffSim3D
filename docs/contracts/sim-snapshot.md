@@ -361,6 +361,19 @@ browser's behaviour is unaffected by the fix either way.
 learned to steer the wrong way ⇒ **it has to be retrained**. The checkpoints
 are not committed, so nothing stale is left in the repository.
 
+> **⚠ 2026-10-21 更正（重训的实测推翻了这个推论）**：上面那句「旧策略作废」**是错的**，
+> 撤回。实测：**`SimCore.step` 从不读 `action[1]`**（`sim_core.py:496` 只读油门）
+> ⇒ 训练出来的 ego 策略是**油门控制器**，转向是**脚本化的 Pure Pursuit**；
+> 而四个训练场景里 ego 的路径精确为 **x ≡ 0**（max|x| = 0.000000）
+> ⇒ `alpha ≡ 0` ⇒ **转向符号在训练环境里完全不起作用**
+> ⇒ 符号修复**没有改变任何训练场景** ⇒ 旧策略并未因此作废。
+>
+> ⇒ T11 修对的仍然是**模型本身**（对「将来有转向权限的策略」和对**契约覆盖转向
+> 维度**都是必需的），但「旧策略作废」这个推论不成立。
+> **「AI 学会开车」的真实现状**：策略没有转向权限，且它的油门策略
+> （60.227）**输给一个人手调的常数油门**（60.835）—— 那点优势全部来自
+> 奖励里的逐帧存活奖励。详见 `docs/PLANS-TO-MILESTONES.md` 的 T12 前记。
+
 ## The contract is two-sided, with two different oracles
 
 This is the part that is easy to get wrong. The backend test compares

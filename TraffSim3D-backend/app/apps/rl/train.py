@@ -131,6 +131,7 @@ def real_train(
     save_every: int,
     independent: bool = False,
     scene_kind: str = "cross",
+    seed: int | None = None,
 ) -> None:
     """Real PPO training via stable-baselines3 on the resolved device.
 
@@ -140,6 +141,11 @@ def real_train(
 
     `scene_kind='corridor'` (Plan 048): ego drives through 2
     4-way intersections. Default 'cross' = 044 single-intersection.
+
+    `seed` makes the run reproducible. SB3 draws its own seed from numpy
+    when it is given none, so two runs of the same command differ; the
+    signal trainer takes a seed for the same reason
+    (`signal_train.train_signal_policy`).
     """
     from . import capabilities as caps
     from . import checkpoint as ckpt
@@ -235,7 +241,7 @@ def real_train(
     # MultiTrafficEnv stacks obs from each sub-env; scene_kind applies to all
     for sub_env in env.envs:
         sub_env.core.scene_kind = scene_kind
-    model = PPO("MlpPolicy", env, verbose=0, device=resolved_device)
+    model = PPO("MlpPolicy", env, verbose=0, device=resolved_device, seed=seed)
 
     def on_step(_locals: dict[str, Any], _globals: dict[str, Any]) -> bool:  # SB3 callback
         if _control_gate()[0]:
@@ -384,6 +390,13 @@ def main() -> None:
         action="store_true",
         help="Curriculum learning: progressive scene difficulty (cross → t_junction → roundabout → corridor).",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Make the run reproducible. Without it SB3 draws its own seed, "
+        "so two runs of the same command differ.",
+    )
     args = parser.parse_args()
 
     if args.curriculum:
@@ -409,6 +422,7 @@ def main() -> None:
             args.save_every,
             args.independent,
             args.scene_kind,
+            args.seed,
         )
     except ImportError as e:
         print(f"SB3 unavailable ({e}); falling back to dry-run path.")
