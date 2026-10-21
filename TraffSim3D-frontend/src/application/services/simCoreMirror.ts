@@ -119,12 +119,35 @@ export interface MirrorLightOverride {
   ewGreen: boolean
 }
 
+/**
+ * The ego pose to install right after the scene's `reset()`.
+ *
+ * Plan 076 S5a. Every contract vector used to be a **straight-line**
+ * scenario: the ego drove straight at its target, Pure Pursuit's angle was
+ * ~0, `steer` was 0 — and the three turning constants (`LOOKAHEAD_DISTANCE`,
+ * `MAX_STEER`, `EGO_WHEELBASE`) therefore could not change any trajectory.
+ * They were measured blind spots (see `docs/contracts/sim-snapshot.md`).
+ *
+ * A vector that starts the ego off its target line makes the angle non-zero
+ * from the first step, so the steer is non-zero and the constants become
+ * observable. The Python side applies the same override to `core.ego` right
+ * after `reset()` (see `tests/contract/test_cross_lang_consistency.py`).
+ */
+export interface MirrorEgoStart {
+  x: number
+  z: number
+  heading: number
+  speed: number
+}
+
 /** The optional extras a contract vector may ask the mirror for. */
 export interface MirrorRunOptions {
   /** Replace the scene's light after `reset()`. */
   lightOverride?: MirrorLightOverride
   /** The external signal actions to apply, and when. */
   signalActions?: MirrorSignalAction[]
+  /** Replace the ego's pose after `reset()`. */
+  egoStart?: MirrorEgoStart
 }
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
@@ -540,6 +563,12 @@ export const runEpisode = (
   core.reset()
   if (options.lightOverride) {
     core.light = createMirrorLight(options.lightOverride.nsGreen, options.lightOverride.ewGreen)
+  }
+  if (options.egoStart) {
+    // Plan 076 S5a: the ego's pose is overridden right after `reset()` —
+    // the same place and the same pattern as the light override, and the
+    // same order on the Python side.
+    core.ego = { ...options.egoStart, y: 0 }
   }
   const signalActions = options.signalActions ?? []
   assertValidSignalActions(signalActions)

@@ -386,3 +386,79 @@ describe('simCoreMirror — contract vector options (Plan 074)', () => {
     ).toThrow(/unknown signal action/)
   })
 })
+
+// Plan 076 S5a: the mirror can start the ego somewhere else.
+//
+// Every contract vector used to be a straight-line scenario, so Pure
+// Pursuit's angle was ~0, `steer` was 0, and the three turning constants
+// (`LOOKAHEAD_DISTANCE`, `MAX_STEER`, `EGO_WHEELBASE`) were blind spots: a
+// change to any of them left every golden untouched. A vector that starts
+// the ego off its target line makes the steer non-zero, so they become
+// observable.
+//
+// The Python side applies the same override to `core.ego` right after
+// `reset()` — see `tests/contract/test_cross_lang_consistency.py`.
+describe('simCoreMirror — the ego start override (Plan 076 S5a)', () => {
+  const lateral = { x: 6, z: -25, heading: Math.PI / 2, speed: 0 }
+  const headingOffset = { x: 0, z: -25, heading: Math.PI / 2 + 0.4, speed: 0 }
+
+  it('starts the ego at the overridden pose', () => {
+    const ep = runEpisode('roundabout', new Array(60).fill(0.2), 10, 60, {
+      lightOverride: { nsGreen: true, ewGreen: false },
+      egoStart: lateral,
+    })
+    expect(ep.samples[0]).toEqual({
+      step: 0,
+      x: 6,
+      z: -25,
+      heading: Math.PI / 2,
+      speed: 0,
+      light: { nsGreen: true, ewGreen: false },
+    })
+  })
+
+  it('changes the trajectory — the override is not a no-op', () => {
+    const withOverride = runEpisode('roundabout', new Array(60).fill(0.2), 10, 60, {
+      lightOverride: { nsGreen: true, ewGreen: false },
+      egoStart: lateral,
+    })
+    const without = runEpisode('roundabout', new Array(60).fill(0.2), 10, 60, {
+      lightOverride: { nsGreen: true, ewGreen: false },
+    })
+    expect(withOverride.samples).not.toEqual(without.samples)
+  })
+
+  it('makes the ego turn — the heading changes, so the steer is not zero', () => {
+    const ep = runEpisode('roundabout', new Array(60).fill(0.2), 10, 60, {
+      lightOverride: { nsGreen: true, ewGreen: false },
+      egoStart: headingOffset,
+    })
+    const headings = ep.samples.map((s) => s.heading)
+    expect(headings[0]).not.toBe(headings[headings.length - 1])
+    // The turn is material, not a last-bit wobble: the Pure Pursuit angle
+    // is non-zero from the first step on.
+    expect(Math.abs(headings[headings.length - 1]! - headings[0]!)).toBeGreaterThan(0.5)
+  })
+
+  it('reproduces the measured Python steering trajectories', () => {
+    // Measured from the Python side (the committed goldens carry the same
+    // numbers); exact equality, like the rest of the contract.
+    const lateralEp = runEpisode('roundabout', new Array(60).fill(0.2), 10, 60, {
+      lightOverride: { nsGreen: true, ewGreen: false },
+      egoStart: lateral,
+    })
+    expect(lateralEp.truncated).toBe(true)
+    expect(lateralEp.finalStep).toBe(60)
+    expect(lateralEp.finalX).toBe(14.811088744631318)
+    expect(lateralEp.finalZ).toBe(-21.60160869957244)
+
+    const headingEp = runEpisode('roundabout', new Array(60).fill(0.2), 10, 60, {
+      lightOverride: { nsGreen: true, ewGreen: false },
+      egoStart: headingOffset,
+    })
+    expect(headingEp.truncated).toBe(true)
+    expect(headingEp.finalStep).toBe(60)
+    expect(headingEp.finalX).toBe(-8.858151131677884)
+    expect(headingEp.finalZ).toBe(-28.203646331227798)
+  })
+})

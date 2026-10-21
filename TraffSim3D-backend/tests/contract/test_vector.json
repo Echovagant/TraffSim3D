@@ -171,6 +171,28 @@
         { "step": 10, "action": "preempt" },
         { "step": 40, "action": "preempt" }
       ]
+    },
+    {
+      "name": "steer_lateral_offset",
+      "scene_kind": "roundabout",
+      "ego_id": "v-1",
+      "n_steps": 60,
+      "max_steps": 60,
+      "actions": [[0.2, 0.0]],
+      "repeat": 60,
+      "light_override": { "ns_green": true, "ew_green": false },
+      "ego_start": { "x": 6.0, "z": -25.0, "heading": 1.5707963267948966, "speed": 0.0 }
+    },
+    {
+      "name": "steer_heading_offset",
+      "scene_kind": "roundabout",
+      "ego_id": "v-1",
+      "n_steps": 60,
+      "max_steps": 60,
+      "actions": [[0.2, 0.0]],
+      "repeat": 60,
+      "light_override": { "ns_green": true, "ew_green": false },
+      "ego_start": { "x": 0.0, "z": -25.0, "heading": 1.9707963267948965, "speed": 0.0 }
     }
   ]
 }

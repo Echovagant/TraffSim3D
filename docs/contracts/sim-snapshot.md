@@ -12,6 +12,19 @@
 > 信号相位时长在两侧都是**未被观测**的。修订前的版本只列了
 > `MAX_STEER` / `LOOKAHEAD_DISTANCE` 两个盲点。
 >
+> **状态（2026-10-21，Plan 076 S5a）：转向维度进入契约 —— 三个常量不再是盲区。**
+> 向量格式新增可选的 `ego_start`（覆盖 ego 的起始位姿），新增 2 条 `steer_*`
+> 向量：ego 从**偏出目标线**的位置起步 ⇒ Pure Pursuit 角 α ≠ 0 ⇒ `steer ≠ 0`
+> ⇒ `LOOKAHEAD_DISTANCE` / `MAX_STEER` / `EGO_WHEELBASE` 三个常量**首次可观测**
+> （变异校验实测：三个常量各自被改后，两条新向量都变红，位移 **0.6–2.0 m**；
+> 改之前它们对**所有**向量都无影响）。
+> 同时实测到一件必须写进契约的事：**转向轨迹无法逐位相等** ——
+> V8 的 `Math.sin`/`Math.atan2` 与 CPython 的 `math.sin`/`math.atan2` 是两套
+> 实现，对部分角度**差 1 ULP**。详见下文
+> 「The turning dimension — the exact-equality premise, measured」。
+> 实测（2026-10-21）：`pytest tests/contract/` → **89 passed / 0 failed / 0 skipped**
+> （原 65；新增 24 条来自 2 条新向量 × 3 类断言 + 18 条新的转向覆盖断言）。
+>
 > **状态（2026-10-21，Plan 074 Sprint 3 / A2b）：动作语义进入契约（镜像侧）。**
 > 向量格式新增可选的 `signal_actions`（带步骤约定）与 `light_override`，
 > 新增 5 条 `signalled_light_*` 向量：两侧在**同一步**施加**同一个动作**，
@@ -125,6 +138,8 @@ it needs a scalar-level entry point into the obs builder. See "Not covered".
 | `signalled_light_shorten_red` | roundabout | `shorten_red`: the swap moves 5 s earlier (step 300 → 250). |
 | `signalled_light_preempt` | roundabout | `preempt`: all-red for 3 s, then the interrupted phase resumes and the swap lands 30 steps later (step 330). |
 | `signalled_light_preempt_boundary` | roundabout | The **clearance-boundary** case: a second `preempt` on the very step the phase resumed (step 40). The light must come back (step 70) — the regression the Plan 073 Sprint 2 fix wave repaired, now pinned at the trajectory level. |
+| `steer_lateral_offset` | roundabout | **Plan 076 S5a — the turning vectors.** The ego starts 6 m to the side of its target line (`ego_start`), so Pure Pursuit's angle is non-zero from the first step: `steer ≠ 0` on every step and the `MAX_STEER` clamp is actually reached. This is what makes `LOOKAHEAD_DISTANCE` / `MAX_STEER` / `EGO_WHEELBASE` observable. 60 steps, truncated at the limit. |
+| `steer_heading_offset` | roundabout | The **other** turning trigger: the ego starts on its target line but with its heading offset by 0.4 rad, so it has to correct immediately. Same coverage, a different path into the Pure Pursuit. |
 
 `cross_action_overrange`'s scenario golden is **identical to
 `cross_baseline`'s** — every sample and the whole `final_state` — because
@@ -152,6 +167,7 @@ fields:
 | `max_steps` | **Optional.** The episode's step limit (Python `SimCore.max_steps`). Absent → `MAX_STEPS_DEFAULT` (200). |
 | `light_override` | **Optional.** The light to install right after the scene's `reset()`: `{"ns_green": bool, "ew_green": bool}`. It exists because the roundabout's own light is both-green ("no traffic lights there"), so its swap is a no-op; the *signalled* vectors override it with a plain NS-green light — the same override `tests/contract/test_signal_actions.py` applies. |
 | `signal_actions` | **Optional.** The external signal actions to apply: `[{"step": N, "action": "<one of the five names>"}, …]`. **The step convention:** an action labelled `"step": N` is applied **before** the N-th simulation step — it is *consumed by* that step (`light.apply_action(name)` immediately before `core.step(...)` in Python, `applySignalAction(name)` immediately before `mirror.step(...)` in TypeScript). The steps are **1-based**. |
+| `ego_start` | **Optional** (Plan 076 S5a). The ego pose to install right after the scene's `reset()`: `{"x": …, "z": …, "heading": …, "speed": …}`. It exists because every other vector is a straight-line scenario, where Pure Pursuit's angle is `≈ 0`, `steer ≡ 0`, and the three turning constants cannot change any trajectory. The override is applied **after** `reset()` on both sides (Python: `core.ego = Vehicle(...)`; TypeScript: `mirror.ego = {…}`), and it lives in the **contract harness**, not in `sim_core.py` — so the scenes and the existing goldens stay byte-identical. |
 
 The **expansion rule**, identical on both sides, one line each:
 
@@ -239,6 +255,7 @@ the same shape — looks like this:
 | `signal_vocabulary.inter_green_seconds` | The **inter-green clearance** (s) a phase change costs: the time between the end of one axis' green and the start of the other axis' green, during which no new vehicle may go (Plan 074 T9). The browser derives it from its clearance-yellow (3 s) plus the all-red the conflict resolution forces (3 s); the Python training sim charges the same 6 s on every phase change (`sim_core.CLEARANCE_SECS`). Compared against `sim_core.CLEARANCE_SECS`. |
 | `light_override` | **Optional** — present only when the vector has one. The light the mirror actually ran with: `{"ns_green": …, "ew_green": …}`. The Python side cross-checks it against the vector's copy. |
 | `signal_actions` | **Optional** — present only when the vector has some. The signal-action sequence the mirror actually applied: `[{"step": N, "action": "…"}, …]`. **The Python side reads the sequence from here** (the golden is the single source it applies, exactly like the `signal_vocabulary` block) and cross-checks it against the vector's copy, so a golden that was not regenerated after a vector edit cannot hide the drift. |
+| `ego_start` | **Optional** — present only when the vector has one (Plan 076 S5a). The pose the mirror actually started the ego from: `{"x": …, "z": …, "heading": …, "speed": …}`. The Python side cross-checks it against the vector's copy, exactly like `light_override`. |
 | `final_state.terminated` | The episode ended by a **termination** — success, collision or red light. |
 | `final_state.truncated` | The episode hit the **step limit** instead. The two flags are mutually exclusive (the limit is only reached when the episode has not terminated), and a truncated episode carries **no** termination reason: `reason` is the empty string. |
 | `final_state.reason` | The termination reason, or `""` when the episode was truncated. |
@@ -351,9 +368,9 @@ recomputed golden against the committed file).
 | `DT` | caught | caught | — (it was caught) |
 | `COLLISION_DISTANCE` | caught | caught | — (it was caught) |
 | `MAX_STEPS_DEFAULT` | caught **only below step 58**; `200 → 100` is blind | same | — (listed as caught; it is only caught below step 58) |
-| `LOOKAHEAD_DISTANCE` | **blind** | **blind** | yes |
-| `MAX_STEER` | **blind** | **blind** | yes |
-| `EGO_WHEELBASE` | **blind** | **blind** | **no** |
+| `LOOKAHEAD_DISTANCE` | **caught** (Plan 076 S5a) | **caught** | was blind — now caught by the `steer_*` vectors (a 25 % change moves the trajectory by 1.2–2.0 m) |
+| `MAX_STEER` | **caught** (Plan 076 S5a) | **caught** | was blind — now caught by the `steer_*` vectors (a 25 % change moves the trajectory by 1.4 m) |
+| `EGO_WHEELBASE` | **caught** (Plan 076 S5a) | **caught** | was blind — now caught by the `steer_*` vectors (a 25 % change moves the trajectory by 0.6–1.5 m) |
 | `INTERSECTION_RADIUS` | **blind** | **blind** | **no** |
 | `ROUNDABOUT_RADIUS` | **blind** | **blind** | **no** |
 | `NPC_SPEED` | **blind** | **blind** | **no** |
@@ -405,9 +422,11 @@ runs the `t_junction` episode at 30 s / 25.5 s / 25.0 s and checks that the
    `roundabout` 400 (truncation only, and its light is both-green so its swap
    is a no-op). The `cross` scene is the worst case: the northbound NPC
    respawns on the ego's own line.
-2. **Every vector is straight-line**, so `steer ≡ 0`. The Pure Pursuit
+2. ~~**Every vector is straight-line**, so `steer ≡ 0`. The Pure Pursuit
    denominator, the steer clamp and the wheelbase therefore cannot affect the
-   trajectory at all.
+   trajectory at all.~~ — **closed in Plan 076 S5a**: the two `steer_*` vectors
+   start the ego off its target line, so `steer ≠ 0` on every step and the
+   clamp is actually reached (the peak steer equals `MAX_STEER` exactly).
 3. **The NPCs never interact with the ego** in the vectors that matter — no
    collision, no influence on the ego's path — so `NPC_SPEED` and the scene
    radii are invisible.
@@ -419,11 +438,53 @@ runs the `t_junction` episode at 30 s / 25.5 s / 25.0 s and checks that the
    scene whose NPC layout never reaches the ego, which is scene-extension
    work (Plan 073 Sprint 5), not a vector change: with the current four
    scenes it is **provably impossible** (the reachability numbers above).
-2. **Add a vector that actually steers** (a target off the ego's heading), so
-   `LOOKAHEAD_DISTANCE`, `MAX_STEER` and `EGO_WHEELBASE` become observable.
+2. ~~**Add a vector that actually steers** (a target off the ego's heading), so
+   `LOOKAHEAD_DISTANCE`, `MAX_STEER` and `EGO_WHEELBASE` become observable.~~
+   — **done in Plan 076 S5a** (the `steer_lateral_offset` and
+   `steer_heading_offset` vectors, plus the `ego_start` override they need).
 3. ~~**Record the light bits in the golden samples**~~ — **done** in Sprint 1:
    the light is now compared directly instead of only through its side
    effect on the termination reason.
+
+### The turning dimension — the exact-equality premise, measured (Plan 076 S5a)
+
+ADR-008 D3 compares the two sides with `==`, because "both sides execute the
+same floating-point operation sequence". That premise holds for the
+straight-line vectors — their only transcendental arguments are exactly `0`
+(the Pure Pursuit angle) and `π/2` (the heading), which every libm reproduces
+bit for bit — but **not** for a trajectory that turns.
+
+V8's `Math.sin` / `Math.atan2` and CPython's `math.sin` / `math.atan2` are
+different implementations (V8 ships an fdlibm-derived port, CPython calls the
+platform libm), and they disagree by **1 ULP** for a few percent of the
+angles a turning trajectory visits. Measured on the `steer_lateral_offset`
+vector (60 steps, this machine): the first divergence is at sample step **20**
+— `heading` 2.22e-16 rad — and the largest is `z` 3.55e-15 m. ADR-008's own
+randomised sweep measured up to 1.09e-13 m.
+
+⇒ A turning trajectory therefore **cannot** be compared with `==`. The
+contract now compares it within a bounded floor (`_LIBM_NOISE_FLOOR = 1e-9`),
+which is four orders of magnitude above the measured divergence and six
+orders below the smallest drift the contract must catch (a mutated turning
+constant moves the trajectory by metres). The **straight-line vectors keep the
+exact `==` assertion** — the floor is only used where the trajectory actually
+turns (a heading that moves by less than 1e-9 rad over the whole episode
+counts as straight: that is the last-bit wobble the ego picks up after it
+passes its target, where the Pure Pursuit angle is `≈ π` and the steer
+`≈ 1e-16`). The floor is pinned by its own test
+(`tests/contract/test_steering_vectors.py`), so it cannot be widened silently.
+
+Two consequences worth knowing:
+
+- The comparison floor is **platform-dependent in principle**: the TypeScript
+  side always runs V8's fdlibm, while the Python side runs the platform libm
+  (glibc on the Linux CI runner, the MSVC CRT here). A floor is what keeps
+  the `contract` CI job green on both.
+- The Pure Pursuit steer depends on `LOOKAHEAD_DISTANCE` and `EGO_WHEELBASE`
+  **only through the ratio** `2 · EGO_WHEELBASE / LOOKAHEAD_DISTANCE`.
+  Scaling both by the same factor leaves the trajectory bit-identical — so a
+  mutation check that changes both at once proves nothing. Each constant has
+  to be moved on its own.
 
 ### The signal phase timeline — NOT covered (Plan 073 Sprint 2)
 
@@ -707,7 +768,7 @@ observation is a different agent's and is untouched). The shared schema is
 | 2 | north-south has right of way | 0 / 1 | the light's phase ∈ {Green, Yellow} | `light.ns_green` |
 | 3 | east-west has right of way | 0 / 1 | the light's phase ∈ {Green, Yellow} | `light.ew_green` |
 | 4 | all-red (neither axis may go) | 0 / 1 | both lights outside {Green, Yellow} | `not ns_green and not ew_green` |
-| 5 | current phase clock | the *elapsed* fraction on the Python side, the *remaining* fraction in the browser — the two are complements | `light.phaseRemaining / cycleSeconds` | `light.cycle_timer / cycle_duration` |
+| 5 | current phase clock — the **elapsed** fraction | `(cycleSeconds − phaseRemaining) / cycleSeconds` | `cycle_timer / cycle_duration` |
 
 **Why the values are NOT compared.** The two sides' traffic models are
 different objects: the browser's vehicles live on lanes (`s`, `roadId`,
@@ -879,8 +940,8 @@ compute the same action.
 | 1c | Signal-action **semantics** / phase timeline | ⚠️ **partially** asserted cross-language (Plan 074 Sprint 3): the **mirror's** per-action semantics are now compared at the trajectory level (the `signalled_light_*` vectors apply the same action at the same step on both sides and must stay bit-identical). The **browser's** phase timeline is still **not** asserted — it has a 3 s yellow per light and Python has none, so the axis-green projections differ at the transitions |
 | 1d | Signal agent's **observation values** | ⚠️ **schema only, never values** (Plan 074 D1): the two sides' traffic models are different objects, so "the queue on an axis" is the same *meaning* computed from different things. The schema (dims, order, normalisation) is shared and pinned; the numbers are not compared — see "the signal observation schema" |
 | 2 | `obs[6:8]` semantics | ✅ aligned (Plan 069) |
-| 3 | Pure Pursuit denominator | ❌ not covered by the contract vectors (see above) |
-| 4 | Steer clamp | ❌ not covered by the contract vectors (see above) |
+| 3 | Pure Pursuit denominator (`LOOKAHEAD_DISTANCE`) | ✅ **covered** (Plan 076 S5a) — the `steer_*` vectors actually steer, and mutating the constant turns the contract red (a committed gate, not a one-off measurement) |
+| 4 | Steer clamp (`MAX_STEER`) | ✅ **covered** (Plan 076 S5a) — the turning vectors reach the clamp, and mutating the constant turns the contract red |
 | 5 | Heading integration | ❌ separate topic |
 | 6 | Motion constraint (free space vs lane) | ❌ structural — separate topic |
 | 7 | Speed integration | ✅ aligned for the replay path (Plan 071) |
@@ -901,6 +962,7 @@ tests/contract/
     ├── ts_t_junction_lights.json
     ├── ts_roundabout_truncation.json
     ├── ts_signalled_light_*.json     # the action-driven vectors (Plan 074)
+    ├── ts_steer_*.json               # the turning vectors (Plan 076 S5a)
     ├── ts_kernel_*.json              # kernel-level goldens — COMMITTED
     └── python_*.json                 # regenerated per run — gitignored
 ```

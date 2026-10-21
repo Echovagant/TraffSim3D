@@ -39,6 +39,7 @@ from app.apps.rl.sim_core import (
     SIGNAL_ACTION_NAMES,
     SimCore,
     TrafficLight,
+    Vehicle,
 )
 
 CONTRACT_DIR = Path(__file__).parent
@@ -59,6 +60,35 @@ _SCENE_REASONS = {
     "t_junction": ("success_t_junction", "collision", "red_light"),
     "roundabout": ("success_roundabout", "collision", "red_light"),
 }
+
+
+# --------------------------------------------------------------------------
+# Plan 076 S5a: the turning vectors and the cross-runtime noise floor
+# --------------------------------------------------------------------------
+#
+# ADR-008 D3 compares the two sides with `==`, because "both sides execute
+# the same floating-point operation sequence". That premise holds for the
+# straight-line vectors - their only transcendental arguments are exactly 0
+# (the Pure Pursuit angle) and pi/2 (the heading), which every libm
+# reproduces bit for bit - but NOT for a trajectory that turns.
+#
+# V8's `Math.sin` / `Math.atan2` and CPython's `math.sin` / `math.atan2`
+# are different implementations (V8 ships an fdlibm-derived port, CPython
+# calls the platform libm), and they disagree by 1 ULP for a few percent of
+# the angles a turning trajectory visits. Measured on this machine (Plan 076
+# S5a): on `steer_lateral_offset` the two sides differ by 2.22e-16 rad in the
+# heading - first at sample step 20 - and 3.55e-15 m in z; ADR-008's own
+# randomised sweep measured up to 1.09e-13 m.
+#
+# The floor below is four orders of magnitude above that measurement and six
+# orders below the smallest drift the contract has to catch: a mutated
+# LOOKAHEAD_DISTANCE / MAX_STEER / EGO_WHEELBASE moves the trajectory by
+# metres (see `tests/contract/test_steering_vectors.py`).
+#
+# A STRAIGHT-line trajectory keeps the exact `==` assertion - the floor is
+# only used where the trajectory actually turns, and the noise floor itself
+# is pinned by a test, so it cannot be widened silently.
+_LIBM_NOISE_FLOOR = 1e-9
 
 
 def _load_vectors() -> list[dict]:
@@ -127,6 +157,118 @@ def _expand_actions(v: dict) -> list[list[float]]:
 def _golden_path(name: str) -> Path:
     """The committed TypeScript golden for a vector."""
     return SNAPSHOT_DIR / f"ts_{name}.json"
+
+
+def _turns(golden: dict) -> bool:
+    """Does this golden's trajectory turn *materially*?
+
+    A trajectory that turns has a non-zero Pure Pursuit angle, so the two
+    runtimes' `sin` / `atan2` can disagree in the last bit (see
+    `_LIBM_NOISE_FLOOR`).
+
+    The threshold is the noise floor itself: a heading that moves by less
+    than 1e-9 rad over the whole episode is a straight line whose last-bit
+    wobble - the ego passing its target, where the Pure Pursuit angle is
+    ~pi and the steer ~1e-16 - is far below anything a libm can change.
+    """
+    headings = [sample["heading"] for sample in golden["samples"]]
+    return (max(headings) - min(headings)) > _LIBM_NOISE_FLOOR
+
+
+def _vector_names(turning: bool) -> list[str]:
+    """The vector names, split by whether their trajectory turns.
+
+    The classification comes from the **committed golden** (the TypeScript
+    side's own trajectory), so it is a property of the vector and not of
+    whichever side happens to run the test.
+    """
+    names: list[str] = []
+    for v in _load_vectors():
+        path = _golden_path(v["name"])
+        # A missing golden is reported by `test_contract_snapshots_are_present`;
+        # classify it as straight so the exact assertion fails loudly there.
+        is_turning = (
+            _turns(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else False
+        )
+        if is_turning == turning:
+            names.append(v["name"])
+    return names
+
+
+def _assert_agrees(v: dict, py: dict, ts: dict, floor: float) -> None:
+    """The two sides must agree on the whole episode.
+
+    `floor = 0.0` is ADR-008 D3's exact equality (the straight-line
+    vectors). A non-zero floor is used only for the turning vectors, where
+    the two runtimes' `sin` / `atan2` disagree in the last bit - see
+    `_LIBM_NOISE_FLOOR`.
+    """
+
+    def same(py_value: float, ts_value: float) -> bool:
+        if py_value == ts_value:
+            return True
+        return floor > 0.0 and abs(py_value - ts_value) <= floor
+
+    py_reason = py["final_state"]["reason"]
+    ts_reason = ts["final_state"]["reason"]
+    assert py_reason == ts_reason, (
+        f"{v['name']}: termination reason mismatch " f"(python={py_reason}, ts={ts_reason})"
+    )
+
+    py_step = py["final_state"]["final_step"]
+    ts_step = ts["final_state"]["final_step"]
+    assert py_step == ts_step, f"{v['name']}: step count mismatch (python={py_step}, ts={ts_step})"
+
+    py_trunc = py["final_state"]["truncated"]
+    ts_trunc = ts["final_state"]["truncated"]
+    assert (
+        py_trunc == ts_trunc
+    ), f"{v['name']}: truncation flag mismatch (python={py_trunc}, ts={ts_trunc})"
+
+    for key in ("final_z", "final_x"):
+        py_value = py["final_state"][key]
+        ts_value = ts["final_state"][key]
+        assert same(py_value, ts_value), (
+            f"{v['name']}: {key} mismatch (python={py_value!r}, ts={ts_value!r}, "
+            f"delta={abs(py_value - ts_value)!r}, floor={floor!r})"
+        )
+    # The speed integration contains no transcendental call, so it stays an
+    # exact comparison - on a turning trajectory too.
+    py_speed = py["final_state"]["final_speed"]
+    ts_speed = ts["final_state"]["final_speed"]
+    assert (
+        py_speed == ts_speed
+    ), f"{v['name']}: final_speed mismatch (python={py_speed!r}, ts={ts_speed!r})"
+
+    py_samples = py["samples"]
+    ts_samples = ts["samples"]
+    assert len(py_samples) == len(ts_samples), (
+        f"{v['name']}: sample count mismatch " f"(python={len(py_samples)}, ts={len(ts_samples)})"
+    )
+    for ps, tsam in zip(py_samples, ts_samples, strict=True):
+        assert ps["step"] == tsam["step"], (
+            f"{v['name']}: sample step mismatch " f"(python={ps['step']}, ts={tsam['step']})"
+        )
+        for key in ("x", "z", "heading"):
+            assert same(ps[key], tsam[key]), (
+                f"{v['name']}: sample step={ps['step']} field={key} "
+                f"(python={ps[key]!r}, ts={tsam[key]!r}, "
+                f"delta={abs(ps[key] - tsam[key])!r}, floor={floor!r})"
+            )
+        # The speed integration is free of transcendental calls: exact.
+        assert ps["speed"] == tsam["speed"], (
+            f"{v['name']}: sample step={ps['step']} field=speed "
+            f"(python={ps['speed']!r}, ts={tsam['speed']!r})"
+        )
+        # The traffic-light bits: the only cross-language common semantic
+        # of the phase ("which axis is green"). Comparing them directly is
+        # what makes the phase *duration* observable - before this, a
+        # change to the cycle length was invisible to every gate.
+        for key in ("nsGreen", "ewGreen"):
+            assert ps["light"][key] == tsam["light"][key], (
+                f"{v['name']}: sample step={ps['step']} light={key} "
+                f"(python={ps['light'][key]!r}, ts={tsam['light'][key]!r})"
+            )
 
 
 def _signal_actions_for(v: dict) -> list[dict]:
@@ -204,6 +346,45 @@ def _light_override_for(v: dict) -> dict | None:
     return override
 
 
+def _ego_start_for(v: dict) -> dict | None:
+    """The ego pose to install right after the scene's `reset()`.
+
+    Plan 076 S5a. Every contract vector used to be a **straight-line**
+    scenario: the ego drove at its target, Pure Pursuit's angle was
+    ~0, `steer` was 0, and the three turning constants
+    (`LOOKAHEAD_DISTANCE`, `MAX_STEER`, `EGO_WHEELBASE`) could not change
+    any trajectory - they were measured blind spots (see
+    `docs/contracts/sim-snapshot.md`).
+
+    This override starts the ego somewhere else, so the Pure Pursuit
+    angle is non-zero from the very first step. It is the same
+    vector-level override pattern as `light_override`: the vector
+    declares it, the TS golden records it, and the Python side
+    **cross-checks** the two - a golden that was not regenerated after
+    a vector edit cannot hide the drift.
+
+    The override lives in the contract harness, not in `sim_core.py`:
+    the scenes and the existing goldens stay byte-identical.
+    """
+    override = v.get("ego_start")
+    if override is None:
+        return None
+    for key in ("x", "z", "heading", "speed"):
+        value = override.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{v['name']}: ego_start.{key} must be a number, " f"got {value!r}")
+    path = _golden_path(v["name"])
+    if path.exists():
+        golden = json.loads(path.read_text(encoding="utf-8"))
+        expected = {key: float(override[key]) for key in ("x", "z", "heading", "speed")}
+        assert golden.get("ego_start") == expected, (
+            f"{v['name']}: the TS golden's ego start differs from the vector's "
+            f"(golden={golden.get('ego_start')}, vector={expected}). "
+            f"Regenerate the goldens with: cd ../TraffSim3D-frontend && npm run contract:gen"
+        )
+    return override
+
+
 def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
     """Generate the Python snapshot for vector `v` (live, every run)."""
     actions = _expand_actions(v)
@@ -215,6 +396,14 @@ def _ensure_python_snapshot(v: dict, sample_every: int) -> dict:
     override = _light_override_for(v)
     if override is not None:
         core.light = TrafficLight(ns_green=override["ns_green"], ew_green=override["ew_green"])
+    start = _ego_start_for(v)
+    if start is not None:
+        core.ego = Vehicle(
+            x=float(start["x"]),
+            z=float(start["z"]),
+            heading=float(start["heading"]),
+            speed=float(start["speed"]),
+        )
     by_step: dict[int, list[str]] = {}
     for entry in _signal_actions_for(v):
         by_step.setdefault(entry["step"], []).append(entry["action"])
@@ -392,62 +581,40 @@ def test_signal_action_vocabulary_matches_the_typescript_golden(vector_name: str
     )
 
 
-@pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])
+@pytest.mark.parametrize("vector_name", _vector_names(turning=False))
 def test_python_and_ts_agree_exactly(vector_name: str) -> None:
-    """L3: the TS contract mirror reproduces the Python sim exactly."""
+    """L3: the TS contract mirror reproduces the Python sim exactly.
+
+    ADR-008 D3's exact equality. These are the **straight-line** vectors:
+    their only transcendental arguments are exactly 0 (the Pure Pursuit
+    angle) and pi/2 (the heading), which every libm reproduces bit for
+    bit, so the two sides agree to the last bit.
+    """
     v = _vector(vector_name)
     data = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
     sample_every = data.get("sample_every", 5)
 
     py = _ensure_python_snapshot(v, sample_every=sample_every)
     ts = _require_snapshot(SNAPSHOT_DIR / f"ts_{v['name']}.json")
+    _assert_agrees(v, py, ts, 0.0)
 
-    py_reason = py["final_state"]["reason"]
-    ts_reason = ts["final_state"]["reason"]
-    assert py_reason == ts_reason, (
-        f"{v['name']}: termination reason mismatch " f"(python={py_reason}, ts={ts_reason})"
-    )
 
-    py_step = py["final_state"]["final_step"]
-    ts_step = ts["final_state"]["final_step"]
-    assert py_step == ts_step, f"{v['name']}: step count mismatch (python={py_step}, ts={ts_step})"
+@pytest.mark.parametrize("vector_name", _vector_names(turning=True))
+def test_python_and_ts_agree_on_a_turning_trajectory(vector_name: str) -> None:
+    """Plan 076 S5a: a turning trajectory agrees within the libm noise floor.
 
-    py_trunc = py["final_state"]["truncated"]
-    ts_trunc = ts["final_state"]["truncated"]
-    assert (
-        py_trunc == ts_trunc
-    ), f"{v['name']}: truncation flag mismatch (python={py_trunc}, ts={ts_trunc})"
+    The exact `==` assertion cannot hold for a trajectory that turns: V8's
+    `Math.sin` / `Math.atan2` and CPython's `math.sin` / `math.atan2` are
+    different implementations and disagree by 1 ULP for some angles - ADR-008
+    D3's stated platform assumption, now measured (see `_LIBM_NOISE_FLOOR`).
+    """
+    v = _vector(vector_name)
+    data = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
+    sample_every = data.get("sample_every", 5)
 
-    for key in ("final_z", "final_x", "final_speed"):
-        py_value = py["final_state"][key]
-        ts_value = ts["final_state"][key]
-        assert (
-            py_value == ts_value
-        ), f"{v['name']}: {key} mismatch (python={py_value!r}, ts={ts_value!r})"
-
-    py_samples = py["samples"]
-    ts_samples = ts["samples"]
-    assert len(py_samples) == len(ts_samples), (
-        f"{v['name']}: sample count mismatch " f"(python={len(py_samples)}, ts={len(ts_samples)})"
-    )
-    for ps, tsam in zip(py_samples, ts_samples, strict=True):
-        assert ps["step"] == tsam["step"], (
-            f"{v['name']}: sample step mismatch " f"(python={ps['step']}, ts={tsam['step']})"
-        )
-        for key in ("x", "z", "heading", "speed"):
-            assert ps[key] == tsam[key], (
-                f"{v['name']}: sample step={ps['step']} field={key} "
-                f"(python={ps[key]!r}, ts={tsam[key]!r})"
-            )
-        # The traffic-light bits: the only cross-language common semantic
-        # of the phase ("which axis is green"). Comparing them directly is
-        # what makes the phase *duration* observable — before this, a
-        # change to the cycle length was invisible to every gate.
-        for key in ("nsGreen", "ewGreen"):
-            assert ps["light"][key] == tsam["light"][key], (
-                f"{v['name']}: sample step={ps['step']} light={key} "
-                f"(python={ps['light'][key]!r}, ts={tsam['light'][key]!r})"
-            )
+    py = _ensure_python_snapshot(v, sample_every=sample_every)
+    ts = _require_snapshot(SNAPSHOT_DIR / f"ts_{v['name']}.json")
+    _assert_agrees(v, py, ts, _LIBM_NOISE_FLOOR)
 
 
 @pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])

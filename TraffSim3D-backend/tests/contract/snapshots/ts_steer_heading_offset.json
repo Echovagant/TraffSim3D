@@ -1,0 +1,124 @@
+{
+  "name": "steer_heading_offset",
+  "scene_kind": "roundabout",
+  "ego_id": "v-1",
+  "signal_vocabulary": {
+    "actions": [
+      "extend_green",
+      "shorten_red",
+      "preempt",
+      "force_all_red",
+      "no_op"
+    ],
+    "all_red_seconds": 3,
+    "phase_adjust_seconds": 5,
+    "max_green_seconds": 60,
+    "min_green_seconds": 10,
+    "inter_green_seconds": 6
+  },
+  "light_override": {
+    "ns_green": true,
+    "ew_green": false
+  },
+  "ego_start": {
+    "x": 0,
+    "z": -25,
+    "heading": 1.9707963267948965,
+    "speed": 0
+  },
+  "final_state": {
+    "terminated": false,
+    "truncated": true,
+    "reason": "",
+    "final_step": 60,
+    "final_z": -28.203646331227798,
+    "final_x": -8.858151131677884,
+    "final_speed": 3.600000053644184
+  },
+  "samples": [
+    {
+      "step": 0,
+      "ego_id": "v-1",
+      "x": 0,
+      "z": -25,
+      "heading": 1.9707963267948965,
+      "speed": 0,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 10,
+      "ego_id": "v-1",
+      "x": -0.18588171418036167,
+      "z": -24.72856784907125,
+      "heading": 2.2729217307684175,
+      "speed": 0.6000000089406966,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 20,
+      "ego_id": "v-1",
+      "x": -0.9332514918615967,
+      "z": -24.18508780696656,
+      "heading": 2.671505648803523,
+      "speed": 1.2000000178813934,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 30,
+      "ego_id": "v-1",
+      "x": -2.410770963245075,
+      "z": -23.82803422276885,
+      "heading": 3.0715056488035235,
+      "speed": 1.800000026822091,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 40,
+      "ego_id": "v-1",
+      "x": -4.500062241974571,
+      "z": -24.16356026052855,
+      "heading": 3.471505648803524,
+      "speed": 2.4000000357627886,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 50,
+      "ego_id": "v-1",
+      "x": -6.802315166950126,
+      "z": -25.597289725830755,
+      "heading": 3.869644994022277,
+      "speed": 3.0000000447034862,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 60,
+      "ego_id": "v-1",
+      "x": -8.858151131677884,
+      "z": -28.203646331227798,
+      "heading": 4.155004803535146,
+      "speed": 3.600000053644184,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    }
+  ]
+}

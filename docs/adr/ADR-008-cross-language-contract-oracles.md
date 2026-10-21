@@ -89,11 +89,20 @@ disagreement being 1 ULP in the last bit, largest absolute divergence
   the ego kinematics, used by the product replay path *and* the mirror. The
   five porting rules in its header are the contract's normative spec; they
   must stay in sync with `sim_core.py`.
-- **Turning parameters are not covered yet.** Every contract vector is a
-  straight-line scenario, so `steer ≡ 0` and the Pure Pursuit denominator,
-  the steer clamp and the wheelbase cannot affect any trajectory. Measured:
-  changing Python's `MAX_STEER` or `LOOKAHEAD_DISTANCE` leaves the contract
-  green. Covering them needs a vector that actually steers (Plan 073 Sprint 5).
+- **Turning parameters are covered as of Plan 076 S5a** (2026-10-21). This
+  bullet used to read "Turning parameters are not covered yet": every contract
+  vector was a straight-line scenario, so `steer ≡ 0` and the Pure Pursuit
+  denominator, the steer clamp and the wheelbase could not affect any
+  trajectory — measured: changing Python's `MAX_STEER` or
+  `LOOKAHEAD_DISTANCE` left the contract green. The two `steer_*` vectors
+  start the ego off its target line, and a mutation of any of the three
+  constants now turns the contract red (metre-scale). **The equality
+  criterion itself changed with them**: exact equality does not hold for a
+  turning trajectory (V8's and CPython's `sin` / `atan2` differ by 1 ULP), so
+  turning vectors are compared within a bounded, test-pinned noise floor
+  while straight-line vectors keep bit-exact equality. That is
+  [ADR-009](ADR-009-contract-equality-and-the-libm-noise-floor.md), which
+  narrows D3's scope rather than overturning it.
 - **The signal phase is only partially covered.** The observable window is the
   *sampled* one (0…250 for the longest signalled episode, because the
   terminating step 257 is not itself a sample point), so a phase-duration

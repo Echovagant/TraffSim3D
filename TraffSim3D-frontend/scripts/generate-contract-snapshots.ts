@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url'
 import {
   assertValidSignalActions,
   runEpisode,
+  type MirrorEgoStart,
   type MirrorLightOverride,
   type MirrorSignalAction,
   type SceneKind,
@@ -76,6 +77,20 @@ interface Vector {
   light_override?: { ns_green: boolean; ew_green: boolean }
   /** Optional: the external signal actions to apply, and when. */
   signal_actions?: VectorSignalAction[]
+  /**
+   * Optional: the ego pose to install right after the scene's `reset()`.
+   *
+   * Plan 076 S5a. Every vector used to be a straight-line scenario, so
+   * Pure Pursuit's angle was ~0, `steer` was 0, and the three turning
+   * constants (`LOOKAHEAD_DISTANCE`, `MAX_STEER`, `EGO_WHEELBASE`) were
+   * blind spots: changing them changed no trajectory. A vector that starts
+   * the ego off its target line makes the steer non-zero, so they become
+   * observable.
+   *
+   * The Python side applies the same override to `core.ego` right after
+   * `reset()` and cross-checks the golden's copy against the vector's.
+   */
+  ego_start?: { x: number; z: number; heading: number; speed: number }
 }
 
 /**
@@ -157,6 +172,31 @@ const parseLightOverride = (v: Vector): MirrorLightOverride | undefined => {
     throw new Error(`vector "${v.name}": "light_override" needs boolean "ns_green" and "ew_green"`)
   }
   return { nsGreen: raw.ns_green, ewGreen: raw.ew_green }
+}
+
+/**
+ * Parse a vector's optional `ego_start`.
+ *
+ * The override is applied right after the scene's `reset()`, exactly like
+ * the Python side's `core.ego = Vehicle(...)`.
+ *
+ * A malformed field throws **here**: an ignored override would leave the
+ * ego on its straight-line start, where `steer` is 0 — and the comparison
+ * would then "agree" on a trajectory that covers nothing.
+ */
+const parseEgoStart = (v: Vector): MirrorEgoStart | undefined => {
+  const raw = v.ego_start
+  if (raw === undefined) return undefined
+  for (const key of ['x', 'z', 'heading', 'speed'] as const) {
+    const value = raw[key]
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(
+        `vector "${v.name}": "ego_start.${key}" must be a finite number, ` +
+          `got ${JSON.stringify(value)}`,
+      )
+    }
+  }
+  return { x: raw.x, z: raw.z, heading: raw.heading, speed: raw.speed }
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -250,12 +290,13 @@ const main = (): void => {
     const actions = expandActions(v)
     const signalActions = parseSignalActions(v)
     const lightOverride = parseLightOverride(v)
+    const egoStart = parseEgoStart(v)
     const episode = runEpisode(
       v.scene_kind,
       actions.map((a) => a[0]!),
       sampleEvery,
       v.max_steps,
-      { lightOverride, signalActions },
+      { lightOverride, signalActions, egoStart },
     )
     const scenario = {
       name: v.name,
@@ -291,6 +332,19 @@ const main = (): void => {
       // changed vector (it cross-checks the two against each other).
       ...(signalActions.length > 0
         ? { signal_actions: signalActions.map((e) => ({ step: e.step, action: e.action })) }
+        : {}),
+      // The ego pose the mirror actually started from (absent → the
+      // scene's own start). The Python side cross-checks it against the
+      // vector's copy — Plan 076 S5a.
+      ...(egoStart
+        ? {
+            ego_start: {
+              x: egoStart.x,
+              z: egoStart.z,
+              heading: egoStart.heading,
+              speed: egoStart.speed,
+            },
+          }
         : {}),
       final_state: {
         terminated: episode.terminated,
