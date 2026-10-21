@@ -797,6 +797,41 @@ float64 (Python / TypeScript) comparison to mean anything. Scaling by a
 positive constant leaves the **argmax unchanged** and multiplies the
 margin by the same factor, so the fixture stays a sharp test.
 
+## The signal policy's transfer check (L6, Plan 074 T6)
+
+The L6 fixture above pins the *forward pass* on an **untrained** policy.
+The signal agent's fixture pins it on the policy the project actually
+**trains** — the weights Python produces must be interpretable by the
+browser, or "the AI commands the light" is a claim with nothing behind it.
+
+```sh
+cd TraffSim3D-backend
+.\.venv\Scripts\python.exe scripts\gen_signal_policy_fixture.py
+```
+
+The generator **trains** a signal policy through the shipped entry point
+(`app.apps.rl.signal_train.train_signal_policy`), exports it through
+`export_weights` (the path under test — a discrete policy has no
+`log_std`), and computes the expected action for a list of observations
+twice: once with **SB3's own policy forward** and once with the
+**pure-Python reference** on the exported weights. Both must agree. Unlike
+the untrained fixture, this one needs no logit scaling: a trained policy
+has wide margins, and the generator **drops** any observation whose
+top-1/top-2 margin is too small for a float32 (SB3) vs float64 (Python /
+TypeScript) comparison to be meaningful.
+
+The fixture lands in
+`TraffSim3D-frontend/src/infrastructure/rl/fixtures/signal-policy-fixture.json`.
+The frontend's `signalPolicyFixture.spec.ts` asserts that
+`mlpForwardDiscrete` returns the committed actions **and** that the action
+index maps to the shared five-action vocabulary.
+
+**What this does NOT cover**: the *observation values* the two sides feed
+the network are still only **schema**-comparable (row 1d above) — the
+browser's traffic model is not the Python training sim's traffic model.
+What the fixture pins is that, given the same observation, both sides
+compute the same action.
+
 ## Cross-language differences (status)
 
 | # | Dimension | Status |

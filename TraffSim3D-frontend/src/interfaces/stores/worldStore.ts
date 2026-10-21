@@ -23,7 +23,13 @@ import {
   createSignalController,
   type SignalController,
   type ControllerKind,
+  type SignalActionSource,
 } from '@application/services/signalController'
+import {
+  createPolicyActionSource,
+  type PolicySignalActionSource,
+  type SignalPolicyDecision,
+} from '@application/services/signalPolicySource'
 import { requestLaneChange as requestLaneChangeFn } from '@domain/services/laneChange'
 import { SensorRegistry, type HostPoseLookup } from '@application/services/sensors'
 import {
@@ -218,6 +224,60 @@ export const useWorldStore = defineStore('world', () => {
     replayLastAction.value = [0, 0]
   }
 
+  // ===== Plan 074 (T6): the traffic-signal policy =====
+  //
+  // A *second*, different policy: the signal agent's (discrete, 5 actions,
+  // 6 observations) as opposed to the ego agent's (continuous, 2 actions,
+  // 14 observations). It drives the traffic light, not a vehicle.
+  //
+  // `signalPolicySource` is the `SignalActionSource` the `RLController`
+  // consumes; `signalPolicyDecision` is the last decision it made, for the
+  // AI Playground's "the AI is commanding" readout.
+
+  /** The loaded signal policy's weights (null until loaded). */
+  const signalPolicy = ref<PolicyWeights | null>(null)
+  /** The action source built from `signalPolicy`. */
+  const signalPolicySource = shallowRef<PolicySignalActionSource | null>(null)
+  /** The policy's most recent decision — the UI's readout. */
+  const signalPolicyDecision = ref<SignalPolicyDecision | null>(null)
+
+  /** Load a trained signal policy by checkpoint name.
+   *
+   * The checkpoint has to be a *discrete* five-action policy: an ego
+   * checkpoint (continuous, two actions) would produce a meaningless action
+   * index, so it is rejected here rather than silently misbehaving later.
+   */
+  const loadSignalPolicy = async (
+    name: string,
+  ): Promise<{ ok: true; obs_dim: number; action_dim: number } | { ok: false; reason: string }> => {
+    try {
+      const w = await defaultRLWeights.getCheckpointWeights(name)
+      const source = createPolicyActionSource(w, (decision) => {
+        signalPolicyDecision.value = decision
+      })
+      signalPolicy.value = w
+      signalPolicySource.value = source
+      signalPolicyDecision.value = null
+      // The RL controllers were built without a source; drop the cache so
+      // the next tick creates them with the policy attached.
+      controllers = new Map()
+      bumpTick()
+      return { ok: true, obs_dim: w.obs_dim, action_dim: w.action_dim }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return { ok: false, reason: msg }
+    }
+  }
+
+  /** Drop the loaded signal policy. */
+  const clearSignalPolicy = (): void => {
+    signalPolicy.value = null
+    signalPolicySource.value = null
+    signalPolicyDecision.value = null
+    controllers = new Map()
+    bumpTick()
+  }
+
   /** Plan 053: bump the fit tick so the editor view asks the camera
    *  to re-frame the current network. Idempotent — repeated calls
    *  just reset the same animation. */
@@ -267,12 +327,22 @@ export const useWorldStore = defineStore('world', () => {
   const getControllerKind = (): ControllerKind => controllerKind.value
   const getControllers = (): Map<string, SignalController> => controllers
   const signalContext: SignalContext = {
-    controllers,
+    // A **getter**, not a snapshot: `controllers` is reassigned whenever the
+    // controller kind or the signal policy changes (so the cached
+    // controllers are rebuilt with the new semantics). Copying the Map by
+    // value here would leave the tick using the stale one.
+    get controllers() {
+      return controllers
+    },
     get controllerKind() {
       return controllerKind.value
     },
     getCoordinatedOffsets: () => coordinatedOffsets.value,
     isCoordinatedEnabled: () => coordinatedOffsetsEnabled.value,
+    // Plan 074 (T6): the RL controller's action source — the trained signal
+    // policy, when one is loaded and the RL controller is the active kind.
+    getRlActionSource: (): SignalActionSource | undefined =>
+      controllerKind.value === 'rl' ? (signalPolicySource.value ?? undefined) : undefined,
   }
 
   /**
@@ -996,6 +1066,11 @@ export const useWorldStore = defineStore('world', () => {
     getControllerKind,
     getControllers,
     forceAllRed,
+    // Plan 074 (T6): the traffic-signal policy surface
+    signalPolicy,
+    signalPolicyDecision,
+    loadSignalPolicy,
+    clearSignalPolicy,
     // M2-C sensor + exporter surface
     sensorRegistry,
     trajectoryExporter,

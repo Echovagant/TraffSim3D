@@ -56,6 +56,7 @@ import {
   createSignalController,
   type SignalController,
   type ControllerKind,
+  type SignalActionSource,
 } from './signalController'
 import type { TrajectoryExporter } from '@infrastructure/export'
 import type { SensorRegistry } from './sensors/SensorRegistry'
@@ -72,6 +73,15 @@ export interface SignalContext {
    *  CoordinatedController (M2-B green-wave). */
   getCoordinatedOffsets: () => ReadonlyMap<string, number>
   isCoordinatedEnabled: () => boolean
+  /**
+   * Plan 074 (T6): where the RL controller's actions come from.
+   *
+   * A **getter**, not a value: the signal policy is loaded at runtime, and
+   * a controller that was created before the policy arrived would hold a
+   * stale (absent) source. The world store clears the controller cache when
+   * the policy changes, and this getter keeps the two in step.
+   */
+  getRlActionSource: () => SignalActionSource | undefined
 }
 
 export interface TickContext {
@@ -184,6 +194,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
           controller = createSignalController(ctx.signal.controllerKind, {
             getCoordinatedOffsets: ctx.signal.getCoordinatedOffsets,
             isCoordinatedEnabled: ctx.signal.isCoordinatedEnabled,
+            rlActionSource: ctx.signal.getRlActionSource(),
           })
           ctx.signal.controllers.set(light.id, controller)
         }

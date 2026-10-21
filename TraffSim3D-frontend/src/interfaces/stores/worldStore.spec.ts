@@ -27,6 +27,9 @@ import {
 } from '@application/services/defaultScene'
 import fixture from '@infrastructure/rl/fixtures/mlp-policy-fixture.json'
 import type { PolicyWeights } from '@infrastructure/rl/types'
+import { constantSignalPolicy } from '@__fixtures__/signalPolicy'
+import { LightPhase } from '@domain/value-objects/Phase'
+import { SIGNAL_ACTION_NAMES } from '@shared/constants/simulation'
 
 describe('worldStore.switchScene', () => {
   beforeEach(() => {
@@ -198,5 +201,105 @@ describe('worldStore.replay (Plan 049)', () => {
     world.switchScene('t')
     expect(world.policy).toBeNull()
     expect(world.replayActive).toBe(false)
+  })
+})
+
+describe('worldStore signal policy (Plan 074 — T6)', () => {
+  let fetchSpy: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    fetchSpy = vi.fn()
+    ;(globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const mockResponse = (body: unknown, status = 200): Response => {
+    const text = JSON.stringify(body)
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? 'OK' : 'Err',
+      text: async () => text,
+      json: async () => body,
+    } as unknown as Response
+  }
+
+  /** The index of `preempt` in the shared five-action vocabulary. */
+  const PREEMPT = SIGNAL_ACTION_NAMES.indexOf('preempt')
+
+  it('loadSignalPolicy stores the policy and builds the action source', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(constantSignalPolicy(PREEMPT)))
+    const world = useWorldStore()
+    const r = await world.loadSignalPolicy('signal.zip')
+    expect(r.ok).toBe(true)
+    expect(world.signalPolicy?.name).toBe('constant-preempt.zip')
+    expect(world.signalPolicy?.action_dim).toBe(5)
+  })
+
+  it('loadSignalPolicy rejects a continuous (ego) policy', async () => {
+    const ego = {
+      ...constantSignalPolicy(PREEMPT),
+      action_space: 'continuous' as const,
+      obs_dim: 14,
+    }
+    fetchSpy.mockResolvedValueOnce(mockResponse(ego))
+    const world = useWorldStore()
+    const r = await world.loadSignalPolicy('ego.zip')
+    expect(r.ok).toBe(false)
+    expect(world.signalPolicy).toBeNull()
+  })
+
+  it('without a policy the RL controller runs the plain cycle', async () => {
+    const world = useWorldStore()
+    world.setControllerKind('rl')
+    world.step(0.1)
+    const light = Object.values(world.network.intersections)[0]!.trafficLights.find(
+      (l) => l.id === 'tl-ns',
+    )!
+    expect(light.phase).toBe(LightPhase.Green)
+    expect(world.signalPolicyDecision).toBeNull()
+  })
+
+  it('the RL controller drives the light from the POLICY, not from the fixed cycle', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(constantSignalPolicy(PREEMPT)))
+    const world = useWorldStore()
+    world.setControllerKind('rl')
+    await world.loadSignalPolicy('signal.zip')
+
+    world.step(0.1)
+    const light = Object.values(world.network.intersections)[0]!.trafficLights.find(
+      (l) => l.id === 'tl-ns',
+    )!
+    expect(light.phase).toBe(LightPhase.AllRed)
+    expect(world.signalPolicyDecision?.action).toBe('preempt')
+  })
+
+  it('the policy is not injected while another controller kind is active', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(constantSignalPolicy(PREEMPT)))
+    const world = useWorldStore()
+    // The default kind is 'actuated' — the signal policy must stay unused.
+    await world.loadSignalPolicy('signal.zip')
+    world.step(0.1)
+    const light = Object.values(world.network.intersections)[0]!.trafficLights.find(
+      (l) => l.id === 'tl-ns',
+    )!
+    expect(light.phase).toBe(LightPhase.Green)
+    expect(world.signalPolicyDecision).toBeNull()
+  })
+
+  it('clearSignalPolicy removes the policy and the readout', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(constantSignalPolicy(PREEMPT)))
+    const world = useWorldStore()
+    world.setControllerKind('rl')
+    await world.loadSignalPolicy('signal.zip')
+    world.step(0.1)
+    expect(world.signalPolicyDecision).not.toBeNull()
+    world.clearSignalPolicy()
+    expect(world.signalPolicy).toBeNull()
+    expect(world.signalPolicyDecision).toBeNull()
   })
 })

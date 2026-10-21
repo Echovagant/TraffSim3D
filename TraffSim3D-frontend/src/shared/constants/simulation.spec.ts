@@ -78,6 +78,7 @@ describe('the minimum inter-green (Plan 074 T9)', () => {
         controllerKind: 'fixed-cycle',
         getCoordinatedOffsets: () => new Map(),
         isCoordinatedEnabled: () => false,
+        getRlActionSource: () => undefined,
       },
       trajectoryExporter: null,
       sensorRegistry: null,

@@ -285,6 +285,75 @@
       </details>
       <p v-if="error" class="err" data-testid="replay-error">{{ error }}</p>
     </section>
+
+    <!-- Plan 074 (T6): the signal agent — a *discrete* five-action policy
+         that commands the traffic light instead of driving a vehicle.
+         The readout below is what makes "the AI is commanding" visible
+         instead of a claim. -->
+    <section class="card">
+      <h2>AI 指挥信号灯</h2>
+      <div class="control-row">
+        <label class="ctrl">
+          信号灯 checkpoint
+          <select v-model="signalCkptName" data-testid="signal-ckpt-select">
+            <option value="">— 选择 —</option>
+            <option v-for="c in checkpoints" :key="c.name" :value="c.name">
+              {{ c.name }} · {{ c.size_kb }}KB
+            </option>
+          </select>
+        </label>
+        <button
+          class="ghost"
+          :disabled="!signalCkptName || signalPolicyLoading"
+          data-testid="load-signal-policy-button"
+          @click="onLoadSignalPolicy"
+        >
+          {{ signalPolicyLoading ? '加载中…' : '加载' }}
+        </button>
+        <button
+          class="ghost"
+          :disabled="!world.signalPolicy"
+          data-testid="clear-signal-policy-button"
+          @click="onClearSignalPolicy"
+        >
+          清除
+        </button>
+        <label class="ctrl">
+          <input
+            v-model="rlControlsSignal"
+            type="checkbox"
+            data-testid="rl-signal-controller-checkbox"
+            @change="onToggleRlSignal"
+          />
+          用 RL 策略指挥信号灯
+        </label>
+      </div>
+      <p class="muted small" data-testid="signal-policy-status">
+        <template v-if="world.signalPolicy">
+          ✓ 已加载 <code>{{ world.signalPolicy.name }}</code> ({{ world.signalPolicy.obs_dim }} obs
+          / {{ world.signalPolicy.action_dim }} act · 离散)
+        </template>
+        <template v-else
+          >未加载 — 训练一次信号灯 agent (python -m app.apps.rl.signal_train) 再加载。</template
+        >
+      </p>
+
+      <div class="replay-status" data-testid="signal-policy-readout">
+        <div class="metric-row">
+          <span>当前动作</span>
+          <strong data-testid="signal-policy-action">{{ signalActionLabel }}</strong>
+        </div>
+        <div class="metric-row">
+          <span>NS 队列</span>
+          <strong data-testid="signal-policy-queue-ns">{{ signalQueueNs }}</strong>
+        </div>
+        <div class="metric-row">
+          <span>EW 队列</span>
+          <strong data-testid="signal-policy-queue-ew">{{ signalQueueEw }}</strong>
+        </div>
+      </div>
+      <p v-if="signalError" class="err" data-testid="signal-policy-error">{{ signalError }}</p>
+    </section>
   </main>
 </template>
 
@@ -456,6 +525,51 @@ const onClearPolicy = (): void => {
   world.clearPolicy()
   replayCkptName.value = ''
   showFlashMessage('策略已清除', 'info')
+}
+
+// ===== Plan 074 (T6): the signal agent =====
+//
+// A second, different policy: the signal agent's (discrete, 5 actions,
+// 6 observations) as opposed to the ego agent's (continuous, 2 actions,
+// 14 observations). It commands the traffic light; the readout below shows
+// what it decided and what it saw.
+
+const signalCkptName = ref('')
+const signalPolicyLoading = ref(false)
+const signalError = ref<string | null>(null)
+const rlControlsSignal = ref(false)
+
+const signalActionLabel = computed(() => world.signalPolicyDecision?.action ?? '—')
+const signalQueueNs = computed(() => world.signalPolicyDecision?.queueNs ?? '—')
+const signalQueueEw = computed(() => world.signalPolicyDecision?.queueEw ?? '—')
+
+const onLoadSignalPolicy = async (): Promise<void> => {
+  signalError.value = null
+  if (!signalCkptName.value) return
+  signalPolicyLoading.value = true
+  try {
+    const r = await world.loadSignalPolicy(signalCkptName.value)
+    if (!r.ok) {
+      signalError.value = r.reason
+      showFlashMessage(`信号灯策略加载失败: ${r.reason}`, 'error')
+      return
+    }
+    showFlashMessage(`信号灯策略已加载: ${signalCkptName.value}`, 'info')
+  } finally {
+    signalPolicyLoading.value = false
+  }
+}
+
+const onClearSignalPolicy = (): void => {
+  world.clearSignalPolicy()
+  signalCkptName.value = ''
+  rlControlsSignal.value = false
+  showFlashMessage('信号灯策略已清除', 'info')
+}
+
+const onToggleRlSignal = (): void => {
+  world.setControllerKind(rlControlsSignal.value ? 'rl' : 'actuated')
+  showFlashMessage(rlControlsSignal.value ? '信号灯由 RL 策略指挥' : '信号灯回到定时控制', 'info')
 }
 
 const formatObs = (obs: readonly number[]): string => obs.map((x) => x.toFixed(3)).join(', ')
