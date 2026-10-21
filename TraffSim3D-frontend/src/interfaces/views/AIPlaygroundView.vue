@@ -136,7 +136,7 @@
     </section>
 
     <section class="card">
-      <h2>Reward 曲线</h2>
+      <h2>Reward 曲线 <span class="muted small">（逐 episode 采样回报 · 含噪声）</span></h2>
       <div v-if="status.reward_history.length === 0" class="muted">
         暂无数据 — 点击"开始训练"以生成样本。
       </div>
@@ -181,6 +181,181 @@
       <p v-if="status.reward_history.length > 0" class="muted small">
         {{ status.reward_history.length }} 个 episode · max {{ formatNumber(maxReward, 2) }} · min
         {{ formatNumber(minReward, 2) }}
+      </p>
+      <p
+        v-if="status.reward_history.length > 0"
+        class="muted small"
+        data-testid="reward-curve-note"
+      >
+        这是训练时随机策略<strong>采样</strong>得到的逐 episode
+        回报，噪声大、口径与下面的评估曲线不同 —— 它不能与固定周期基线比较，也不能与评估回报比较。
+      </p>
+    </section>
+
+    <!-- Plan 075: the comparison curve — the policy's deterministic
+         evaluation return against the training step, next to the
+         fixed-cycle baseline it has to beat. -->
+    <section v-if="evalSeries.length > 0" class="card">
+      <h2>评估回报 vs 固定周期基线</h2>
+      <p class="muted small" data-testid="eval-curve-condition">
+        条件: <strong>{{ evalConditionLabel }}</strong> · 确定性评估 (argmax) 的回报 · 基线 =
+        该条件下实测的固定 30/30 周期 {{ formatNumber(evalBaseline, 1) }} · 横轴 = 训练步数, 纵轴 =
+        回报 (越大越好)
+      </p>
+      <svg
+        :viewBox="`0 0 ${EVAL_CHART.width} ${EVAL_CHART.height}`"
+        :width="EVAL_CHART.width"
+        :height="EVAL_CHART.height"
+        class="chart"
+        data-testid="eval-curve-chart"
+        preserveAspectRatio="none"
+      >
+        <!-- the bar the policy has to clear -->
+        <line
+          :x1="EVAL_CHART.padLeft"
+          :y1="evalGeometry.baselineY"
+          :x2="EVAL_CHART.width - EVAL_CHART.padRight"
+          :y2="evalGeometry.baselineY"
+          stroke="#fb7185"
+          stroke-width="1.5"
+          stroke-dasharray="6 4"
+          data-testid="eval-baseline-line"
+        />
+        <!-- the policy's evaluation return -->
+        <polyline
+          :points="evalGeometry.line"
+          fill="none"
+          stroke="#60a5fa"
+          stroke-width="2"
+          data-testid="eval-curve-line"
+        />
+        <!-- the part above the baseline: "the policy beat it", marked -->
+        <g data-testid="eval-curve-above">
+          <polyline
+            v-for="(segment, index) in evalGeometry.above"
+            :key="index"
+            :points="segment"
+            fill="none"
+            stroke="#34d399"
+            stroke-width="3"
+            :data-testid="`eval-curve-above-segment-${index}`"
+          />
+        </g>
+        <!-- axis labels -->
+        <text
+          :x="EVAL_CHART.padLeft"
+          :y="EVAL_CHART.height - 8"
+          fill="#94a3b8"
+          font-size="10"
+          data-testid="eval-axis-step-min"
+        >
+          {{ evalStepMin }}
+        </text>
+        <text
+          :x="EVAL_CHART.width - EVAL_CHART.padRight"
+          :y="EVAL_CHART.height - 8"
+          fill="#94a3b8"
+          font-size="10"
+          text-anchor="end"
+          data-testid="eval-axis-step-max"
+        >
+          {{ evalStepMax }}
+        </text>
+        <text
+          :x="4"
+          :y="EVAL_CHART.padTop + 4"
+          fill="#94a3b8"
+          font-size="10"
+          data-testid="eval-axis-return-max"
+        >
+          {{ formatNumber(evalGeometry.domain.hi, 0) }}
+        </text>
+        <text
+          :x="4"
+          :y="EVAL_CHART.height - EVAL_CHART.padBottom"
+          fill="#94a3b8"
+          font-size="10"
+          data-testid="eval-axis-return-min"
+        >
+          {{ formatNumber(evalGeometry.domain.lo, 0) }}
+        </text>
+        <text
+          :x="EVAL_CHART.padLeft + 4"
+          :y="evalGeometry.baselineY - 4"
+          fill="#fb7185"
+          font-size="10"
+          data-testid="eval-baseline-label"
+        >
+          基线 {{ formatNumber(evalBaseline, 1) }}
+        </text>
+      </svg>
+      <p v-if="evalGeometry.above.length > 0" class="muted small" data-testid="eval-curve-verdict">
+        ✓ 评估回报曾高于基线 {{ formatNumber(evalAboveMargin, 1) }} 分 — 绿色区段就是基线以上的部分
+      </p>
+      <p v-else class="muted small" data-testid="eval-curve-verdict">
+        ✗ 评估回报从未高于基线 — 该策略没有打败固定 30/30 周期
+      </p>
+    </section>
+
+    <!-- Plan 075: the multi-seed table. Every seed is on the table — the
+         ones that collapsed back onto `no_op` included, because the ~50 %
+         success rate is only honest if the failures are visible. -->
+    <section v-if="signalSeedResults.length > 0" class="card">
+      <h2>多种子结果 (best-of-N)</h2>
+      <p class="muted small" data-testid="seed-summary">
+        {{ seedBeatenCount }}/{{ signalSeedResults.length }} 个种子在训练条件上打败了固定周期基线
+        (成功率 {{ formatNumber(seedSuccessRate, 0) }}%) · 固定周期基线: 训练
+        {{ trainBaseline === null ? '—' : formatNumber(trainBaseline, 1) }} · 留出评估
+        {{ evalConditionBaseline === null ? '—' : formatNumber(evalConditionBaseline, 1) }}
+      </p>
+      <table class="seed-table" data-testid="signal-seed-table">
+        <thead>
+          <tr>
+            <th>种子</th>
+            <th>训练条件回报</th>
+            <th>留出评估条件回报</th>
+            <th>打败基线 (训练)</th>
+            <th>打败基线 (评估)</th>
+            <th>动作分布 (训练条件)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="record in signalSeedResults"
+            :key="record.seed"
+            data-testid="signal-seed-row"
+            :data-seed="record.seed"
+          >
+            <td>
+              <span data-testid="seed-value-seed">{{ record.seed }}</span>
+              <span
+                v-if="isCollapsedSeed(record)"
+                class="collapsed-badge"
+                data-testid="seed-collapsed-badge"
+                >塌缩 no_op</span
+              >
+            </td>
+            <td data-testid="seed-value-train">{{ formatNumber(record.train_return, 1) }}</td>
+            <td data-testid="seed-value-eval">{{ formatNumber(record.eval_return, 1) }}</td>
+            <td data-testid="seed-value-beats-train">
+              {{ record.beats_train_baseline ? '✅' : '❌' }}
+            </td>
+            <td data-testid="seed-value-beats-eval">{{ record.beats_baseline ? '✅' : '❌' }}</td>
+            <td data-testid="seed-value-actions">{{ formatActionMix(record.train_actions) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="generalisationGap" class="muted small" data-testid="generalisation-gap">
+        泛化差距 (种子 {{ bestSeedRecord?.seed }}) — 训练条件:
+        {{ marginPhrase(generalisationGap.train) }} · 留出评估条件:
+        {{ marginPhrase(generalisationGap.eval) }} · 在没训过的初始条件上，优势并不等量迁移。
+      </p>
+      <p
+        v-if="status.signal_holdout_return !== undefined"
+        class="muted small"
+        data-testid="holdout-note"
+      >
+        最终留出条件 (holdout, 从未用于选优): {{ formatNumber(status.signal_holdout_return, 1) }}
       </p>
     </section>
 
@@ -369,6 +544,24 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
 import { useWorldStore } from '@interfaces/stores/worldStore'
+import { buildEvalCurve, type EvalPoint } from './trainingCurve'
+
+/** Plan 075: one point of the backend's evaluation series. */
+type SignalEvalPoint = EvalPoint
+
+/** Plan 075: one seed's measured result (the collapsed ones included). */
+interface SignalSeedResult {
+  seed: number
+  train_return: number
+  train_actions: Record<string, number>
+  beats_train_baseline: boolean
+  eval_return: number
+  eval_actions: Record<string, number>
+  beats_baseline: boolean
+  best_step: number
+  checkpoint: string
+  eval_series?: SignalEvalPoint[]
+}
 
 interface Status {
   running: boolean
@@ -386,6 +579,20 @@ interface Status {
   /** Plan 047: per-agent reward history (only when independent_agents=true).
    *  Keys are stringified int agent_ids ("0", "1", ...). */
   agent_rewards?: Record<string, number[]>
+  /** Plan 075: the evaluation series — one point per evaluation. */
+  signal_eval_series?: SignalEvalPoint[]
+  /** Plan 075: the fixed 30/30 cycle per condition (train / eval / holdout). */
+  signal_baselines?: Record<string, number>
+  /** Plan 075: every seed's measured result — the collapsed ones included. */
+  signal_seed_results?: SignalSeedResult[]
+  /** Plan 075: the seed the best-of-N selection picked. */
+  best_seed?: number
+  /** Plan 075: the winner's return on the final, never-selected condition. */
+  signal_holdout_return?: number
+  /** The fixed 30/30 cycle on the training condition. */
+  baseline_no_op_return?: number
+  /** The fixed 30/30 cycle on the held-out evaluation condition. */
+  signal_eval_baseline?: number
 }
 
 interface Checkpoint {
@@ -659,6 +866,146 @@ const pointsForAgent = (agentId: string): string => {
 const formatNumber = (n: number, digits = 2): string => {
   if (Number.isNaN(n) || !Number.isFinite(n)) return '0'
   return Number(n).toFixed(digits)
+}
+
+// ===== Plan 075: the comparison curve + the multi-seed table =====
+//
+// The raw reward curve above is a *sampled* per-episode return: noisy, and
+// not comparable with anything. The curve below is the policy's
+// **deterministic evaluation** return against the training step, drawn next
+// to the fixed-cycle baseline it has to beat — and the part of the curve
+// that lies above that baseline is marked, so "the policy beat the
+// baseline" is visible at a glance instead of something the reader has to
+// work out by comparing two numbers.
+
+const EVAL_CHART = {
+  width: 600,
+  height: 200,
+  padLeft: 52,
+  padRight: 16,
+  padTop: 16,
+  padBottom: 26,
+}
+
+const CONDITION_LABELS: Record<string, string> = {
+  train: '训练条件 (train)',
+  eval: '留出评估条件 (eval)',
+  holdout: '最终留出条件 (holdout)',
+}
+
+/**
+ * The series, restricted to the condition of its **newest** point.
+ *
+ * A point carries the condition it was measured on, and the numbers of two
+ * conditions are not comparable (the baselines differ), so one curve shows
+ * one condition.
+ */
+const evalSeries = computed<SignalEvalPoint[]>(() => {
+  const series = status.value.signal_eval_series ?? []
+  if (series.length === 0) return []
+  const condition = series[series.length - 1]!.condition
+  return series.filter((point) => point.condition === condition)
+})
+
+const evalCondition = computed(() => evalSeries.value[0]?.condition ?? 'train')
+const evalConditionLabel = computed(
+  () => CONDITION_LABELS[evalCondition.value] ?? evalCondition.value,
+)
+const evalGeometry = computed(() => buildEvalCurve(evalSeries.value, EVAL_CHART))
+const evalBaseline = computed(() => evalSeries.value[evalSeries.value.length - 1]?.baseline ?? 0)
+const evalStepMin = computed(() =>
+  evalSeries.value.length === 0 ? 0 : Math.min(...evalSeries.value.map((p) => p.step)),
+)
+const evalStepMax = computed(() =>
+  evalSeries.value.length === 0 ? 0 : Math.max(...evalSeries.value.map((p) => p.step)),
+)
+/** How far the best evaluation was above the baseline. */
+const evalAboveMargin = computed(() => {
+  if (evalSeries.value.length === 0) return 0
+  return Math.max(...evalSeries.value.map((p) => p.return)) - evalBaseline.value
+})
+
+// --- the multi-seed table ------------------------------------------------
+
+const signalSeedResults = computed<SignalSeedResult[]>(() => status.value.signal_seed_results ?? [])
+
+/** How many seeds beat the baseline **on the training condition**. */
+const seedBeatenCount = computed(
+  () => signalSeedResults.value.filter((record) => record.beats_train_baseline).length,
+)
+
+const seedSuccessRate = computed(() =>
+  signalSeedResults.value.length === 0
+    ? 0
+    : (seedBeatenCount.value / signalSeedResults.value.length) * 100,
+)
+
+const trainBaseline = computed<number | null>(() => {
+  const value = status.value.signal_baselines?.train ?? status.value.baseline_no_op_return
+  return typeof value === 'number' ? value : null
+})
+
+const evalConditionBaseline = computed<number | null>(() => {
+  const value = status.value.signal_baselines?.eval ?? status.value.signal_eval_baseline
+  return typeof value === 'number' ? value : null
+})
+
+/** The seed the best-of-N selection picked (fallback: the best measured). */
+const bestSeedRecord = computed<SignalSeedResult | null>(() => {
+  const records = signalSeedResults.value
+  if (records.length === 0) return null
+  const picked = records.find((record) => record.seed === status.value.best_seed)
+  if (picked) return picked
+  return records.reduce((best, record) => (record.eval_return > best.eval_return ? record : best))
+})
+
+interface Margin {
+  abs: number
+  pct: number
+}
+
+const marginOf = (value: number, baseline: number): Margin => {
+  const abs = value - baseline
+  const pct = baseline === 0 ? 0 : (abs / Math.abs(baseline)) * 100
+  return { abs, pct }
+}
+
+const marginPhrase = (margin: Margin): string =>
+  margin.abs >= 0
+    ? `领先 ${margin.abs.toFixed(1)} 分 (${margin.pct.toFixed(1)}%)`
+    : `落后 ${Math.abs(margin.abs).toFixed(1)} 分 (${Math.abs(margin.pct).toFixed(1)}%)`
+
+/**
+ * The generalisation gap (Plan 074 T10): the margin on the training
+ * condition against the margin on the held-out evaluation condition. The
+ * advantage measured on the training episodes is an overestimate — this is
+ * where that becomes visible.
+ */
+const generalisationGap = computed<{ train: Margin; eval: Margin } | null>(() => {
+  const record = bestSeedRecord.value
+  const train = trainBaseline.value
+  const heldOut = evalConditionBaseline.value
+  if (!record || train === null || heldOut === null) return null
+  return {
+    train: marginOf(record.train_return, train),
+    eval: marginOf(record.eval_return, heldOut),
+  }
+})
+
+const formatActionMix = (actions: Record<string, number> | undefined): string => {
+  const entries = Object.entries(actions ?? {})
+  if (entries.length === 0) return '—'
+  return entries.map(([name, count]) => `${name} ${count}`).join(' / ')
+}
+
+/**
+ * A seed whose action mix collapsed onto the pure `no_op` schedule — the
+ * failure mode Plan 074 T10 measured. It is **reported**, never hidden:
+ * the success rate is only honest if the failures are on the table.
+ */
+const isCollapsedSeed = (record: SignalSeedResult): boolean => {
+  const names = Object.keys(record.train_actions ?? {})
+  return names.length === 1 && names[0] === 'no_op'
 }
 
 const refreshStatus = async (): Promise<void> => {
@@ -974,6 +1321,39 @@ button.ghost:disabled {
 .muted.small {
   font-size: 11px;
   margin-top: 6px;
+}
+
+/* Plan 075: the multi-seed table. */
+.seed-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.seed-table th {
+  text-align: left;
+  font-weight: 600;
+  color: #94a3b8;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+.seed-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  color: #e2e0f0;
+}
+.collapsed-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: rgba(251, 113, 133, 0.18);
+  color: #fda4af;
+  white-space: nowrap;
 }
 
 /* Plan 049: RL replay surface styling. */

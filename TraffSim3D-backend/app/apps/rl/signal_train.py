@@ -77,6 +77,28 @@ Within a single seed, the best *checkpoint* is still chosen on the training
 condition (that is the usual "keep the best checkpoint of the run" rule);
 the held-out condition is only spent on the cross-seed selection.
 
+Plan 075 — THE EVALUATION SERIES
+------------------------------
+`signal_eval_return` is a **single number**: every evaluation overwrites it,
+so the run's history is lost. Plan 075 needs a **curve** — the policy's
+deterministic evaluation return against the training step — plus the
+fixed-cycle baseline it has to beat, so the status document keeps
+
+    "signal_eval_series": [
+        {"step": 10000, "return": -455.4, "baseline": -423.1, "condition": "train"},
+    ]
+
+one point per evaluation. Two rules make the curve readable:
+
+- the `baseline` of a point is the fixed 30/30 cycle **measured on the very
+  condition the point was measured on** (Plan 074 T10: two different
+  conditions' numbers are not comparable);
+- the series is **bounded** (like `reward_history`), so the status document
+  cannot grow without limit.
+
+The series is what the AI Playground draws next to the baseline reference
+line, so "the policy beat the baseline" is visible instead of asserted.
+
 Usage (from `TraffSim3D-backend/`):
 
     .\\.venv\\Scripts\\python.exe -m app.apps.rl.signal_train 300000
@@ -134,6 +156,14 @@ EVAL_EPISODES = 3
 #: The seeds a multi-seed run trains by default — the four Plan 074 S3b
 #: measured (two of them beat the baseline, two collapsed onto it).
 DEFAULT_SEEDS: tuple[int, ...] = (0, 1, 2, 3)
+
+#: How many evaluation points the status document keeps (Plan 075).
+#:
+#: The series is a *curve*, not a log: once the bound is reached the oldest
+#: points are dropped. The bound matches `status.append_reward`'s, so the
+#: status document stays the same order of magnitude no matter how long the
+#: run is.
+EVAL_SERIES_MAX_POINTS = 200
 
 #: The initial **action prior** written into the policy's action-layer bias.
 #:
@@ -286,6 +316,30 @@ def evaluate_policy(
     }
 
 
+def append_eval_point(
+    series: Sequence[dict[str, Any]] | None,
+    point: dict[str, Any],
+    *,
+    max_points: int = EVAL_SERIES_MAX_POINTS,
+) -> list[dict[str, Any]]:
+    """Append one evaluation point to the series, keeping the series bounded.
+
+    The series is the curve the AI Playground draws (Plan 075): **one point
+    per evaluation**, each carrying the fixed-cycle baseline *measured on the
+    same condition as the point* — Plan 074 T10 is explicit that two
+    different conditions' numbers are not comparable, so a point may never
+    borrow another condition's baseline.
+
+    The bound keeps the status document from growing without limit: the
+    oldest points are dropped, exactly like `reward_history`.
+    """
+    points = [dict(existing) for existing in (series or [])]
+    points.append(dict(point))
+    if len(points) > max_points:
+        points = points[-max_points:]
+    return points
+
+
 def _apply_action_prior(model: Any) -> None:
     """Write the initial action prior into the policy's action-layer bias.
 
@@ -435,6 +489,17 @@ def train_signal_policy(
     best_step = 0
     best_state: dict[str, Any] | None = None
     best_actions: dict[str, int] = {}
+    # Plan 075: the evaluation **series** — one point per evaluation, so the
+    # AI Playground can draw the policy's return against the training step
+    # next to the fixed-cycle baseline.
+    eval_series: list[dict[str, Any]] = []
+    # The fixed 30/30 cycle on the **training** condition — the bar this
+    # run's evaluations are compared against. It is measured on the very
+    # condition (and horizon) the evaluations below use, because two
+    # different conditions' numbers are not comparable (Plan 074 T10).
+    # Measured once, lazily: the run does not need it before its first
+    # evaluation.
+    measured_baseline: float | None = train_baseline
 
     chunk = max(eval_every, n_steps) if eval_every > 0 else total_steps
     trained = 0
@@ -451,12 +516,31 @@ def train_signal_policy(
             return {"trained": False, "reason": "terminated_by_request", "seed": seed}
         if eval_every <= 0:
             continue
-        scored = evaluate_policy(model, steps=max_steps, seed=seed, episodes=1)
+        scored = evaluate_policy(
+            model, steps=max_steps, seed=seed, episodes=1, condition=TRAIN_CONDITION
+        )
+        if measured_baseline is None:
+            measured_baseline = evaluate_schedule(
+                NO_OP_INDEX,
+                steps=max_steps,
+                seed=seed,
+                condition=TRAIN_CONDITION,
+            )["return"]
+        eval_series = append_eval_point(
+            eval_series,
+            {
+                "step": int(trained),
+                "return": float(scored["return"]),
+                "baseline": float(measured_baseline),
+                "condition": TRAIN_CONDITION.name,
+            },
+        )
         if own_status:
             ss = st.read_status()
             ss["signal_eval_return"] = scored["return"]
             ss["signal_eval_step"] = trained
             ss["signal_eval_actions"] = scored["actions"]
+            ss["signal_eval_series"] = eval_series
             st.write_status(ss)
         if best_return is None or scored["return"] > best_return:
             best_return = scored["return"]
@@ -493,8 +577,14 @@ def train_signal_policy(
         )["return"]
     if train_baseline is None:
         # The published T9 baseline: the fixed 30/30 cycle on the
-        # **training** condition (-423.1 over 600 steps).
-        train_baseline = evaluate_schedule(NO_OP_INDEX, steps=max_steps)["return"]
+        # **training** condition (-423.1 over 600 steps). The series already
+        # measured it on that very condition, so reuse it instead of
+        # measuring the same thing twice.
+        train_baseline = (
+            measured_baseline
+            if measured_baseline is not None
+            else evaluate_schedule(NO_OP_INDEX, steps=max_steps)["return"]
+        )
 
     if own_status:
         s = st.read_status()
@@ -505,6 +595,11 @@ def train_signal_policy(
         s["baseline_no_op_return"] = train_baseline
         s["signal_eval_condition_return"] = eval_result["return"]
         s["signal_eval_condition_baseline"] = eval_baseline
+        # Plan 075: the fixed cycle of every condition this run reports on,
+        # so the UI can show the margin (and the generalisation gap)
+        # without a second request.
+        s["signal_baselines"] = {"train": train_baseline, "eval": eval_baseline}
+        s["signal_eval_series"] = eval_series
         st.write_status(s)
         st.finalize_status(f"signal_ppo_completed on {resolved_device}")
 
@@ -525,6 +620,8 @@ def train_signal_policy(
         "beats_train_baseline": bool(best_return is not None and best_return > train_baseline),
         "device": resolved_device,
         "evaluation": evaluation,
+        # Plan 075: the evaluation curve (one point per evaluation).
+        "eval_series": eval_series,
     }
 
 
@@ -566,6 +663,9 @@ def _seed_record(summary: dict[str, Any]) -> dict[str, Any]:
         "beats_baseline": bool(summary["beats_baseline"]),
         "best_step": int(summary["best_step"]),
         "checkpoint": str(summary["checkpoint"]),
+        # Plan 075: the seed's own evaluation curve, so every seed — the
+        # collapsed ones included — can be looked at, not only the winner.
+        "eval_series": list(summary.get("eval_series", [])),
     }
 
 
@@ -699,6 +799,10 @@ def train_signal_seeds(
     s["latest_checkpoint"] = ""
     s["signal_seeds"] = seed_list
     s["signal_seed_count"] = len(seed_list)
+    # Plan 075: the evaluation curve and the per-condition baselines start
+    # empty — they are filled in as the run measures them.
+    s["signal_eval_series"] = []
+    s["signal_baselines"] = {}
     st.write_status(s)
 
     # The fixed cycle on every condition — the bar a policy has to clear
@@ -712,6 +816,9 @@ def train_signal_seeds(
         )["return"]
         for condition in (TRAIN_CONDITION, EVAL_CONDITION, HOLDOUT_CONDITION)
     }
+    ss = st.read_status()
+    ss["signal_baselines"] = baselines
+    st.write_status(ss)
 
     records: list[dict[str, Any]] = []
     if workers > 1 and len(seed_list) > 1:
@@ -784,6 +891,10 @@ def train_signal_seeds(
             records.append(_seed_record(summary))
             ss = st.read_status()
             ss["signal_seed_results"] = records
+            # Plan 075: the curve of the seed that just finished, so the
+            # dashboard shows a live curve during a multi-seed run. The
+            # final publish below replaces it with the **winner's** curve.
+            ss["signal_eval_series"] = records[-1]["eval_series"]
             st.write_status(ss)
 
     winner = select_best_seed(records)
@@ -831,6 +942,11 @@ def train_signal_seeds(
     s["signal_holdout_return"] = holdout["return"]
     s["signal_seed_results"] = records
     s["signal_run_metadata"] = str(metadata_path)
+    # Plan 075: the delivered policy's evaluation curve (the winner's own
+    # series — every seed's series stays in `signal_seed_results`), and the
+    # fixed cycle of each condition the run reports on.
+    s["signal_eval_series"] = list(winner.get("eval_series", []))
+    s["signal_baselines"] = baselines
     st.write_status(s)
     st.finalize_status(f"signal_ppo_completed on {resolved_device} ({len(seed_list)} seeds)")
 

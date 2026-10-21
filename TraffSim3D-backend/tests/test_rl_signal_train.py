@@ -610,3 +610,144 @@ def test_the_multi_seed_cli_reports_every_seed(rl_state, monkeypatch, capsys) ->
     assert "fixed cycle" in out
     assert "run metadata" in out
     assert list(rl_paths.checkpoints_dir().rglob("ppo_step_*.zip"))
+
+
+# --------------------------------------------------------------------------
+# Plan 075: the evaluation series
+# --------------------------------------------------------------------------
+
+
+def _point(step: int, value: float = -400.0) -> dict[str, object]:
+    return {
+        "step": step,
+        "return": value,
+        "baseline": -423.1,
+        "condition": "train",
+    }
+
+
+def test_append_eval_point_appends_one_point_per_evaluation() -> None:
+    """The series grows by exactly one point per evaluation."""
+    series: list[dict[str, object]] = []
+    for index in range(5):
+        series = signal_train.append_eval_point(series, _point((index + 1) * 10))
+        assert len(series) == index + 1
+
+    assert [point["step"] for point in series] == [10, 20, 30, 40, 50]
+
+
+def test_append_eval_point_bounds_the_series() -> None:
+    """The series must not grow without limit.
+
+    The bound is what keeps the status document the same order of magnitude
+    no matter how long the run is — `reward_history` is bounded the same way.
+    """
+    series: list[dict[str, object]] = []
+    for index in range(signal_train.EVAL_SERIES_MAX_POINTS + 25):
+        series = signal_train.append_eval_point(series, _point(index))
+
+    assert len(series) == signal_train.EVAL_SERIES_MAX_POINTS
+    # The **newest** points are the ones that survive.
+    assert series[-1]["step"] == signal_train.EVAL_SERIES_MAX_POINTS + 24
+    assert series[0]["step"] == 25
+
+
+def test_append_eval_point_does_not_mutate_the_series_it_is_given() -> None:
+    original = [_point(10)]
+    series = signal_train.append_eval_point(original, _point(20))
+    assert len(original) == 1
+    assert len(series) == 2
+
+
+@requires_sb3
+def test_the_training_run_appends_one_point_per_evaluation(rl_state) -> None:
+    """One evaluation -> one point in the series.
+
+    The run is chunked: every `eval_every` steps the deterministic policy is
+    scored, and each of those scores has to land in the series — that is what
+    turns a single overwritten number into a curve.
+    """
+    summary = signal_train.train_signal_policy(
+        64,
+        device="cpu",
+        save_every=32,
+        n_steps=32,
+        batch_size=16,
+        eval_every=32,
+    )
+
+    series = summary["eval_series"]
+    assert [point["step"] for point in series] == [32, 64]
+    assert all(point["condition"] == "train" for point in series)
+    assert all(isinstance(point["return"], float) for point in series)
+
+    # The status document — what `GET /api/v1/rl/status` serves — carries
+    # the same curve.
+    status = rl_status.read_status()
+    assert status["signal_eval_series"] == series
+
+
+@requires_sb3
+def test_each_point_carries_the_baseline_of_its_own_condition(rl_state) -> None:
+    """A point's baseline is the fixed cycle **on that point's condition**.
+
+    Plan 074 T10 is explicit that two conditions' numbers are not
+    comparable, so a point may never borrow another condition's baseline.
+    The training condition's fixed cycle is -423.1 (Plan 074 T9); the
+    held-out evaluation condition's is a different number.
+    """
+    from app.apps.rl.signal_conditions import EVAL_CONDITION
+
+    signal_train.train_signal_policy(
+        64,
+        device="cpu",
+        save_every=32,
+        n_steps=32,
+        batch_size=16,
+        eval_every=32,
+    )
+
+    train_baseline = signal_train.evaluate_schedule(
+        signal_train.NO_OP_INDEX, condition=signal_train.TRAIN_CONDITION
+    )["return"]
+    eval_baseline = signal_train.evaluate_schedule(
+        signal_train.NO_OP_INDEX, condition=EVAL_CONDITION
+    )["return"]
+    assert train_baseline != eval_baseline
+
+    series = rl_status.read_status()["signal_eval_series"]
+    assert series
+    for point in series:
+        assert point["baseline"] == pytest.approx(train_baseline, abs=0.05)
+        assert point["baseline"] != pytest.approx(eval_baseline, abs=0.05)
+
+
+@requires_sb3
+def test_the_multi_seed_run_publishes_the_curve_and_the_baselines(rl_state) -> None:
+    """The multi-seed run's results have to be readable through the API.
+
+    The status document is what `GET /api/v1/rl/status` serves, so the curve
+    and the per-seed results belong there: a sidecar file under `.data/`
+    would not be reachable by the UI.
+    """
+    summary = signal_train.train_signal_seeds(
+        64,
+        seeds=[0, 1],
+        device="cpu",
+        save_every=32,
+        n_steps=32,
+        batch_size=16,
+        eval_every=32,
+    )
+
+    status = rl_status.read_status()
+    # The delivered policy's curve ...
+    assert status["signal_eval_series"] == summary["winner"]["eval_series"]
+    assert status["signal_eval_series"]
+    # ... the fixed cycle of every condition the run reports on ...
+    assert set(status["signal_baselines"]) == {"train", "eval", "holdout"}
+    assert status["signal_baselines"]["train"] != status["signal_baselines"]["eval"]
+    # ... and every seed, with its own curve. A failed seed is not hidden.
+    assert [record["seed"] for record in status["signal_seed_results"]] == [0, 1]
+    for record in status["signal_seed_results"]:
+        assert record["eval_series"]
