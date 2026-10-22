@@ -1,12 +1,12 @@
-# Plan 056: Overpass response cache (backend proxy)
+# Overpass response cache (backend proxy)
 
-User-reported follow-up: `/smart-city` (Plan 055) called
+User-reported follow-up: `/smart-city` called
 overpass-api.de directly from the browser. This had two problems:
-  1. **Slow / blocked from China** — the user's network couldn't
+  1. **Slow / blocked on some networks** — the user's network couldn't
      reach overpass-api.de, so the "正在从 Overpass 加载 OSM
      数据..." toast stayed forever.
   2. **No caching** — every page reload re-fetched the same bbox
-     (e.g. 天安门 ±2km) from Overpass.
+     (e.g. a ±2 km box around a city centre) from Overpass.
 
 ## Fix
 
@@ -55,7 +55,7 @@ We use **content-addressed keys** (SHA-256 of query string), so:
 
 The user controls invalidation by deleting `geojson/cache/*.json`.
 For a project with manually curated scenes, this is the right
-default — no surprise eviction. M5+ can add LRU if memory pressure
+default — no surprise eviction. A later change can add LRU if memory pressure
 becomes an issue.
 
 ## ODbL attribution

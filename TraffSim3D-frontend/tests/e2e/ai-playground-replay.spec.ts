@@ -1,5 +1,5 @@
 /**
- * Plan 049: AI Playground — strategy load + replay UI.
+ * AI Playground — strategy load + replay UI.
  *
  * Stubs:
  *   - /api/v1/rl/checkpoints     → list of fake .zip checkpoints

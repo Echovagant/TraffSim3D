@@ -1,4 +1,4 @@
-"""Plan 044 + 045: /api/v1/rl/* endpoints (train + status + capabilities + checkpoints)."""
+"""/api/v1/rl/* endpoints (train + status + capabilities + checkpoints)."""
 
 from __future__ import annotations
 
@@ -19,12 +19,12 @@ router = APIRouter()
 class TrainRequest(BaseModel):
     steps: int = 1000
     dry_run: bool = True
-    device: str = "auto"  # 'auto' | 'gpu' | 'cpu' — Plan 044 GPU extension
-    n_agents: int = 2  # Plan 045: stacked TrafficEnvs sharing PPO
-    save_every: int = 5000  # Plan 045: checkpoint save interval
-    independent_agents: bool = False  # Plan 047: per-agent PPO policies
+    device: str = "auto"  # 'auto' | 'gpu' | 'cpu' — GPU support
+    n_agents: int = 2  # stacked TrafficEnvs sharing PPO
+    save_every: int = 5000  # checkpoint save interval
+    independent_agents: bool = False  # per-agent PPO policies
     scene_kind: str = (
-        "cross"  # Plan 048/076: 'cross' | 'corridor' | 't_junction' | 'roundabout' | 'cross_signalled'
+        "cross"  # 'cross' | 'corridor' | 't_junction' | 'roundabout' | 'cross_signalled'
     )
     curriculum: bool = False  # Curriculum learning: progressive scene difficulty
 
@@ -164,7 +164,7 @@ async def capabilities() -> dict[str, Any]:
     return rl_caps.detect_capabilities()
 
 
-# --- Training task control (M4 Must: 启动/暂停/恢复/终止) -------------------
+# --- Training task control (启动/暂停/恢复/终止) ----------------------------
 #
 # Training is a detached subprocess, so these endpoints do not poke a live
 # object — they write a control request that the trainer polls from its step
@@ -225,7 +225,7 @@ async def prune_checkpoints() -> dict[str, Any]:
 
 @router.get("/rl/scenes", tags=["rl"])
 async def list_scenes() -> dict[str, Any]:
-    """List supported sim scene kinds (Plan 048, Plan 076 T13)."""
+    """List supported sim scene kinds."""
     return {"scenes": ["cross", "corridor", "t_junction", "roundabout", "cross_signalled"]}
 
 
@@ -262,7 +262,7 @@ async def training_config() -> dict[str, Any]:
 
 @router.get("/rl/checkpoints/{name}/weights", tags=["rl"])
 async def get_checkpoint_weights(name: str) -> dict[str, Any]:
-    """Plan 049: export a saved PPO checkpoint as JSON-serializable weights.
+    """Export a saved PPO checkpoint as JSON-serializable weights.
 
     The frontend uses this to instantiate an in-browser MlpPolicy for
     replay (see `src/infrastructure/rl/mlpInference.ts`). Returns the

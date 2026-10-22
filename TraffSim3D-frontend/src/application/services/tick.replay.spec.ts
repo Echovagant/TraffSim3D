@@ -1,8 +1,8 @@
 // src/application/services/tick.replay.spec.ts
 //
-// Plan 071: the product replay path's speed integration.
+// The product replay path's speed integration.
 //
-// Before Plan 071 the replay path was inert: tick's step 3 wrote
+// Before the replay fix the replay path was inert: tick's step 3 wrote
 // `v.targetSpeed = road.speedLimit` unconditionally, overwriting the
 // policy's own `nextSpeed`, so the vehicle drove at the road speed limit
 // whether or not a policy was loaded. These tests pin the fixed

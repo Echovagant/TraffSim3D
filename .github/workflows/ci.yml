@@ -2,7 +2,7 @@
 #
 # This repository had no CI at all before this file: every gate below was
 # run by hand. They are wired up here because the cross-language contract
-# test (Plan 071) compares two *independent* implementations of the same
+# test compares two *independent* implementations of the same
 # traffic model with exact equality — without a machine-run gate, drift goes
 # unnoticed until somebody reads a diff by eye.
 #
@@ -38,7 +38,7 @@ env:
   # vite port and the one `playwright.config.ts` hard-codes.
   FRONTEND_PORT: '5188'
   BACKEND_PORT: '8001'
-  # Domestic PyPI mirror first (the project's toolchain note for slow
+  # Faster PyPI mirror first (the project's toolchain note for slow
   # networks). The install steps fall back to pypi.org if the mirror fails.
   PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
 
@@ -240,7 +240,7 @@ jobs:
     # baselines have been re-recorded on Linux, i.e. once a Linux runner
     # exists to re-record them. Until then it is a smoke test, not a gate.
     #
-    # Note that `m1-perf-gate.spec.ts` is a *measurement*, not a
+    # Note that `perf-gate.spec.ts` is a *measurement*, not a
     # comparison: it needs >= 30 FPS under software rasterisation, which
     # depends on the runner's CPU. That is a second reason this job cannot
     # gate the build yet.

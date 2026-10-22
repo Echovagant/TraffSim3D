@@ -6,7 +6,7 @@ import { createRoadNetwork } from '@domain/entities/RoadNetwork'
  * Deep-clone a SerializedScene via JSON round-trip. The scene format
  * is JSON-friendly (no class instances, no Maps, no functions), so
  * structuredClone is overkill. The cost is O(N) where N = total
- * bytes of the scene; at M1 scale (a few KB), this is sub-millisecond.
+ * bytes of the scene; at demo scale (a few KB), this is sub-millisecond.
  */
 export const cloneScene = (scene: SerializedScene): SerializedScene => {
   return JSON.parse(JSON.stringify(scene)) as SerializedScene
@@ -16,7 +16,7 @@ export const cloneScene = (scene: SerializedScene): SerializedScene => {
  * Apply a SerializedScene to a live network. Used by undo/redo:
  * the worldStore replaces `network` with a new RoadNetwork built
  * from the snapshot, and Rapier bodies are re-registered by the
- * caller (worldStore.loadNetwork in plan 020).
+ * caller (worldStore.loadNetwork).
  *
  * Pure function — does NOT mutate Rapier. Caller handles that.
  */

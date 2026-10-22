@@ -14,9 +14,9 @@ file shape, base image, whether to bundle Postgres/Redis/MinIO, build context).
 
 Two things were blocking dependent work:
 
-1. M4's §4.2 Must item「模型权重存取（MinIO）」needs a deployment form to
+1. The §4.2 Must item「模型权重存取（MinIO）」needs a deployment form to
    decide the *object-storage shape* of weight persistence.
-2. M4's acceptance criterion「权重可跨**容器重建**保留（需挂卷）」requires
+2. The acceptance criterion「权重可跨**容器重建**保留（需挂卷）」requires
    containers to exist at all.
 
 Meanwhile the project's actual pain was never "no containers" — it was
@@ -40,19 +40,19 @@ No `Dockerfile`, no compose file, no container volumes.
 
 ## Consequences
 
-- **M4「模型权重存取」项改判。** The MinIO requirement is formally
+- **「模型权重存取」项改判。** The MinIO requirement is formally
   re-scoped to *persistent local filesystem storage*. The real requirement —
   "weights must not be lost on same-machine restart" — **is met** and
   verified. If object storage is ever needed, it should be added as an
   adapter behind `apps/rl/paths.py`, not as a deployment-form prerequisite.
-- **M4 验收第 5 条作废。**「权重可跨容器重建保留（需挂卷）」is **out of scope
+- **验收第 5 条作废。**「权重可跨容器重建保留（需挂卷）」is **out of scope
   under this ADR**, not failed. It is removed from the acceptance list rather
   than left perpetually unchecked.
-- **M5 的 ADR finalization 项收口.** ADR-001~007 are now all resolved
+- **ADR finalization 项收口.** ADR-001~007 are now all resolved
   (001-006 Accepted, 007 Rejected).
 - MinIO / Postgres / Redis / object storage are **not** introduced. Any future
   need requires a new ADR that supersedes this one.
-- Deployment documentation (still M5 TODO) must describe the local-process
+- Deployment documentation must describe the local-process
   procedure instead of a compose workflow.
 
 ## Alternatives considered
@@ -69,7 +69,7 @@ No `Dockerfile`, no compose file, no container volumes.
 
 ## Last reviewed
 
-- 2026-06-25: Postponed to M5 (M3/M4 backend work was local-venv driven).
+- 2026-06-25: Postponed (backend work was local-venv driven).
 - **2026-10-17: Rejected.** Project lead ruled "不用容器". RL weight
   persistence had already been solved on local FS (`apps/rl/paths.py`), which
   removed the only concrete dependency this ADR had.

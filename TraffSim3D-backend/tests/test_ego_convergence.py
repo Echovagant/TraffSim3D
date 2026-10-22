@@ -1,6 +1,6 @@
-"""Plan 076 T11: the training sim's ego must steer **towards** its target.
+"""The training sim's ego must steer **towards** its target.
 
-This is the regression test for the defect Plan 076 T11 fixed.
+This is the regression test for the inverted-alpha defect.
 
 The Pure Pursuit steering law
 
@@ -68,8 +68,8 @@ def test_the_ego_converges_on_an_offset_target() -> None:
     distance grew to 150.9 m (from 25.7 m) — the training environment was
     teaching the ego to steer the wrong way.
 
-    Plan 076 T12 note: this scenario starts the ego 6 m off the
-    centreline, which is **beyond the 3.5 m road half-width** T12 gave
+    Note: this scenario starts the ego 6 m off the
+    centreline, which is **beyond the 3.5 m road half-width** the sim was given
     the sim. The ego therefore cannot score the success any more, so the
     episode no longer *ends* at the target — it converges, overshoots and
     keeps going. The property under test is therefore the **closest

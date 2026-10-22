@@ -1,4 +1,4 @@
-"""Plan 045: PPO checkpoint management tests."""
+"""PPO checkpoint management tests."""
 
 from __future__ import annotations
 

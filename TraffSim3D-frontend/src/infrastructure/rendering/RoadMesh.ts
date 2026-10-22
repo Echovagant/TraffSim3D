@@ -4,12 +4,12 @@ import { ROAD_LANE_WIDTH } from '@shared/constants/simulation'
 import { roadWaypoints } from '@domain/services/laneGeometry'
 
 /**
- * Plan 035: build a road as a triangle strip extruded along the polyline
+ * Build a road as a triangle strip extruded along the polyline
  * waypoints. For 2-point roads the math collapses to a single quad
- * (4 vertices, 6 indices), matching the pre-035 PlaneGeometry shape.
+ * (4 vertices, 6 indices), matching the older PlaneGeometry shape.
  *
- * Y component of waypoints is honoured so 036 ramps work without
- * further changes; for 035 roads y=0 throughout.
+ * Y component of waypoints is honoured so ramps work without
+ * further changes; for flat roads y=0 throughout.
  */
 export const createRoadMesh = (road: Road): THREE.Mesh => {
   const waypoints = roadWaypoints(road)

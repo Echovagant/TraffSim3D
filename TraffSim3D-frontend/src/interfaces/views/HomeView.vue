@@ -33,8 +33,8 @@
             分层 + 多智能体 RL 引擎联合驱动。
           </p>
           <p class="hero-sub gsap-hero-sub">
-            M1–M4 已交付：场景编辑器、物理仿真、OSM 地图导入、智能体 RL 训练。M3 新增 SmartCity 3D
-            底图(基于 Cesium + 高德瓦片 + 真实建筑 3D 拉伸)。
+            场景编辑器、物理仿真、OSM 地图导入、智能体 RL 训练，另附 SmartCity 3D 底图(基于 Cesium +
+            高德瓦片 + 真实建筑 3D 拉伸)。
           </p>
           <div class="hero-ctas gsap-hero-ctas">
             <router-link to="/scene-editor" class="btn">进入 SceneLab</router-link>
@@ -47,7 +47,7 @@
       <section class="modules">
         <header class="modules-header gsap-modules-header">
           <h2>产品模块矩阵</h2>
-          <p>每个模块对应一个前端路由和一个后端 app，按里程碑逐步交付。</p>
+          <p>每个模块对应一个前端路由和一个后端 app。</p>
         </header>
 
         <div class="module-grid gsap-module-grid">
@@ -56,7 +56,7 @@
             <div class="module-body">
               <div class="module-title-row">
                 <h3>SceneLab</h3>
-                <span class="badge badge-active">M1 · Active</span>
+                <span class="badge badge-active">Active</span>
               </div>
               <p class="module-sub">场景编辑器 / SceneEditor</p>
               <p class="module-desc">
@@ -72,7 +72,7 @@
             <div class="module-body">
               <div class="module-title-row">
                 <h3>SimulationLab</h3>
-                <span class="badge badge-active">M2 · Active</span>
+                <span class="badge badge-active">Active</span>
               </div>
               <p class="module-sub">物理 + 传感器仿真</p>
               <p class="module-desc">
@@ -87,7 +87,7 @@
             <div class="module-body">
               <div class="module-title-row">
                 <h3>MapLab</h3>
-                <span class="badge badge-active">M3 · Active</span>
+                <span class="badge badge-active">Active</span>
               </div>
               <p class="module-sub">OSM 地图导入与路网生成</p>
               <p class="module-desc">
@@ -97,7 +97,7 @@
             </div>
           </router-link>
 
-          <!-- Plan 055: SmartCity 3D basemap (Cesium + Three.js overlay) -->
+          <!-- SmartCity 3D basemap (Cesium + Three.js overlay) -->
           <router-link
             to="/smart-city"
             class="module-card status-active module-card-featured"
@@ -107,7 +107,7 @@
             <div class="module-body">
               <div class="module-title-row">
                 <h3>SmartCity 3D</h3>
-                <span class="badge badge-new">M3 · New</span>
+                <span class="badge badge-new">New</span>
               </div>
               <p class="module-sub">智慧城市 3D 底图（Cesium + 高德瓦片）</p>
               <p class="module-desc">
@@ -123,7 +123,7 @@
             <div class="module-body">
               <div class="module-title-row">
                 <h3>AI Proving Ground</h3>
-                <span class="badge badge-active">M4 · Active</span>
+                <span class="badge badge-active">Active</span>
               </div>
               <p class="module-sub">RL 训练 + 回放</p>
               <p class="module-desc">
@@ -138,12 +138,12 @@
             <div class="module-body">
               <div class="module-title-row">
                 <h3>DeliveryLab</h3>
-                <span class="badge badge-planned">M5 · Planned</span>
+                <span class="badge badge-planned">Planned</span>
               </div>
               <p class="module-sub">部署与交付物总览</p>
               <p class="module-desc">
-                本地部署清单、ADR 归档、API 文档、测试覆盖率报告的目录页。 不引入新功能, 只把前 4
-                个里程碑的可交付物集中展示给项目接手人。
+                本地部署清单、ADR 归档、API 文档、测试覆盖率报告的目录页。 不引入新功能, 只把
+                已可用的交付物集中展示给项目接手人。
               </p>
             </div>
           </router-link>
@@ -153,13 +153,13 @@
             <div class="module-body">
               <div class="module-title-row">
                 <h3>Backend Services</h3>
-                <span class="badge badge-active">M1 · Active</span>
+                <span class="badge badge-active">Active</span>
               </div>
               <p class="module-sub">FastAPI 服务面</p>
               <p class="module-desc">
                 所有模块的统一 API 入口。当前已暴露 <code>GET /health</code> 与
                 <code>GET /api/v1/ping</code> 两个 smoke 端点;scene sync、tick stream、RL control
-                等接口在 M2–M4 落地。
+                等接口尚未开放。
               </p>
             </div>
           </router-link>
@@ -175,7 +175,7 @@
 
 <script setup lang="ts">
 /**
- * Plan 057: GSAP-powered homepage animations.
+ * GSAP-powered homepage animations.
  *
  * Animation design (per the gsap-skills `gsap-frameworks` Vue 3
  * patterns + `gsap-scrolltrigger` recommendations):
@@ -363,7 +363,7 @@ html {
   color: #1d4ed8;
 }
 
-/* Plan 057: SmartCity link has a violet gradient to signal it's
+/* SmartCity link has a violet gradient to signal it's
    the "new" 3D basemap entry (matches the imported-scene badge). */
 .nav-link.nav-link-new {
   background: linear-gradient(135deg, rgba(168, 85, 247, 0.16), rgba(59, 130, 246, 0.16));
@@ -514,7 +514,7 @@ html {
   background: rgba(255, 255, 255, 0.92);
 }
 
-/* Plan 057: SmartCity card gets the "featured" violet gradient
+/* SmartCity card gets the "featured" violet gradient
    to distinguish it from the regular modules. The hover effect
    is amplified (slightly more lift, more glow). */
 .module-card.module-card-featured {
@@ -596,7 +596,7 @@ html {
   background: rgba(148, 163, 184, 0.2);
   color: rgba(15, 23, 42, 0.55);
 }
-/* Plan 057: badge for the brand-new SmartCity card. Violet gradient
+/* Badge for the brand-new SmartCity card. Violet gradient
    matches the featured-card border to signal "new + featured". */
 .badge-new {
   background: linear-gradient(135deg, rgba(168, 85, 247, 0.22), rgba(59, 130, 246, 0.22));

@@ -1,6 +1,6 @@
-"""Plan 041 + 046: OSM parser HTTP endpoints (XML + PBF).
+"""OSM parser HTTP endpoints (XML + PBF).
 
-M3 follow-up: both parse endpoints accept an optional bbox
+Both parse endpoints accept an optional bbox
 (south, west, north, east) so a user can load only the area they intend to
 simulate. The parser capability already existed (`osm_parser.parse_osm_xml`
 / `parse_osmpbf` take a `bbox`); this module only wires it through.
@@ -104,8 +104,8 @@ async def parse_pbf(
     """Parse an uploaded .osm.pbf file into a RoadNetwork dict.
 
     Same return shape as /maps/parse-osm. Uses libosmium (osmium Python
-    bindings) to stream the binary PBF. Real-world city files (Shenzhen
-    ~20MB, Guangdong ~200MB) use this format.
+    bindings) to stream the binary PBF. Real-world city files (city-scale
+    ~20MB, province-scale ~200MB) use this format.
 
     Takes the same optional bbox query params as /maps/parse-osm.
     """
@@ -122,10 +122,10 @@ async def parse_pbf(
 
 @router.get("/maps/overpass", tags=["maps"])
 async def overpass(query: str = Query(..., min_length=10)) -> dict[str, Any]:
-    """Plan 056: cached Overpass proxy.
+    """Cached Overpass proxy.
 
-    The smart-city view (Plan 055) used to call Overpass directly,
-    which fails in China (overpass-api.de is blocked) and re-fetches
+    The smart-city view used to call Overpass directly,
+    which is unreachable from some networks (overpass-api.de is blocked) and re-fetches
     on every page load. This endpoint forwards the query to Overpass
     once, caches the response to `geojson/cache/<hash>.json`, and
     serves subsequent identical queries from disk.
@@ -147,5 +147,5 @@ async def overpass(query: str = Query(..., min_length=10)) -> dict[str, Any]:
 
 @router.get("/maps/overpass/cache", tags=["maps"])
 async def overpass_cache_list() -> dict[str, Any]:
-    """Plan 056: list cached Overpass queries (debug UI)."""
+    """List cached Overpass queries (debug UI)."""
     return {"cached": list_cached_queries()}

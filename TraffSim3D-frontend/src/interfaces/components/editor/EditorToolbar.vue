@@ -44,9 +44,7 @@
     <span class="sep" />
 
     <button title="添加车辆" @click="onAddVehicle">+ 车辆</button>
-    <button title="一键生成 50 辆车演示 Rapier 碰撞 (M2)" @click="onSpawnMany(50)">
-      🚗 +50 车辆
-    </button>
+    <button title="一键生成 50 辆车演示 Rapier 碰撞" @click="onSpawnMany(50)">🚗 +50 车辆</button>
     <button title="添加信号灯" @click="world.addTrafficLight()">+ 信号灯</button>
     <button title="强制所有信号灯全红 (3s)" @click="world.forceAllRed()">🚨 全红</button>
     <button title="重置场景 (R)" data-testid="reset-button" @click="world.reset()">重置</button>
@@ -61,9 +59,9 @@
       </select>
     </label>
 
-    <label class="ctrl-kind scene-kind" title="演示场景 (M2 道路几何)">
+    <label class="ctrl-kind scene-kind" title="演示场景 (道路几何)">
       <span class="ctrl-kind-label">场景</span>
-      <!-- Plan 054: for imported OSM/PBF scenes, show a read-only
+      <!-- For imported OSM/PBF scenes, show a read-only
            label with the file name instead of the dropdown. The
            user can still switch to a built-in scene to abandon
            the import via the dropdown menu of the next built-in
@@ -102,7 +100,7 @@
     <button title="重做 (Ctrl+Shift+Z)" :disabled="!world.canRedo()" @click="world.redo()">
       ↷ 重做
     </button>
-    <!-- Plan 053: manual camera-fit. Useful after the user has
+    <!-- Manual camera-fit. Useful after the user has
          panned / orbited far from the network and wants to recover,
          or after importing a new OSM region that auto-fit missed. -->
     <button title="重新框选整个场景 (F)" data-testid="fit-scene-button" @click="onFitScene">
@@ -194,12 +192,12 @@ onMounted(() => window.addEventListener('traffsim3d:toggle-shortcuts', onToggleS
 onBeforeUnmount(() => window.removeEventListener('traffsim3d:toggle-shortcuts', onToggleShortcuts))
 
 const onAddVehicle = (): void => {
-  // `addVehicle` returns `{ ok, ... }` in M1.5; we don't need the
+  // `addVehicle` returns `{ ok, ... }`; we don't need the
   // result here because failures surface via the flash channel.
   world.addVehicle()
 }
 
-/** Plan 031: 一键生成 N 辆车演示 Rapier 碰撞. */
+/** 一键生成 N 辆车演示 Rapier 碰撞. */
 const onSpawnMany = (count: number): void => {
   const ok = world.spawnMany(count)
   if (ok === 0) {
@@ -222,7 +220,7 @@ const onSceneKindChange = (e: Event): void => {
   showFlashMessage(`已切换场景: ${sceneLabel(v)}`, 'info')
 }
 
-/** Plan 053: manual re-fit trigger. Bumps `worldStore.fitRequestTick`,
+/** Manual re-fit trigger. Bumps `worldStore.fitRequestTick`,
  *  which `WorldCanvas` watches and forwards to `requestFitToNetwork`.
  *  Useful when the user has panned/orbited far from the network
  *  (e.g. after dragging to inspect a corner) and wants to recover. */
@@ -243,7 +241,7 @@ const sceneLabel = (k: SceneKind): string => {
     case 'corridor':
       return '多路口走廊'
   }
-  return k // fallback for imported scenes (Plan 054)
+  return k // fallback for imported scenes
 }
 
 const onLidarToggle = (e: Event): void => {
@@ -507,7 +505,7 @@ button.danger:hover {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* Plan 054: read-only label shown in the toolbar when an OSM/PBF
+/* Read-only label shown in the toolbar when an OSM/PBF
    scene is loaded (replaces the scene-kind dropdown). */
 .scene-label-imported {
   display: inline-block;

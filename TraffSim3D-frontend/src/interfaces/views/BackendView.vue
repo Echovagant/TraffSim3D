@@ -107,7 +107,7 @@ const discoverEndpoints = async (): Promise<void> => {
           id: 'ping',
           method: 'GET',
           path: '/api/v1/ping',
-          description: 'M1 端到端 smoke 测试 — 经过 Vite proxy 与 FastAPI 全链路。',
+          description: '端到端 smoke 测试 — 经过 Vite proxy 与 FastAPI 全链路。',
         },
       ]
       return
@@ -150,7 +150,7 @@ const discoverEndpoints = async (): Promise<void> => {
         id: 'ping',
         method: 'GET',
         path: '/api/v1/ping',
-        description: 'M1 端到端 smoke 测试 — 经过 Vite proxy 与 FastAPI 全链路。',
+        description: '端到端 smoke 测试 — 经过 Vite proxy 与 FastAPI 全链路。',
       },
     ]
   }

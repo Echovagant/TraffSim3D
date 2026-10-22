@@ -1,11 +1,11 @@
 // src/application/services/signalController.ts
 //
-// M2-B (plan 010): per-light signal controller. One instance per
+// Per-light signal controller. One instance per
 // traffic light, owned by worldStore. Per-tick, the application
 // tick calls `controller.decide(light, network, simTime)` and
 // applies the returned decision to the light entity.
 //
-// See ADR-004 for the contract.
+// See the signal-controller contract for the full details.
 
 import type { TrafficLight } from '@domain/entities/TrafficLight'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
@@ -74,7 +74,7 @@ export const createSequenceActionSource = (
 export interface SignalController {
   decide(light: TrafficLight, network: RoadNetwork, simTime: number): SignalDecision
   /** Synchronous: mutate internal pending-action queue.
-   *  Next decide() consumes. See 007 §2 semantics. */
+   *  Next decide() consumes. */
   applyAction(light: TrafficLight, action: SignalActionName): void
 }
 
@@ -84,7 +84,7 @@ export type ControllerKind = 'fixed-cycle' | 'actuated' | 'coordinated' | 'rl'
  * Queue length on `light.controlledLane` (or "any lane on this
  * axis" if undefined) of `light.axis` direction.
  *
- * Per 007 §3.1 R2 mitigation: crashed cars are excluded;
+ * Crashed cars are excluded;
  * cars inside the intersection box are excluded; cars past the
  * stop line are excluded. Only "queued" cars (in lane, in
  * stop-line approach, not crashed, not in box) count.
@@ -132,7 +132,7 @@ export const getAxisQueueLength = (light: TrafficLight, network: RoadNetwork): n
 
 /**
  * Factory: returns a SignalController instance for the requested kind.
- * `coordinated` was added in plan 028 (M2-B green-wave); its deps
+ * `coordinated` was added for the green-wave; its deps
  * (offset map + enabled flag) are passed by worldStore so the
  * controller stays a pure decision function.
  */
@@ -140,10 +140,10 @@ export interface CreateSignalControllerDeps {
   getCoordinatedOffsets: () => ReadonlyMap<string, number>
   isCoordinatedEnabled: () => boolean
   /**
-   * The RL controller's action source (Plan 073 Sprint 2).
+   * The RL controller's action source.
    *
    * Optional: with no source the controller still accepts actions through
-   * `applyAction` (the injected-sequence path). Sprint 3 passes the
+   * `applyAction` (the injected-sequence path). A later change passes the
    * trained policy's source here — a one-line swap, because the source is
    * the only thing that decides *where* the actions come from.
    */

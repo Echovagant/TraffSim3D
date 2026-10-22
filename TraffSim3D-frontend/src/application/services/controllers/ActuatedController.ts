@@ -1,8 +1,8 @@
-// M2-B default: green extends if queue > 0, red shortens if opposite axis empty.
+// Default: green extends if queue > 0, red shortens if opposite axis empty.
 // Per 007 §3.B: 5s extension per check, max 60s green, min 10s red,
 // 3s yellow clear (not shortenable).
 //
-// Note: when both axes have continuous traffic (M1 default scene), the
+// Note: when both axes have continuous traffic (the default scene), the
 // red shortening rarely fires — the queue stays > 0. This is
 // intentional: 007 §3.B says "shorten red when opposite queue = 0",
 // and the default scene always has cars. Operators wanting the
@@ -74,6 +74,6 @@ export class ActuatedController implements SignalController {
     }
   }
   applyAction(_light: TrafficLight, _action: SignalAction['name']): void {
-    // No external action queue yet — RLController (M4) implements it.
+    // No external action queue yet — RLController implements it.
   }
 }

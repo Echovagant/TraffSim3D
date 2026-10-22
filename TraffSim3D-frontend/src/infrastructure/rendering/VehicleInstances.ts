@@ -1,5 +1,5 @@
 /**
- * Plan 062: Instanced vehicle rendering.
+ * Instanced vehicle rendering.
  *
  * Replaces per-vehicle THREE.Group (6+ meshes each) with three
  * THREE.InstancedMesh objects (one per vehicle type). Draw calls

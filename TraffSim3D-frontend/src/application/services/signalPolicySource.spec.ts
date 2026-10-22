@@ -1,11 +1,11 @@
 // src/application/services/signalPolicySource.spec.ts
 //
-// Plan 074 (T6): the browser side of the traffic-signal agent.
+// The browser side of the traffic-signal agent.
 //
 // The suite has three parts:
 //
 // 1. the **observation mapping** — every one of the six indices must carry
-//    the *same meaning* as Python's `SignalEnv._obs()` (Plan 074 §2 D1);
+//    the *same meaning* as Python's `SignalEnv._obs()`;
 // 2. the **policy source** — the trained policy's argmax becomes the
 //    action name the controller consumes;
 // 3. **the gate** — the phase decisions come from the *policy*, not from
@@ -71,7 +71,7 @@ const buildSignalNetwork = (
  */
 const constantPolicy = constantSignalPolicy
 
-describe('buildSignalObservation (Plan 074 D1 — the observation mapping)', () => {
+describe('buildSignalObservation — the observation mapping', () => {
   it('has six dimensions', () => {
     const ns = makeLight()
     const net = buildSignalNetwork(

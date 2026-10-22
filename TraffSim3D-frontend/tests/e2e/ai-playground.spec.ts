@@ -1,5 +1,5 @@
 /**
- * Plan 044 / Plan 042 verification: AI Playground training dashboard.
+ * Verification: AI Playground training dashboard.
  *
  * Strategy: stub /api/v1/rl/status to return a fake training history
  * so the test is self-contained (no live backend / no PPO required).

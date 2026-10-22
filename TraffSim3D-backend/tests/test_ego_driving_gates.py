@@ -1,6 +1,6 @@
-"""Plan 076 T12: the ego's four gates — the regressions the four fixes pin.
+"""The ego's four gates — the regressions the four fixes pin.
 
-Plan 076 T12 changed four things in `app/apps/rl/sim_core.py`:
+Four things changed in `app/apps/rl/sim_core.py`:
 
 1. **steering authority** — `action[1]` became a *residual* on top of the
    scripted Pure Pursuit steer (the scripted controller is the baseline);
@@ -16,7 +16,7 @@ One test per fix, plus the steering-residual test (the fourth change is
 covered by the same file because it is the *semantics* of the action
 space the other three sit on).
 
-Every test here is written so that the **pre-T12** code fails it: the
+Every test here is written so that the **previous** code fails it: the
 old alive bonus paid a standing step, the old success condition was
 route-agnostic, and the old red-light rule disagreed with the traffic
 model on 26 of the 72 sampled headings.
@@ -44,7 +44,7 @@ SAMPLED_HEADINGS = [math.radians(deg) for deg in range(0, 360, 5)]
 
 
 def _old_heading_ns(heading: float) -> bool:
-    """The **pre-T12** red-light axis heuristic, kept to pin what it got wrong.
+    """The **previous** red-light axis heuristic, kept to pin what it got wrong.
 
     It read the axis off the heading as "within 0.5 rad of north"
     (61.35deg - 118.65deg), while the traffic model uses
@@ -80,7 +80,7 @@ def test_the_time_cost_makes_standing_still_a_loss() -> None:
     policy beat "constant full throttle" only because it drove slower,
     and still lost to the best constant throttle.
 
-    Plan 076 T12 turned the per-step term around: the passage of time is
+    The per-step term was turned around: the passage of time is
     now **charged** (`TIME_COST`), so a step that makes no progress is a
     pure loss, and an episode that does nothing scores **worse** than one
     that drives to the goal.
@@ -89,7 +89,7 @@ def test_the_time_cost_makes_standing_still_a_loss() -> None:
     standing.reset()
     for _ in range(20):
         _, reward, terminated, truncated, _ = standing.step(np.array([0.0, 0.0], dtype=np.float32))
-        # The pre-T12 code paid +0.05 here.
+        # The previous code paid +0.05 here.
         assert reward == pytest.approx(-TIME_COST), f"a standing step earned {reward}"
         assert not terminated and not truncated
 
@@ -135,7 +135,7 @@ def test_the_reward_is_progress_minus_a_time_cost() -> None:
 def test_driving_past_the_goal_cannot_be_farmed() -> None:
     """An off-road ego that drives past the goal earns less than a success.
 
-    Plan 076 T12: the success needs the ego to have stayed on the road, so
+    The success needs the ego to have stayed on the road, so
     an off-road ego is never terminated by it — and if the progress reward
     were unbounded it could drive past the goal and earn progress forever.
     The first training run found exactly that (episode returns of 283

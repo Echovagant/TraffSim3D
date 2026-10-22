@@ -32,7 +32,7 @@ const rendererRef = shallowRef<ThreeJSRenderer | null>(null)
 useCameraControls(canvasRef, rendererRef)
 const { handleMouseDown, handleMouseMove, handleMouseUp } = useEditor(rendererRef)
 
-// Plan 053: whenever the worldStore requests a fit (network loaded,
+// Whenever the worldStore requests a fit (network loaded,
 // scene switched, OSM imported, undo/redo, manual button), ask the
 // camera composable to frame the new network. The 200ms debounce
 // guards against rapid back-to-back network changes (e.g. reset
@@ -45,7 +45,7 @@ const requestFitForCurrent = (): void => {
     fitTimer = null
     const bounds = computeNetworkBounds(world.network)
     if (bounds.diagonal === 0) return // empty network, nothing to frame
-    // Plan 054: retune the renderer's camera far plane + fog so the
+    // Retune the renderer's camera far plane + fog so the
     // ground edge stays hidden when the user zooms out. Without
     // this, a 5km OSM district shows a visible 200m gray square
     // (the default ground size) until the ground is rebuilt — and
@@ -64,7 +64,7 @@ const requestFitForCurrent = (): void => {
 // Watch isReady to trigger the FIRST fit once the renderer + OrbitControls
 // are wired up. Without this, the camera sits at ThreeJSRenderer's
 // default (40, 35, 40) until the user manually clicks "适配场景"
-// (Plan 053 follow-up: Playwright caught this bug — initial distance
+// (Playwright caught this bug — initial distance
 // 66.5m = default camera position, not the bbox-derived fit distance).
 watch(isReady, (ready) => {
   if (ready) {

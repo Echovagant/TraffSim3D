@@ -12,7 +12,7 @@ describe('TrafficLightNode constants', () => {
   it('PHASE_COLOR[Dark] is near-black (0x1a1a1a)', () => {
     expect(PHASE_COLOR[LightPhase.Dark]).toBe(0x1a1a1a)
   })
-  it('Left family shares hue with base (M2-D will differentiate by shape)', () => {
+  it('Left family shares hue with base (shape differentiation is still a TODO)', () => {
     expect(PHASE_COLOR[LightPhase.GreenLeft]).toBe(PHASE_COLOR[LightPhase.Green])
     expect(PHASE_COLOR[LightPhase.YellowLeft]).toBe(PHASE_COLOR[LightPhase.Yellow])
     expect(PHASE_COLOR[LightPhase.RedLeft]).toBe(PHASE_COLOR[LightPhase.Red])

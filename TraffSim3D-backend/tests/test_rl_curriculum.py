@@ -718,7 +718,7 @@ def test_env_advances_against_the_real_sim_core() -> None:
             assert truncated is (i == 4)
         episode_totals.append(total)
 
-    # Plan 076 T12: the reward is PROGRESS_WEIGHT * progress - TIME_COST, so
+    # The reward is PROGRESS_WEIGHT * progress - TIME_COST, so
     # a step pays its progress (0.03, 0.06, 0.09, 0.12, 0.15 m) and is
     # charged 0.05 for the time it took:
     # -0.02+0.01+0.04+0.07+0.10 per truncated episode -> 0.20, which clears

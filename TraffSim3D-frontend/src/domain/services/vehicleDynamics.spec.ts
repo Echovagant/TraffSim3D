@@ -1,4 +1,4 @@
-// Plan 037: vehicle dynamics unit tests.
+// Vehicle dynamics unit tests.
 //
 // Covers all four exports:
 //   - smoothAccel: per-type accel ramp, snap-to-target convergence,

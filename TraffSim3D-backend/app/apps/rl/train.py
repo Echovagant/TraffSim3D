@@ -1,4 +1,4 @@
-"""Plan 044: training entry. Subprocess-driven for the API endpoint.
+"""Training entry. Subprocess-driven for the API endpoint.
 
 Default: dry-run path. Writes a synthetic reward history to status.json
 without invoking PPO — used by the e2e test and by users who want a UI
@@ -9,17 +9,17 @@ If PPO is available (stable-baselines3 + torch installed via
     python -m app.apps.rl.train 1000
 to do real training.
 
-GPU support (Plan 044 extension):
+GPU support:
 - `--device {auto,gpu,cpu}` picks the torch device.
 - `auto` selects GPU if CUDA available AND VRAM ≥ MIN_VRAM_GB (2.0),
   else CPU; falls back to dry_run if SB3 is missing entirely.
 - The resolved device is recorded in status.json `device` field.
 
-Multi-agent + checkpoints (Plan 045 extension):
+Multi-agent + checkpoints:
 - `--n-agents INT` (default 2): stack N TrafficEnvs in lockstep,
   share one PPO policy (parameter sharing).
 
-True independent multi-agent (Plan 047 extension):
+True independent multi-agent:
 - `--independent`: each agent trains with its own PPO policy
   (no parameter sharing). Per-agent checkpoints + per-agent reward
   history written to status.json under `agent_rewards: {0: [...], ...}`.
@@ -90,7 +90,7 @@ def dry_run(
 
     n_episodes = max(1, total_steps // 200)
     if independent:
-        # Plan 047: per-agent reward histories.
+        # Per-agent reward histories.
         agent_rewards: dict[str, list[float]] = {str(i): [] for i in range(n_agents)}
         for ep in range(n_episodes):
             for i in range(n_agents):
@@ -124,11 +124,11 @@ def dry_run(
         st.finalize_status("dry_run_completed")
 
 
-#: Plan 076 T14: the **light curriculum** for the signalled scene.
+#: The **light curriculum** for the signalled scene.
 #:
 #: (the red's length in seconds, the env steps spent on that stage).
 #:
-#: Why it exists (Plan 076 T13, measured): PPO cannot learn the compliant
+#: Why it exists (measured): PPO cannot learn the compliant
 #: behaviour in the shipped 12 s red on its own — the compliant branch is
 #: "brake while `obs[6] == 0`" for **120 consecutive steps**, which a
 #: Gaussian policy with a mean near zero almost never samples, so the
@@ -143,7 +143,7 @@ def dry_run(
 #: observation is memoryless, so the policy can only learn "brake while
 #: red, go while green" — which holds for any red length.
 #:
-#: The budgets are the **measured** ones (T13: two seeds, the same score
+#: The budgets are the **measured** ones (two seeds, the same score
 #: at the 8 s and the 12 s stages).
 LIGHT_CURRICULUM_STAGES = (
     (6.0, 60_000),
@@ -189,18 +189,18 @@ def real_train(
     """Real PPO training via stable-baselines3 on the resolved device.
 
     `independent=True`: each agent trains with its own PPO policy
-    (Plan 047 true multi-agent). Otherwise, one PPO on MultiTrafficEnv
-    (Plan 045 parameter sharing).
+    (true multi-agent). Otherwise, one PPO on MultiTrafficEnv
+    (parameter sharing).
 
-    `scene_kind='corridor'` (Plan 048): ego drives through 2
-    4-way intersections. Default 'cross' = 044 single-intersection.
+    `scene_kind='corridor'`: ego drives through 2
+    4-way intersections. Default 'cross' = the plain single-intersection scene.
 
     `seed` makes the run reproducible. SB3 draws its own seed from numpy
     when it is given none, so two runs of the same command differ; the
     signal trainer takes a seed for the same reason
     (`signal_train.train_signal_policy`).
 
-    `light_curriculum=True` (Plan 076 T14): walk the **signalled** scene's
+    `light_curriculum=True`: walk the **signalled** scene's
     red from short to long, so the policy learns the light-state condition
     ("brake while red, go while green") on a red short enough for the
     exploration to reach it, and then carries that condition over to the
@@ -269,7 +269,7 @@ def real_train(
         st.write_status(ss)
 
     if independent:
-        # Plan 047: each agent trains with its own PPO. Serial (MVP);
+        # Each agent trains with its own PPO. Serial (MVP);
         # GPU can run multiple models in parallel via SubprocVecEnv
         # but that's a follow-up.
         envs = [TrafficEnv(scene_kind=scene_kind) for _ in range(n_agents)]
@@ -310,7 +310,7 @@ def real_train(
         )
         return
 
-    # Shared policy (Plan 045)
+    # Shared policy
     env = MultiTrafficEnv(n_agents=n_agents)
     # MultiTrafficEnv stacks obs from each sub-env; scene_kind applies to all
     for sub_env in env.envs:
@@ -335,7 +335,7 @@ def real_train(
         return True
 
     if light_curriculum:
-        # Plan 076 T14: the light curriculum. Each stage shortens the
+        # The light curriculum. Each stage shortens the
         # signalled scene's red, learns on it, and the next stage puts the
         # red back towards the shipped length. The scene reads the cycle
         # at `reset()`, so a stage change takes effect at the next
@@ -451,34 +451,33 @@ def main() -> None:
         "--device",
         choices=["auto", "gpu", "cpu"],
         default="auto",
-        help="Training device (Plan 044 GPU extension). "
-        "'auto' picks GPU if available + ≥2GB VRAM, else CPU.",
+        help="Training device. 'auto' picks GPU if available + ≥2GB VRAM, else CPU.",
     )
     parser.add_argument(
         "--n-agents",
         type=int,
         default=2,
-        help="Number of parallel agents sharing the PPO policy (Plan 045).",
+        help="Number of parallel agents sharing the PPO policy.",
     )
     parser.add_argument(
         "--save-every",
         type=int,
         default=5000,
-        help="Save checkpoint every N env steps (Plan 045).",
+        help="Save checkpoint every N env steps.",
     )
     parser.add_argument(
         "--independent",
         action="store_true",
-        help="Train each agent with its own PPO policy (Plan 047 true multi-agent).",
+        help="Train each agent with its own PPO policy (true multi-agent).",
     )
     parser.add_argument(
         "--scene-kind",
         choices=["cross", "corridor", "t_junction", "roundabout", "cross_signalled"],
         default="cross",
         help=(
-            "Sim topology (Plan 048). 'corridor' = 2 4-way intersections + 60m "
+            "Sim topology. 'corridor' = 2 4-way intersections + 60m "
             "corridor. 't_junction' = 3-way T intersection. 'roundabout' = "
-            "circular intersection. 'cross_signalled' (Plan 076 T13) = the "
+            "circular intersection. 'cross_signalled' = the "
             "cross scene with the ego's own axis starting RED on a 12 s "
             "cycle - the scene in which a scripted baseline is provably not "
             "optimal."
@@ -488,7 +487,7 @@ def main() -> None:
         "--light-curriculum",
         action="store_true",
         help=(
-            "Plan 076 T14: walk the signalled scene's red from short to long "
+            "Walk the signalled scene's red from short to long "
             "while training, so the policy learns the light-state condition "
             "('brake while red, go while green') on a red the exploration can "
             "reach, and then carries it over to the shipped 12 s red. Only "

@@ -1,5 +1,5 @@
 /**
- * Plan 046: OSM PBF import e2e.
+ * OSM PBF import e2e.
  *
  * Stubs POST /api/v1/maps/parse-pbf to return a fake RoadNetwork,
  * uploads a .osm.pbf fixture, and verifies the scene-editor loads

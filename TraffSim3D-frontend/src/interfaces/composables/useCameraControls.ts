@@ -18,10 +18,10 @@ export const useCameraControls = (
   let controls: OrbitControls | null = null
   let focusRafId: number | null = null
 
-  /** Plan 053: dynamic zoom limits. Updated by `requestFitToNetwork`
+  /** Dynamic zoom limits. Updated by `requestFitToNetwork`
    *  so a 5km OSM district can be both framed AND zoomed into a
    *  single intersection without scrolling past hard caps.
-   *  Defaults match the M1 single-intersection case (5..200m). */
+   *  Defaults match the single-intersection case (5..200m). */
   let zoomMin = 5
   let zoomMax = 200
 
@@ -35,7 +35,7 @@ export const useCameraControls = (
       controls.minDistance = zoomMin
       controls.maxDistance = zoomMax
       controls.maxPolarAngle = Math.PI / 2 - 0.05 // keep camera above ground
-      // Plan 054b: right-click pan disabled. Three.js OrbitControls
+      // Right-click pan is disabled. Three.js OrbitControls
       // defaults to RIGHT=pan, which is hostile in a 3D traffic sim:
       //   1. It hijacks the browser's right-click context menu, so the user
       //      cannot right-click an entity to inspect it.
@@ -47,19 +47,19 @@ export const useCameraControls = (
       // HISTORY: commit 95eaf79 introduced this (RIGHT: null) together with the
       // Playwright test `right-click drag does NOT pan` — that commit reported
       // "Frontend e2e: 28/28", i.e. the assertion was green. Commit 1c7ffb0
-      // ("M2 risk remediation — signal conflict resolution + lateral drift +
+      // ("risk remediation — signal conflict resolution + lateral drift +
       // renderer registry") silently flipped it back to MOUSE.PAN, replacing the
-      // rationale comment with a contradictory "Plan 053: right-click is pan by
+      // rationale comment with a contradictory "right-click is pan by
       // default". That commit's stated scope does not mention the camera, so the
       // flip reads as an incidental revert rather than a re-deliberation.
-      // Restored 2026-10-17; see ADR-008.
+      // Restored 2026-10-17.
       controls.mouseButtons = {
         LEFT: THREE.MOUSE.ROTATE,
         MIDDLE: THREE.MOUSE.DOLLY,
         RIGHT: null,
       } as unknown as typeof controls.mouseButtons
       renderer.attachControls(controls)
-      // Plan 053 follow-up: expose camera state for Playwright tests.
+      // Expose camera state for Playwright tests.
       // Same DEV-only pattern as window.__world — Vite tree-shakes
       // this out of production bundles.
       if (import.meta.env.DEV && typeof window !== 'undefined') {
@@ -100,7 +100,7 @@ export const useCameraControls = (
     animateCameraTo(controls!, t)
   })
 
-  // Plan 053: fit-to-network. Picks a camera position+target that
+  // Fit-to-network. Picks a camera position+target that
   // frames the entire network bbox. Also widens OrbitControls'
   // minDistance/maxDistance so the user can zoom out to see the
   // whole district-level OSM import (the previous hard cap of 200m
@@ -188,7 +188,7 @@ export const useCameraControls = (
 
     const startTarget = c.target.clone()
     const startCam = (c.object as THREE.PerspectiveCamera).position.clone()
-    // Plan 054: shorter animation (400ms) so the camera is "in place"
+    // Shorter animation (400ms) so the camera is "in place"
     // before the user can scroll — feels more responsive. Damping
     // is temporarily disabled in startRaf() to prevent the
     // spherical-cartesian fight that produced the flicker the user
@@ -200,7 +200,7 @@ export const useCameraControls = (
    *  Cancels any in-flight animation (focus + fit share this RAF id
    *  since they're mutually exclusive user intents).
    *
-   *  Plan 054: temporarily disable OrbitControls damping during the
+   *  Temporarily disable OrbitControls damping during the
    *  animation. Without this, the damped spherical coordinates fight
    *  with the position lerp — the user sees a "stuttering" or
    *  "flickering" effect as the two update loops try to reconcile.

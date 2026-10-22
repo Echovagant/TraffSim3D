@@ -1,13 +1,13 @@
-"""Plan 076 T13: the signalled scene — the contract gates that make it real.
+"""The signalled scene — the contract gates that make it real.
 
-Plan 076 T12's finding was that the ego **never faces a red light** in the
+The finding was that the ego **never faces a red light** in the
 four training scenes: the light's phase clock advances every step, but the
 30 s cycle puts the first phase change on step 300 — beyond every ego
 episode. A scripted controller therefore never pays the -5 red-light
 penalty, and "the AI beats the scripted baseline" was **unreachable**
 (the baseline sits exactly on the physical step lower bound).
 
-T13 adds the scene that gives the ego a decision: `cross_signalled`, whose
+The signalled scene gives the ego a decision: `cross_signalled`, whose
 own axis starts **red** and turns green on step 121, inside the episode.
 Two contract vectors cover it:
 
@@ -114,7 +114,7 @@ def test_the_scene_starts_on_the_red() -> None:
 def test_the_phase_change_lands_inside_the_episode() -> None:
     """The phase change must land inside the episode, not beyond it.
 
-    This is the difference T13 exists for: the default 30 s cycle swaps
+    This is what the signalled scene exists for: the default 30 s cycle swaps
     on step 300, which no ego episode ever reaches.
     """
     core = SimCore(scene_kind="cross_signalled", max_steps=300)
@@ -254,7 +254,7 @@ def test_the_two_sides_agree_on_the_red_light_run() -> None:
 def test_the_crossing_vector_drives_past_the_intersection() -> None:
     """The vector has to exercise the part of the route the target drives.
 
-    Plan 076 T14: the signalled scene's Pure Pursuit target is the **goal
+    The signalled scene's Pure Pursuit target is the **goal
     line**, not the intersection centre (a point the ego passes on the way
     - after which the scripted pursuit pulls the ego back and its heading
     drops). The other two vectors stop before that point, so only this one

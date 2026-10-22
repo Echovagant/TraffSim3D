@@ -1,7 +1,7 @@
 /**
  * Pure Pursuit path-following algorithm.
  *
- * Plan 037c: enables vehicles to steer smoothly along curve roads
+ * Enables vehicles to steer smoothly along curve roads
  * (T-junctions, rectangular loops, ramps). Pure Pursuit computes a
  * steering angle from:
  *   - the vehicle's current pose (x, z, heading)

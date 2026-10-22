@@ -1,4 +1,4 @@
-/** Target frame budget for M1. Anything below this fails the perf gate. */
+/** Target frame budget. Anything below this fails the perf gate. */
 export const M1_MIN_FPS = 30
 /** Default render scale (device pixel ratio cap). */
 export const MAX_DPR = 2
@@ -6,7 +6,7 @@ export const MAX_DPR = 2
 export const DEFAULT_CYCLE_SECONDS = 63
 
 /**
- * Plan B — visual constants shared between the scene builder and the
+ * Visual constants shared between the scene builder and the
  * domain tick step. Keeping them here means RoadMesh, RoadMarkings, the
  * traffic-light phase bar, and the trail length all agree without
  * each importing from the other.
@@ -27,17 +27,17 @@ export const PHASE_DURATIONS = {
   red: DEFAULT_CYCLE_SECONDS - 33, // 30s for the default 63s cycle
 } as const
 
-// ===== M1.5 — basic traffic physics (no Rapier) =====
+// ===== basic traffic physics (no Rapier) =====
 //
-// All of these are intentionally simple hand-rolled kinematics; M2
-// replaces this block with Rapier-driven simulation. Keeping the knobs
+// All of these are intentionally simple hand-rolled kinematics; the
+// Rapier-driven simulation replaces this block. Keeping the knobs
 // in one place makes the swap-out mechanical: tick.ts reads from here,
 // nothing else does.
 
 /** Maximum forward acceleration in m/s² (≈ 0–100 km/h in 8s, gentle). */
 export const MAX_ACCEL = 3.5
 
-// ===== Plan 037: vehicle dynamics hierarchy =====
+// ===== vehicle dynamics hierarchy =====
 //
 // Three-tier accel / decel model: `comfy` is what the controller aims
 // for under normal conditions; `limit` is the hard cap before
@@ -45,7 +45,7 @@ export const MAX_ACCEL = 3.5
 // ceiling used only when the controller needs to stop NOW (e.g. on
 // contact). All tiers are per-type scaled in VEHICLE_DYN below.
 //
-// Pre-037 had a single MAX_ACCEL=3.5 and MAX_DECEL=10 used for every
+// There was originally a single MAX_ACCEL=3.5 and MAX_DECEL=10 used for every
 // vehicle regardless of intent, which produced the "instant stop"
 // behaviour the user reported in bug 1.
 
@@ -60,9 +60,9 @@ export const MAX_DECEL_LIMIT = 6.0
 /** Panic brake (e.g. contact response); only used by the safety layer. */
 export const HARD_STOP_DECEL = 10.0
 
-// ===== Plan 037: state-machine hysteresis =====
+// ===== state-machine hysteresis =====
 //
-// Pre-037 used a single 0.5 m/s threshold for `waiting ↔ driving`,
+// Originally a single 0.5 m/s threshold was used for `waiting ↔ driving`,
 // which produced the flicker at startup (speed ∈ [0, 0.5) flipped
 // status back to waiting even after the controller had commanded
 // throttle). Now the entry and exit thresholds are separated, so a
@@ -74,14 +74,14 @@ export const DRIVING_SPEED_THRESHOLD = 1.0
 /** Speed (m/s) below which a vehicle drops back to `waiting`. */
 export const WAITING_SPEED_THRESHOLD = 0.3
 
-// ===== Plan 037: spawn-point release =====
+// ===== spawn-point release =====
 //
 // Distance past the spawn arc-length at which a spawn point is
 // considered "released" — the next spawn is free to reuse it.
 export const SPAWN_POINT_RELEASE_DISTANCE = 20
 
 /**
- * Plan 037: per-type dynamics parameters. Cars are baseline; trucks
+ * Per-type dynamics parameters. Cars are baseline; trucks
  * and buses have lower accel ceilings and lower decel ceilings
  * because they're heavier (the per-type mass in VEHICLE_BODY_SPEC
  * already makes Rapier collision response heavier, but the
@@ -95,7 +95,7 @@ export const VEHICLE_DYN: Record<'car' | 'truck' | 'bus', { accel: number; decel
 }
 
 /**
- * Plan 037c: per-type Pure Pursuit parameters.
+ * Per-type Pure Pursuit parameters.
  * `wheelbase` affects the turning radius (larger = wider turns).
  * `lookahead` affects responsiveness (larger = smoother but slower).
  *
@@ -111,13 +111,13 @@ export const VEHICLE_PURE_PURSUIT: Record<
 }
 
 /**
- * Plan 037: crash impulse threshold (N·s). Below this, a contact is
+ * Crash impulse threshold (N·s). Below this, a contact is
  * considered a tap (e.g. cars nudging in stop-and-go traffic) and
  * the involved vehicles stay `driving`. Above, both vehicles flip
  * to `crashed`.
  *
  * NOTE: Rapier's `ContactForceEvent` reading is deferred to a follow-up
- * plan — currently `ContactEvent.impulse` is always 0, so this
+ * work — currently `ContactEvent.impulse` is always 0, so this
  * threshold is set to 0 to keep the previous "any contact = crash"
  * behaviour. When Rapier contact-force wiring lands, raising this to
  * e.g. 50 N·s becomes a real filter.
@@ -147,18 +147,18 @@ export const STOP_LINE_DISTANCE = 5.0
  */
 export const STOP_LINE_BUFFER = 4.0
 
-// ===== M2-A — Rapier body specs =====
+// ===== Rapier body specs =====
 //
 // Per-type body spec for Rapier rigid bodies. Length/width are in
 // world units (metres). Mass is in kg. Inertia is derived from
 // RapierBodySpec.ts (cube inertia tensor) at register-time.
 //
-// Note: M1 used a hand-tuned COLLISION_RADIUS (car=2.6, truck=3.6,
+// Note: the hand-rolled path used a hand-tuned COLLISION_RADIUS (car=2.6, truck=3.6,
 // bus=5.0) for its distance check. The Rapier collider uses the
 // actual body dimensions (length/width), which give a more faithful
-// footprint. M1's NUDGE_SPEED / NUDGE_REVERSE / NUDGE_REVERSE_SPEED
-// are deleted with applyIntersectionNudge (M2-A doesn't need a
-// reverse-nudge step — Rapier collision response handles it).
+// footprint. The NUDGE_SPEED / NUDGE_REVERSE / NUDGE_REVERSE_SPEED
+// constants are deleted with applyIntersectionNudge (the Rapier path
+// doesn't need a reverse-nudge step — Rapier collision response handles it).
 
 export const VEHICLE_BODY_SPEC: Record<
   'car' | 'truck' | 'bus',
@@ -169,10 +169,10 @@ export const VEHICLE_BODY_SPEC: Record<
   bus: { length: 9.0, width: 2.5, mass: 8000 },
 }
 
-// ===== M2-B — signal controller constants =====
+// ===== signal controller constants =====
 //
-// Defaults match M1's hard-coded cycle (30/3/30) so the M1 perf
-// gate is reproducible when controllerKind='fixed-cycle'.
+// Defaults match the hand-rolled cycle (30/3/30) so the
+// frame-rate gate is reproducible when controllerKind='fixed-cycle'.
 
 /** Max green duration for ActuatedController (s). After this the
  *  light MUST cycle to yellow even with queue. */
@@ -186,7 +186,7 @@ export const MIN_RED_SECS = 10
  * Min green duration (s). Below this the light won't turn yellow — a
  * green must last long enough for a driver to react to it.
  *
- * Plan 074 T7: the symmetric counterpart of `MIN_RED_SECS` — "a red is
+ * The symmetric counterpart of `MIN_RED_SECS` — "a red is
  * never shorter than `MIN_RED_SECS`, a green is never shorter than
  * `MIN_GREEN_SECS`". It exists because a controller that shortens the
  * phase on every decision would otherwise *flicker* the light (0.6 s per
@@ -231,11 +231,11 @@ export const MIN_INTER_GREEN_SECS = YELLOW_CLEAR_SECS + CONFLICT_ALL_RED_SECS
 /** Default controller kind at app startup. */
 export const DEFAULT_CONTROLLER_KIND = 'actuated' as const
 
-// ===== Plan 073 Sprint 2 — the shared signal-action vocabulary =====
+// ===== the shared signal-action vocabulary =====
 //
 // The five action names are the **externally-actionable control surface**
-// of the traffic signal, defined in plans/legacy/007-m2-signal-controller.md
-// §2. The frontend's `RLController` consumes them and the Python training
+// of the traffic signal.
+// The frontend's `RLController` consumes them and the Python training
 // sim (`app/apps/rl/sim_core.py`) accepts the same names, so a policy
 // trained in Python can drive the browser's signal.
 //
@@ -274,35 +274,35 @@ export const ALL_RED_SECS = 3
  */
 export const PHASE_ADJUST_SECS = 5
 
-// ===== M2-C — sensor + export constants =====
+// ===== sensor + export constants =====
 //
-// 16-line default per 008 §1.1. 32/64 deferred to M2-D.
+// 16-line default. 32/64 deferred.
 
-/** Per-type LiDAR mount height (m). 008 §1.2. */
+/** Per-type LiDAR mount height (m). */
 export const LIDAR_MOUNT_HEIGHT: Record<'car' | 'truck' | 'bus', number> = {
   car: 1.5,
   truck: 2.2,
   bus: 2.6,
 }
-/** Plan 033: Horizontal rays. 360 → 90 (4× fewer rays per scan;
- *  per 032 §Issue 1 mitigation C). 90° 前向扇形 符合主流车载 LiDAR
- *  (Waymo / Mobileye). 32/64-line + 360° 升级到 M5+. */
+/** Horizontal rays. 360 → 90 (4× fewer rays per scan;
+ *  mitigation C). 90° 前向扇形 符合主流车载 LiDAR
+ *  (Waymo / Mobileye). 32/64-line + 360° 升级留待后续. */
 export const LIDAR_HORIZONTAL_RAYS = 90
-/** Vertical rays. M2-C default = 16 (008 §1.1). */
+/** Vertical rays. Default = 16. */
 export const LIDAR_VERTICAL_RAYS = 16
 /** Max range (m). */
 export const LIDAR_MAX_RANGE = 100
-/** Gaussian noise stddev (m). 008 §2 R2. */
+/** Gaussian noise stddev (m). */
 export const LIDAR_NOISE_STDDEV = 0.02
-/** Plan 033: scan interval in seconds. Default 0.1 = 10Hz throttle.
+/** Scan interval in seconds. Default 0.1 = 10Hz throttle.
  *  Combined with LIDAR_HORIZONTAL_RAYS=90 and LIDAR_MAX_ACTIVE_SENSORS=10,
  *  total sensor cost drops from ~205ms/tick to ~5ms/tick. */
 export const LIDAR_SCAN_INTERVAL_S = 0.1
-/** Plan 033: max sensors that actually scan per tick. 45 vehicles
+/** Max sensors that actually scan per tick. 45 vehicles
  *  registered, but only the first 10 (sorted by vehicleId) scan. Others
  *  keep their last frame. */
 export const LIDAR_MAX_ACTIVE_SENSORS = 10
-/** Plan 033: horizontal field of view in degrees. Default 90 (前向扇形).
+/** Horizontal field of view in degrees. Default 90 (前向扇形).
  *  Future 360 全向升级. */
 export const LIDAR_AZIMUTH_DEG = 90
 
@@ -311,7 +311,7 @@ export const TRAJECTORY_SAMPLE_INTERVAL = 0.1
 /** Trajectory buffer cap (rows). 100k ≈ 30min @ 30车 × 10Hz. */
 export const TRAJECTORY_BUFFER_CAP = 100_000
 
-// ===== M2-D — camera sensor constants =====
+// ===== camera sensor constants =====
 /** Default offscreen camera resolution. Lower than viewport to
  *  keep the per-frame GPU→CPU pixel-read cost manageable. */
 export const CAMERA_DEFAULT_WIDTH = 256
@@ -322,7 +322,7 @@ export const CAMERA_DEFAULT_FOV = 60
 export const CAMERA_SAMPLE_INTERVAL = 0.2
 
 /**
- * Plan 034: 车辆位置距其 (road, lane, s) 几何 > 此值 → respawn.
+ * 车辆位置距其 (road, lane, s) 几何 > 此值 → respawn.
  * 默认 50m. 道路长 60u, 50 远大于任何合法偏离 (lane change ~3.5m).
  * tick.ts 的 OOB branch 用这个常量决定是否 respawn.
  */
@@ -342,7 +342,7 @@ export const OUT_OF_BOUNDS_M = 50
 export const LATERAL_DRIFT_THRESHOLD_M = 15
 
 /**
- * Plan 071: constants mirrored from the Python RL sim
+ * Constants mirrored from the Python RL sim
  * (`TraffSim3D-backend/app/apps/rl/sim_core.py`).
  *
  * These are the **contract constants** — the cross-language contract
@@ -391,7 +391,7 @@ export const PYTHON_SIM = {
   /**
    * Python: `ROAD_HALF_WIDTH = 3.5` (m) — the road's half-width.
    *
-   * Plan 076 T12. The scenes carry no lane model; they place their NPCs at a
+   * The scenes carry no lane model; they place their NPCs at a
    * **3.5 m lateral offset** from the road's centreline, so 3.5 m is the
    * half-width the scene itself implies. An ego that leaves it may not score
    * the success any more (the rule is latched for the whole episode).
@@ -404,7 +404,7 @@ export const PYTHON_SIM = {
    * Python: `SCENE_GOAL_Z` — the **goal line** of each scene (the z the ego
    * has to pass to score the success).
    *
-   * Plan 076 T12: the success condition and the progress reward both read
+   * The success condition and the progress reward both read
    * this number, so "the goal line" is one thing and not two. The contract
    * compares the two sides' copies item by item.
    */
@@ -414,7 +414,7 @@ export const PYTHON_SIM = {
     t_junction: -3.0,
     roundabout: 5.0,
     /**
-     * Python: `SCENE_GOAL_Z["cross_signalled"]` — Plan 076 T13.
+     * Python: `SCENE_GOAL_Z["cross_signalled"]`.
      *
      * The signalled scene's goal line is the `cross` scene's: the two
      * scenes differ in the **light schedule**, not in the route.
@@ -425,7 +425,7 @@ export const PYTHON_SIM = {
    * Python: `sim_core.CROSS_SIGNALLED_CYCLE_SECONDS` — the light cycle of
    * the `cross_signalled` scene (s per phase).
    *
-   * Plan 076 T13. The other four scenes run the default 30 s cycle, whose
+   * The other four scenes run the default 30 s cycle, whose
    * first phase change lands on step 300 — beyond every ego episode, which
    * is why the ego never faces a red light in them. The signalled scene
    * starts the ego's axis **red** and turns it green at step 121 (12 s),
@@ -438,7 +438,7 @@ export const PYTHON_SIM = {
 } as const
 
 /**
- * Plan 049 back-compat alias: the Python sim speed limit (60 km/h, m/s) that
+ * Back-compat alias: the Python sim speed limit (60 km/h, m/s) that
  * `tick.ts` uses to normalise obs[3] (ego speed). The Python RL sim
  * (`app/apps/rl/sim_core.py`) normalizes obs[3] by this value, and the TS
  * replay must use the SAME denominator or PPO sees "smaller than trained"
@@ -446,6 +446,6 @@ export const PYTHON_SIM = {
  * the TS Rapier / hand-rolled cap.
  *
  * Alias of `PYTHON_SIM.SPEED_LIMIT` — the contract constants have a single
- * source of truth; this name only exists for the pre-Plan-071 importers.
+ * source of truth; this name only exists for the pre-contract importers.
  */
 export const PYTHON_SIM_SPEED_LIMIT = PYTHON_SIM.SPEED_LIMIT

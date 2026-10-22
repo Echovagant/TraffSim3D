@@ -1,4 +1,4 @@
-"""Plan 044: API endpoint tests for /api/v1/rl/*.
+"""API endpoint tests for /api/v1/rl/*.
 
 Uses httpx2 + ASGITransport (in-process, no subprocess overhead).
 `status.get_status_path()` is bound at module-import time, so we
@@ -112,7 +112,7 @@ async def test_train_accepts_n_agents_and_save_every(client: AsyncClient) -> Non
 
 @pytest.mark.asyncio
 async def test_train_independent_writes_agent_rewards(client: AsyncClient) -> None:
-    """Plan 047: independent dry-run produces per-agent reward dict."""
+    """Independent dry-run produces per-agent reward dict."""
     r = await client.post(
         "/api/v1/rl/train",
         json={
@@ -142,9 +142,9 @@ async def test_train_independent_writes_agent_rewards(client: AsyncClient) -> No
 
 @pytest.mark.asyncio
 async def test_scenes_endpoint_returns_list(client: AsyncClient) -> None:
-    """Plan 048/076: GET /api/v1/rl/scenes returns the supported scene kinds.
+    """GET /api/v1/rl/scenes returns the supported scene kinds.
 
-    Plan 076 T13 added `cross_signalled` — the scene whose ego axis starts
+    `cross_signalled` was added later — the scene whose ego axis starts
     red, i.e. the one in which a scripted baseline is provably not optimal.
     """
     r = await client.get("/api/v1/rl/scenes")
@@ -156,7 +156,7 @@ async def test_scenes_endpoint_returns_list(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_train_accepts_scene_kind_corridor(client: AsyncClient) -> None:
-    """Plan 048: dry-run with scene_kind='corridor' persists the field."""
+    """Dry-run with scene_kind='corridor' persists the field."""
     r = await client.post(
         "/api/v1/rl/train",
         json={"steps": 200, "dry_run": True, "scene_kind": "corridor"},
@@ -174,7 +174,7 @@ async def test_weights_endpoint_404_for_missing_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    """Plan 049: GET /weights with a name not in the list returns 404."""
+    """GET /weights with a name not in the list returns 404."""
     from app.apps.rl import checkpoint as ckpt
 
     monkeypatch.setattr(ckpt, "_DEFAULT_DIR", tmp_path / "nonexistent")
@@ -189,7 +189,7 @@ async def test_weights_endpoint_returns_json_for_existing_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    """Plan 049: GET /weights for a real SB3 .zip returns architecture + layers."""
+    """GET /weights for a real SB3 .zip returns architecture + layers."""
     # Save a tiny PPO model directly to tmp and point the checkpoint
     # module at it. We use a fresh model (not the full train pipeline)
     # because that takes seconds; the weights layout is identical.
@@ -235,7 +235,7 @@ async def test_weights_endpoint_503_when_sb3_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    """Plan 049: when SB3 is uninstalled, GET /weights returns 503."""
+    """When SB3 is uninstalled, GET /weights returns 503."""
     from app.apps.rl import checkpoint as ckpt
 
     # Drop a stub .zip in the checkpoint dir (no SB3 needed for the list),
@@ -290,7 +290,7 @@ async def test_weights_endpoint_404_when_the_file_vanishes_mid_request(
     assert "missing" in r.json()["detail"].lower()
 
 
-# --- M4 Must: training task control (pause / resume / terminate) ------------
+# --- training task control (pause / resume / terminate) ---------------------
 
 
 @pytest.mark.asyncio

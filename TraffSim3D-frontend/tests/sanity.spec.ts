@@ -1,7 +1,7 @@
 // TraffSim3D-frontend/tests/sanity.spec.ts
 //
 // Sanity test — proves Vitest + happy-dom + alias resolution work.
-// Delete or replace with real tests in plan 015.
+// Delete or replace with real tests.
 
 import { describe, it, expect } from 'vitest'
 import { LightPhase } from '@domain/value-objects/Phase'

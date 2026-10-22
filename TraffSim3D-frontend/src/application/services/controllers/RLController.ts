@@ -1,12 +1,12 @@
 // src/application/services/controllers/RLController.ts
 //
-// Plan 073 Sprint 2 (A2a): the RL signal controller becomes a real
+// The RL signal controller becomes a real
 // control surface.
 //
 // It still runs the plain 30/3/30 cycle when nothing drives it, so
 // selecting "RL" in the UI does not change the traffic — but it now
 // *consumes* external actions from the shared five-action vocabulary
-// (plans/legacy/007-m2-signal-controller.md §2):
+// (the shared five-action vocabulary):
 //
 //   extend_green          the current light's remaining time grows by 5 s
 //                         (never past MAX_GREEN_SECS)
@@ -18,11 +18,11 @@
 //   no_op                 nothing
 //
 // `applyAction` is **synchronous**: it only mutates the pending-action
-// queue. The next `decide()` consumes the queue (007 §2). It never calls
+// queue. The next `decide()` consumes the queue. It never calls
 // `decide()` itself.
 //
-// SCOPE NOTE — the controller is **per light** (007 §3: "M2-B 阶段 =
-// per-light controller"). "All lights go AllRed" is therefore realised by
+// SCOPE NOTE — the controller is **per light** (one controller
+// per light). "All lights go AllRed" is therefore realised by
 // the caller applying the action to *every* light of the intersection;
 // each light's controller then holds its own AllRed for 3 s.
 //
@@ -69,7 +69,7 @@ export interface RLControllerDeps {
  *
  * The floors are the project's existing convention, applied per phase:
  * a **red** light never drops below `MIN_RED_SECS` and a **green** light
- * never drops below `MIN_GREEN_SECS` (Plan 074 T7). The green floor is
+ * never drops below `MIN_GREEN_SECS`. The green floor is
  * what stops a controller that shortens on every decision from
  * *flickering* the light — 0.6 s per phase, which no driver can react
  * to. The yellow and all-red phases have no floor: they are clearance
@@ -103,7 +103,7 @@ export class RLController implements SignalController {
 
   applyAction(_light: TrafficLight, action: SignalActionName): void {
     // Synchronous: mutate the pending queue ONLY. The next decide()
-    // consumes it — this method never calls decide() (007 §2).
+    // consumes it — this method never calls decide().
     this.pending.push(action)
   }
 
@@ -113,7 +113,7 @@ export class RLController implements SignalController {
     const sourced = this.actionSource?.nextAction(light, network, simTime) ?? null
     if (sourced !== null) this.pending.push(sourced)
 
-    // 2. Consume the pending queue (007 §2: "next decide() consumes").
+    // 2. Consume the pending queue ("next decide() consumes").
     const actions = this.pending
     this.pending = []
 
@@ -204,7 +204,7 @@ export class RLController implements SignalController {
 
   /**
    * The action space offered to the agent, with the availability flags of
-   * 007 §2 ("preemption is only legal when the light is idle").
+   * ("preemption is only legal when the light is idle").
    */
   private availableActions(phase: LightPhase, duration: number): ReadonlyArray<SignalAction> {
     const clearing = phase === LightPhase.AllRed

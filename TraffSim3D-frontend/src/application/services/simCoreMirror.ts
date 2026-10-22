@@ -1,6 +1,6 @@
 // src/application/services/simCoreMirror.ts
 //
-// Plan 071: the L3 contract mirror — a 1:1 TypeScript port of the Python
+// The L3 contract mirror — a 1:1 TypeScript port of the Python
 // training sim (`TraffSim3D-backend/app/apps/rl/sim_core.py`).
 //
 // WHY A MIRROR EXISTS: the cross-language contract compares the Python sim
@@ -16,7 +16,7 @@
 // `@domain/services/egoKernel`, which the product replay path shares, so
 // the mirror and the product can never diverge on the ego model.
 //
-// Porting rules: see the cross-language contract (ADR-008) §4.1/§4.2.
+// Porting rules: see the egoKernel header.
 
 import { integrateEgo, type EgoState } from '@domain/services/egoKernel'
 import {
@@ -122,7 +122,7 @@ export interface MirrorLightOverride {
 /**
  * The ego pose to install right after the scene's `reset()`.
  *
- * Plan 076 S5a. Every contract vector used to be a **straight-line**
+ * Every contract vector used to be a **straight-line**
  * scenario: the ego drove straight at its target, Pure Pursuit's angle was
  * ~0, `steer` was 0 — and the three turning constants (`LOOKAHEAD_DISTANCE`,
  * `MAX_STEER`, `EGO_WHEELBASE`) therefore could not change any trajectory.
@@ -151,9 +151,9 @@ export interface MirrorRunOptions {
   /**
    * The **steering commands** (`action[1]`) of the episode, in step order.
    *
-   * Plan 076 T12: the policy's steering authority is a residual on top of
+   * The policy's steering authority is a residual on top of
    * the scripted Pure Pursuit steer. Absent → every step uses `0`, i.e. the
-   * scripted controller drives unmodified (the pre-T12 behaviour).
+   * scripted controller drives unmodified (the previous behaviour).
    */
   steerActions?: number[]
 }
@@ -180,7 +180,7 @@ export const ALL_RED_STEPS = Math.round(ALL_RED_SECS / PYTHON_SIM.DT)
  * builds one: the phase clock at zero, no queued action, no clearance.
  *
  * `cycleDuration` defaults to the default 30 s cycle; the signalled scene
- * passes its own (Plan 076 T13).
+ * passes its own.
  */
 export const createMirrorLight = (
   nsGreen: boolean,
@@ -201,14 +201,14 @@ const LIGHT_START = (): MirrorLight => createMirrorLight(true, false)
 
 /** Python `sim_core.approach_axis` — the signalised approach axis.
  *
- * Plan 076 T12. The NPCs drive straight through the intersection centre, so
+ * The NPCs drive straight through the intersection centre, so
  * the axis follows from the heading alone: a heading within 45° of ±Z runs on
  * the north-south road ("ns"), a heading within 45° of ±X on the east-west
  * road ("ew").
  *
  * This is the **traffic model's own** classification, and the red-light rule
  * below uses it too — the two must never disagree about which axis the ego
- * is on. (The pre-T12 heuristic read the axis off "within 0.5 rad of north"
+ * is on. (The previous heuristic read the axis off "within 0.5 rad of north"
  * instead, which disagreed with the traffic model on 26 of the 72 sampled
  * headings — every 5° — so it both killed green-axis episodes and let real
  * red-light runs through.)
@@ -231,7 +231,7 @@ const lateralOffset = (vehicle: MirrorVehicle): number =>
  * The scene's **own** light — the one `reset()` installs, before any
  * vector-level `lightOverride` is applied.
  *
- * Plan 076 T13. The contract generator writes this into every golden, and
+ * The contract generator writes this into every golden, and
  * the Python side compares it against the light its own `SimCore.reset()`
  * installs — item by item. Each side owns its own schedule (the four
  * default scenes run the 30 s cycle; `cross_signalled` starts the ego's
@@ -261,7 +261,7 @@ export class SimCoreMirror {
   truncated = false
   terminatedReason: TerminationReason = ''
   /**
-   * Plan 076 T12: has the ego left the road during this episode?
+   * Has the ego left the road during this episode?
    *
    * The success condition used to be route-agnostic (`ego.z > 25`), so a
    * wrong route that left the road scored the same success — and the same
@@ -301,7 +301,7 @@ export class SimCoreMirror {
     // Swapping `(true, true)` is a no-op, so Python's roundabout light never
     // changes.
     //
-    // Plan 076 T13: `_reset_cross_signalled` is the third case — the ego's
+    // `_reset_cross_signalled` is the third case — the ego's
     // axis starts **red** (`ns_green=False, ew_green=True`) and the cycle is
     // the scene's own 12 s, so the phase changes at step 121 — inside the
     // episode, unlike the default 30 s cycle (step 300).
@@ -314,7 +314,7 @@ export class SimCoreMirror {
     this.terminated = false
     this.truncated = false
     this.terminatedReason = ''
-    // Plan 076 T12: the off-road latch is per-episode state too.
+    // The off-road latch is per-episode state too.
     this.offRoad = false
 
     switch (this.sceneKind) {
@@ -367,7 +367,7 @@ export class SimCoreMirror {
         ]
         break
       case 'cross_signalled':
-        // Plan 076 T13: only the east-west cross traffic. A north-south
+        // Only the east-west cross traffic. A north-south
         // NPC would be respawned by the default traffic model's
         // out-of-bounds rule (`x -> -0.8 x`), which converges onto the
         // ego's own centreline within two respawns and would then drive
@@ -391,7 +391,7 @@ export class SimCoreMirror {
         ]
         break
       default:
-        // Plan 076 T13: an unknown scene name is an error, not a silent
+        // An unknown scene name is an error, not a silent
         // fall-through to the `cross` scene — the Python side raises too
         // (`SimCore.reset()`). A caller that asked for a scene that does
         // not exist must not end up measuring the `cross` scene.
@@ -403,7 +403,7 @@ export class SimCoreMirror {
   private target(): readonly [number, number] {
     if (this.sceneKind === 'corridor') return [0, 30]
     if (this.sceneKind === 'roundabout') return [0, PYTHON_SIM.ROUNDABOUT_RADIUS]
-    // Plan 076 T14: the signalled scene's target is the **goal line**, not
+    // The signalled scene's target is the **goal line**, not
     // the intersection centre — a pursuit target that stays ahead of the
     // ego for the whole route (the same convention the corridor and
     // roundabout scenes use). See Python's `SimCore.step()`.
@@ -414,7 +414,7 @@ export class SimCoreMirror {
   /**
    * One simulation step.
    *
-   * `action1` is Plan 076 T12's **steering residual**: the policy's
+   * `action1` is the **steering residual**: the policy's
    * correction **on top of** the scripted Pure Pursuit steer, not a
    * replacement. It is scaled by `MAX_STEER` and clipped together with the
    * scripted steer, exactly like Python's
@@ -472,7 +472,7 @@ export class SimCoreMirror {
     }
     this.consumeLightActions()
     if (this.light.allRedSteps > 0) {
-      // All-red clearance (Plan 073 Sprint 2): neither axis is green and
+      // All-red clearance: neither axis is green and
       // the phase clock is frozen, so the interrupted phase resumes where
       // it left off.
       this.light.nsGreen = false
@@ -506,13 +506,13 @@ export class SimCoreMirror {
       this.terminatedReason = 'red_light'
     }
 
-    // Plan 076 T12: has the ego left the road? The latch is permanent —
+    // Has the ego left the road? The latch is permanent —
     // the success needs the ego to have STAYED on the road.
     if (lateralOffset(this.ego) > PYTHON_SIM.ROAD_HALF_WIDTH) {
       this.offRoad = true
     }
 
-    // Plan 076 T12: the success also needs the ego to have stayed on the
+    // The success also needs the ego to have stayed on the
     // road — the old condition (`ego.z > 25`) was route-agnostic, so a wrong
     // route that left the road scored the same success and the same bonus as
     // the right one.
@@ -532,7 +532,7 @@ export class SimCoreMirror {
       }
     }
 
-    // 5) truncation latch (Plan 067)
+    // 5) truncation latch
     if (this.stepCount >= this.maxSteps && !this.terminated) {
       this.truncated = true
     }
@@ -585,7 +585,7 @@ export class SimCoreMirror {
       Math.abs(this.ego.x) < PYTHON_SIM.INTERSECTION_RADIUS &&
       Math.abs(this.ego.z) < PYTHON_SIM.INTERSECTION_RADIUS
     if (!inIntersection) return false
-    // Plan 076 T12: the axis comes from the **traffic model's own**
+    // The axis comes from the **traffic model's own**
     // classification (`approachAxis`), so the red-light rule and the traffic
     // model can never disagree about which axis the ego is on.
     //
@@ -684,7 +684,7 @@ export const runEpisode = (
     core.light = createMirrorLight(options.lightOverride.nsGreen, options.lightOverride.ewGreen)
   }
   if (options.egoStart) {
-    // Plan 076 S5a: the ego's pose is overridden right after `reset()` —
+    // The ego's pose is overridden right after `reset()` —
     // the same place and the same pattern as the light override, and the
     // same order on the Python side.
     core.ego = { ...options.egoStart, y: 0 }

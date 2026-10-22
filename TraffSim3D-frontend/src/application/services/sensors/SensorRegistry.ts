@@ -1,7 +1,7 @@
 // src/application/services/sensors/SensorRegistry.ts
 //
 // Sensor lifecycle manager. Prevents Float32Array / WebGL resource
-// leaks when vehicles are removed (008 §3.5 R5 HIGH).
+// leaks when vehicles are removed (a HIGH-severity fix).
 //
 // scanAll(world, simTime, getHostPose) is the per-tick entry point:
 // iterates every registered sensor, calls sensor.scan with the host
@@ -9,7 +9,7 @@
 // LidarFrame[]. tick() (per m2-interface-contract.md §4 step f)
 // calls this when lidarEnabled is true.
 //
-// M2-D (plan 025): also caches the latest LidarFrame per vehicle,
+// Also caches the latest LidarFrame per vehicle,
 // so visualization consumers (LidarPointCloud) can read without
 // re-scanning.
 
@@ -27,7 +27,7 @@ export class SensorRegistry {
   private sensors: Map<SensorId, LidarSensor> = new Map()
   /** Latest frame per host vehicle — overwritten every scanAll(). */
   private latestFrames: Map<VehicleId, LidarFrame> = new Map()
-  /** Plan 033: max sensors that actually scan per tick. */
+  /** Max sensors that actually scan per tick. */
   private maxActiveSensors: number
   /** Total frames produced (not throttled calls). For UI display. */
   private totalFramesProduced: number = 0
@@ -64,7 +64,7 @@ export class SensorRegistry {
   /** H1 fix: actually scan. Called per tick when LiDAR is enabled.
    *  Also caches the latest frame for visualization consumers.
    *
-   *  Plan 033: cap at maxActiveSensors. Sort by vehicleId for stable
+   *  Cap at maxActiveSensors. Sort by vehicleId for stable
    *  "first N" selection. Sensors past the cap keep their last frame
    *  in latestFrames (UI consumers see stale data, not no data). */
   scanAll(world: RapierWorld, simTime: number, getHostPose: HostPoseLookup): LidarFrame[] {

@@ -322,7 +322,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/v1/ping
 # 阿里云镜像（本机实测更快）
 python -m pip install -i https://mirrors.aliyun.com/pypi/simple/ <包名>
 
-# 清华 TUNA
+# 另一条可用镜像
 python -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <包名>
 ```
 
@@ -440,7 +440,6 @@ cd TraffSim3D-backend
 ```
 
 2026-10-21 实测**收集到 292 个用例**（约 2 秒）。
-完整运行结果见 `docs/M4-VERIFICATION.md`。
 
 覆盖率（需先装 `pytest-cov`）：
 
@@ -549,6 +548,5 @@ CI 漂移检查（只比对、不写文件；不一致时退出码为 1）：
 ## 相关文档
 
 - [`docs/USER-GUIDE.md`](USER-GUIDE.md) —— 面向使用者的功能指南
-- [`docs/PLANS-TO-MILESTONES.md`](PLANS-TO-MILESTONES.md) —— **里程碑状态的唯一权威来源**
 - [`docs/adr/ADR-007-deployment-docker-compose.md`](adr/ADR-007-deployment-docker-compose.md) —— 容器方案被否决的决策记录
 - [`docs/contracts/sim-snapshot.md`](contracts/sim-snapshot.md) —— 前后端仿真观测契约（`OBS_DIM = 14`）

@@ -1,4 +1,4 @@
-"""Plan 050: cross-language contract test (Python sim ↔ TS sim).
+"""Cross-language contract test (Python sim ↔ TS sim).
 
 Regenerates the Python-side state trajectories in
 `snapshots/python_<name>.json` from `test_vector.json`, so the on-disk
@@ -7,7 +7,7 @@ Python artefacts can be refreshed (and inspected) on demand.
 The **schema** of those files is owned by
 `tests/contract/test_cross_lang_consistency.py`, and this module reuses that
 module's writer instead of having its own. Two writers with two schemas was
-a real defect: this legacy writer emitted the Plan 050 shape (no `light`, no
+a real defect: this legacy writer emitted the older shape (no `light`, no
 `final_state`, plus a `tolerance` key), and because pytest collects
 `test_cross_lang_consistency.py` first (alphabetically), it **overwrote** the
 newer, richer files at the end of every session — so the on-disk

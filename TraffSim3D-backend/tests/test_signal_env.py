@@ -1,10 +1,10 @@
-"""Plan 074 Sprint 3 (S3a-2): the signal agent's environment.
+"""The signal agent's environment.
 
 The gate that matters here is the **counterfactual reward test**: from
 the same initial state, a schedule that serves both axes must score
 better than a schedule that only ever serves one. If the two came out
 equal (or reversed), the reward would not be pricing the *cross-axis*
-delay and Plan 074 §2 D2 would not be met — the agent would learn to
+delay and the counterfactual-reward rule would not be met — the agent would learn to
 starve the opposite axis.
 """
 
@@ -111,7 +111,7 @@ def test_the_chosen_action_really_reaches_the_light() -> None:
 
 
 def test_the_observation_layout_matches_the_plan() -> None:
-    """Plan 074 §2 D1, index by index."""
+    """The observation layout, index by index."""
     env = SignalEnv(max_steps=40)
     env.reset(seed=0)
 
@@ -153,7 +153,7 @@ def test_the_reward_is_the_negative_delay() -> None:
 
 
 def test_serving_both_axes_beats_starving_one_axis() -> None:
-    """The counterfactual gate (Plan 074 §2 D2).
+    """The counterfactual gate (the reward must price the cross-axis delay).
 
     Both schedules start from the same initial state:
 
@@ -164,7 +164,7 @@ def test_serving_both_axes_beats_starving_one_axis() -> None:
 
     The second one must score *worse*. The reward therefore has to price
     the cross-axis delay — otherwise "extend forever" would be optimal,
-    which is exactly the residual risk D2 was written to mitigate.
+    which is exactly the residual risk the rule was written to mitigate.
     """
     serve_both, both_info = _run([ACTION_INDEX["shorten_red"]] * 600)
     serve_one, one_info = _run([ACTION_INDEX["extend_green"]] * 600)
@@ -217,7 +217,7 @@ def test_an_out_of_range_action_is_rejected() -> None:
 
 
 # --------------------------------------------------------------------------
-# Plan 074 T7: the minimum green time (§2 D5)
+# The minimum green time
 # --------------------------------------------------------------------------
 
 
@@ -278,7 +278,7 @@ def test_the_minimum_green_time_boundary_is_exact() -> None:
 
 
 def test_the_flicker_schedule_no_longer_scores_a_free_lunch() -> None:
-    """D5's regression, pinned (Plan 074 T7).
+    """The minimum-green regression, pinned.
 
     Before the minimum green time the "flicker" schedule — `shorten_red`
     on every step — drove the light at 0.6 s per phase. The vehicles
@@ -302,7 +302,7 @@ def test_the_flicker_schedule_no_longer_scores_a_free_lunch() -> None:
 def test_the_flicker_schedule_is_a_legal_timed_plan_now() -> None:
     """The masked flicker must respect the minimum green time.
 
-    It is no longer the 0.6 s jitter of D5: the light alternates on a
+    It is no longer the 0.6 s jitter of the old guard: the light alternates on a
     fixed, legal cycle, and every phase it runs is at least
     `MIN_GREEN_SECS` long.
     """
@@ -323,9 +323,9 @@ def test_the_flicker_schedule_is_a_legal_timed_plan_now() -> None:
 
 
 def test_the_flicker_schedule_versus_the_default_schedule() -> None:
-    """The plan's comparison - and the measured result.
+    """The prescribed comparison - and the measured result, **twice**.
 
-    Plan 074 T7 expected the masked flicker to score *worse* than the
+    The minimum-green rule expected the masked flicker to score *worse* than the
     default 30/30 cycle. **Measured then, it did not**: the masked
     flicker scored -97.2 against the default's -109.2 - it was still
     the better schedule *in this model*.
@@ -336,17 +336,46 @@ def test_the_flicker_schedule_versus_the_default_schedule() -> None:
     green. So a shorter cycle was pure gain for the delay metric (the
     area under the queue-length curve).
 
-    **Plan 074 T9 added the lost time** (the 6 s inter-green clearance,
+    **The lost time was added** (the 6 s inter-green clearance,
     charged by `SimCore` on every phase change) and the dense training
-    scenario. The flicker is now worse than the alternating schedule
-    (-437.2 against -423.1): every extra switch costs six seconds during
-    which nobody may go. The plan's gate (flicker < default) holds.
+    scenario, and the flicker became worse than the alternating
+    schedule (-437.2 against -423.1): in the **closed loop** the
+    clearance was the expensive part, because it held the *whole fleet*
+    still.
+
+    **The traffic model changed again** (the closed loop became
+    the browser-like open flow) and with it the comparison: the cost is
+    no longer dominated by the clearance - it is the **red's duration**
+    that costs, and a faster alternation has shorter reds. Measured on
+    the open traffic (600 steps): flicker -260.8, fixed cycle -292.8 -
+    the flicker is now the **better** schedule.
+
+    So the *ordering* between the fixed cycle and the flicker is a
+    property of the traffic model, not of the reward: it flipped when
+    the traffic changed. What does **not** flip is the gate that
+    matters - "starve one axis" is still the worst schedule by a wide
+    margin (see `test_signal_open_traffic.py`).
     """
     flicker, _ = _run([ACTION_INDEX["shorten_red"]] * 600)
     default, _ = _run([ACTION_INDEX["no_op"]] * 600)
 
-    assert flicker < default, (
-        "the flicker must not beat the default schedule: switching "
-        "phases costs the inter-green clearance "
-        f"(flicker={flicker}, default={default})"
+    assert flicker > default, (
+        "the measured open-traffic ordering changed: the flicker is now "
+        "the better schedule, because the delay is dominated by the red's "
+        f"duration (flicker={flicker}, default={default})"
+    )
+
+    # The closed loop is unchanged: there the clearance dominated and the
+    # flicker was the worse schedule.
+    closed_env = SignalEnv(max_steps=600, open_traffic=False)
+    closed_env.reset(seed=0)
+    closed_flicker = 0.0
+    for _ in range(600):
+        _, reward, terminated, truncated, _ = closed_env.step(ACTION_INDEX["shorten_red"])
+        closed_flicker += float(reward)
+        if terminated or truncated:
+            break
+    assert closed_flicker < -423.1, (
+        "the closed loop's ordering changed - the old numbers in the "
+        f"docs are stale (closed flicker={closed_flicker})"
     )

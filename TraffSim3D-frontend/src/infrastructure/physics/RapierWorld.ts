@@ -1,7 +1,7 @@
 // src/infrastructure/physics/RapierWorld.ts
 //
 // Rapier3D WASM physics world. Wraps `@dimforge/rapier3d-compat`
-// behind the M2 contract interface (plans/m2-interface-contract.md
+// behind the physics contract interface (see the interface contract
 // §2). Lazy-imports Rapier to keep the initial bundle small and to
 // avoid the dev-server first-load hang (R2).
 //
@@ -37,7 +37,7 @@ export interface RayHit {
 export interface VehicleControl {
   throttle: number // 0..1
   brake: number // 0..1
-  steering: number // rad/s (M2 不用; M3 变道用)
+  steering: number // rad/s
 }
 
 // Rapier 的 collider handle 是 number. 我们用 vehicleId 作为稳定
@@ -57,7 +57,7 @@ export class RapierWorld {
   private destroyed = false
   // Accumulator: 即使 render dt 是 1/30, 物理仍按 fixedDt=1/60
   // 推进 (1 帧物理 step 1 次). accumulator 留着给未来的"多次 step
-  // 追上 wall-clock"用 — M2-A 默认 1 步/帧.
+  // 追上 wall-clock"用 — 默认 1 步/帧.
   private accumulator = 0
 
   constructor(cfg: WorldConfig = DEFAULT_WORLD_CONFIG) {
@@ -145,8 +145,8 @@ export class RapierWorld {
     // bodyForCollider 由 Rapier 的 handle 空间回收 — 不用手清.
   }
 
-  /** Per-vehicle control input. Rapier 用 setLinvel 简化 (M2 不做
-   *  力模型; M3 引入转向时再升级到 applyImpulse).
+  /** Per-vehicle control input. Rapier 用 setLinvel 简化 (暂不做
+   *  力模型; 引入转向时再升级到 applyImpulse).
    *
    *  - throttle=1, brake=0 → targetSpeed 方向 setLinvel
    *  - brake=1 → setLinvel(0)
@@ -156,7 +156,7 @@ export class RapierWorld {
    *  这里 throttle/brake 直接由 caller 算好 targetSpeed 后转
    *  linvel; caller 不需要知道力学. 实施档简化: 我们把
    *  targetSpeed 当作 "想要的速度", 直接 setLinvel. 物理上不
-   *  是"力推进" — 是"速度设置" — 但 M2-A 接受 (006 §Trade-offs). */
+   *  是"力推进" — 是"速度设置" — 但接受该取舍. */
   applyControl(
     vehicleId: string,
     control: VehicleControl,
@@ -215,7 +215,7 @@ export class RapierWorld {
   }
 
   /**
-   * Plan 029: apply a lateral (perpendicular-to-current-linvel) velocity
+   * Apply a lateral (perpendicular-to-current-linvel) velocity
    * nudge to a vehicle body. Used during lane-change to slide the body
    * sideways without disturbing forward motion. The caller combines
    * this with the longitudinal linvel that `applyControl` already set
@@ -257,7 +257,7 @@ export class RapierWorld {
    * Implementation: setTranslation (wakes the body via `true`), then
    * setLinvel to zero. The `heading` is NOT updated here — drag
    * doesn't rotate the vehicle; rotation is set on drag end via
-   * `setRotation` if needed (out of scope for this plan — vehicle
+   * `setRotation` if needed (out of scope for now — vehicle
    * keeps its current heading).
    */
   setVehiclePosition(vehicleId: string, position: { x: number; y: number; z: number }): void {
@@ -286,7 +286,7 @@ export class RapierWorld {
   }
 
   /**
-   * Plan 037c: directly set a rigid body's angular velocity around the
+   * Directly set a rigid body's angular velocity around the
    * Y-axis (in world-space). Used by the Pure Pursuit steering loop
    * to turn the vehicle toward the lookahead point.
    *
@@ -357,7 +357,7 @@ export class RapierWorld {
     const clampedDt = Math.min(dt, 1 / 30)
     this.world.timestep = this.cfg.fixedDt
     this.accumulator += clampedDt
-    // M2-A: 1 step per frame. 多次 step 留 M2-C.
+    // 1 step per frame. 多次 step 留待后续.
     this.world.step(this.eventQueue)
     this.simTime += this.cfg.fixedDt
     // Drain contact events
@@ -374,8 +374,8 @@ export class RapierWorld {
       events.push({
         colliderA: a,
         colliderB: b,
-        normal: { x: 0, y: 0, z: 0 }, // M2-A 不读 normal (M2-B 才用)
-        impulse: 0, // M2-A 简化为存在即触发; 严格 impulse 需要 contact force event queue.
+        normal: { x: 0, y: 0, z: 0 }, // 当前不读 normal (后续接触处理才用)
+        impulse: 0, // 简化为存在即触发; 严格 impulse 需要 contact force event queue.
       })
     })
     return { dt: this.cfg.fixedDt, contactEvents: events, simTime: this.simTime }
@@ -456,7 +456,7 @@ export class RapierWorld {
 
   /**
    * Lookup the collider handle for a vehicle. Used by LiDAR
-   * excludeColliders (M2-C, plan 017 H4 fix). Returns the handle
+   * excludeColliders (the LiDAR fix). Returns the handle
    * as a string for contract consistency with `ContactEvent.colliderA/B`
    * (which is string in our domain).
    */
@@ -476,5 +476,5 @@ export class RapierWorld {
   }
 }
 
-// Public API (the contract interface from 006 §2).
+// Public API (the physics contract interface).
 export interface RapierWorldAPI extends RapierWorld {}

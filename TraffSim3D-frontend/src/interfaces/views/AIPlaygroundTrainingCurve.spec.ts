@@ -1,6 +1,6 @@
 // src/interfaces/views/AIPlaygroundTrainingCurve.spec.ts
 //
-// Plan 075 (S4): the training-curve UI must make the *measurement* legible.
+// The training-curve UI must make the *measurement* legible.
 //
 // The raw reward curve that was already there is a sampled per-episode
 // return — noisy, and not comparable with anything. What the dashboard has
@@ -13,7 +13,7 @@
 //      collapsed back onto `no_op` especially, because the ~50 % success
 //      rate is only honest if the failures are on the table.
 //
-// The numbers below are the ones Plan 074 T9/T10 measured, so the spec
+// The numbers below are the ones a real training run measured, so the spec
 // describes a real run rather than a convenient fiction.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -29,7 +29,7 @@ const EVAL_SERIES = [
   { step: 40000, return: -399.9, baseline: -423.1, condition: 'train' },
 ]
 
-/** Plan 074 T10: two seeds beat the baseline, two collapsed onto `no_op`. */
+/** Two seeds beat the baseline, two collapsed onto `no_op`. */
 const SEED_RESULTS = [
   {
     seed: 0,
@@ -115,7 +115,7 @@ const parsePoints = (attribute: string | undefined): Array<[number, number]> =>
       return [Number(x), Number(y)] as [number, number]
     })
 
-describe('AIPlaygroundView — the training curve (Plan 075 S4)', () => {
+describe('AIPlaygroundView — the training curve', () => {
   let fetchSpy: ReturnType<typeof vi.fn>
   let wrapper: VueWrapper | null = null
 
@@ -290,7 +290,7 @@ describe('AIPlaygroundView — the training curve (Plan 075 S4)', () => {
   it('makes the generalisation gap visible in one screen', async () => {
     const view = await mountView()
 
-    // Plan 074 T10: +23.2 (5.5 %) on the training condition, +7.1 (1.4 %)
+    // +23.2 (5.5 %) on the training condition, +7.1 (1.4 %)
     // on the held-out evaluation condition.
     const gap = view.get('[data-testid="generalisation-gap"]').text()
     expect(gap).toContain('23.2')

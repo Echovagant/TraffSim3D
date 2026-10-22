@@ -1,4 +1,4 @@
-"""Plan 076 (T11 follow-up): score a trained ego policy against the
+"""Score a trained ego policy against the
 constant-throttle baselines.
 
 The signal agent's gate (`signal_train.evaluate_policy` /
@@ -22,7 +22,7 @@ stochastic scene only has to change this constant.
 
 What the ego's policy actually controls
 ---------------------------------------
-`SimCore.step` reads **both** action channels (Plan 076 T12):
+`SimCore.step` reads **both** action channels:
 
 - `action[0]` — the throttle, as an acceleration command;
 - `action[1]` — a **steering residual**, i.e. a *correction on top of* the
@@ -61,7 +61,7 @@ FULL_THROTTLE = 1.0
 ZERO_THROTTLE = 0.0
 #: The steering residual that leaves the scripted Pure Pursuit unmodified.
 #:
-#: Plan 076 T12: `action[1]` is a *correction* on the scripted steer, so
+#: `action[1]` is a *correction* on the scripted steer, so
 #: `0.0` means "drive exactly as the scripted controller drives" — the
 #: baseline every policy has to beat.
 SCRIPTED_PURSUIT = 0.0
@@ -156,7 +156,7 @@ def evaluate_constant_throttle(
     `2.0` is the same command as `1.0` (the sim clips it) — the baseline is
     therefore reported on the *clipped* value.
 
-    `steer` is the **steering residual** (Plan 076 T12): `0.0` — the
+    `steer` is the **steering residual**: `0.0` — the
     default — leaves the scripted Pure Pursuit unmodified, which is the
     baseline the trained policy has to beat. A non-zero value adds a
     constant correction on top of it.

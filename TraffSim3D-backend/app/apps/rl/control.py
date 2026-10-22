@@ -1,4 +1,4 @@
-"""M4 Must: training task control — pause / resume / terminate.
+"""Training task control — pause / resume / terminate.
 
 Training runs as a **detached subprocess** (spawned by
 `POST /api/v1/rl/train`), so the API process cannot reach into it directly

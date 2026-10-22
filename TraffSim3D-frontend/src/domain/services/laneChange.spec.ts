@@ -1,7 +1,7 @@
-// M2 (plan 029): lane change domain unit tests.
+// Lane change domain unit tests.
 //
 // `requestLaneChange` is a pure function. We test 4 critical paths
-// using the shared testNetwork fixture (026's `buildTestNetwork`).
+// using the shared testNetwork fixture (`buildTestNetwork`).
 import { describe, it, expect } from 'vitest'
 import {
   requestLaneChange,
@@ -78,14 +78,14 @@ describe('perpendicularOffsetAlongRoad', () => {
     expect(perpendicularOffsetAlongRoad(road as never, { x: 10, z: 0 })).toBe(0)
   })
   it('returns a signed offset for a point off the road centerline', () => {
-    // Pre-035 test: (10, -1) on road (0,0)-(30,0) used to be -1 (negative).
+    // Legacy test: (10, -1) on road (0,0)-(30,0) used to be -1 (negative).
     // New convention: rotate tangent -90° = (uz, -ux) = (0, -1). Dot with
     // (10, -1) - (0,0) = (10, -1) gives 10*0 + (-1)*(-1) = +1.
     const road = { startNode: { x: 0, z: 0 }, endNode: { x: 30, z: 0 } }
     expect(perpendicularOffsetAlongRoad(road as never, { x: 10, z: -1 })).toBeCloseTo(1)
   })
   it('polyline-aware: passes (road, s, position) and uses local segment tangent', () => {
-    // Plan 035 new signature. Right-angle road: at s=10 we're in seg 0
+    // New signature. Right-angle road: at s=10 we're in seg 0
     // (0,0,-30)→(0,0,0), tangent = (0, 1). Right-perp = (uz, -ux) = (1, 0).
     // Point (5, -20) is 5 units to +x of seg 0 centerline, so offset = 5.
     const road = {

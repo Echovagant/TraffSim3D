@@ -1,6 +1,6 @@
 // src/infrastructure/rl/mlpInference.discrete.spec.ts
 //
-// Plan 074 (T4): the discrete forward-pass contract.
+// The discrete forward-pass contract.
 //
 // The browser can only run a **continuous** 2-dim action policy today, but
 // a traffic-signal agent has a **discrete 5-way** action. SB3's
@@ -35,7 +35,7 @@ const POLICY: PolicyWeights = {
 const OBSERVATIONS = fixture.observations as number[][]
 const EXPECTED = fixture.expected_actions as number[]
 
-describe('mlpForwardDiscrete (Plan 074 — the discrete forward-pass contract)', () => {
+describe('mlpForwardDiscrete — the discrete forward-pass contract', () => {
   it('uses a discrete policy that carries no Gaussian log-std', () => {
     expect(POLICY.action_space).toBe('discrete')
     expect(POLICY.action_dim).toBe(5)

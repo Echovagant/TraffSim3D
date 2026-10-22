@@ -1,4 +1,4 @@
-"""Unit tests for `app.apps.rl.capabilities` (Plan 044 GPU extension).
+"""Unit tests for `app.apps.rl.capabilities` (GPU extension).
 
 Strategy
 --------

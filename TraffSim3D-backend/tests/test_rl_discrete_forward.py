@@ -1,4 +1,4 @@
-"""Plan 074 (T4): the discrete forward-pass contract — the Python side.
+"""The discrete forward-pass contract — the Python side.
 
 For the **same weights** and the **same observations**, the Python forward
 pass and the TypeScript forward pass must produce the **same action
@@ -13,7 +13,7 @@ TypeScript half. This module asserts the Python half: the pure-Python
 reference forward pass, run on the committed weights, reproduces the
 committed actions.
 
-The fixture lives in the **frontend** folder (like the Plan 049 MLP
+The fixture lives in the **frontend** folder (like the MLP
 fixture) because the frontend is the side that imports it. When the
 frontend folder is not checked out, the test skips instead of failing.
 """

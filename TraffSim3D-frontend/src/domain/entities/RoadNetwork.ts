@@ -7,7 +7,7 @@ export interface RoadNetwork {
   roads: Record<string, Road>
   intersections: Record<string, Intersection>
   vehicles: Record<string, Vehicle>
-  /** Plan 037: spawn points keyed by id. Empty on pre-037 scenes that
+  /** Spawn points keyed by id. Empty on legacy scenes that
    *  haven't been migrated; tick treats an empty map as "no spawn
    *  limits" so old scenes continue to work. */
   spawnPoints: Record<string, SpawnPoint>

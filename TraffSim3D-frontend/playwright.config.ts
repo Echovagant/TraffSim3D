@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test'
 
 /**
- * Plan 042: Playwright e2e + screenshot baseline.
+ * Playwright e2e + screenshot baseline.
  *
  * Test directory: ./tests/e2e
  * Screenshot output: ../../e2e-output/{current,baseline}/ (project root, per user request)

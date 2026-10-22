@@ -28,11 +28,11 @@ const router = createRouter({
       component: () => import('@interfaces/views/MapImporterView.vue'),
     },
     {
-      // Plan 055: Smart City view — Cesium basemap + Three.js overlay.
+      // Smart City view — Cesium basemap + Three.js overlay.
       // Distinct route from /scene-editor so the existing simulator
       // view stays untouched (all existing e2e tests still pass).
       //
-      // Plan 066: the Cesium runtime (5.3 MB UMD) is loaded on demand
+      // The Cesium runtime (5.3 MB UMD) is loaded on demand
       // instead of being injected into index.html for every page. The
       // runtime must be in place before this chunk evaluates, hence the
       // explicit `ensureCesiumRuntime()` before the dynamic import.

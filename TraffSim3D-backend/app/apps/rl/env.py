@@ -1,4 +1,4 @@
-"""Plan 044: Gymnasium env wrapping SimCore."""
+"""Gymnasium env wrapping SimCore."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ class TrafficEnv(gym.Env[np.ndarray, np.ndarray]):
     """Single-agent traffic env — drive the ego vehicle through a 4-way
     intersection while respecting the traffic light and avoiding NPCs.
 
-    Plan 048: `scene_kind='corridor'` switches to a 2-intersection
+    `scene_kind='corridor'` switches to a 2-intersection
     corridor topology for multi-intersection training.
 
-    Plan 076 T14: `light_cycle_seconds` overrides the **signalled** scene's
+    `light_cycle_seconds` overrides the **signalled** scene's
     light cycle for training (the light curriculum in `train.py`). `None`
     (the default) is the scene's own cycle — the value the cross-language
     contract pins.
@@ -32,7 +32,7 @@ class TrafficEnv(gym.Env[np.ndarray, np.ndarray]):
     def __init__(
         self,
         max_steps: int = MAX_STEPS_DEFAULT,
-        scene_kind: str = "cross",  # Plan 048: 'cross' | 'corridor'
+        scene_kind: str = "cross",  # 'cross' | 'corridor'
         light_cycle_seconds: float | None = None,
     ) -> None:
         super().__init__()

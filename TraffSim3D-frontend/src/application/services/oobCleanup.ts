@@ -1,10 +1,10 @@
 // src/application/services/oobCleanup.ts
 //
-// Plan 034: out-of-bounds cleanup. Pure function for testing.
+// Out-of-bounds cleanup. Pure function for testing.
 // tick.ts calls this once per tick; tests can mock deps and run
 // without worldStore.
 //
-// (See 032 §Issue 2 + 034 plan for the full design rationale.)
+// (See the design rationale for the full details.)
 
 import type { Vehicle } from '@domain/entities/Vehicle'
 import type { Road } from '@domain/entities/Road'

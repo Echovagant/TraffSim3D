@@ -1,6 +1,6 @@
 // src/infrastructure/rl/types.ts
 //
-// Plan 049: shared types for in-browser PPO policy replay.
+// Shared types for in-browser PPO policy replay.
 //
 // A `PolicyWeights` is the JSON shape returned by the backend
 // `GET /api/v1/rl/checkpoints/{name}/weights` endpoint — a flattened
@@ -14,7 +14,7 @@ export interface PolicyWeights {
   /** Action dimension. Defaults to 2 (accel, steer). */
   action_dim: number
   /**
-   * The checkpoint's action space (Plan 074).
+   * The checkpoint's action space.
    *
    * - `"discrete"` — the policy emits action *logits*; use
    *   `mlpForwardDiscrete` to get the action index.
@@ -22,7 +22,7 @@ export interface PolicyWeights {
    *   `mlpForwardMean`.
    *
    * **Absent ⇒ treated as `"continuous"**, so the weights exported before
-   * Plan 074 (and the committed fixtures) keep working unchanged.
+   * the discrete path existed (and the committed fixtures) keep working unchanged.
    */
   action_space?: 'discrete' | 'continuous'
   /** Sizes of the two hidden layers. Defaults to [64, 64]. */

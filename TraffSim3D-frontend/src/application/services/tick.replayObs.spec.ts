@@ -1,6 +1,6 @@
 // src/application/services/tick.replayObs.spec.ts
 //
-// Plan 069 — Python parity for the replay observation's traffic-light bits.
+// Python parity for the replay observation's traffic-light bits.
 //
 // Python's `SimCore._obs()` sets:
 //     obs[6] = 1 if ns_green else 0      # the NS axis, ALWAYS
@@ -55,7 +55,7 @@ const nsEgo = () => makeTestVehicle({ id: 'v-1', roadId: 'r-ns', heading: Math.P
 const ewEgo = () =>
   makeTestVehicle({ id: 'v-ew', roadId: 'r-ew', heading: 0, position: { x: -20, y: 0, z: 0 } })
 
-describe('buildReplayObs traffic-light bits (Plan 069)', () => {
+describe('buildReplayObs traffic-light bits', () => {
   it('reports the NS axis in obs[6] and the EW axis in obs[7]', () => {
     const net = networkWith(
       light('ns', LightPhase.Green, 'tl-ns'),

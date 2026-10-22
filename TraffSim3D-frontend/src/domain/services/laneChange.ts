@@ -1,4 +1,4 @@
-// M2 (plan 029): domain actions for lane change.
+// Domain actions for lane change.
 //
 // `requestLaneChange` is a *pure* decision function: it returns whether
 // the change is safe given the current network snapshot. The caller
@@ -63,7 +63,7 @@ export const requestLaneChange = (
   }
   // Gap check: any non-self vehicle in the target lane on the same
   // road must be at least MIN_GAP ahead AND behind. (O(N) over
-  // vehicles on this road; fine at M2 scale.)
+  // vehicles on this road; fine at the current scale.)
   const targetVehicles = Object.values(network.vehicles).filter(
     (o) =>
       o.id !== v.id && o.roadId === road.id && o.laneIndex === targetLane && o.status !== 'crashed',
@@ -92,9 +92,9 @@ export const LANE_CHANGE_CONVERGED_M = 0.3
 
 /** Perpendicular offset (metres, signed) of `position` relative to
  *  the road's centerline in the XZ plane. Positive = "right" side
- *  (lane 0 in the M2 convention).
+ *  (lane 0 is the rightmost forward lane).
  *
- *  Plan 035: polyline-aware. Pass the vehicle's current `s` so the
+ *  Polyline-aware. Pass the vehicle's current `s` so the
  *  perpendicular uses the LOCAL segment tangent at that arc-length —
  *  a vehicle halfway through a corner road gets the corner's tangent,
  *  not the average over the whole polyline. */
@@ -112,7 +112,7 @@ export const perpendicularOffsetAlongRoad = (
     position = positionParam ?? { x: 0, z: 0 }
   } else {
     // Legacy signature. Use the road's midpoint as the default s — the
-    // pre-035 caller had no `s`, so the perpendicular was always the
+    // older caller had no `s`, so the perpendicular was always the
     // straight-line perp from startNode to endNode. For 2-point roads
     // this is exact; for N-point polylines this is "the perp at the
     // middle segment", which is what the legacy tests expect (they use

@@ -3,8 +3,7 @@
 面向「要读懂这个系统、或者要接手它继续做」的人。
 
 本文只描述**系统现在的样子**。每个结构性断言后面都给出代码出处（路径 + 符号），
-便于自行核对。里程碑状态、决策裁定内容、契约的逐项覆盖面与盲区表，分别以
-[PLANS-TO-MILESTONES.md](PLANS-TO-MILESTONES.md)、
+便于自行核对。决策裁定内容与契约的逐项覆盖面、盲区表，分别以
 [adr/](adr/) 与 [contracts/sim-snapshot.md](contracts/sim-snapshot.md) 为准，本文只做链接与结论。
 
 ---
@@ -32,8 +31,7 @@ TraffSim3D 是一个 3D 智能交通仿真平台：前端用 Vue 3 + Three.js �
 |---|---|
 | `TraffSim3D-frontend/` | Vue3 + Three.js 前端。DDD 四层 + `shared/`，见第 3 节。 |
 | `TraffSim3D-backend/` | Python FastAPI + SB3 后端。app-per-capability，见第 4 节。 |
-| `docs/` | 权威文档：`adr/`（9 篇 ADR）、`contracts/sim-snapshot.md`（跨语言契约）、`PLANS-TO-MILESTONES.md`（里程碑状态唯一权威）、`DEPLOYMENT.md`、`USER-GUIDE.md`、`M1`–`M4-VERIFICATION.md`。 |
-| `plans/` | 计划与设计文档（顶层计划文档 + `plans/legacy/` 里的早期设计稿）。索引见 [plans/README.md](../plans/README.md)。 |
+| `docs/` | 权威文档：`adr/`（9 篇 ADR）、`contracts/sim-snapshot.md`（跨语言契约）、`DEPLOYMENT.md`、`USER-GUIDE.md`、`ARCHITECTURE.md`（本文）。 |
 | `.github/workflows/ci.yml` | 四个 CI job：`backend` / `frontend` / `contract` / `e2e`。 |
 | `e2e-output/baseline/` | Playwright 视觉回归基线 PNG（在**仓库根**，不在 frontend 子目录）。 |
 | `TraffSim3D-backend/.data/` | RL 运行时产物（checkpoint / 训练状态 / 控制文件），gitignored。 |
@@ -54,8 +52,7 @@ flowchart TB
       beMaps["app/apps/maps/<br/>OSM 解析 · 路网图 · Overpass 缓存"]
       beEmpty["app/apps/simulation/ · app/apps/perception/<br/>空壳"]
     end
-    docsN["docs/ — ADR · 契约 · 里程碑状态"]
-    plansN["plans/ — 计划与设计文档"]
+    docsN["docs/ — ADR · 契约 · 部署 · 用户指南"]
     ciN[".github/workflows/ci.yml"]
   end
 ```
@@ -361,7 +358,7 @@ cd TraffSim3D-backend
 
 - **不要用 `uv run`**：这台机器上 uv 的 HTTP 客户端会挂起而不是报错，
   `uv sync` 可能永远不返回。直接用 `.\.venv\Scripts\python.exe`。
-- **装包用镜像源**：
+- **装包用更快的镜像源**：
   `.\.venv\Scripts\python.exe -m pip install -i https://mirrors.aliyun.com/pypi/simple/ <pkgs>`。
 - **`--cov` 必须用点号模块名**：`--cov=app.apps.rl.weights` 有效；
   `--cov=app/apps/rl/weights.py`（斜杠路径）在 coverage 7.16.2 下**静默无数据**，
@@ -481,7 +478,7 @@ npm run test:e2e:headed   # 有头模式
 9. **委派出去的实现任务，要让 worker 自己提交**。否则成果留在别人的工作区里，
    谁也拿不到 —— 也不要为了「干净工作区」去 `git stash` / `git reset --hard` /
    `git checkout --`，那会毁掉别人尚未提交的成果。
-10. **依赖下载优先镜像源**（pip 用 `mirrors.aliyun.com/pypi/simple`，
+10. **依赖下载优先走更快的镜像源**（pip 用 `mirrors.aliyun.com/pypi/simple`，
     npm 用 `registry.npmmirror.com`）。这台机器到海外 CDN 的出站链路慢且间歇性不可达，
     「装不上」通常是网络问题，不是包不存在 —— 下结论前先换镜像复验。
 11. **装 RL 栈用可选依赖**：`pip install -e ".[dev,rl]"`。没有 SB3 时，
@@ -495,8 +492,6 @@ npm run test:e2e:headed   # 有头模式
 |---|---|
 | [adr/ADR-001 … ADR-009](adr/) | 决策记录。001 前端框架 · 002 后端框架 · 003 物理引擎 · 004 RL 框架 · 005 DDD + 前后端切分 · 006 OSM → 内部图 · 007 部署方式（Rejected）· 008 契约的两个 oracle · 009 契约的相等判定与 libm 噪声地板。 |
 | [contracts/sim-snapshot.md](contracts/sim-snapshot.md) | 跨语言契约：**覆盖什么**、**不覆盖什么**（含具名盲区表）、向量清单、跨语言差异状态表。 |
-| [PLANS-TO-MILESTONES.md](PLANS-TO-MILESTONES.md) | 里程碑状态（DONE / PARTIAL / TODO）的**唯一权威**。 |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | 部署：镜像配置、安装、端口、运行时数据目录、故障排查。 |
 | [USER-GUIDE.md](USER-GUIDE.md) | 用户向：四个模块的界面用法与术语表。 |
-| []() | 最初的完整执行方案（范围、架构、里程碑划分）。 |
-| [../plans/README.md](../plans/README.md) | 计划文档索引与执行顺序。 |
+| [../README.md](../README.md) | 项目总览：能做什么、怎么跑起来、技术栈。 |

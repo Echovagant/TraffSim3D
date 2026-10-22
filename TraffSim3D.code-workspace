@@ -47,37 +47,13 @@
     "configurations": [],
     "compounds": []
   },
-  "claude": {
-    "_comment": "Project-level Claude Code metadata (custom, not VS Code standard). Read by Skill commands when they need to know which skills/mcps are wired for this repo.",
-    "config_file": ".claude/CLAUDE.md",
-    "settings_file": ".claude/settings.json",
-    "skills_dir": ".claude/skills",
-    "active_skills": [
-      "improve",
-      "verify",
-      "code-review",
-      "simplify",
-      "specify",
-      "plan",
-      "tasks",
-      "implement",
-      "self-improving",
-      "improve-m2",
-      "sync-plans-docs",
-      "e2e-review"
-    ],
-    "mcp_servers": [],
-    "e2e": {
-      "enabled": true,
-      "framework": "@playwright/test",
-      "browser": "chromium (bundled)",
-      "specs_dir": "TraffSim3D-frontend/tests/e2e",
-      "output_dir": "e2e-output",
-      "baseline_tracked": true,
-      "command": "npm run test:e2e"
-    },
-    "e2e_output_dir": "e2e-output",
-    "plans_dir": "plans",
-    "docs_dir": "docs"
+  "e2e": {
+    "enabled": true,
+    "framework": "@playwright/test",
+    "browser": "chromium (bundled)",
+    "specs_dir": "TraffSim3D-frontend/tests/e2e",
+    "output_dir": "e2e-output",
+    "baseline_tracked": true,
+    "command": "npm run test:e2e"
   }
 }

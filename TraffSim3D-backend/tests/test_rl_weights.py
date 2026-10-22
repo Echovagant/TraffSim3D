@@ -1,4 +1,4 @@
-"""Unit tests for `app.apps.rl.weights` (Plan 049 checkpoint → JSON export).
+"""Unit tests for `app.apps.rl.weights` (checkpoint → JSON export).
 
 `export_weights` lazily does `from stable_baselines3 import PPO` inside the
 function body, so a stand-in module placed in `sys.modules` is exactly what
@@ -205,7 +205,7 @@ def test_export_weights_returns_architecture_and_layers(
 
 
 # --------------------------------------------------------------------------
-# Plan 074 (T4): the action space — discrete vs continuous
+# The action space — discrete vs continuous
 # --------------------------------------------------------------------------
 
 
@@ -283,7 +283,7 @@ def test_export_weights_of_an_unknown_action_space_stays_strict(
 
     Without an action space there is nothing to tell a discrete policy
     from a continuous one, so the export stays strict and demands the
-    `log_std` — the same behaviour as before Plan 074.
+    `log_std` — the same behaviour as before the action-space split.
     """
     _install_fake_sb3(
         monkeypatch,
@@ -429,7 +429,7 @@ def test_export_weights_rejects_state_dict_missing_log_std(
 ) -> None:
     """A checkpoint whose action space is unknown is rejected by name.
 
-    Since Plan 074 a `Discrete` policy legitimately has no `log_std` — but
+    Since the action-space split a `Discrete` policy legitimately has no `log_std` — but
     the export can only tell the two apart from the checkpoint's *action
     space*. A loader that does not expose one leaves the export strict,
     exactly as it was before.

@@ -1,6 +1,6 @@
 // src/domain/services/egoKernel.ts
 //
-// Plan 071: the L1 ego-kinematics kernel — a 1:1 port of the Python
+// The L1 ego-kinematics kernel — a 1:1 port of the Python
 // training sim's ego model (`TraffSim3D-backend/app/apps/rl/sim_core.py`).
 //
 // It is shared by two consumers:
@@ -47,7 +47,7 @@
 //   7. The Pure Pursuit **alpha sign** is the textbook one:
 //      `alpha = atan2(dz, dx) - heading` (the angle from the heading to the
 //      target), so the steer turns **towards** the target. Python computed
-//      the opposite until Plan 076 T11 (2026-10-21), which made the trained
+//      the opposite until the alpha sign was fixed (2026-10-21), which made the trained
 //      ego steer away from its target — invisible while every scenario put
 //      the target straight ahead. The contract's `steer_*` vectors keep this
 //      dimension covered; see `pythonSteer`'s docstring.
@@ -148,7 +148,7 @@ export const pythonSpeedStep = (speed: number, action0: number, dt: number): num
  * `sin(alpha) > 0` means the target is ahead and to the left, and the steer
  * turns **towards** it.
  *
- * It was the other way round until Plan 076 T11 (2026-10-21): the sim
+ * It was the other way round until the alpha sign was fixed (2026-10-21): the sim
  * computed `alpha = heading - atan2(dz, dx)`, and the steering law is only
  * correct for the textbook sign — so the ego steered **away** from its
  * target. It was invisible for years because every scenario put the target
@@ -191,11 +191,11 @@ export const pythonSteer = (ego: EgoState, target: readonly [number, number]): n
  * The speed update is `pythonSpeedStep` verbatim — the two must stay one
  * operation sequence, so the shared function is the single place to change.
  *
- * `steerResidual` is Plan 076 T12's **steering residual**: a correction the
+ * `steerResidual` is a **steering residual**: a correction the
  * policy applies **on top of** the scripted Pure Pursuit steer, scaled by
  * `MAX_STEER` by the caller and clipped together with it (Python:
  * `steer = clip(clip(steer) + residual)`). The default is `0` — no
- * correction — which keeps every pre-T12 caller bit-identical: the
+ * correction — which keeps every pre-existing caller bit-identical: the
  * product replay path only uses `pythonSpeedStep`, and the contract mirror
  * passes the vector's residual.
  */

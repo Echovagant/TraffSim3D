@@ -1,4 +1,4 @@
-// Plan 034: out-of-bounds cleanup tests.
+// Out-of-bounds cleanup tests.
 import { describe, it, expect, beforeEach } from 'vitest'
 import { lanePoint } from '@domain/services/laneGeometry'
 import { buildTestNetwork, makeTestVehicle } from '@__fixtures__/testNetwork'

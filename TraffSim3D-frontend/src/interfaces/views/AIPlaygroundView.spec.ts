@@ -1,6 +1,6 @@
 // src/interfaces/views/AIPlaygroundView.spec.ts
 //
-// Plan 074 (T6): the "AI is commanding" readout.
+// The "AI is commanding" readout.
 //
 // The AI Playground must show what the signal agent is doing — the current
 // action and the two queue lengths — so that "the AI commands the light" is
@@ -26,7 +26,7 @@ const mockResponse = (body: unknown, status = 200): Response => {
   } as unknown as Response
 }
 
-describe('AIPlaygroundView — the AI signal-command readout (Plan 074 T6)', () => {
+describe('AIPlaygroundView — the AI signal-command readout', () => {
   let fetchSpy: ReturnType<typeof vi.fn>
 
   beforeEach(() => {

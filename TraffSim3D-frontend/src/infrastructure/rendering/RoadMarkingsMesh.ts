@@ -49,7 +49,7 @@ const buildArrow = (arrowSize: number): THREE.LineSegments => {
 }
 
 /**
- * Plan 035: polyline-aware road markings. Centerline follows the
+ * Polyline-aware road markings. Centerline follows the
  * polyline (N-1 segments). Dashed dividers distribute along the
  * polyline arc length, snapping to the local segment tangent at each
  * dash. Stop lines are perpendicular to the LOCAL tangent at the
@@ -57,7 +57,7 @@ const buildArrow = (arrowSize: number): THREE.LineSegments => {
  * `s = 0.2·len` and `0.8·len`, rotated to the local tangent.
  *
  * For 2-point roads (N=2), the result is mathematically the same as
- * the pre-035 single-segment road.
+ * the older single-segment road.
  */
 export const createRoadMarkings = (road: Road): THREE.Group => {
   const group = new THREE.Group()

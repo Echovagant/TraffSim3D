@@ -1,4 +1,4 @@
-// M2-B (plan 028): Coordinated signal controller — green-wave.
+// Coordinated signal controller — green-wave.
 //
 // Pairwise offset: r-ew 的绿相位起始时间比 r-ns 晚 `offset` 秒.
 // Phase 长度严格 30/3/30, 不做延长/缩短 (与 FixedCycle 行为一致).
@@ -15,7 +15,7 @@ const GREEN_SECS = 30
 const YELLOW_SECS = 3
 const RED_SECS = 30
 
-/** Default pair key for the M2 default scene. M3+ multi-pair is
+/** Default pair key for the default scene. Multi-pair is
  *  handled by a future plan (030 corridor discovery). */
 const DEFAULT_PAIR = 'r-ns|r-ew'
 
@@ -89,7 +89,7 @@ export class CoordinatedController implements SignalController {
   }
 
   applyAction(_light: TrafficLight, _action: SignalAction['name']): void {
-    // No external action queue (RLController, M4).
+    // No external action queue (RLController).
   }
 }
 

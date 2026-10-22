@@ -1,6 +1,6 @@
 // src/infrastructure/rl/mlpInference.ts
 //
-// Plan 049: in-browser forward pass for SB3 PPO MlpPolicy.
+// In-browser forward pass for SB3 PPO MlpPolicy.
 //
 // Re-implements the SB3 default policy in pure TS so the frontend can
 // run a trained PPO checkpoint without PyTorch / onnxruntime. The
@@ -17,7 +17,7 @@
 // parameter) and Box-Muller Gaussian noise. Deterministic replay uses
 // `mean` directly.
 //
-// Plan 074 added the **discrete** path: a traffic-signal agent has a
+// The **discrete** path was added for the traffic-signal agent: it has a
 // 5-way discrete action, and SB3's `CategoricalPolicy` has no `log_std`
 // at all — it produces action *logits*. `mlpForwardDiscrete` runs the
 // same layer layout and takes the argmax (no softmax: argmax is
@@ -87,7 +87,7 @@ export const mlpForwardMean = (obs: number[], w: PolicyWeights): PolicyAction =>
   return [mean[0] ?? 0, mean[1] ?? 0]
 }
 
-/** The **discrete** forward pass (Plan 074): the argmax of the action
+/** The **discrete** forward pass: the argmax of the action
  *  logits.
  *
  *  A discrete (SB3 `CategoricalPolicy`) policy's deterministic action is

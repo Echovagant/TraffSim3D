@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 /**
- * Plan 054: ground plane now accepts a configurable size. M1-M3 used
+ * The ground plane now accepts a configurable size. Earlier versions used
  * a hard-coded 200×200 plane that became a visible "gray square" once
  * the user zoomed out to frame a 5km OSM district. The scene builder
  * now sizes the ground to `max(200, bboxDiagonal * 3) + 1000` so

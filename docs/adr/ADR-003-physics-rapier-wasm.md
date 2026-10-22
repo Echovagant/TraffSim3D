@@ -17,12 +17,12 @@ realistic motion for human inspection of learned policies.
 
 Use **Rapier (WASM)** for the front-end 3D physics. Rapier compiles to
 WebAssembly and exposes a JavaScript API; we wire it through the Vue
-front-end in M2.
+front-end.
 
 ## Consequences
 
 - The back-end does NOT depend on Rapier; the Gymnasium env in `apps/rl`
-  uses its own simplified kinematic model in M4.
+  uses its own simplified kinematic model.
 - WASM bundle size is non-trivial; we will lazy-load the Rapier module
   when the SceneLab or SimulationLab view mounts.
 - Determinism for RL training is preserved by running the *training*

@@ -1,7 +1,7 @@
 /**
- * Plan 042 / Plan 037 (bug 2) verification: status hysteresis at startup.
+ * Verification: status hysteresis at startup.
  *
- * Plan 037 §2.1 defines the defect as 状态闪烁 — the status oscillating
+ * The defect is 状态闪烁 — the status oscillating
  * driving → waiting → driving at the speed threshold. The fix was hysteresis
  * (separated enter/exit thresholds plus a 0.5s dwell).
  *
@@ -19,7 +19,7 @@
 import { test, expect } from '@playwright/test'
 import { waitForSceneReady } from './helpers/wait'
 
-test('status does not flicker at startup (Plan 037 hysteresis)', async ({ page }) => {
+test('status does not flicker at startup (hysteresis)', async ({ page }) => {
   await waitForSceneReady(page)
   // Sample statuses 6 times over 3 seconds
   const samples: (string | null)[] = []

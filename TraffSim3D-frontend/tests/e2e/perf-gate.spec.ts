@@ -1,8 +1,7 @@
 /**
- * M1 performance gate — the one M1 Must item never actually executed.
+ * Performance gate — the frame-rate target the scene editor is built against.
  *
- * Gate definition (docs/M1-VERIFICATION.md): 20 vehicles, camera still,
- * ≥ 30 FPS sustained. This spec finally runs it instead of leaving it PENDING.
+ * Gate definition: 20 vehicles, camera still, ≥ 30 FPS sustained.
  *
  * IMPORTANT HONESTY NOTE
  * ----------------------
@@ -19,7 +18,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { SCREENSHOT_DIR, waitForSceneReady } from './helpers/wait'
 
-const M1_MIN_FPS = 30
+const MIN_FPS = 30
 /** Gate as originally written. See the SCOPE note below — unreachable today. */
 const GATE_VEHICLES = 20
 /** Largest capacity any built-in scene can actually hold (measured). */
@@ -30,7 +29,7 @@ const SAMPLE_INTERVAL_MS = 500
 
 type Sample = { tMs: number; fps: number; frameMsAvg: number; vehicles: number }
 
-test.describe('M1 performance gate', () => {
+test.describe('performance gate', () => {
   test.setTimeout(180_000)
 
   test(`${MEASURED_VEHICLES} vehicles sustain the frame-rate target`, async ({ page }) => {
@@ -40,7 +39,7 @@ test.describe('M1 performance gate', () => {
     // Measured capacities of every built-in scene (tests/e2e/scene-capacity-probe.spec.ts):
     //   cross 8 | t 7 | loop 12 | elevated 6 | corridor 8
     // `spawnVehicle` refuses once every lane is occupied ("交通密度已满"), and
-    // road geometry was reworked across M2-M4 since the gate was written.
+    // road geometry was reworked since the gate was written.
     // So we measure the largest scene at its real ceiling and report the
     // shortfall rather than silently redefining the gate as 12 vehicles.
     await page.selectOption('[data-testid="scene-kind-select"]', 'loop')
@@ -114,7 +113,7 @@ test.describe('M1 performance gate', () => {
     // Persist raw samples so the reading is reproducible and reviewable.
     fs.mkdirSync(SCREENSHOT_DIR, { recursive: true })
     const report = {
-      gate: `M1 perf gate: ${GATE_VEHICLES} vehicles (as written), >= ${M1_MIN_FPS} FPS`,
+      gate: `perf gate: ${GATE_VEHICLES} vehicles (as written), >= ${MIN_FPS} FPS`,
       gateStatus:
         'REDUCED SCOPE — 20-vehicle target unreachable; no built-in scene holds ' +
         'more than 12. Measured at the largest scene ceiling instead. Needs a ' +
@@ -132,20 +131,20 @@ test.describe('M1 performance gate', () => {
       headless: true,
       samples,
       stats: { min, max, avg: Number(avg.toFixed(2)), frameMsAvg: Number(frameAvg.toFixed(2)) },
-      target: M1_MIN_FPS,
+      target: MIN_FPS,
     }
     fs.writeFileSync(
-      path.join(SCREENSHOT_DIR, 'm1-perf-gate.json'),
+      path.join(SCREENSHOT_DIR, 'perf-gate.json'),
       JSON.stringify(report, null, 2),
       'utf-8',
     )
 
     console.log(
-      `[M1 perf gate] renderer=${report.renderer}\n` +
-        `[M1 perf gate] fps min/avg/max = ${min}/${avg.toFixed(1)}/${max}, ` +
+      `[perf gate] renderer=${report.renderer}\n` +
+        `[perf gate] fps min/avg/max = ${min}/${avg.toFixed(1)}/${max}, ` +
         `frameMs avg = ${frameAvg.toFixed(2)}, vehicles = ${added.vehicles} ` +
         `(gate asked for ${GATE_VEHICLES}; scene capacity max is ${MEASURED_VEHICLES})\n` +
-        `[M1 perf gate] target = ${M1_MIN_FPS} FPS (headless = software raster, pessimistic)`,
+        `[perf gate] target = ${MIN_FPS} FPS (headless = software raster, pessimistic)`,
     )
 
     // The store must actually have been ticking — a frozen sim would read
@@ -157,10 +156,10 @@ test.describe('M1 performance gate', () => {
     // constraint; see the honesty note at the top of this file.
     expect(
       avg,
-      `sustained FPS ${avg.toFixed(1)} < ${M1_MIN_FPS} at ${MEASURED_VEHICLES} vehicles. ` +
+      `sustained FPS ${avg.toFixed(1)} < ${MIN_FPS} at ${MEASURED_VEHICLES} vehicles. ` +
         `Renderer: ${report.renderer}. Headless Chromium uses software ` +
         `rasterization — re-run headed on real hardware before treating this ` +
         `as a gate failure.`,
-    ).toBeGreaterThanOrEqual(M1_MIN_FPS)
+    ).toBeGreaterThanOrEqual(MIN_FPS)
   })
 })

@@ -121,10 +121,10 @@
 
 FPS（低于门槛时会标黄警告）、帧耗时平均值 / 最小值 / 最大值、仿真速率（`−` / `+` 调节）、播放状态。
 
-### 5. M2 vs M1 对照表
+### 5. 物理仿真接入前后的对照表
 
-一张对照表说明"这个功能在物理仿真接入前后的差别" —— 比如 M1 的车辆只是沿车道直线走，
-M2 接入 Rapier 之后才有真实质量/摩擦与碰撞检测（相撞的车状态变为 `crashed`）。
+一张对照表说明"这个功能在物理仿真接入前后的差别" —— 比如接入前车辆只是沿车道直线走，
+接入 Rapier 之后才有真实质量/摩擦与碰撞检测（相撞的车状态变为 `crashed`）。
 第一次用平台时扫一眼这张表，能快速建立预期。
 
 ---
@@ -332,4 +332,5 @@ cross（十字路口） → t_junction（T 型路口） → roundabout（环形�
 - [`DEPLOYMENT.md`](DEPLOYMENT.md) —— 安装、启动、故障排查
 - [`openapi.json`](openapi.json) —— 后端全部接口的 OpenAPI 快照
 - [`contracts/sim-snapshot.md`](contracts/sim-snapshot.md) —— 前后端仿真观测契约（`OBS_DIM = 14`）
-- [`PLANS-TO-MILESTONES.md`](PLANS-TO-MILESTONES.md) —— 里程碑状态（唯一权威）
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) —— 系统结构与代码出处
+- [`../README.md`](../README.md) —— 项目总览

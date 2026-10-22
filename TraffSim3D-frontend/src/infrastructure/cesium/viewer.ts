@@ -1,6 +1,6 @@
 // src/infrastructure/cesium/viewer.ts
 //
-// Plan 055: Cesium viewer factory for the Smart City basemap.
+// Cesium viewer factory for the Smart City basemap.
 //
 // Reuses the same approach as the user's prior SmartCity.vue project:
 //   - Zero Ion dependency (`baseLayer: false`, no access token)
@@ -43,7 +43,7 @@ export const createCesiumViewer = (
   container: HTMLElement,
   opts: CesiumSceneOptions,
 ): Cesium.Viewer => {
-  // Plan 055: explicit baseLayer: false to avoid Cesium triggering
+  // Explicit baseLayer: false to avoid Cesium triggering
   // its default `fromWorldImagery()` call which requires an Ion
   // access token. We attach our own imagery layer below.
   const viewer = new Cesium.Viewer(container, {

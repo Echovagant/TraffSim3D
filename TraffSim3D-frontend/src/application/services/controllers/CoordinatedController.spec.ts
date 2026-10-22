@@ -1,6 +1,6 @@
-// M2-B (plan 028): CoordinatedController unit tests.
+// CoordinatedController unit tests.
 //
-// Verify the 4 critical behaviors documented in plan 028:
+// Verify the 4 critical behaviors:
 //   1. enabled=false / offset=0 — fixed-cycle compatible (错开 30s)
 //   2. enabled + offset=0 — same as 1
 //   3. enabled + offset=15 — EW green lags NS green by 15s

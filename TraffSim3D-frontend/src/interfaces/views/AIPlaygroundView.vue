@@ -3,7 +3,7 @@
     <router-link to="/" class="back-link">← 返回首页</router-link>
 
     <header class="header">
-      <span class="badge">M4 · 044</span>
+      <span class="badge">PPO</span>
       <h1>AI Proving Ground</h1>
       <p class="sub">Gymnasium + PPO 训练单智能体通过 4-way 路口</p>
     </header>
@@ -149,7 +149,7 @@
         data-testid="reward-chart"
         preserveAspectRatio="none"
       >
-        <!-- Plan 047: when independent_agents, draw one polyline per agent -->
+        <!-- When independent_agents, draw one polyline per agent -->
         <template v-if="hasAgentRewards">
           <polyline
             v-for="(color, agentId) in agentColors"
@@ -192,7 +192,7 @@
       </p>
     </section>
 
-    <!-- Plan 075: the comparison curve — the policy's deterministic
+    <!-- The comparison curve — the policy's deterministic
          evaluation return against the training step, next to the
          fixed-cycle baseline it has to beat. -->
     <section v-if="evalSeries.length > 0" class="card">
@@ -297,7 +297,7 @@
       </p>
     </section>
 
-    <!-- Plan 075: the multi-seed table. Every seed is on the table — the
+    <!-- The multi-seed table. Every seed is on the table — the
          ones that collapsed back onto `no_op` included, because the ~50 %
          success rate is only honest if the failures are visible. -->
     <section v-if="signalSeedResults.length > 0" class="card">
@@ -372,7 +372,7 @@
       </ul>
     </section>
 
-    <!-- Plan 049: RL replay surface — load a trained PPO checkpoint
+    <!-- RL replay surface — load a trained PPO checkpoint
          and watch it drive one of the sim vehicles in the editor. -->
     <section class="card">
       <h2>策略部署 (Replay)</h2>
@@ -461,7 +461,7 @@
       <p v-if="error" class="err" data-testid="replay-error">{{ error }}</p>
     </section>
 
-    <!-- Plan 074 (T6): the signal agent — a *discrete* five-action policy
+    <!-- The signal agent — a *discrete* five-action policy
          that commands the traffic light instead of driving a vehicle.
          The readout below is what makes "the AI is commanding" visible
          instead of a claim. -->
@@ -534,11 +534,11 @@
 
 <script setup lang="ts">
 /**
- * Plan 044: AI Playground — single-agent training dashboard.
- * Plan 045: checkpoint management UI.
- * Plan 047: per-agent reward rendering.
- * Plan 048: scene-kind selector.
- * Plan 049: RL replay surface — load a PPO checkpoint and drive one
+ * AI Playground — single-agent training dashboard.
+ * Checkpoint management UI.
+ * Per-agent reward rendering.
+ * Scene-kind selector.
+ * RL replay surface — load a PPO checkpoint and drive one
  *   vehicle in the TS sim from the policy's actions.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -546,10 +546,10 @@ import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 import { buildEvalCurve, type EvalPoint } from './trainingCurve'
 
-/** Plan 075: one point of the backend's evaluation series. */
+/** One point of the backend's evaluation series. */
 type SignalEvalPoint = EvalPoint
 
-/** Plan 075: one seed's measured result (the collapsed ones included). */
+/** One seed's measured result (the collapsed ones included). */
 interface SignalSeedResult {
   seed: number
   train_return: number
@@ -576,18 +576,18 @@ interface Status {
   n_agents?: number
   independent_agents?: boolean
   latest_checkpoint?: string
-  /** Plan 047: per-agent reward history (only when independent_agents=true).
+  /** Per-agent reward history (only when independent_agents=true).
    *  Keys are stringified int agent_ids ("0", "1", ...). */
   agent_rewards?: Record<string, number[]>
-  /** Plan 075: the evaluation series — one point per evaluation. */
+  /** The evaluation series — one point per evaluation. */
   signal_eval_series?: SignalEvalPoint[]
-  /** Plan 075: the fixed 30/30 cycle per condition (train / eval / holdout). */
+  /** The fixed 30/30 cycle per condition (train / eval / holdout). */
   signal_baselines?: Record<string, number>
-  /** Plan 075: every seed's measured result — the collapsed ones included. */
+  /** Every seed's measured result — the collapsed ones included. */
   signal_seed_results?: SignalSeedResult[]
-  /** Plan 075: the seed the best-of-N selection picked. */
+  /** The seed the best-of-N selection picked. */
   best_seed?: number
-  /** Plan 075: the winner's return on the final, never-selected condition. */
+  /** The winner's return on the final, never-selected condition. */
   signal_holdout_return?: number
   /** The fixed 30/30 cycle on the training condition. */
   baseline_no_op_return?: number
@@ -665,7 +665,7 @@ const refreshTrainingConfig = async (): Promise<void> => {
   }
 }
 
-// Plan 049: RL replay state. The store owns the loaded policy; this
+// RL replay state. The store owns the loaded policy; this
 // view just collects the user's intent (which checkpoint, which target)
 // and pipes actions to the store.
 const world = useWorldStore()
@@ -734,7 +734,7 @@ const onClearPolicy = (): void => {
   showFlashMessage('策略已清除', 'info')
 }
 
-// ===== Plan 074 (T6): the signal agent =====
+// ===== the signal agent =====
 //
 // A second, different policy: the signal agent's (discrete, 5 actions,
 // 6 observations) as opposed to the ego agent's (continuous, 2 actions,
@@ -826,7 +826,7 @@ const rewardPoints = computed(() => {
     .join(' ')
 })
 
-// Plan 047: per-agent reward history rendering.
+// Per-agent reward history rendering.
 const AGENT_COLOR_PALETTE = [
   '#34d399',
   '#60a5fa',
@@ -868,7 +868,7 @@ const formatNumber = (n: number, digits = 2): string => {
   return Number(n).toFixed(digits)
 }
 
-// ===== Plan 075: the comparison curve + the multi-seed table =====
+// ===== the comparison curve + the multi-seed table =====
 //
 // The raw reward curve above is a *sampled* per-episode return: noisy, and
 // not comparable with anything. The curve below is the policy's
@@ -976,7 +976,7 @@ const marginPhrase = (margin: Margin): string =>
     : `落后 ${Math.abs(margin.abs).toFixed(1)} 分 (${Math.abs(margin.pct).toFixed(1)}%)`
 
 /**
- * The generalisation gap (Plan 074 T10): the margin on the training
+ * The generalisation gap: the margin on the training
  * condition against the margin on the held-out evaluation condition. The
  * advantage measured on the training episodes is an overestimate — this is
  * where that becomes visible.
@@ -1000,7 +1000,7 @@ const formatActionMix = (actions: Record<string, number> | undefined): string =>
 
 /**
  * A seed whose action mix collapsed onto the pure `no_op` schedule — the
- * failure mode Plan 074 T10 measured. It is **reported**, never hidden:
+ * failure mode the multi-seed run measured. It is **reported**, never hidden:
  * the success rate is only honest if the failures are on the table.
  */
 const isCollapsedSeed = (record: SignalSeedResult): boolean => {
@@ -1115,7 +1115,7 @@ onMounted(() => {
   refreshStatus()
   refreshTrainingConfig()
   pollHandle = window.setInterval(refreshStatus, 2000)
-  // Plan 049: poll `window.__replayLast` (set by tick.ts on each
+  // Poll `window.__replayLast` (set by tick.ts on each
   // replay inference) and copy into the store so the replay-status
   // panel updates. 4 Hz is plenty for human-readable debug.
   replayMirrorHandle = window.setInterval(() => {
@@ -1323,7 +1323,7 @@ button.ghost:disabled {
   margin-top: 6px;
 }
 
-/* Plan 075: the multi-seed table. */
+/* The multi-seed table. */
 .seed-table {
   width: 100%;
   border-collapse: collapse;
@@ -1356,7 +1356,7 @@ button.ghost:disabled {
   white-space: nowrap;
 }
 
-/* Plan 049: RL replay surface styling. */
+/* RL replay surface styling. */
 .replay-status {
   display: flex;
   gap: 24px;

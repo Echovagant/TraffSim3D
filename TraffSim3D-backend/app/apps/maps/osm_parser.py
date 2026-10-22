@@ -1,8 +1,8 @@
-"""OSM XML -> RoadNetwork JSON parser. Plan 041.
+"""OSM XML -> RoadNetwork JSON parser.
 
 Returns the network shape directly aligned with the frontend
-SerializedScene (schemaVersion 6) — see ADR-006 for
-the full plan. Used by the POST /api/v1/maps/parse-osm endpoint.
+SerializedScene (schemaVersion 6) — the frontend's own scene format.
+Used by the POST /api/v1/maps/parse-osm endpoint.
 
 MVP scope:
 - XML only (PBF deferred)
@@ -278,7 +278,7 @@ def parse_osm_xml(
 
 
 # ---------------------------------------------------------------------------
-# Plan 046: OSM PBF parser (.osm.pbf -> RoadNetwork).
+# OSM PBF parser (.osm.pbf -> RoadNetwork).
 #
 # Uses libosmium (osmium Python bindings) for streaming PBF parsing.
 # The shared projection + way-to-road + intersection logic is the

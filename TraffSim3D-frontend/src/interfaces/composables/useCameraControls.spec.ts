@@ -165,10 +165,10 @@ describe('useCameraControls', () => {
       expect(h.controls().maxPolarAngle).toBeCloseTo(Math.PI / 2 - 0.05, 10)
     })
 
-    it('binds left=rotate, middle=dolly, right=disabled (Plan 054b)', () => {
+    it('binds left=rotate, middle=dolly, right=disabled', () => {
       expect(h.controls().mouseButtons.LEFT).toBe(THREE.MOUSE.ROTATE)
       expect(h.controls().mouseButtons.MIDDLE).toBe(THREE.MOUSE.DOLLY)
-      // Plan 054b: right-click pan is deliberately disabled so the browser
+      // Right-click pan is deliberately disabled so the browser
       // context menu stays available for entity inspection. See the rationale
       // block in useCameraControls.ts.
       expect(h.controls().mouseButtons.RIGHT).toBeNull()
@@ -276,7 +276,7 @@ describe('useCameraControls', () => {
     })
   })
 
-  describe('fit-to-network (Plan 053)', () => {
+  describe('fit-to-network', () => {
     it('puts controls.target on the bbox centre with Y forced to 0', async () => {
       requestFitToNetwork({ bounds: bounds({ centerX: 250, centerZ: -80 }), aspect: 1.6 })
       await nextTick()

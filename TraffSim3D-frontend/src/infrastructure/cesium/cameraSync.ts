@@ -1,6 +1,6 @@
 // src/infrastructure/cesium/cameraSync.ts
 //
-// Plan 055: Cesium → Three.js camera sync (one-way, MVP).
+// Cesium → Three.js camera sync (one-way, MVP).
 //
 // Cesium works in ECEF (Earth-Centered, Earth-Fixed) world coords;
 // Three.js works in a local tangent plane anchored at a chosen

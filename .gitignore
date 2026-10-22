@@ -47,17 +47,20 @@ coverage/
 htmlcov/
 .pytest_cache/
 
-# Plan 042 — Playwright e2e + screenshots
+# Playwright e2e + screenshot baselines
 e2e-output/current/
+e2e-output/perf/
 TraffSim3D-frontend/test-results/
 TraffSim3D-frontend/playwright-report/
+TraffSim3D-frontend/playwright.perf.config.ts
+TraffSim3D-frontend/playwright.local.config.ts
 
-# Plan 050 — cross-language contract test snapshots.
+# Cross-language contract test snapshots.
 # The Python side regenerates its own on every run; the TS side's goldens
 # are committed so the backend suite can run the full contract standalone.
 TraffSim3D-backend/tests/contract/snapshots/python_*.json
 
-# Plan 056 — Overpass response cache (large JSON files regenerated
+# Overpass response cache (large JSON files regenerated
 # by the backend; user can `rm -rf` to force refresh from overpass-api.de)
 TraffSim3D-backend/geojson/cache/
 
@@ -66,19 +69,37 @@ TraffSim3D-backend/geojson/cache/
 TraffSim3D-backend/geojson/*.geojson
 TraffSim3D-backend/geojson/*.osm
 
-# Third-party skill repos cloned into root (not part of this project;
-# use `dsh` skill loading instead of vendoring full git repos)
+# Third-party reference repos cloned into root (not part of this project)
 gsap-skills/
 
 # Root-level Playwright test-results (in addition to the frontend-specific
 # path above; some runs write to project root)
 /test-results/
 
-# Editor plugin / agent scratch dirs
+# Local tooling scratch dirs
 .qoder-cn/
 
 # Analysis report scratch (regenerated on demand)
 1014分析报告.md
+
+# --- Local-only working material (never published) ---------------------------
+# These are internal planning / agent-harness documents. They are kept on
+# this machine so the local development workflow keeps working, but they are
+# not part of the published project: they name internal work-item numbers
+# and document how the project was built rather than what it does.
+plans/
+team/
+.claude/
+CLAUDE.md
+任务详细20261016.md
+任务过程.md
+插件兼容性审计.md
+docs/PLANS-TO-MILESTONES.md
+docs/M1-VERIFICATION.md
+docs/M2-VERIFICATION.md
+docs/M3-VERIFICATION.md
+docs/M4-VERIFICATION.md
+docs/
 
 # Environment / secrets
 .env

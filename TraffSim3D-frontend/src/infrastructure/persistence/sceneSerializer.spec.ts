@@ -30,11 +30,11 @@ describe('sceneSerializer round-trip', () => {
     const net = buildTestNetwork(0)
     const scene = serializeNetwork(net)
     expect(scene.schemaVersion).toBe(SCENE_SCHEMA_VERSION)
-    expect(scene.schemaVersion).toBe(6) // plan 037 bumped to v6 (was v5 in 035)
+    expect(scene.schemaVersion).toBe(6) // bumped to v6 (was v5)
     expect(typeof scene.savedAtMs).toBe('number')
   })
 
-  it('preserves desiredLaneIndex + laneChangeStartedAt across round-trip (plan 029)', () => {
+  it('preserves desiredLaneIndex + laneChangeStartedAt across round-trip', () => {
     const net = buildTestNetwork(1)
     net.vehicles['v-1']!.desiredLaneIndex = 1
     net.vehicles['v-1']!.laneChangeStartedAt = 12.5
@@ -44,7 +44,7 @@ describe('sceneSerializer round-trip', () => {
     expect(restored.vehicles['v-1']!.laneChangeStartedAt).toBe(12.5)
   })
 
-  it('round-trips polyline waypoints (plan 035)', () => {
+  it('round-trips polyline waypoints', () => {
     const net = buildTestNetwork(0)
     const polyRoad = {
       id: 'r-poly',

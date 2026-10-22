@@ -1,5 +1,5 @@
 /**
- * Plan 040 / Plan 042 verification: multi-intersection corridor scene.
+ * Verification: multi-intersection corridor scene.
  * Switches to the corridor scene, verifies 6 default vehicles load,
  * and screenshots the visualization.
  */

@@ -40,10 +40,10 @@ boundary) — the API contract is the OpenAPI schema, not a shared
   Vue template into the four DDD layers; new feature code lands on
   top of the layered structure, not on top of the flat scaffold.
 - The back-end's `app/apps/*` packages stay as empty skeletons
-  in M1 (one-line docstrings only) and fill in across M2–M4.
+  (one-line docstrings only) and fill in as each capability lands.
 - Storage stack (PostgreSQL + PostGIS, Redis, MinIO) is **only**
-  introduced when the milestone that needs it starts (M3 maps, M4 RL).
-- ADR-001 through ADR-006 must be re-confirmed at the M2 boundary;
+  introduced when the capability that needs it starts (map data, RL).
+- ADR-001 through ADR-006 must be re-confirmed at the next architecture boundary;
   any deviation (e.g. swapping Pinia for a different store, or
   dropping DDD) requires a new ADR that supersedes the current one.
 

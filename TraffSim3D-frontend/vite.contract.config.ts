@@ -1,6 +1,6 @@
 // vite.contract.config.ts
 //
-// Plan 071: a minimal vite config for the contract snapshot generator.
+// A minimal vite config for the contract snapshot generator.
 //
 // It exists because `vite-node` bundles its own (older) vite and the
 // project's `vite.config.js` plugins are not compatible with it —

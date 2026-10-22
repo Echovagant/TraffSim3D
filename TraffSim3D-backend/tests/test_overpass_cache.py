@@ -1,4 +1,4 @@
-"""Plan 056: tests for the cached Overpass fetcher.
+"""Tests for the cached Overpass fetcher.
 
 We mock the `httpx.Client.post` call to avoid hitting
 overpass-api.de (and to keep the test deterministic + fast).

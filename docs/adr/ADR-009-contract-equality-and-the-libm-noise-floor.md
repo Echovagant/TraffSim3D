@@ -5,7 +5,7 @@
 - **Deciders**: Project lead (contract scope)
 - **Supersedes**: [ADR-008](ADR-008-cross-language-contract-oracles.md) §D3 的**适用范围**
   （不是推翻它 —— 见「与 ADR-008 的关系」）
-- **Source**: the cross-language contract (ADR-008) §2 S5a
+- **Source**: 转向向量与变异门禁 —— 转向向量引入后暴露出的 1 ULP 平台差异
 
 ---
 
@@ -17,7 +17,7 @@
 这个前提**对直线向量成立**：它们的超越函数参数只有 `0`（Pure Pursuit 的角）
 与 `π/2`（航向），任何 libm 都逐位复现。
 
-**但它对会转向的轨迹不成立。** Plan 076 S5a 加了转向向量之后，契约立刻变红，
+**但它对会转向的轨迹不成立。** 加入转向向量之后，契约立刻变红，
 差异是**恰好 1 ULP**：
 
 | 量 | 实测差异 | 首次出现 |
@@ -85,4 +85,4 @@
 
 - `docs/contracts/sim-snapshot.md` —— 契约现状与盲区表
 - `docs/adr/ADR-008-cross-language-contract-oracles.md` —— 双 oracle 与精确相等的原始论证
-- the cross-language contract (ADR-008) §2 S5a —— 转向向量与变异门禁
+- 转向向量与变异门禁 —— `TraffSim3D-backend/tests/contract/test_steering_vectors.py`

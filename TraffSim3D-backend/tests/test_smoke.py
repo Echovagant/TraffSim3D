@@ -34,7 +34,7 @@ async def test_ping(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_cors_allows_vite_dev_origin(client: AsyncClient) -> None:
-    """Plan 052: CORS middleware must permit the Vite dev origin (5173)
+    """CORS middleware must permit the Vite dev origin (5173)
     so MapImporterView's POST /api/v1/maps/parse-osm doesn't get
     blocked by the browser preflight.
 
@@ -59,7 +59,7 @@ async def test_cors_allows_vite_dev_origin(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_cors_allows_vite_preview_origin(client: AsyncClient) -> None:
-    """Plan 052: same as the dev test but for the preview server (4173)."""
+    """Same as the dev test but for the preview server (4173)."""
     r = await client.options(
         "/api/v1/ping",
         headers={

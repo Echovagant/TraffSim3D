@@ -6,7 +6,7 @@ A* `shortest_path`, added 2026-10-16), `overpass_cache` (disk-cached
 Overpass proxy for the smart-city view — overpass-api.de is slow/blocked
 from China, responses cached under geojson/cache/).
 
-NOT implemented (backlog, plan §4.2 M3): graph storage in PostGIS — the
+NOT implemented (backlog): graph storage in PostGIS — the
 in-memory graph in `road_graph` is sufficient for current scale.
 """
 

@@ -1,6 +1,6 @@
-"""Plan 076 T12: the contract vectors that make the road rules non-vacuous.
+"""The contract vectors that make the road rules non-vacuous.
 
-Before T12 the cross-language contract could not see two of the ego sim's
+Before the fix the cross-language contract could not see two of the ego sim's
 rules at all:
 
 - the **red-light axis** — the TS mirror classified the axis with the old
@@ -72,9 +72,9 @@ OFF_ROAD_VECTOR = "off_road_no_success"
 RESIDUAL_VECTOR = "steer_residual"
 
 
-#: The old red-light axis heuristic — the one the TS mirror used until T12.
+#: The old red-light axis heuristic — the one the TS mirror used until the fix.
 def _old_approach_axis(heading: float) -> str:
-    """The pre-T12 heuristic: "within 0.5 rad of north" means the NS axis."""
+    """The previous heuristic: "within 0.5 rad of north" means the NS axis."""
     heading_ns = abs((heading % (2 * math.pi)) - math.pi / 2) < 0.5
     return "ns" if heading_ns else "ew"
 
@@ -138,7 +138,7 @@ def test_the_old_axis_heuristic_would_have_missed_the_run(
 
     The old heuristic classified the ego's 50-degree heading as the **ew**
     axis, where the light is green — so the run went unpunished and the
-    episode continued. That is the exact drift T12 found, and this is the
+    episode continued. That is the exact drift that was found, and this is the
     check that keeps it fixed.
     """
     v = _vector(AXIS_VECTOR)

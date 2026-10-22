@@ -1,4 +1,4 @@
-"""Plan 074 Sprint 3 (S3a-1): the traffic obeys the traffic light.
+"""The traffic obeys the traffic light.
 
 The NPCs used to drive in straight lines at a constant speed and to
 teleport back when they left the world — they never looked at the light,

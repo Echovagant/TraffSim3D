@@ -1,4 +1,4 @@
-"""Plan 044 GPU extension: detect runtime capabilities.
+"""GPU support: detect runtime capabilities.
 
 Returns a snapshot of torch / CUDA / SB3 / VRAM state so the frontend
 can make informed UI decisions (e.g. grey out "GPU" when not available)

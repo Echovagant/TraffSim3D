@@ -1,4 +1,4 @@
-// Plan 038: FixedStepScheduler unit tests.
+// FixedStepScheduler unit tests.
 //
 // Verifies the four invariants the rest of the codebase relies on:
 //   1. Boundary crossing: wallDt < fixedStepSec → false, then

@@ -157,7 +157,7 @@
           "maps"
         ],
         "summary": "Parse Pbf",
-        "description": "Parse an uploaded .osm.pbf file into a RoadNetwork dict.\n\nSame return shape as /maps/parse-osm. Uses libosmium (osmium Python\nbindings) to stream the binary PBF. Real-world city files (Shenzhen\n~20MB, Guangdong ~200MB) use this format.\n\nTakes the same optional bbox query params as /maps/parse-osm.",
+        "description": "Parse an uploaded .osm.pbf file into a RoadNetwork dict.\n\nSame return shape as /maps/parse-osm. Uses libosmium (osmium Python\nbindings) to stream the binary PBF. Real-world city files (city-scale\n~20MB, province-scale ~200MB) use this format.\n\nTakes the same optional bbox query params as /maps/parse-osm.",
         "operationId": "parse_pbf_api_v1_maps_parse_pbf_post",
         "parameters": [
           {
@@ -276,7 +276,7 @@
           "maps"
         ],
         "summary": "Overpass",
-        "description": "Plan 056: cached Overpass proxy.\n\nThe smart-city view (Plan 055) used to call Overpass directly,\nwhich fails in China (overpass-api.de is blocked) and re-fetches\non every page load. This endpoint forwards the query to Overpass\nonce, caches the response to `geojson/cache/<hash>.json`, and\nserves subsequent identical queries from disk.\n\nQuery param:\n  `query` — the full Overpass QL string (e.g. `[out:json][timeout:60]; ...`)\n\nReturns:\n  The raw Overpass JSON dict (`{ version, generator, elements }`).",
+        "description": "Cached Overpass proxy.\n\nThe smart-city view used to call Overpass directly,\nwhich is unreachable from some networks (overpass-api.de is blocked) and re-fetches\non every page load. This endpoint forwards the query to Overpass\nonce, caches the response to `geojson/cache/<hash>.json`, and\nserves subsequent identical queries from disk.\n\nQuery param:\n  `query` — the full Overpass QL string (e.g. `[out:json][timeout:60]; ...`)\n\nReturns:\n  The raw Overpass JSON dict (`{ version, generator, elements }`).",
         "operationId": "overpass_api_v1_maps_overpass_get",
         "parameters": [
           {
@@ -323,7 +323,7 @@
           "maps"
         ],
         "summary": "Overpass Cache List",
-        "description": "Plan 056: list cached Overpass queries (debug UI).",
+        "description": "List cached Overpass queries (debug UI).",
         "operationId": "overpass_cache_list_api_v1_maps_overpass_cache_get",
         "responses": {
           "200": {
@@ -566,7 +566,7 @@
           "rl"
         ],
         "summary": "List Scenes",
-        "description": "List supported sim scene kinds (Plan 048).",
+        "description": "List supported sim scene kinds.",
         "operationId": "list_scenes_api_v1_rl_scenes_get",
         "responses": {
           "200": {
@@ -616,7 +616,7 @@
           "rl"
         ],
         "summary": "Get Checkpoint Weights",
-        "description": "Plan 049: export a saved PPO checkpoint as JSON-serializable weights.\n\nThe frontend uses this to instantiate an in-browser MlpPolicy for\nreplay (see `src/infrastructure/rl/mlpInference.ts`). Returns the\npolicy `state_dict()` flattened to nested lists + architecture\nmetadata (`obs_dim`, `action_dim`, `hidden_sizes`).\n\nErrors:\n  - 404: checkpoint file not found\n  - 503: SB3 / torch not installed (run `uv sync --extra rl`)",
+        "description": "Export a saved PPO checkpoint as JSON-serializable weights.\n\nThe frontend uses this to instantiate an in-browser MlpPolicy for\nreplay (see `src/infrastructure/rl/mlpInference.ts`). Returns the\npolicy `state_dict()` flattened to nested lists + architecture\nmetadata (`obs_dim`, `action_dim`, `hidden_sizes`).\n\nErrors:\n  - 404: checkpoint file not found\n  - 503: SB3 / torch not installed (run `uv sync --extra rl`)",
         "operationId": "get_checkpoint_weights_api_v1_rl_checkpoints__name__weights_get",
         "parameters": [
           {

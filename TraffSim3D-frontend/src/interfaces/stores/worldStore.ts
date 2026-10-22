@@ -64,10 +64,10 @@ import { computeNetworkBounds } from '@domain/services/networkBounds'
 export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const
 
 /**
- * Plan 035: scene-selector enum. The toolbar dropdown binds to this.
- * Plan 039: added 'elevated' (高架桥 — Y-axis ramps + level tagging).
- * Plan 040: added 'corridor' (多路口走廊 — 2-intersection corridor demo).
- * Plan 054: added 'imported' (any OSM/PBF file loaded via MapImporter —
+ * Scene-selector enum. The toolbar dropdown binds to this.
+ * 'elevated' (高架桥 — Y-axis ramps + level tagging).
+ * 'corridor' (多路口走廊 — 2-intersection corridor demo).
+ * 'imported' (any OSM/PBF file loaded via MapImporter —
  *   shown in the toolbar as a read-only label with the source file name
  *   instead of the dropdown, since there's no factory to "switch back to").
  * Adding a new scene = add a factory + an entry here.
@@ -87,7 +87,7 @@ const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
     case 'corridor':
       return buildCorridorScene()
     case 'imported':
-      // Plan 054: switchScene should never be called with 'imported'
+      // switchScene should never be called with 'imported'
       // (the toolbar hides the dropdown for imported scenes). If a
       // caller does (e.g. undo restores an older state), fall back
       // to cross so we always have a valid network.
@@ -95,7 +95,7 @@ const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
   }
 }
 
-/** Plan 054: human-readable label for built-in scene kinds. Imported
+/** Human-readable label for built-in scene kinds. Imported
  *  scenes use the source filename (set by loadNetwork) instead. */
 const sceneLabelForKind = (kind: SceneKind): string => {
   switch (kind) {
@@ -115,7 +115,7 @@ const sceneLabelForKind = (kind: SceneKind): string => {
 }
 
 export const useWorldStore = defineStore('world', () => {
-  // Plan 035 fix: `network` is now a `shallowRef`. Earlier we kept it
+  // Fix: `network` is now a `shallowRef`. Earlier we kept it
   // as a plain closure variable mutated in place, but `replaceNetwork`
   // reassigns the variable (`network = next`) — Pinia setup stores do
   // not track plain reassignments, so consumers reading `world.network`
@@ -130,11 +130,11 @@ export const useWorldStore = defineStore('world', () => {
   const fps = ref(0)
   const isRunning = ref(true)
 
-  // Plan 035: which demo scene is currently loaded. Default 'cross'
+  // Which demo scene is currently loaded. Default 'cross'
   // (the original 4-way intersection). Drives the toolbar dropdown
   // and is read by `switchScene()` to know which factory to call.
   const currentSceneKind = ref<SceneKind>('cross')
-  // Plan 054: human-readable label for the currently loaded scene.
+  // Human-readable label for the currently loaded scene.
   // - For built-in scenes: '十字路口' / 'T 路口' / etc. (matches
   //   sceneLabel() in EditorToolbar).
   // - For imported OSM/PBF: the original filename (e.g. 'futian.osm').
@@ -150,7 +150,7 @@ export const useWorldStore = defineStore('world', () => {
   // and shortcut composable can share the same array.
   const tickRate = ref<number>(1)
 
-  // Plan 053: increments every time the network is replaced (initial
+  // Increments every time the network is replaced (initial
   // load, scene switch, OSM import, undo/redo). Views watch this and
   // call `requestFitToNetwork()` so the camera frames the new scene
   // without the user manually panning. Kept as a separate ref so the
@@ -159,7 +159,7 @@ export const useWorldStore = defineStore('world', () => {
   // to re-debounce.
   const fitRequestTick = ref(0)
 
-  // Plan 049: RL replay surface. `policy` is the loaded SB3 PPO weights
+  // RL replay surface. `policy` is the loaded SB3 PPO weights
   // (null until loadPolicy() succeeds); `replayTargetId` is the vehicle
   // being driven by the policy; `replayActive` is the toggle so the user
   // can load + dry-run without affecting the sim. `replayStep` counts
@@ -224,7 +224,7 @@ export const useWorldStore = defineStore('world', () => {
     replayLastAction.value = [0, 0]
   }
 
-  // ===== Plan 074 (T6): the traffic-signal policy =====
+  // ===== the traffic-signal policy =====
   //
   // A *second*, different policy: the signal agent's (discrete, 5 actions,
   // 6 observations) as opposed to the ego agent's (continuous, 2 actions,
@@ -278,7 +278,7 @@ export const useWorldStore = defineStore('world', () => {
     bumpTick()
   }
 
-  /** Plan 053: bump the fit tick so the editor view asks the camera
+  /** Bump the fit tick so the editor view asks the camera
    *  to re-frame the current network. Idempotent — repeated calls
    *  just reset the same animation. */
   const requestFit = (): void => {
@@ -290,9 +290,9 @@ export const useWorldStore = defineStore('world', () => {
   // right-of-way rule can pick "the car that got there first".
   let simTime = 0
 
-  // M2-A: optional Rapier physics world. Null before useWorldSimulation
+  // Optional Rapier physics world. Null before useWorldSimulation
   // has finished its async `init()` (which loads the WASM). When null,
-  // tick() falls back to M1's hand-rolled move+s wrap.
+  // tick() falls back to the hand-rolled move+s wrap.
   let rapierWorld: RapierWorld | null = null
   const setRapierWorld = (w: RapierWorld | null): void => {
     rapierWorld = w
@@ -311,7 +311,7 @@ export const useWorldStore = defineStore('world', () => {
   }
   const getDraggingId = (): string | null => draggingId
 
-  // M2-B: per-light signal controller cache (plan 010). One
+  // Per-light signal controller cache. One
   // SignalController instance per traffic light; lazy-created on
   // first encounter. Switching controllerKind clears the cache so
   // the new kind's `decide()` semantics take effect immediately.
@@ -339,7 +339,7 @@ export const useWorldStore = defineStore('world', () => {
     },
     getCoordinatedOffsets: () => coordinatedOffsets.value,
     isCoordinatedEnabled: () => coordinatedOffsetsEnabled.value,
-    // Plan 074 (T6): the RL controller's action source — the trained signal
+    // The RL controller's action source — the trained signal
     // policy, when one is loaded and the RL controller is the active kind.
     getRlActionSource: (): SignalActionSource | undefined =>
       controllerKind.value === 'rl' ? (signalPolicySource.value ?? undefined) : undefined,
@@ -348,8 +348,8 @@ export const useWorldStore = defineStore('world', () => {
   /**
    * Force every traffic light to AllRed for `durationSeconds`.
    * Preemption path — bypasses the controllers and writes the
-   * light state directly. M4 RL agents will get a similar API via
-   * `controller.applyAction('force_all_red')`; for M2-B the
+   * light state directly. RL agents will get a similar API via
+   * `controller.applyAction('force_all_red')`; for now the
    * direct mutation is fine and explicit.
    */
   const forceAllRed = (durationSeconds = 3): void => {
@@ -362,7 +362,7 @@ export const useWorldStore = defineStore('world', () => {
     bumpTick()
   }
 
-  // M2-C: per-vehicle sensor + per-tick trajectory export.
+  // Per-vehicle sensor + per-tick trajectory export.
   const sensorRegistry = new SensorRegistry()
   const trajectoryExporter = new TrajectoryExporter(TRAJECTORY_BUFFER_CAP)
   const lidarEnabled = ref(false)
@@ -374,13 +374,13 @@ export const useWorldStore = defineStore('world', () => {
   }
   const toggleLidar = (): void => setLidarEnabled(!lidarEnabled.value)
 
-  // Plan 038: fixed-step scheduler driving the trajectory exporter
+  // Fixed-step scheduler driving the trajectory exporter
   // at 10 Hz. Lives as a plain closure var (not a ref) — the renderer
   // doesn't need to react to it; only tick() reads its state.
   const fixedStepScheduler = new FixedStepScheduler({ fixedStepSec: 0.1 })
 
-  // M2-B Coordinated UI hooks (plan 027). The offsets are consulted by
-  // CoordinatedController (plan 028) — until then they are pure UI state
+  // Coordinated UI hooks. The offsets are consulted by
+  // CoordinatedController — until then they are pure UI state
   // that the modal reads / writes without effect on the running sim.
   const coordinatedOffsets = ref<Map<string, number>>(
     new Map([
@@ -410,7 +410,7 @@ export const useWorldStore = defineStore('world', () => {
     return { position: v.position, heading: v.heading }
   }
 
-  // M2-D (plan 025): LiDAR point cloud visualization + camera sensor.
+  // LiDAR point cloud visualization + camera sensor.
   // The point cloud meshes are added to the scene by the renderer
   // (via addAuxiliary) when lidarCloudsEnabled is true. The cloud
   // map is keyed by vehicleId; meshes are destroyed on removeVehicle.
@@ -438,7 +438,7 @@ export const useWorldStore = defineStore('world', () => {
     return cloud
   }
 
-  /** M2-D: camera sensor. Lazily created on first enable so the
+  /** Camera sensor. Lazily created on first enable so the
    *  WebGLRenderTarget is only allocated when actually used. */
   const cameraSensor = shallowRef<CameraSensor | null>(null)
   const cameraEnabled = ref(false)
@@ -579,22 +579,22 @@ export const useWorldStore = defineStore('world', () => {
       lidarEnabled: lidarEnabled.value,
       getHostPose,
       draggingId,
-      removeVehicle, // Plan 034: OOB cleanup entry point
-      fixedStepScheduler, // Plan 038: drives trajectory export at 10 Hz
-      // Plan 049: pass policy + replay target to tick. tick() reads
+      removeVehicle, // OOB cleanup entry point
+      fixedStepScheduler, // drives trajectory export at 10 Hz
+      // Pass policy + replay target to tick. tick() reads
       // `replayTargetId` and computes obs + inference each step. The
       // store keeps the always-current refs so flipping `replayActive`
       // takes effect on the very next tick.
       policy: policy.value,
       replayTargetId: replayActive.value ? replayTargetId.value : null,
     })
-    // M2-C: update LiDAR frame counter from sensorRegistry's actual scan count
+    // Update LiDAR frame counter from sensorRegistry's actual scan count
     // (not per-tick). The registry tracks frames produced (throttled scans only).
     if (lidarEnabled.value) {
       lidarFrameCount.value = sensorRegistry.frameCount
     }
 
-    // M2-D: refresh LidarPointCloud meshes from the latest frames
+    // Refresh LidarPointCloud meshes from the latest frames
     // cached by sensorRegistry.scanAll(). Each cloud is positioned
     // at its host vehicle's current pose (which is post-Rapier-step).
     if (lidarCloudsEnabled.value) {
@@ -646,7 +646,7 @@ export const useWorldStore = defineStore('world', () => {
         rapierWorld.removeVehicle(id)
       }
     }
-    // Plan 049: clear any loaded RL policy so it can't drive the
+    // Clear any loaded RL policy so it can't drive the
     // fresh network's vehicles with stale target ids.
     clearPolicy()
     history = []
@@ -654,7 +654,7 @@ export const useWorldStore = defineStore('world', () => {
     controllers = new Map()
     sensorRegistry.destroyAll()
     trajectoryExporter.clear()
-    // M2-D: tear down point clouds + camera sensor.
+    // Tear down point clouds + camera sensor.
     for (const cloud of lidarPointClouds.values()) cloud.destroy()
     lidarPointClouds = new Map()
     if (cameraSensor.value) {
@@ -665,7 +665,7 @@ export const useWorldStore = defineStore('world', () => {
     lidarFrameCount.value = 0
     network.value = buildCrossIntersectionNetwork()
     simTime = 0
-    fixedStepScheduler.reset() // Plan 038: zero out the 10 Hz cadence
+    fixedStepScheduler.reset() // zero out the 10 Hz cadence
     // Re-register default vehicles.
     if (rapierWorld) {
       for (const v of Object.values(network.value.vehicles)) {
@@ -676,7 +676,7 @@ export const useWorldStore = defineStore('world', () => {
         const sensor = new LidarSensor(defaultLidarConfig(v.id, excludes))
         sensor.configure({ mountHeight: LIDAR_MOUNT_HEIGHT[v.type] })
         sensorRegistry.register(v.id, sensor, `lidar-${v.id}`)
-        // M2-D: backfill point clouds.
+        // Backfill point clouds.
         if (lidarCloudsEnabled.value) ensureLidarCloud(v.id)
       }
     }
@@ -699,7 +699,7 @@ export const useWorldStore = defineStore('world', () => {
     const id = overrides.id ?? `v-${nextVehicleNum++}`
     // `spawnVehicle` handles picking a road/lane/s that's free, picking
     // a type with weighted random, and assigning the correct world
-    // position + heading. If every lane is full (M1.5 density check),
+    // position + heading. If every lane is full (density check),
     // it returns `{ ok: false, reason }` and we surface a flash
     // message — we never silently place a colliding car.
     const spawnOpts: SpawnOptions = {
@@ -724,15 +724,15 @@ export const useWorldStore = defineStore('world', () => {
           result.vehicle.heading,
         ),
       )
-      // M2-C: mount a LiDAR sensor. The collider handle is needed
-      // for self-occlusion filtering (017 H4). If Rapier didn't
+      // Mount a LiDAR sensor. The collider handle is needed
+      // for self-occlusion filtering. If Rapier didn't
       // create a collider, the sensor still works (no exclusions).
       const colliderHandle = rapierWorld.getColliderHandle(result.vehicle.id)
       const excludes = colliderHandle ? [colliderHandle] : []
       const sensor = new LidarSensor(defaultLidarConfig(result.vehicle.id, excludes))
       sensor.configure({ mountHeight: LIDAR_MOUNT_HEIGHT[result.vehicle.type] })
       sensorRegistry.register(result.vehicle.id, sensor, `lidar-${result.vehicle.id}`)
-      // M2-D: lazily create a LidarPointCloud if clouds are enabled.
+      // Lazily create a LidarPointCloud if clouds are enabled.
       if (lidarCloudsEnabled.value) {
         ensureLidarCloud(result.vehicle.id)
       }
@@ -741,7 +741,7 @@ export const useWorldStore = defineStore('world', () => {
     return result
   }
 
-  // Plan 031: one-click spawn many vehicles for Rapier collision demo.
+  // One-click spawn many vehicles for Rapier collision demo.
   // Returns the number actually added; bails on first full lane so
   // we don't spam the user with "lane full" flashes.
   const spawnMany = (count: number): number => {
@@ -756,11 +756,11 @@ export const useWorldStore = defineStore('world', () => {
 
   const removeVehicle = (id: string): void => {
     pushHistory()
-    // M2-C: unregister sensors BEFORE removing the Rapier body.
+    // Unregister sensors BEFORE removing the Rapier body.
     // The body removal deletes the collider handle that the sensor
     // needs for excludeColliders, so the order is critical.
     sensorRegistry.unregisterAllFor(id)
-    // M2-D: tear down the LidarPointCloud mesh.
+    // Tear down the LidarPointCloud mesh.
     const cloud = lidarPointClouds.get(id)
     if (cloud) {
       cloud.destroy()
@@ -792,7 +792,7 @@ export const useWorldStore = defineStore('world', () => {
     bumpTick()
   }
 
-  // Plan 029 (M2 lane change): domain decision + state mutation.
+  // Lane change: domain decision + state mutation.
   // Returns the same shape as `requestLaneChange` (the domain function)
   // so the caller can flash the reason on rejection.
   const requestLaneChange = (
@@ -857,7 +857,7 @@ export const useWorldStore = defineStore('world', () => {
     bumpTick()
   }
 
-  // ----- persistence (added by Plan 005) -----
+  // ----- persistence -----
 
   const serialize = (): { ok: true } | { ok: false; reason: string } => {
     try {
@@ -885,11 +885,11 @@ export const useWorldStore = defineStore('world', () => {
         rapierWorld.removeVehicle(id)
       }
     }
-    // Plan 049: same as reset() — never let a stale policy drive the
+    // Same as reset() — never let a stale policy drive the
     // new network's vehicles. The user's selected replay target id may
     // not even exist in the loaded scene.
     clearPolicy()
-    // Plan 035: assign via .value so Pinia's auto-unwrap on the store
+    // Assign via .value so Pinia's auto-unwrap on the store
     // surfaces the new network to EntityOutline, InspectorPanel, etc.
     network.value = next
     // Clear controller cache + sensors + exporter — new scene has
@@ -897,7 +897,7 @@ export const useWorldStore = defineStore('world', () => {
     controllers = new Map()
     sensorRegistry.destroyAll()
     trajectoryExporter.clear()
-    // M2-D: tear down point clouds + camera sensor.
+    // Tear down point clouds + camera sensor.
     for (const cloud of lidarPointClouds.values()) cloud.destroy()
     lidarPointClouds = new Map()
     if (cameraSensor.value) {
@@ -916,12 +916,12 @@ export const useWorldStore = defineStore('world', () => {
         const sensor = new LidarSensor(defaultLidarConfig(v.id, excludes))
         sensor.configure({ mountHeight: LIDAR_MOUNT_HEIGHT[v.type] })
         sensorRegistry.register(v.id, sensor, `lidar-${v.id}`)
-        // M2-D: backfill point clouds.
+        // Backfill point clouds.
         if (lidarCloudsEnabled.value) ensureLidarCloud(v.id)
       }
     }
     bumpTick() // signal Vue watchers; the renderer will rebuild via identity change
-    // Plan 053: bump fit request so the editor view re-frames the camera.
+    // Bump fit request so the editor view re-frames the camera.
     fitRequestTick.value += 1
     return { ok: true }
   }
@@ -941,7 +941,7 @@ export const useWorldStore = defineStore('world', () => {
    * round-trip — the caller has already done the validation that
    * `hydrate()` would do via `loadScene()`.
    *
-   * Plan 054: `sourceLabel` is the human-readable name shown in the
+   * `sourceLabel` is the human-readable name shown in the
    * toolbar's scene indicator (e.g. the imported file name). When
    * omitted, the existing label is kept. Any call with a non-empty
    * `sourceLabel` flips `currentSceneKind` to `'imported'` so the
@@ -962,7 +962,7 @@ export const useWorldStore = defineStore('world', () => {
   }
 
   /**
-   * Plan 035: switch the loaded scene to one of the three demo
+   * Switch the loaded scene to one of the three demo
    * factories. Clears the Rapier body / sensor / controller caches
    * via the existing `loadNetwork` path (which removes old bodies
    * and re-registers the new vehicles' bodies). Also clears undo
@@ -975,7 +975,7 @@ export const useWorldStore = defineStore('world', () => {
     redoStack = []
     currentSceneKind.value = kind
     if (kind === 'imported') {
-      // Plan 054: callers must pass a label via loadNetwork() before
+      // Callers must pass a label via loadNetwork() before
       // calling switchScene('imported') (or just call loadNetwork
       // directly). For safety, fall back to the current label.
     } else {
@@ -1060,25 +1060,25 @@ export const useWorldStore = defineStore('world', () => {
     redo,
     canUndo,
     canRedo,
-    // M2-B signal controller surface
+    // signal controller surface
     controllerKind,
     setControllerKind,
     getControllerKind,
     getControllers,
     forceAllRed,
-    // Plan 074 (T6): the traffic-signal policy surface
+    // the traffic-signal policy surface
     signalPolicy,
     signalPolicyDecision,
     loadSignalPolicy,
     clearSignalPolicy,
-    // M2-C sensor + exporter surface
+    // sensor + exporter surface
     sensorRegistry,
     trajectoryExporter,
     lidarEnabled,
     lidarFrameCount,
     setLidarEnabled,
     toggleLidar,
-    // M2-D point cloud + camera surface
+    // point cloud + camera surface
     lidarCloudsEnabled,
     setLidarCloudsEnabled,
     toggleLidarClouds,
@@ -1091,12 +1091,12 @@ export const useWorldStore = defineStore('world', () => {
     toggleCamera,
     getCameraSensor,
     initCameraSensor,
-    // M2-B Coordinated UI hooks (plan 027)
+    // Coordinated UI hooks
     coordinatedOffsets,
     coordinatedOffsetsEnabled,
     setCoordinatedOffset,
     toggleCoordinatedOffsets,
-    // Plan 049: RL replay surface
+    // RL replay surface
     policy,
     replayTargetId,
     replayActive,
@@ -1108,13 +1108,13 @@ export const useWorldStore = defineStore('world', () => {
     startReplay,
     stopReplay,
     clearPolicy,
-    // Plan 053: camera fit
+    // camera fit
     fitRequestTick,
     requestFit,
   }
 })
 
-// Plan 042: dev-only window.__world introspection for Playwright e2e tests.
+// Dev-only window.__world introspection for Playwright e2e tests.
 // `import.meta.env.DEV` is replaced with `false` in production builds by Vite,
 // so this block is tree-shaken out of the production bundle.
 if (import.meta.env.DEV && typeof window !== 'undefined') {

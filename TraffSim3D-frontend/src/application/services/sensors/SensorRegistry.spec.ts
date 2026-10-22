@@ -74,7 +74,7 @@ describe('SensorRegistry', () => {
     expect(reg.getLatestFrames().size).toBe(0)
   })
 
-  it('scanAll caps at maxActiveSensors (plan 033)', () => {
+  it('scanAll caps at maxActiveSensors', () => {
     const reg = new SensorRegistry(2) // cap = 2
     for (let i = 0; i < 5; i++) {
       const id = `v-${i}`

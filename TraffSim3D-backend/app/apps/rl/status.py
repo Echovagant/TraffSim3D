@@ -1,4 +1,4 @@
-"""Plan 044: training status persistence (status.json)."""
+"""Training status persistence (status.json)."""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ def append_reward(reward: float, max_history: int = 200) -> None:
 
 
 def set_paused(paused: bool) -> None:
-    """Flag a live run as paused/resumed (M4 Must task control)."""
+    """Flag a live run as paused/resumed (task control)."""
     s = read_status()
     s["paused"] = bool(paused)
     write_status(s)

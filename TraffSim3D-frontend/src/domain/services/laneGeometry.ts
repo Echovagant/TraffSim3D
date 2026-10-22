@@ -1,11 +1,11 @@
 /**
  * Lane geometry helpers.
  *
- * Plan 035: polyline-aware. `Road` may have `waypoints?: Position[]`
+ * Polyline-aware. `Road` may have `waypoints?: Position[]`
  * (length ≥ 2); lane geometry is derived from the polyline.
  * For 2-point roads (`waypoints` absent or length 2) the math
  * collapses to a straight segment and is mathematically equivalent
- * to the pre-035 straight-line formulas.
+ * to the older straight-line formulas.
  *
  * Convention (right-hand traffic, like CN / US):
  *  - lane indices are 0..N-1
@@ -24,7 +24,7 @@ export interface UnitVec2 {
   uz: number
 }
 
-/** Plan 035: Return the polyline waypoints of `road`. If the road has no
+/** Return the polyline waypoints of `road`. If the road has no
  *  `waypoints` field, or only two points, return `[startNode, endNode]`.
  *  All downstream geometry helpers route through this so 2-point
  *  backward-compat is automatic. */
@@ -33,7 +33,7 @@ export const roadWaypoints = (road: Road): readonly Position[] => {
   return [road.startNode, road.endNode]
 }
 
-/** Plan 035: per-segment cumulative arc length `[segLen1, segLen1+segLen2, ...]`.
+/** Per-segment cumulative arc length `[segLen1, segLen1+segLen2, ...]`.
  *  The last element is the total polyline length. Cached in a WeakMap
  *  since `Road` instances are readonly — first call computes, all later
  *  calls are O(1). */
@@ -49,7 +49,7 @@ export const roadPolylineLengths = (road: Road): ReadonlyArray<number> => {
     const b = wps[i + 1]!
     const dx = b.x - a.x
     const dz = b.z - a.z
-    // 3D segment length (Y matters for 036 ramps, even though 035 roads are flat).
+    // 3D segment length (Y matters for ramps; flat roads have Y = 0).
     const dy = (b.y ?? 0) - (a.y ?? 0)
     acc += Math.sqrt(dx * dx + dy * dy + dz * dz)
     cum.push(acc)
@@ -58,7 +58,7 @@ export const roadPolylineLengths = (road: Road): ReadonlyArray<number> => {
   return cum
 }
 
-/** Plan 035: find the polyline segment that contains arc-length `s`, plus
+/** Find the polyline segment that contains arc-length `s`, plus
  *  the local normalized parameter `t` within that segment (0..1). */
 export interface PolylineSegment {
   segIdx: number
@@ -79,7 +79,7 @@ export const segmentAt = (road: Road, s: number): PolylineSegment => {
   // wrapped the value, but defensive clamp here keeps geometry finite.
   const total = cum[cum.length - 1]!
   const sClamped = Math.max(0, Math.min(total, s))
-  // Linear search through cum array (N segments, small). For M2 scale
+  // Linear search through cum array (N segments, small). At the current scale
   // (≤ 8 segments per road) this beats a binary search on overhead.
   for (let i = 0; i < cum.length; i++) {
     if (sClamped <= cum[i]!) {
@@ -142,8 +142,8 @@ export interface LanePoint {
   heading: number
 }
 
-/** Plan 035: `radius` defaults to STOP_LINE_DISTANCE * 2 = 10 m for back-compat
- *  with the pre-035 callers (tick.ts used a hard-coded formula).
+/** `radius` defaults to STOP_LINE_DISTANCE * 2 = 10 m for back-compat
+ *  with the older callers (tick.ts used a hard-coded formula).
  *  When a per-intersection radius is known, callers should pass it explicitly. */
 export const intersectionSRange = (
   road: Road,
@@ -166,7 +166,7 @@ export const inIntersectionBox = (
 /**
  * World position + heading for a vehicle in `laneIndex` at distance
  * `s` along the polyline. For 2-point roads the result matches the
- * pre-035 straight-line formula exactly (regression-safe).
+ * the older straight-line formula exactly (regression-safe).
  */
 export const lanePoint = (road: Road, laneIndex: number, s: number): LanePoint => {
   const wps = roadWaypoints(road)
@@ -187,14 +187,14 @@ export const lanePoint = (road: Road, laneIndex: number, s: number): LanePoint =
   const tanZ = (b.z - a.z) / seg.segLen
   // Perpendicular in XZ (rotate tangent -90° = "right" of forward): (uz, -ux).
   // Matches `roadRight()` convention exactly so lane 0 of a forward road
-  // sits on the +laneOffset side (right of motion), preserving pre-035 layout.
+  // sits on the +laneOffset side (right of motion), preserving the older layout.
   const perpX = tanZ
   const perpZ = -tanX
   const off = laneOffset(laneIndex, road.laneCount)
   const sign = laneForwardSign(laneIndex, road.laneCount)
   // Lane offset is in WORLD space, not motion-relative. Lane 0 sits at
   // +off perpendicular to the centerline (geometric "right" of forward);
-  // lane N-1 sits at -off. This matches the pre-035 formula and is what
+  // lane N-1 sits at -off. This matches the older formula and is what
   // the renderer expects when painting lane markings.
   const heading = Math.atan2(tanZ * sign, tanX * sign)
   return {

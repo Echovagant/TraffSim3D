@@ -1,6 +1,6 @@
-"""Plan 074 T9: the inter-green clearance and the dense training scenario.
+"""The inter-green clearance and the dense training scenario.
 
-Two model changes, both required by Plan 074 §3 T9:
+Two model changes, both required by the training scenario:
 
 1. **The inter-green clearance.** The Python light model swapped
    instantaneously, so switching phases was *free*: splitting the same
@@ -166,26 +166,51 @@ def test_the_clearance_costs_the_phase_change_its_lost_time() -> None:
     legally possible" schedule -437.2 — the flicker pays 14.1 more,
     because every extra switch costs six seconds during which nobody
     may go. Before the clearance the flicker was the *better* schedule.
+
+    **The traffic model changed** (the closed loop became the
+    browser-like open flow) and with it the comparison: in the open
+    model the *delay* is dominated by the red's duration rather than by
+    the clearance, so the flicker is now the better schedule overall
+    (-260.8 against the fixed cycle's -292.8).
+
+    The clearance itself did not get cheaper, though — and that is what
+    this test pins now: a phase change still costs **six seconds during
+    which neither axis may go**, and the *number* of switches is what
+    separates the two schedules. So the test measures the lost time
+    directly instead of inferring it from the schedule comparison.
     """
     env = SignalEnv(max_steps=600)
     env.reset(seed=0)
 
     alternating = 0.0
+    alternating_clearance = 0
     flicker = 0.0
+    flicker_clearance = 0
     for _ in range(600):
         _, reward, terminated, truncated, _ = env.step(ACTION_INDEX["no_op"])
         alternating += reward
+        alternating_clearance += env.core.in_clearance
         if terminated or truncated:
             break
     env.reset(seed=0)
     for _ in range(600):
         _, reward, terminated, truncated, _ = env.step(ACTION_INDEX["shorten_red"])
         flicker += reward
+        flicker_clearance += env.core.in_clearance
         if terminated or truncated:
             break
 
-    assert alternating > flicker, (
-        "switching phases must not be free " f"(alternating={alternating}, flicker={flicker})"
+    # The clearance is charged: the light stands still for six seconds
+    # after every phase change, and the flicker pays it far more often.
+    assert alternating_clearance > 0, "the clearance is never charged"
+    assert flicker_clearance > alternating_clearance, (
+        "the flicker does not pay more lost time than the fixed cycle "
+        f"({flicker_clearance} against {alternating_clearance} steps)"
+    )
+    # And the lost time is the six seconds the contract pins.
+    assert flicker_clearance - alternating_clearance >= 30, (
+        "the flicker should pay at least five extra clearances over 600 "
+        f"steps ({flicker_clearance} against {alternating_clearance})"
     )
 
 
@@ -195,7 +220,7 @@ def test_the_clearance_refuses_a_phase_adjustment() -> None:
 
     The clock reads 0 during the clearance, so an adjustment landing
     there would silently shorten the *next* green — below the minimum
-    green time the T7 guard exists to protect. The environment refuses
+    green time the minimum-green guard exists to protect. The environment refuses
     it, and reports the action as masked.
     """
     env = SignalEnv(max_steps=600)

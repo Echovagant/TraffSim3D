@@ -11,7 +11,7 @@ let sharedRapierWorld: RapierWorld | null = null
 let rapierInitPromise: Promise<RapierWorld> | null = null
 
 /** Lazily create + init the Rapier world singleton. Called from
- *  useWorldSimulation. M2-A: 1 world per page lifetime; HMR
+ *  useWorldSimulation. One world per page lifetime; HMR
  *  destroys on dispose (R7). */
 export const getOrCreateRapierWorld = async (): Promise<RapierWorld> => {
   if (sharedRapierWorld) return sharedRapierWorld
@@ -135,7 +135,7 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
     { immediate: true },
   )
 
-  // M2-D: camera sensor creation — top-level so it doesn't depend
+  // Camera sensor creation — top-level so it doesn't depend
   // on Rapier loading (setupRenderer awaits Rapier before returning).
   watch(
     () => store.cameraEnabled,

@@ -9,7 +9,7 @@ import { vi } from 'vitest'
 
 // Rapier lazy-loads via `await import('@dimforge/rapier3d-compat')`.
 // In a unit test, we don't want to load the full WASM (slow + flaky).
-// Stub the import with a no-op module. Plan 015's tick tests will
+// Stub the import with a no-op module. The tick tests will
 // pass a mock RapierWorld via the worldStore seam.
 vi.mock('@dimforge/rapier3d-compat', () => ({
   default: {},

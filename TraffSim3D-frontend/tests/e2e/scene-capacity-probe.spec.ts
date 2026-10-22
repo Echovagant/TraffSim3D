@@ -1,8 +1,8 @@
 /**
  * Probe: how many vehicles can each built-in scene actually hold?
  *
- * The M1 gate specifies 20 vehicles, but scene capacity has changed since M1
- * (roads were reworked through M2-M4). This measures the real ceiling per
+ * The original gate specifies 20 vehicles, but scene capacity has changed
+ * since then (roads were reworked). This measures the real ceiling per
  * scene so the gate can either target the largest scene honestly or record
  * that no scene reaches 20.
  */

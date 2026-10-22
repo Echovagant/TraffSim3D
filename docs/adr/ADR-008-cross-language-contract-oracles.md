@@ -2,10 +2,10 @@
 
 - **Status**: ✅ **Accepted** (2026-10-21)
 - **Date**: 2026-10-21
-- **Deciders**: Project lead (contract scope), implemented under Plan 071 / 072 / 073
-the project's original architecture decision set (ADR-001 … ADR-009, this directory),
-  the cross-language contract (ADR-008),
-  the cross-language contract (ADR-008)
+- **Deciders**: Project lead (contract scope)
+- **Source**: the original master plan — project purpose (§1.1) and
+  architecture principles (§6) — plus the cross-language contract design and
+  implementation records: the executable contract and its two oracles
 
 ## Context
 
@@ -14,12 +14,12 @@ city"**. The RL training sim lives in Python (`app/apps/rl/sim_core.py`); the
 browser replays the trained policy in TypeScript. For that to mean anything,
 the two implementations must not silently drift apart.
 
-A cross-language contract test has existed since Plan 050 — and it **never
-ran**. The TypeScript-side snapshot generator was never implemented, so the
-test took a `continue` branch and reported success while comparing nothing. A
-source-level audit (Plan 068) then found the deeper problem: the contract's
-premise was false. The plan asserted the two sims "share the same ego
-dynamics", but they do not:
+A cross-language contract test had been in the test suite from early on — and
+it **never ran**. The TypeScript-side snapshot generator was never implemented,
+so the test took a `continue` branch and reported success while comparing
+nothing. A source-level audit later found the deeper problem: the contract's
+premise was false. The original design asserted the two sims "share the same
+ego dynamics", but they do not:
 
 | # | Dimension | Python `sim_core.py` | TS `tick.ts` |
 |---|---|---|---|
@@ -89,7 +89,7 @@ disagreement being 1 ULP in the last bit, largest absolute divergence
   the ego kinematics, used by the product replay path *and* the mirror. The
   five porting rules in its header are the contract's normative spec; they
   must stay in sync with `sim_core.py`.
-- **Turning parameters are covered as of Plan 076 S5a** (2026-10-21). This
+- **Turning parameters are covered** (as of 2026-10-21). This
   bullet used to read "Turning parameters are not covered yet": every contract
   vector was a straight-line scenario, so `steer ≡ 0` and the Pure Pursuit
   denominator, the steer clamp and the wheelbase could not affect any
@@ -114,24 +114,24 @@ disagreement being 1 ULP in the last bit, largest absolute divergence
 - **The two sims remain different systems.** The shadow mirror makes the
   *trajectory* comparable; it does not make the training environment and the
   browser the same world. Closing that gap (a training environment that can
-  express lanes and multi-intersection topologies) is Plan 073 Sprint 5, and it
-  is a much larger piece of work than anything in this ADR.
+  express lanes and multi-intersection topologies) is a much larger piece of
+  work than anything in this ADR.
 
 ## Alternatives considered
 
-- **Compare the product sim directly against Python (the original Plan 050
+- **Compare the product sim directly against Python (the original
   design).** Rejected: difference #6 is structural, so the comparison would
   need a tolerance wide enough to hide real drift — i.e. it would compare
   nothing.
-- **Keep a tolerance (`±1e-3`, as Plan 050 specified).** Rejected: it cannot
+- **Keep a tolerance (`±1e-3`, as originally specified).** Rejected: it cannot
   distinguish "one side drifted" from "both sides are fine but the arithmetic
   ordering differs". It would have let the 30→20 s phase-duration change
   through unnoticed.
 - **Make the Python training sim a faithful port of the product sim.**
-  Rejected for now: it would discard the M4 training environment (free space,
+  Rejected for now: it would discard the training environment (free space,
   collision, red-light termination) that existing checkpoints were trained
-  against. It remains the right long-term direction (Plan 073 Sprint 5) but is
-  a re-implementation, not a refactor.
+  against. It remains the right long-term direction — a lane-aware training
+  environment — but it is a re-implementation, not a refactor.
 - **Derive the goldens from the product sim and compare only the ego
   trajectory.** Rejected: the product's ego position is `lanePoint(road,
   lane, s)`, which is not a function of the ego dynamics, so the comparison
@@ -141,5 +141,5 @@ disagreement being 1 ULP in the last bit, largest absolute divergence
 
 - `docs/contracts/sim-snapshot.md` — the contract as it stands, including the
   measured blind-spot table.
-- the cross-language contract (ADR-008) — the design and the implementation record.
-- ADR-008 — the contract's boundary and its oracles.
+- `docs/adr/ADR-009-contract-equality-and-the-libm-noise-floor.md` — the noise floor narrowing D3.
+- `simCoreMirror.ts`, `egoKernel.ts` and `tests/contract/` — the mirror, the kernel and the contract tests.

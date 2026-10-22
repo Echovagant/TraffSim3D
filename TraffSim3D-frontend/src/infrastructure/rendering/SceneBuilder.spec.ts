@@ -35,7 +35,7 @@ const groundOf = (built: BuiltScene): THREE.Mesh =>
 const planeWidth = (mesh: THREE.Mesh): number =>
   (mesh.geometry as THREE.PlaneGeometry).parameters.width
 
-describe('buildScene — ground sizing (Plan 054)', () => {
+describe('buildScene — ground sizing', () => {
   it('scales the ground to max(200, ceil(diag * 2 + 1000)) for the 60x60 cross network', () => {
     const built = buildScene(buildTestNetwork(0))
     // xs span -30..30, zs span -30..30 -> diag = hypot(60, 60)
@@ -128,7 +128,7 @@ describe('buildScene — flat mode (default)', () => {
   })
 })
 
-describe('buildScene — smart-city mode (Plan 055)', () => {
+describe('buildScene — smart-city mode', () => {
   const built = buildScene(buildTestNetwork(2), 'smart-city')
 
   it('replaces the lit ground with an invisible pick plane', () => {

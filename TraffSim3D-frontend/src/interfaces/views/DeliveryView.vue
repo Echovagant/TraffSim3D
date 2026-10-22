@@ -2,7 +2,7 @@
   <main class="placeholder-view">
     <router-link to="/" class="back-link">← 返回首页</router-link>
     <header class="placeholder-header">
-      <span class="badge badge-planned">M5 · Planned</span>
+      <span class="badge badge-planned">Planned</span>
       <h1>DeliveryLab</h1>
       <p class="placeholder-sub">部署与交付物</p>
     </header>
@@ -10,18 +10,19 @@
     <section class="placeholder-card">
       <h2>本模块做什么</h2>
       <p>
-        DeliveryLab 是 M5 阶段的交付物总览页 — 本地部署清单、ADR 归档、API 文档、测试覆盖率报告。
-        这一页不引入新功能, 只把 <strong>前 4 个里程碑的可交付物</strong> 集中展示给项目接手人。
+        DeliveryLab 是交付物总览页 — 本地部署清单、ADR 归档、API 文档、测试覆盖率报告。
+        这一页不引入新功能, 只把<strong>已可用的交付物</strong>集中展示给项目接手人。
       </p>
 
-      <h2>M5 计划范围 (摘自执行方案)</h2>
+      <h2>交付范围</h2>
       <ul>
         <li>
           本地进程部署: frontend (Vite) + backend (uvicorn)。<strong>不使用容器</strong> — ADR-007
-          已于 2026-10-17 裁定为 Rejected。
+          已裁定为 Rejected。
         </li>
         <li>
-          ADR 归档: 7 份 ADR 的 <code>Status</code> 已全部裁定 (001–006 Accepted, 007 Rejected)。
+          ADR 归档: 9 份 ADR 的 <code>Status</code> 已全部裁定 (001–006 Accepted, 007 Rejected,
+          008–009 Accepted)。
         </li>
         <li>
           API 文档: FastAPI 自动生成的 OpenAPI schema (<code>docs/openapi.json</code>) +
@@ -31,10 +32,7 @@
       </ul>
 
       <h2>当前状态</h2>
-      <p class="muted">
-        仍在占位阶段。M5 是项目收官, 计划 2-3 周; 触发条件是 M4 (RL 训练) 通过验收。
-        当前所有交付物散落在 <code>docs/</code>, 本视图是它们的目录页。
-      </p>
+      <p class="muted">仍在占位阶段。本视图是散落在 <code>docs/</code> 里的交付物的目录页。</p>
 
       <div class="placeholder-actions">
         <router-link to="/scene-editor" class="btn">看 SceneLab demo</router-link>
@@ -45,7 +43,7 @@
 </template>
 
 <script setup>
-// Placeholder. Real implementation in M5.
+// Placeholder view — a directory of the delivery artefacts.
 </script>
 
 <style scoped>

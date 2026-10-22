@@ -1,10 +1,10 @@
 /**
- * Plan 055: Smart City view verification.
+ * Smart City view verification.
  *
- * Plan 056 follow-up: we stub our BACKEND proxy
+ * We stub our BACKEND proxy
  * (`/api/v1/maps/overpass`) instead of overpass-api.de directly,
- * because the frontend now hits our cached proxy (Plan 055 called
- * Overpass directly, which was blocked from China and slow). The
+ * because the frontend now hits our cached proxy (it used to call
+ * Overpass directly, which was blocked on some networks and slow). The
  * stub returns the same raw Overpass shape the real backend would
  * return after a cache miss / hit.
  */
@@ -61,7 +61,7 @@ const FAKE_OVERPASS_RAW = {
 
 test('Smart City: route mounts Cesium + Three.js canvases', async ({ page }) => {
   // Stub our backend's cached Overpass proxy so the OSM loader
-  // doesn't hit the network (Plan 056: browser calls our backend,
+  // doesn't hit the network (the browser calls our backend,
   // not overpass-api.de directly).
   await page.route('**/api/v1/maps/overpass*', async (route) => {
     await route.fulfill({

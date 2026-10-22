@@ -1,11 +1,11 @@
-"""Plan 044: minimal Python sim core (mirror of TS tick.ts).
+"""Minimal Python sim core (mirror of TS tick.ts).
 
 A research-quality reimplementation of the 4-way intersection scene
-from frontend Plan 005/035. NOT a full port — only the subset needed
+from the frontend sim. NOT a full port — only the subset needed
 for PPO to learn. The frontend TS sim is authoritative for visual
 quality; this Python sim is authoritative for training.
 
-Layout (matches Plan 035 cross scene):
+Layout (matches the frontend's cross scene):
 - NS road: x=0, z ∈ [-30, 30], heading north = +Z (heading=π/2 in
   heading-from-+X convention)
 - EW road: z=0, x ∈ [-30, 30], heading east = +X (heading=0)
@@ -36,7 +36,7 @@ COLLISION_DISTANCE = 2.0  # m — closer than this = collision
 MAX_STEPS_DEFAULT = 200
 OBS_DIM = 14
 
-# The road's half-width (m) - Plan 076 T12.
+# The road's half-width (m).
 #
 # The scenes carry no lane model; they place the NPCs at a **3.5 m lateral
 # offset** from the road's centreline (`_reset_cross`: the southbound NPC
@@ -49,7 +49,7 @@ ROAD_HALF_WIDTH = 3.5
 # success. The success condition and the progress reward both read it, so
 # they cannot drift apart.
 #
-# Plan 076 T12: the progress reward is the *signed* advance towards this
+# The progress reward is the *signed* advance towards this
 # line, bounded by it. That is what keeps the reward from being farmed:
 # an ego that leaves the road (and is therefore never terminated by the
 # success) cannot keep earning progress past the goal, and a step
@@ -59,17 +59,17 @@ SCENE_GOAL_Z = {
     "corridor": 25.0,
     "t_junction": -3.0,
     "roundabout": 5.0,
-    # Plan 076 T13: the signalled scene's goal line is the same one the
+    # The signalled scene's goal line is the same one the
     # `cross` scene uses - the difference between the two scenes is the
     # **light schedule**, not the route.
     "cross_signalled": 25.0,
 }
 
-# ===== Plan 076 T13: the signalled scene's light schedule =====
+# ===== the signalled scene's light schedule =====
 #
 # The four scenes above run the default 30 s cycle, so the first phase
-# change lands on step 300 - beyond every ego episode (Plan 076 T12's
-# "the light never swaps inside an episode"). That is why the ego never
+# change lands on step 300 - beyond every ego episode (the light
+# never swaps inside an episode). That is why the ego never
 # faces a red light in them, and why a scripted controller is never
 # punished for ignoring the light.
 #
@@ -78,7 +78,7 @@ SCENE_GOAL_Z = {
 # driver that does not look at the light pays for it (-5 for a red-light
 # run, -10 for a collision).
 #
-# The cycle length is measured, not guessed (ADR-008):
+# The cycle length is measured, not guessed:
 #
 # - the **green** window must be long enough for the ego to clear the
 #   intersection from a standstill: 33 steps (3.3 s) from the stop line
@@ -97,23 +97,23 @@ SCENE_GOAL_Z = {
 # contrived puzzle.
 CROSS_SIGNALLED_CYCLE_SECONDS = 12.0
 
-# Pure Pursuit (Coulter 1992) — see ADR-004
+# Pure Pursuit (Coulter 1992)
 LOOKAHEAD_DISTANCE = 8.0
 MAX_STEER = 0.4         # rad
 DT = 0.1                # seconds per sim step (matches frontend 10Hz)
 
-# ===== Plan 076 T12: the ego's reward =====
+# ===== the ego's reward =====
 #
 # The per-step "alive" bonus used to be a flat 0.05 **per step**. It paid a
 # policy for *existing* - and, because a step is a unit of *time*, it
 # implicitly paid for being **slow**: the more steps an episode took, the
-# more it earned. The measured consequence (Plan 076 T11's re-measurement)
+# more it earned. The measured consequence (the re-measurement)
 # was that the trained ego policy beat "constant full throttle" (+1.13)
 # only because it drove slower (86 steps against 58), and still lost to the
 # best constant throttle (60.227 against 60.835) - the whole margin came
 # from the bonus, not from the driving.
 #
-# T12 turns that term around: the passage of time is now **charged**:
+# The change turns that term around: the passage of time is now **charged**:
 #
 #   reward = PROGRESS_WEIGHT * progress - TIME_COST
 #
@@ -138,10 +138,10 @@ DT = 0.1                # seconds per sim step (matches frontend 10Hz)
 PROGRESS_WEIGHT = 1.0    # per metre of progress
 TIME_COST = 0.05         # per step - the speed signal (less time = better)
 
-# ===== Plan 073 Sprint 2 (A2a): the shared signal-action vocabulary =====
+# ===== the shared signal-action vocabulary =====
 #
 # The five action names are the externally-actionable control surface of
-# the traffic signal (plans/legacy/007-m2-signal-controller.md §2). The
+# the traffic signal. The
 # frontend's `RLController` consumes the same names, so a policy trained
 # here can drive the browser's signal.
 #
@@ -189,7 +189,7 @@ MAX_GREEN_SECS = 60.0
 # It exists because a controller that shrinks the phase on every
 # decision would otherwise *flicker* the light (0.6 s per phase) —
 # which no driver can react to, and which made the "flicker" schedule
-# look optimal inside the model (ADR-008).
+# look optimal inside the model.
 #
 # It is enforced at the **controller / environment** layer (the Python
 # `SignalEnv` masks the `shorten_red` action; the browser's
@@ -199,7 +199,7 @@ MAX_GREEN_SECS = 60.0
 MIN_GREEN_SECS = 10.0
 # The all-red clearance expressed in sim steps (3 s at the contract's 10 Hz).
 ALL_RED_STEPS = int(round(ALL_RED_SECS / DT))
-# The inter-green clearance (s) charged on every phase change (Plan 074 T9).
+# The inter-green clearance (s) charged on every phase change.
 #
 # The browser charges a 3 s yellow plus a 3 s all-red before the other
 # axis may go - six seconds during which no new vehicle gets a green.
@@ -221,7 +221,7 @@ CLEARANCE_SECS = 6.0
 # The inter-green clearance expressed in sim steps (6 s at the 10 Hz clock).
 CLEARANCE_STEPS = int(round(CLEARANCE_SECS / DT))
 
-# ===== Plan 074 Sprint 3 (S3a-1): traffic that answers to the light =====
+# ===== traffic that answers to the light =====
 #
 # The NPCs used to drive in straight lines at a constant speed and to
 # teleport back when they left the world — they never looked at the light.
@@ -249,8 +249,19 @@ NPC_DECEL = 6.0  # m/s²
 STOPPED_SPEED = 0.5  # m/s
 # Slack for the "is the vehicle still before the stop line?" comparison.
 STOP_LINE_EPS = 1e-9
+# How far past the intersection centre a vehicle has to be
+# before the **open** traffic model lets it leave the world (metres,
+# measured along its own heading).
+#
+# The closed loop respawns a vehicle when it leaves the *world* (|x| or
+# |z| > 40); the open model lets it leave when it has *crossed* — so the
+# vehicles that queue far upstream (a long queue reaches far past the
+# world's edge) stay in the world and keep queuing. That is what makes
+# the delay of a starved axis grow with the episode instead of being
+# capped by the fleet size.
+OPEN_TRAFFIC_EXIT_DISTANCE = 40.0
 
-# ===== Plan 074 T8: the intersection conflict =====
+# ===== the intersection conflict =====
 #
 # A vehicle may not enter the intersection while a vehicle of the
 # *other* axis occupies it - it has to wait behind the stop line, in
@@ -262,7 +273,7 @@ STOP_LINE_EPS = 1e-9
 # which is the cross-language contract's sensitive area and must
 # stay bit-identical.
 #
-# Why it is needed (Plan 074 §3 T8): without it the two axes never
+# Why it is needed: without it the two axes never
 # block each other, so splitting the same green time into more,
 # shorter phases is a pure gain. A signal agent trained against
 # that world has no trade-off to learn - its optimum is a
@@ -283,8 +294,8 @@ class Vehicle:
     z: float = 0.0
     heading: float = 0.0  # rad, 0 = +X, π/2 = +Z (north)
     speed: float = 0.0    # m/s
-    y: float = 0.0        # elevation (m), Plan 061
-    # --- Plan 074 Sprint 3 (S3a-1): signal-responsive traffic ---
+    y: float = 0.0        # elevation (m)
+    # --- signal-responsive traffic ---
     # The signalised approach axis this vehicle runs along ("ns" / "ew"),
     # derived from its heading. Empty when the vehicle is not on a
     # signalised approach.
@@ -356,7 +367,7 @@ class TrafficLight:
     ew_green: bool = False
     cycle_timer: float = 0.0
     cycle_duration: float = 30.0  # seconds per phase
-    # --- Plan 073 Sprint 2 (A2a): the externally-actionable control surface ---
+    # --- the externally-actionable control surface ---
     # Actions queued by `apply_action`; consumed by the next `SimCore.step()`.
     pending_actions: list[str] = field(default_factory=list)
     # Steps of all-red clearance left (0 = the normal cycle runs).
@@ -370,7 +381,7 @@ class TrafficLight:
 
         Synchronous, and it does NOT change the light's phase: the action is
         consumed by the next `SimCore.step()`. This mirrors the frontend's
-        `RLController.applyAction` (007 §2).
+        `RLController.applyAction`.
 
         An unknown name is rejected loudly — the vocabulary is a contract,
         not a free-form string.
@@ -384,7 +395,7 @@ class TrafficLight:
     def consume_actions(self) -> None:
         """Apply every queued action, in order.
 
-        Semantics (Plan 073 Sprint 2), expressed in this light's own model —
+        Semantics, expressed in this light's own model —
         a single phase clock, so "the swap" is the one event both axes
         hang off:
 
@@ -450,14 +461,14 @@ class SimCore:
     max_steps: int = MAX_STEPS_DEFAULT
     _terminated: bool = False
     _terminated_reason: str = ""
-    # Plan 067: the time-limit (truncation) flag is *latched*, mirroring
+    # The time-limit (truncation) flag is *latched*, mirroring
     # `_terminated`. It used to be recomputed from `step_count >= max_steps`
     # on every step, so once the limit was reached the world kept simulating
     # and kept accruing the alive bonus, and every following step re-reported
     # `truncated=True` — which made `CurriculumEnv` record one episode per
     # extra step. Now the episode's final state is stable once truncated.
     _truncated: bool = False
-    # Plan 076 T12: has the ego left the road during this episode?
+    # Has the ego left the road during this episode?
     #
     # The success condition used to be route-agnostic (`ego.z > 25`), so a
     # wrong route that left the road scored the same success - and the same
@@ -465,11 +476,11 @@ class SimCore:
     # the ego to have **stayed** on the road, not to be on it at the moment
     # it crossed the line.
     _off_road: bool = False
-    # Plan 048: scene_kind determines road topology and Pure Pursuit target.
-    # 'cross' (default, 044 behavior): single 4-way intersection.
-    # 'corridor' (048): 2 4-way intersections + 60m NS corridor between.
+    # scene_kind determines road topology and Pure Pursuit target.
+    # 'cross' (default): single 4-way intersection.
+    # 'corridor': 2 4-way intersections + 60m NS corridor between.
     scene_kind: str = "cross"
-    # Plan 074 Sprint 3 (S3a-1): make the traffic obey the light.
+    # Make the traffic obey the light.
     #
     # OFF by default on purpose. The default path is the basis of the
     # committed cross-language contract goldens
@@ -478,7 +489,7 @@ class SimCore:
     # leak into it. The signal training env (`signal_env.SignalEnv`) turns
     # it on; the contract vectors keep running the default path.
     responsive_traffic: bool = False
-    # Plan 074 T9: the inter-green clearance.
+    # The inter-green clearance.
     #
     # `_clearance_steps` counts the clearance steps that are left (0 =
     # the normal cycle runs); `_pending_swap` is the phase to show when
@@ -489,7 +500,7 @@ class SimCore:
     # sensitive area and must not grow.
     _clearance_steps: int = 0
     _pending_swap: tuple[bool, bool] | None = None
-    # Plan 076 T14: the light cycle of the **signalled** scene, overridable
+    # The light cycle of the **signalled** scene, overridable
     # for training.
     #
     # `None` (the default) means the scene's own cycle
@@ -506,12 +517,35 @@ class SimCore:
     # TypeScript contract mirror has no counterpart and the contract does
     # not cover it (the contract always runs the default cycle).
     light_cycle_seconds: float | None = None
+    # The **open** traffic model.
+    #
+    # OFF by default. The default path is the basis of the committed
+    # cross-language contract goldens (tests/contract/snapshots/ts_*.json)
+    # and the contract compares the two sides for *exact* equality, so the
+    # default behaviour must not move - not even by one vehicle.
+    #
+    # With it on, a vehicle that has crossed the intersection and left the
+    # downstream end **leaves the world** instead of being respawned at the
+    # mirrored position. The closed loop (the default) keeps a FIXED fleet
+    # on every lane, so the queue can never be longer than that fleet and
+    # the delay of a starved axis is capped at (fleet size x episode
+    # length). The browser's traffic is open (spawn at a fixed headway,
+    # disappear after the crossing), so the delay there is unbounded - the
+    # mismatch this flag removes.
+    #
+    # The **spawning** half lives in the environment (`signal_env`), which
+    # owns the demand (`signal_conditions.TrafficCondition`); this flag
+    # owns the **leaving** half, because the respawn happens here.
+    #
+    # Python-only, like `responsive_traffic`: the TypeScript contract
+    # mirror has no counterpart and the contract does not cover it.
+    open_traffic: bool = False
 
     def reset(self, seed: int | None = None) -> np.ndarray:
-        # Plan 074 T9: the inter-green clearance is per-episode state.
+        # The inter-green clearance is per-episode state.
         self._clearance_steps = 0
         self._pending_swap = None
-        # Plan 076 T12: the off-road latch is per-episode state too.
+        # The off-road latch is per-episode state too.
         self._off_road = False
         if self.scene_kind == "cross":
             return self._reset_cross()
@@ -523,7 +557,7 @@ class SimCore:
             return self._reset_roundabout()
         if self.scene_kind == "cross_signalled":
             return self._reset_cross_signalled()
-        # Plan 076 T13: an unknown scene name used to fall through to the
+        # An unknown scene name used to fall through to the
         # `cross` scene, which is a silent lie: a caller that asked for a
         # scene that does not exist measured the **cross** scene instead
         # (and its numbers looked perfectly plausible). The scene list is
@@ -535,7 +569,7 @@ class SimCore:
         )
 
     def _reset_cross(self) -> np.ndarray:
-        """Original cross scene (Plan 044). Single 4-way intersection."""
+        """Original cross scene. Single 4-way intersection."""
         self.ego = Vehicle(x=0.0, z=-25.0, heading=math.pi / 2, speed=0.0)
         # 4 NPCs at varying positions on each cardinal direction
         self.npcs = [
@@ -553,7 +587,7 @@ class SimCore:
         return self._obs()
 
     def _reset_corridor(self) -> np.ndarray:
-        """Plan 048: 2 4-way intersections + 60m NS corridor (mirror
+        """2 4-way intersections + 60m NS corridor (mirror
         frontend buildCorridorScene).
 
         NPC positions are spread to avoid immediate collisions with ego.
@@ -634,13 +668,13 @@ class SimCore:
         return self._obs()
 
     def _reset_cross_signalled(self) -> np.ndarray:
-        """Plan 076 T13: the signalled cross - the ego's axis starts RED.
+        """The signalled cross - the ego's axis starts RED.
 
         The four scenes above leave the ego's axis green for the whole
         episode, so the ego never faces a red light and a scripted
-        controller is never punished for ignoring the light (Plan 076
-        T12). Here the ego's axis starts **red** and turns green at step
-        121 (12 s) - inside the episode, and inside the ego's approach.
+        controller is never punished for ignoring the light (the light
+        never swaps). Here the ego's axis starts **red** and turns green
+        at step 121 (12 s) - inside the episode, and inside the ego's approach.
 
         The NPC layout is the **measured** one, not a copy of the `cross`
         scene's:
@@ -699,7 +733,7 @@ class SimCore:
         - `corridor`: the north end of the corridor (0, +30), so the ego
           passes both intersections instead of stalling at the first one;
         - `roundabout`: the north exit (0, +10);
-        - `cross_signalled` (Plan 076 T14): the **goal line**
+        - `cross_signalled`: the **goal line**
           (0, +25) - not the intersection centre.
 
         Why the signalled scene differs: the `cross` scene's target is a
@@ -731,7 +765,7 @@ class SimCore:
         if self._terminated:
             return self._obs(), 0.0, True, False, {"reason": self._terminated_reason}
         if self._truncated:
-            # Plan 067: the time limit was already reached — the episode is
+            # The time limit was already reached — the episode is
             # over. Freeze the world so the final state is stable and
             # reproducible instead of drifting on for every extra step.
             return self._obs(), 0.0, False, True, {"reason": self._terminated_reason, "progress": 0.0}
@@ -748,7 +782,7 @@ class SimCore:
         alpha = (alpha + math.pi) % (2 * math.pi) - math.pi
         steer = math.atan2(2.0 * EGO_WHEELBASE * math.sin(alpha), LOOKAHEAD_DISTANCE)
         steer = float(np.clip(steer, -MAX_STEER, MAX_STEER))
-        # Plan 076 T12: the policy's steering authority is a **residual**
+        # The policy's steering authority is a **residual**
         # on top of the scripted Pure Pursuit steer, not a replacement.
         #
         # The scripted controller is the natural baseline: a policy that
@@ -773,9 +807,9 @@ class SimCore:
         self.ego.x += self.ego.speed * math.cos(self.ego.heading) * DT
         self.ego.z += self.ego.speed * math.sin(self.ego.heading) * DT
 
-        # Plan 076 T14: has the ego left the road?
+        # Has the ego left the road?
         #
-        # T12 latched this so the **success** needs the ego to have
+        # The latch makes the **success** need the ego to have
         # *stayed* on the road. The latch is read by the **reward** as
         # well (the mileage is only earned on the road), so it is set
         # here - right after the kinematics, which are its only input -
@@ -801,7 +835,7 @@ class SimCore:
                 # Heading is tangent to circle (angle + π/2)
                 npc.heading = angle + math.pi / 2
         elif self.responsive_traffic:
-            # Plan 074 Sprint 3 (S3a-1): the NPCs obey the light, queue up
+            # The NPCs obey the light, queue up
             # behind each other and are released by the green.
             self._step_responsive_npcs()
         else:
@@ -822,7 +856,7 @@ class SimCore:
         if self.light.all_red_steps == 0 and self.light.resume_state is not None:
             self.light.ns_green, self.light.ew_green = self.light.resume_state
             self.light.resume_state = None
-        # Plan 074 T9: the inter-green clearance freezes the phase clock
+        # The inter-green clearance freezes the phase clock
         # completely - it does not advance, and a phase adjustment may
         # not move it either, so the next phase always starts with the
         # full cycle.
@@ -831,21 +865,21 @@ class SimCore:
         # here the adjustment is neutralised too, because the clock
         # reads 0 during the clearance and an adjustment landing there
         # would silently shorten the *next* green - below the minimum
-        # green time the T7 guard exists to protect.
+        # green time the minimum-green guard exists to protect.
         clearing = self.responsive_traffic and self._clearance_steps > 0
         clock_before_clearance = self.light.cycle_timer
         self.light.consume_actions()
         if clearing:
             self.light.cycle_timer = clock_before_clearance
         if self.light.all_red_steps > 0:
-            # All-red clearance (Plan 073 Sprint 2): neither axis is green
+            # All-red clearance: neither axis is green
             # and the phase clock is frozen, so the interrupted phase
             # resumes where it left off.
             self.light.ns_green = False
             self.light.ew_green = False
             self.light.all_red_steps -= 1
         elif clearing:
-            # Plan 074 T9: the inter-green clearance. Neither axis may go
+            # The inter-green clearance. Neither axis may go
             # and the phase clock is frozen; when the clearance runs out,
             # the other axis gets its green.
             self.light.ns_green = False
@@ -859,7 +893,7 @@ class SimCore:
             if self.light.cycle_timer >= self.light.cycle_duration:
                 self.light.cycle_timer = 0.0
                 if self.responsive_traffic:
-                    # Plan 074 T9: the swap is no longer instantaneous -
+                    # The swap is no longer instantaneous -
                     # the two axes are separated by an inter-green
                     # clearance during which no new vehicle may go.
                     self._pending_swap = (
@@ -880,7 +914,7 @@ class SimCore:
 
         # 5) Compute reward + termination
         #
-        # Plan 076 T12: the progress is the **signed** advance towards the
+        # The progress is the **signed** advance towards the
         # goal line, bounded by that line:
         #
         #   progress = min(ego.z, goal_z) - min(prev_z, goal_z)
@@ -888,7 +922,7 @@ class SimCore:
         # The old `max(0, ego.z - prev_z)` was farmable twice over: an ego
         # that zig-zagged earned the same progress again and again, and an
         # ego that drove past the goal kept earning it. The second one
-        # became reachable as soon as T12 let an off-road ego skip the
+        # became reachable as soon as the off-road rule let an ego skip the
         # success: the first training run found it (episode returns of 283
         # against a ceiling of ~59).
         #
@@ -896,13 +930,13 @@ class SimCore:
         # that reaches the goal earns exactly the distance to it.
         goal_z = self.goal_z
         progress = min(self.ego.z, goal_z) - min(prev_z, goal_z)
-        # Plan 076 T14: the mileage is only earned **on the road**.
+        # The mileage is only earned **on the road**.
         #
-        # T12's rule was "the success needs the ego to have **stayed** on
+        # The latch's rule was "the success needs the ego to have **stayed** on
         # the road", but it guarded the success only - the mileage was
         # still paid wherever the ego drove, so a policy could farm the
-        # progress by leaving the road. Plan 076 T13 measured that hole
-        # on the signalled scene: the trained policy drove off the road
+        # progress by leaving the road. That hole was measured on the
+        # signalled scene: the trained policy drove off the road
         # after the green, forfeited the +5 success bonus and still
         # collected the whole mileage.
         #
@@ -931,16 +965,16 @@ class SimCore:
             self._terminated_reason = "red_light"
             reward -= 5.0
 
-        # Plan 076 T12: the "the ego left the road" latch is set right
-        # after the kinematics (Plan 076 T14 moved it up there, because
+        # The "the ego left the road" latch is set right
+        # after the kinematics (it was moved up there, because
         # the reward reads it: the mileage is only earned on the road).
         # It is permanent - the success needs the ego to have STAYED on
         # the road.
 
-        # Plan 048: corridor has TWO intersections and a "pass through
+        # The corridor has TWO intersections and a "pass through
         # both" success condition.
         #
-        # Plan 076 T12: success also needs the ego to have stayed on the
+        # Success also needs the ego to have stayed on the
         # road - the old condition (`ego.z > 25`) was route-agnostic, so a
         # wrong route that left the road scored the same success and the
         # same bonus as the right one.
@@ -967,14 +1001,14 @@ class SimCore:
                     self._terminated_reason = "success_roundabout"
                     reward += 5.0
             else:
-                # Cross scene single-intersection success (original 044)
+                # Cross scene single-intersection success
                 if self.ego.z > self.goal_z:
                     self._terminated = True
                     self._terminated_reason = "success"
                     reward += 5.0
 
         # Check max steps
-        # Plan 067: latch the truncation instead of recomputing it every
+        # Latch the truncation instead of recomputing it every
         # step. The step that reaches the limit reports `truncated=True` and
         # still earns its reward; every later step short-circuits at the top
         # of `step()`.
@@ -988,20 +1022,20 @@ class SimCore:
         }
         return self._obs(), float(reward), self._terminated, self._truncated, info
 
-    # ===== Plan 074 Sprint 3 (S3a-1): signal-responsive traffic =====
+    # ===== signal-responsive traffic =====
 
     @property
     def goal_z(self) -> float:
         """The z the ego has to pass to score the success.
 
-        Plan 076 T12: the success condition and the progress reward both
+        The success condition and the progress reward both
         read this number, so "the goal line" is one thing, not two.
         """
         return SCENE_GOAL_Z.get(self.scene_kind, SCENE_GOAL_Z["cross"])
 
     @property
     def in_clearance(self) -> bool:
-        """Is the light in its inter-green clearance (Plan 074 T9)?
+        """Is the light in its inter-green clearance?
 
         During the clearance neither axis may go and the phase clock is
         frozen. The controller layer uses this to refuse a phase
@@ -1051,7 +1085,7 @@ class SimCore:
     def _step_responsive_npcs(self) -> None:
         """Advance the NPCs so that they obey the traffic light.
 
-        Plan 074 Sprint 3 (S3a-1). The model is deliberately small:
+        The model is deliberately small:
 
         - a vehicle that is still before the stop line and whose axis is
           red brakes to a stop at the stop line;
@@ -1068,7 +1102,7 @@ class SimCore:
             npc.axis = approach_axis(npc.heading)
             lanes.setdefault(_lane_key(npc), []).append((approach_distance(npc), npc))
 
-        # Plan 074 T8: the intersection conflict. The occupancy is read
+        # The intersection conflict. The occupancy is read
         # **once**, from the state at the beginning of the step, so the
         # outcome does not depend on the order in which the lanes are
         # processed - the model stays deterministic.
@@ -1088,16 +1122,35 @@ class SimCore:
 
         # Respawn at the opposite end when out of bounds — the behaviour
         # the default path has always had.
-        for npc in self.npcs:
-            if abs(npc.x) > 40 or abs(npc.z) > 40:
-                npc.x = -npc.x * 0.8
-                npc.z = -npc.z * 0.8
-                npc.stopped_at = None
+        #
+        # With the **open** traffic model a vehicle that has
+        # crossed the intersection and left the downstream end **leaves the
+        # world** instead. The closed loop is what makes the queue
+        # impossible to starve: a fixed fleet per lane ⇒ the queue can
+        # never be longer than the fleet.
+        #
+        # The test is **directional** on purpose: a vehicle that is
+        # queued far upstream (a long queue reaches far past the world's
+        # edge) has a *negative* distance along its heading, so it is
+        # kept — only the vehicles that have actually crossed the
+        # intersection leave.
+        if self.open_traffic:
+            self.npcs = [
+                npc
+                for npc in self.npcs
+                if approach_distance(npc) <= OPEN_TRAFFIC_EXIT_DISTANCE
+            ]
+        else:
+            for npc in self.npcs:
+                if abs(npc.x) > 40 or abs(npc.z) > 40:
+                    npc.x = -npc.x * 0.8
+                    npc.z = -npc.z * 0.8
+                    npc.stopped_at = None
 
     def _occupied_axes(self) -> set[str]:
         """The axes whose vehicles currently occupy the intersection.
 
-        Plan 074 T8. A vehicle is *in* the intersection when it is
+        A vehicle is *in* the intersection when it is
         inside the intersection box: `|x| < INTERSECTION_RADIUS` and
         `|z| < INTERSECTION_RADIUS`.
 
@@ -1125,7 +1178,7 @@ class SimCore:
 
         - the light: a vehicle whose axis is red stops at the stop
           line;
-        - the intersection conflict (Plan 074 T8): a vehicle may not
+        - the intersection conflict: a vehicle may not
           *enter* the intersection while the other axis occupies it,
           so it waits behind the stop line even when its axis is
           green.
@@ -1147,7 +1200,7 @@ class SimCore:
             return None
         if not green:
             return stop_distance
-        # Plan 074 T8: green, but the intersection is occupied by the
+        # Green, but the intersection is occupied by the
         # *other* axis. The vehicle has to wait behind the stop line -
         # this is what makes "serve one axis" block the other one.
         if occupied_axes - {npc.axis}:
@@ -1200,7 +1253,7 @@ class SimCore:
         in_intersection = abs(self.ego.x) < INTERSECTION_RADIUS and abs(self.ego.z) < INTERSECTION_RADIUS
         if not in_intersection:
             return False
-        # Plan 076 T12: the axis comes from the **traffic model's own**
+        # The axis comes from the **traffic model's own**
         # classification (`approach_axis`), so the red-light rule and the
         # traffic model can never disagree about which axis the ego is on.
         #
@@ -1238,6 +1291,6 @@ class SimCore:
             distances.append(50.0)
         for i, d in enumerate(distances[:5]):
             obs[8 + i] = min(d / 50.0, 1.0)
-        # [13] ego elevation (Plan 061)
+        # [13] ego elevation
         obs[13] = np.clip(self.ego.y / 10.0, -1.0, 1.0)
         return obs

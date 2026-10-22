@@ -3,14 +3,14 @@ import type { TrafficLight } from '@domain/entities/TrafficLight'
 import { LightPhase } from '@domain/value-objects/Phase'
 import { PHASE_DURATIONS } from '@shared/constants/simulation'
 
-// M2-B (plan 010): extended color map covers all 10 phase values.
+// Extended color map covers all 10 phase values.
 // Per 007 §1.1 rendering enforcement — exhaustive (no `default: gray`).
 // `Dark` = nearly black; renderer keeps emissiveIntensity low for it.
 export const PHASE_COLOR: Record<TrafficLight['phase'], number> = {
   [LightPhase.Green]: 0x22c55e, // (0.13, 0.77, 0.37)
   [LightPhase.Yellow]: 0xfbbf24, // (0.98, 0.75, 0.14)
   [LightPhase.Red]: 0xef4444, // (0.94, 0.27, 0.27)
-  [LightPhase.GreenLeft]: 0x22c55e, // same hue, different shape (left arrow — TODO M2-D)
+  [LightPhase.GreenLeft]: 0x22c55e, // same hue, different shape (left arrow — shape still TODO)
   [LightPhase.YellowLeft]: 0xfbbf24,
   [LightPhase.RedLeft]: 0xef4444,
   [LightPhase.FlashingYellow]: 0xfbbf24, // 1Hz blink (see updateTrafficLightNode)
@@ -122,7 +122,7 @@ export const updateTrafficLightNode = (
   // Phase-countdown bar: width is the remaining time as a fraction of
   // the current phase's nominal duration. Falls back to red duration
   // for phases PHASE_DURATIONS doesn't list (e.g. GreenLeft) — fine
-  // for M2-B; M2-D adds per-phase durations.
+  // for now; per-phase durations are not defined yet.
   const phaseTotal =
     phase === LightPhase.Green || phase === LightPhase.GreenLeft
       ? PHASE_DURATIONS.green

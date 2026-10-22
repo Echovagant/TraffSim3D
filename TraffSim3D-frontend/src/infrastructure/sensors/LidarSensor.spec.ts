@@ -85,7 +85,7 @@ describe('LidarSensor', () => {
     expect(frame.intensities[0]!).toBeGreaterThan(frame.intensities[1]!)
   })
 
-  it('throttles scan: returns null when called within scanIntervalSec (plan 033)', () => {
+  it('throttles scan: returns null when called within scanIntervalSec', () => {
     const cfg = defaultLidarConfig('v-1', [])
     cfg.horizontalRays = 2
     cfg.verticalRays = 1

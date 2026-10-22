@@ -1,8 +1,8 @@
 /**
- * Plan 047 / Plan 042: AI Playground true multi-agent training e2e.
+ * AI Playground true multi-agent training e2e.
  *
  * Stubs /api/v1/rl/status with `agent_rewards: {0: [...], 1: [...]}`
- * to simulate Plan 047 true multi-agent training output. Toggles the
+ * to simulate true multi-agent training output. Toggles the
  * "独立训练" checkbox and verifies:
  *  - 2 polylines render (one per agent, different colors)
  *  - Checkpoint list shows agent_id field
@@ -94,7 +94,7 @@ test('AI Playground: independent multi-agent renders per-agent polylines', async
 
   // Wait for chart to render with per-agent polylines
   await expect(page.locator('[data-testid="reward-chart"]')).toBeVisible()
-  // Plan 047: 2 polylines (one per agent)
+  // 2 polylines (one per agent)
   await expect(page.locator('[data-testid="reward-line-agent-0"]')).toBeVisible()
   await expect(page.locator('[data-testid="reward-line-agent-1"]')).toBeVisible()
   await expect(page.locator('[data-testid="reward-line-agent-0"]')).not.toHaveAttribute(

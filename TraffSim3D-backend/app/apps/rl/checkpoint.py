@@ -1,4 +1,4 @@
-"""Plan 045: PPO model checkpoint management.
+"""PPO model checkpoint management.
 
 Each subprocess gets its own subdirectory (pid-scoped) to avoid filename
 collisions when multiple training runs are spawned concurrently. The
@@ -36,7 +36,7 @@ def save_checkpoint(
 ) -> Path:
     """Save PPO model to a per-process subdirectory and prune old ones.
 
-    If `agent_id` is provided (Plan 047 true multi-agent), the filename
+    If `agent_id` is provided (true multi-agent), the filename
     includes `agent{id}` so per-agent checkpoints don't collide.
     """
     pdir = _per_process_dir()
@@ -57,7 +57,7 @@ def save_named_checkpoint(model: Any, name: str) -> Path:
 
     `save_checkpoint` names the file after the training step, so two
     runs that save at the same step overwrite each other. A multi-seed
-    run keeps one policy per seed (Plan 074 T10) and the name has to
+    run keeps one policy per seed and the name has to
     say which seed it belongs to — e.g.
     `signal_seed0_step_0210000.zip`.
 

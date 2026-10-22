@@ -604,14 +604,14 @@ def test_the_ego_training_path_exports_a_browser_loadable_policy(rl_state, monke
 
 
 # --------------------------------------------------------------------------
-# Plan 076 T14: the light curriculum
+# The light curriculum
 # --------------------------------------------------------------------------
 
 
 def test_the_light_curriculum_reproduces_the_measured_recipe() -> None:
     """The stage list is the measured one, and it scales with the budget.
 
-    The budgets are the ones Plan 076 T13 measured (two seeds, the same
+    The budgets are the ones measured (two seeds, the same
     score at the 8 s and the 12 s stages), so `--steps 230000` reproduces
     that measurement exactly.
     """

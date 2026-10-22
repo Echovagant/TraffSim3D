@@ -5,7 +5,7 @@ The signal agent's gate is `signal_train.evaluate_policy` against
 `signal_train.evaluate_schedule`: the same env, the same horizon, the same
 initial state. The ego's gate is the same shape, except that the ego's action
 space is a `Box(-1, 1, 2)` — `action[0]` is the throttle, `action[1]` is the
-**steering residual** (Plan 076 T12) — so the baseline is "always command X on
+**steering residual** — so the baseline is "always command X on
 the throttle channel", with the steer channel left at `0.0`, i.e. with the
 scripted Pure Pursuit unmodified.
 
@@ -18,7 +18,7 @@ The ego scenes are **deterministic**: `SimCore._reset_*` hard-codes the NPC
 placement and never draws from a random source, so the seed changes nothing
 and one episode *is* the population.
 
-What the reward looks like after Plan 076 T12
+What the reward looks like now
 --------------------------------------------
 The reward is `PROGRESS_WEIGHT * progress - TIME_COST` per step: the
 progress is the **signed** advance towards the goal line, bounded by it
@@ -103,7 +103,7 @@ def test_the_zero_throttle_baseline_is_rear_ended() -> None:
 
 
 def test_every_successful_constant_throttle_scores_the_same() -> None:
-    """Plan 076 T12: the alive bonus can no longer be farmed.
+    """The alive bonus can no longer be farmed.
 
     The bonus used to be paid per *step*, so a creeping policy collected
     it more often than a fast one and "the best constant throttle" was the
@@ -245,9 +245,9 @@ def test_evaluate_policy_reports_the_throttle_distribution() -> None:
 
 
 def test_the_steer_channel_now_reaches_the_sim() -> None:
-    """Plan 076 T12: `action[1]` is a steering **residual**, and it acts.
+    """`action[1]` is a steering **residual**, and it acts.
 
-    Before T12 the sim computed the steer itself and never read
+    Before the change the sim computed the steer itself and never read
     `action[1]`, so a policy trained here was a throttle controller with no
     steering authority at all. Now the command is a correction on top of the
     scripted Pure Pursuit steer, so the two signs drive to the two sides.

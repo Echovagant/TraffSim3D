@@ -5,12 +5,12 @@ describe('LightPhase', () => {
   it('has exactly 10 values (016 H2 exhaustiveness)', () => {
     expect(Object.keys(LightPhase).length).toBe(10)
   })
-  it('M1 values keep their string identity (backward compat with v3 saved scenes)', () => {
+  it('the three basic values keep their string identity (backward compat with v3 saved scenes)', () => {
     expect(LightPhase.Green).toBe('green')
     expect(LightPhase.Yellow).toBe('yellow')
     expect(LightPhase.Red).toBe('red')
   })
-  it('M2-B new values exist with expected string values', () => {
+  it('the seven advanced values exist with expected string values', () => {
     expect(LightPhase.GreenLeft).toBe('greenLeft')
     expect(LightPhase.YellowLeft).toBe('yellowLeft')
     expect(LightPhase.RedLeft).toBe('redLeft')

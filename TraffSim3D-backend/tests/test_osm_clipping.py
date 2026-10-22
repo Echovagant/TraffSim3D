@@ -1,4 +1,4 @@
-"""M3 Must: configurable map clipping (只加载仿真区域).
+"""Configurable map clipping (只加载仿真区域).
 
 The parser used to hardcode `MAX_BBOX_DEG = 0.5` (~55 km) as a
 memory-safety cap on oversized `.osm` files. That is not clipping: 55 km is

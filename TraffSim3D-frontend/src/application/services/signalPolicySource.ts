@@ -1,6 +1,6 @@
 // src/application/services/signalPolicySource.ts
 //
-// Plan 074 (T6): the browser side of the traffic-signal agent.
+// The browser side of the traffic-signal agent.
 //
 // The Python training env (`app/apps/rl/signal_env.py`) is the **authoritative**
 // definition of the observation. This module rebuilds the *same six
@@ -9,7 +9,7 @@
 // controller through the existing `SignalActionSource` seam.
 //
 // ---------------------------------------------------------------------------
-// The observation, index by index (Plan 074 §2 D1)
+// The observation, index by index
 // ---------------------------------------------------------------------------
 //
 // Python's `SignalEnv._obs()` is the reference implementation:
@@ -37,9 +37,9 @@
 // Three details are worth spelling out, because they are where the two
 // sides could silently disagree:
 //
-// 1. **idx 5 is the elapsed fraction, not the remaining one.** The plan's
-//    first draft said the browser uses the *remaining* fraction and the two
-//    are complements; that was wrong (Plan 074's D1 correction, 2026-10-21):
+// 1. **idx 5 is the elapsed fraction, not the remaining one.** The
+//    original draft said the browser uses the *remaining* fraction and the two
+//    are complements; that was wrong (corrected on 2026-10-21):
 //    the policy's weights are trained against Python's definition, so the
 //    browser has to feed the *same* quantity or the network is consuming a
 //    different input than it was trained on. Python's `cycle_timer` counts
@@ -50,7 +50,7 @@
 //    The two sides still differ in *scale*: Python's `cycle_duration` is one
 //    phase (30 s) while the browser's `cycleSeconds` is the whole cycle
 //    (63 s). That is the known "the two traffic models are not the same
-//    model" boundary of Plan 074 §2 D1 — the schema is compared, not the
+//    model" boundary — the schema is compared, not the
 //    numbers.
 //
 // 2. **idx 0 / 1 count the whole axis.** Python's `queue_length(axis)`
@@ -60,7 +60,7 @@
 //    the one that matches Python's meaning. (In the default scene no light
 //    sets `controlledLane`, so the two are the same number.)
 //
-//    One residual difference the plan accepts (D1 compares the *schema*,
+//    One residual difference the contract accepts (it compares the *schema*,
 //    never the numbers): Python additionally requires the vehicle to be
 //    stopped (`speed < STOPPED_SPEED`), the browser only requires it to be
 //    before the stop line and not crashed / inside the intersection. The
@@ -80,7 +80,7 @@ import { mlpForwardDiscrete } from '@infrastructure/rl/mlpInference'
 import type { PolicyWeights } from '@infrastructure/rl/types'
 import { getAxisQueueLength, type SignalActionSource } from './signalController'
 
-/** The signal agent's observation dimension (Plan 074 §2 D1). */
+/** The signal agent's observation dimension. */
 export const SIG_OBS_DIM = 6
 
 /**

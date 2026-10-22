@@ -1,7 +1,7 @@
 # TraffSim3D Frontend
 
-Vue 3 + Vite + Three.js + Pinia. DDD-layered — see
-`../docs/` §3.2 for the structure spec.
+Vue 3 + Vite + Three.js + Pinia. DDD-layered — `src/` is split into
+domain / application / infrastructure / interfaces / shared (see below).
 
 ## Develop
 
@@ -28,10 +28,18 @@ npm run format       # Prettier write
 
 ## Test
 
-No test runner is wired up yet. A future plan will add Vitest with
-tests for the pure functions in `src/domain/value-objects/`, the
-serializer in `src/infrastructure/persistence/`, and the `tick` step
-function in `src/application/services/`.
+```sh
+npm run test:run           # Vitest unit tests
+npm run test:coverage      # + coverage (thresholds are enforced)
+npm run test:e2e           # Playwright end-to-end + visual regression
+npm run contract:check     # cross-language contract snapshots
+```
+
+Unit tests cover the pure functions in `src/domain/`, the serializer in
+`src/infrastructure/persistence/`, the `tick` step function in
+`src/application/services/` and the views. The end-to-end suite drives a live
+dev server and compares screenshots against the baselines in
+`../e2e-output/baseline/`.
 
 ## Architecture cheat sheet
 

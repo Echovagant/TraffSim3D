@@ -4,7 +4,7 @@ import type { TrafficLight } from '@domain/entities/TrafficLight'
 import type { Road } from '@domain/entities/Road'
 import { createGroundMesh, GROUND_DEFAULT_SIZE, GROUND_PADDING } from './GroundMesh'
 
-/** Plan 055: rendering mode. `flat` (default) renders the ground
+/** Rendering mode. `flat` (default) renders the ground
  *  + road meshes as Three.js geometry — used by /scene-editor for
  *  the standalone simulator view. `smart-city` skips ground + roads
  *  because Cesium provides the basemap underneath; Three.js only
@@ -30,7 +30,7 @@ export interface RoadNode {
 
 export interface BuiltScene {
   root: THREE.Group
-  /** Plan 062: instanced vehicle rendering (3 InstancedMesh, one per type). */
+  /** Instanced vehicle rendering (3 InstancedMesh, one per type). */
   vehicles: VehicleInstances
   lightNodes: Map<string, TrafficLightNode>
   roadNodes: Map<string, RoadNode>
@@ -81,12 +81,12 @@ const buildLightNode = (light: TrafficLight): TrafficLightNode => createTrafficL
 
 export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): BuiltScene => {
   const root = new THREE.Group()
-  // Plan 054: ground size scales with the network bbox so a 5km
+  // Ground size scales with the network bbox so a 5km
   // OSM district doesn't show a visible 200m gray square when the
   // camera zooms out. For small synthetic scenes (cross, t, loop,
   // corridor) we use 2× the diagonal so the road never sits on the
   // very edge of the ground (the visible gray "background" the user
-  // reported in 054b). Fog hides the ground edge for both small and
+  // reported earlier). Fog hides the ground edge for both small and
   // large scenes.
   let groundSize = GROUND_DEFAULT_SIZE
   let halfExtent = GROUND_DEFAULT_SIZE / 2
@@ -114,7 +114,7 @@ export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): Bui
   if (mode === 'flat') {
     root.add(createGroundMesh(groundSize))
   } else {
-    // Plan 055: invisible ground at y=0 to receive Three.js raycasts
+    // Invisible ground at y=0 to receive Three.js raycasts
     // (vehicle pick, hover). The Cesium basemap provides the visible
     // ground; this is purely a pick surface.
     const pickPlane = new THREE.Mesh(
@@ -127,7 +127,7 @@ export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): Bui
   }
 
   const roadNodes = new Map<string, RoadNode>()
-  // Plan 055: smart-city mode skips Three.js road meshes because
+  // Smart-city mode skips Three.js road meshes because
   // Cesium draws roads from real OSM data (GeoJsonDataSource).
   if (mode === 'flat') {
     for (const road of Object.values(network.roads)) {
@@ -137,7 +137,7 @@ export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): Bui
     }
   }
 
-  // Plan 062: instanced vehicle rendering.
+  // Instanced vehicle rendering.
   const vehicles = createVehicleInstances()
   for (const type of ['car', 'truck', 'bus'] as const) {
     root.add(vehicles.meshes[type])
@@ -196,7 +196,7 @@ export const syncMeshTransforms = (
  * reset/hydrate, so we need this incremental path for add/remove.
  */
 export const syncSceneContents = (network: RoadNetwork, built: BuiltScene): void => {
-  // Plan 062: vehicles use instanced pool, not individual nodes.
+  // Vehicles use instanced pool, not individual nodes.
   const liveVehicleIds = new Set(Object.keys(network.vehicles))
   const allocatedIds = new Set(built.vehicles.trails.keys())
 

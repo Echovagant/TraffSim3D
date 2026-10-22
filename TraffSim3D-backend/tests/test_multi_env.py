@@ -1,4 +1,4 @@
-"""Plan 045: MultiTrafficEnv contract tests."""
+"""MultiTrafficEnv contract tests."""
 
 from __future__ import annotations
 

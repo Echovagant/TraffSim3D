@@ -1,5 +1,5 @@
 /**
- * Plan 075 (S4): the AI Playground has to *draw* the comparison curve.
+ * The AI Playground has to *draw* the comparison curve.
  *
  * The dashboard already had a "Reward 曲线" — a hand-written SVG polyline of
  * the raw per-episode training reward. That curve cannot be compared with
@@ -22,7 +22,7 @@
  */
 import { test, expect } from '@playwright/test'
 
-/** Plan 074 T9/T10's measured numbers. */
+/** The measured evaluation numbers. */
 const EVAL_SERIES = [
   { step: 10000, return: -455.4, baseline: -423.1, condition: 'train' },
   { step: 20000, return: -440.2, baseline: -423.1, condition: 'train' },
@@ -104,7 +104,7 @@ const parsePoints = (attribute: string | null): Array<[number, number]> =>
       return [Number(x), Number(y)] as [number, number]
     })
 
-test.describe('AI Playground — the training curve (Plan 075)', () => {
+test.describe('AI Playground — the training curve', () => {
   test.beforeEach(async ({ page }) => {
     await page.route('**/api/v1/rl/status', async (route) => {
       await route.fulfill({

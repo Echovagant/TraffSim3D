@@ -1,6 +1,6 @@
 // src/infrastructure/physics/WorldConfig.spec.ts
 //
-// The M2 contract constants. `fixedDt` is load-bearing: 1 step/frame and
+// The physics contract constants. `fixedDt` is load-bearing: 1 step/frame and
 // simTime accumulates by exactly this value, so assert it as a number, not
 // as "is defined".
 

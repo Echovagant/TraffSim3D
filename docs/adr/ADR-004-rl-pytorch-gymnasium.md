@@ -16,12 +16,12 @@ Gym with broader environment support and active development.
 
 Use **PyTorch (>=2.x) + Gymnasium (>=0.29) + Stable-Baselines3** for RL.
 Algorithms of interest: PPO, SAC, DQN; multi-agent via independent
-learners or MAPPO in M4.
+learners or MAPPO is the forward path.
 
 ## Consequences
 
-- PyTorch is **not pinned in M1** to avoid forcing a 2 GB+ install
-  before it's needed. The pin lands in M4 alongside the `tool.uv.sources`
+- PyTorch is **not pinned initially** to avoid forcing a 2 GB+ install
+  before it's needed. The pin lands alongside the `tool.uv.sources`
   block selecting the right PyTorch index (CPU or CUDA).
 - Domain entities in `src/domain/` (frontend) and `app/models/`
   (backend) must be **pure and serializable** — the Gymnasium env
@@ -37,5 +37,5 @@ learners or MAPPO in M4.
 - **JAX + Acme**: higher performance ceiling, but the team's PyTorch
   fluency and ecosystem tooling tip the balance toward PyTorch.
 - **Ray RLlib**: appealing for distributed training, but the project
-  is single-developer in M1–M4; we can swap in RLlib later without
+  is single-developer at this scale; we can swap in RLlib later without
   rewriting the env.

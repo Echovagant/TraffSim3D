@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-"""Export the FastAPI OpenAPI schema to `docs/openapi.json` (M5 §4.2).
+"""Export the FastAPI OpenAPI schema to `docs/openapi.json`.
 
 Why this script exists
 ----------------------
-M5's Must item "API 文档 (OpenAPI)" needs the schema checked into the repo so
+The "API 文档 (OpenAPI)" deliverable needs the schema checked into the repo so
 a reader can read the API surface without starting a server. FastAPI already
 serves it live at `GET /openapi.json` and renders it at `GET /docs`, but that
 only helps someone who has the backend running. This script makes the snapshot

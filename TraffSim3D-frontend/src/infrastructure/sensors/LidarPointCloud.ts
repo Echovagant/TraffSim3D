@@ -1,6 +1,6 @@
 // src/infrastructure/sensors/LidarPointCloud.ts
 //
-// M2-D (plan 025): THREE.Points wrapper that visualizes a LidarFrame.
+// THREE.Points wrapper that visualizes a LidarFrame.
 // One LidarPointCloud per vehicle; worldStore keeps a Map<VehicleId,
 // LidarPointCloud> and ThreeJSRenderer.addAuxiliary puts the mesh in
 // the scene. updateFromFrame() re-uploads the position + color

@@ -1,5 +1,5 @@
 /**
- * Plan 048 / Plan 042: AI Playground corridor scene training e2e.
+ * AI Playground corridor scene training e2e.
  *
  * Verifies the scene select renders both 'cross' and 'corridor' options
  * and that selecting 'corridor' persists in the train request body.

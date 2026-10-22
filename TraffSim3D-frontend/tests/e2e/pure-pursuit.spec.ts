@@ -1,5 +1,5 @@
 /**
- * Plan 042 / Plan 037c verification: Pure Pursuit path following.
+ * Verification: Pure Pursuit path following.
  * Capture the T-junction scene, let the simulation run for a few seconds,
  * then sample a vehicle's heading — expect it to have rotated through
  * the T-junction corner (not just traveled straight).
@@ -12,9 +12,7 @@ import {
   expectSceneScreenshot,
 } from './helpers/wait'
 
-test('Pure Pursuit: vehicle heading changes through T junction corner (Plan 037c)', async ({
-  page,
-}) => {
+test('Pure Pursuit: vehicle heading changes through T junction corner', async ({ page }) => {
   await waitForSceneReady(page)
   await switchScene(page, 't')
   await waitForVehicleCount(page, 4) // T-junction has 4 vehicles (v-t1..v-t4)

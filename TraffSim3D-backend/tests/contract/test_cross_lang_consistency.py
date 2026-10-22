@@ -1,4 +1,4 @@
-"""Plan 071: cross-language consistency test (executable).
+"""Cross-language consistency test (executable).
 
 The Python training sim (`app/apps/rl/sim_core.py`) and the TypeScript
 contract mirror (`TraffSim3D-frontend/src/application/services/simCoreMirror.ts`)
@@ -61,7 +61,7 @@ _SCENE_REASONS = {
     "corridor": ("success_corridor", "collision", "red_light"),
     "t_junction": ("success_t_junction", "collision", "red_light"),
     "roundabout": ("success_roundabout", "collision", "red_light"),
-    # Plan 076 T13: the signalled scene shares the `cross` scene's success
+    # The signalled scene shares the `cross` scene's success
     # reason - the difference between the two scenes is the light schedule,
     # not the route.
     "cross_signalled": ("success", "collision", "red_light"),
@@ -69,7 +69,7 @@ _SCENE_REASONS = {
 
 
 # --------------------------------------------------------------------------
-# Plan 076 S5a: the turning vectors and the cross-runtime noise floor
+# The turning vectors and the cross-runtime noise floor
 # --------------------------------------------------------------------------
 #
 # ADR-008 D3 compares the two sides with `==`, because "both sides execute
@@ -81,8 +81,8 @@ _SCENE_REASONS = {
 # V8's `Math.sin` / `Math.atan2` and CPython's `math.sin` / `math.atan2`
 # are different implementations (V8 ships an fdlibm-derived port, CPython
 # calls the platform libm), and they disagree by 1 ULP for a few percent of
-# the angles a turning trajectory visits. Measured on this machine (Plan 076
-# S5a): on `steer_lateral_offset` the two sides differ by 2.22e-16 rad in the
+# the angles a turning trajectory visits. Measured on this machine (for the
+# turning vectors): on `steer_lateral_offset` the two sides differ by 2.22e-16 rad in the
 # heading - first at sample step 20 - and 3.55e-15 m in z; ADR-008's own
 # randomised sweep measured up to 1.09e-13 m.
 #
@@ -355,7 +355,7 @@ def _light_override_for(v: dict) -> dict | None:
 def _ego_start_for(v: dict) -> dict | None:
     """The ego pose to install right after the scene's `reset()`.
 
-    Plan 076 S5a. Every contract vector used to be a **straight-line**
+    Every contract vector used to be a **straight-line**
     scenario: the ego drove at its target, Pure Pursuit's angle was
     ~0, `steer` was 0, and the three turning constants
     (`LOOKAHEAD_DISTANCE`, `MAX_STEER`, `EGO_WHEELBASE`) could not change
@@ -446,7 +446,7 @@ def _write_python_snapshot(v: dict, sample_every: int) -> dict:
 
     This is the **only** writer of the Python-side snapshot files. The
     legacy sibling `tests/contract/test_python_snapshot.py` used to have its
-    own writer with the Plan 050 schema (no `light`, no `final_state`, plus
+    own writer with the older schema (no `light`, no `final_state`, plus
     a `tolerance` key); because pytest collects `test_cross_lang_consistency.py`
     first (alphabetically), that sibling overwrote these files at the end of
     every session — so the artefact a reader is most likely to open was the
@@ -517,7 +517,7 @@ def test_contract_snapshots_are_present() -> None:
 
 @pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])
 def test_the_road_rules_constants_match_the_typescript_golden(vector_name: str) -> None:
-    """Plan 076 T12: the road rules are contract constants too.
+    """The road rules are contract constants too.
 
     The road's half-width and each scene's goal line decide whether the
     ego may score the success. Both sides own their own copy (Python in
@@ -545,7 +545,7 @@ def test_the_road_rules_constants_match_the_typescript_golden(vector_name: str) 
 
 @pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])
 def test_the_scene_light_schedule_matches_the_typescript_golden(vector_name: str) -> None:
-    """Plan 076 T13: the scene's light schedule is a contract constant too.
+    """The scene's light schedule is a contract constant too.
 
     Four of the five scenes run the default 30 s cycle, whose first phase
     change lands on step 300 — beyond every ego episode, which is why the
@@ -584,7 +584,7 @@ def test_the_scene_light_schedule_matches_the_typescript_golden(vector_name: str
 
 @pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])
 def test_signal_action_vocabulary_matches_the_typescript_golden(vector_name: str) -> None:
-    """Plan 073 Sprint 2 (D4): the two sides speak the same action language.
+    """The two sides speak the same action language.
 
     The TypeScript side writes its copy of the five action names and the two
     semantics constants into every scenario golden; this test compares them
@@ -634,7 +634,7 @@ def test_signal_action_vocabulary_matches_the_typescript_golden(vector_name: str
         f"(typescript={ts_max_green}, python={MAX_GREEN_SECS})"
     )
 
-    # Plan 074 T7: the minimum green time is a contract constant too —
+    # The minimum green time is a contract constant too —
     # it is what stops a controller from flickering the light (a phase
     # shorter than the minimum is never shorter than this).
     ts_min_green = vocab["min_green_seconds"]
@@ -643,7 +643,7 @@ def test_signal_action_vocabulary_matches_the_typescript_golden(vector_name: str
         f"(typescript={ts_min_green}, python={MIN_GREEN_SECS})"
     )
 
-    # Plan 074 T9: the inter-green clearance - the lost time a phase
+    # The inter-green clearance - the lost time a phase
     # change costs. The browser charges a 3 s yellow plus a 3 s all-red
     # before the other axis may go; the Python training sim charges the
     # same 6 s, and the two numbers are compared here.
@@ -674,7 +674,7 @@ def test_python_and_ts_agree_exactly(vector_name: str) -> None:
 
 @pytest.mark.parametrize("vector_name", _vector_names(turning=True))
 def test_python_and_ts_agree_on_a_turning_trajectory(vector_name: str) -> None:
-    """Plan 076 S5a: a turning trajectory agrees within the libm noise floor.
+    """A turning trajectory agrees within the libm noise floor.
 
     The exact `==` assertion cannot hold for a trajectory that turns: V8's
     `Math.sin` / `Math.atan2` and CPython's `math.sin` / `math.atan2` are
@@ -727,7 +727,7 @@ def test_python_and_ts_kernel_speed_series_agree(vector_name: str) -> None:
 
 
 # --------------------------------------------------------------------------
-# Plan 074 (T3): the action-driven contract vectors
+# The action-driven contract vectors
 # --------------------------------------------------------------------------
 #
 # The five vectors above run the **default** cycle, so they cannot tell
@@ -807,7 +807,7 @@ def test_the_preempt_boundary_case_keeps_the_light_alive() -> None:
 
     A `preempt` that lands on the step right after a clearance ended used to
     record the all-red state as the resume point, and the light then never
-    went green again (Plan 073 Sprint 2 fix wave). The golden must show the
+    went green again. The golden must show the
     phase coming back.
     """
     golden = _require_snapshot(_golden_path("signalled_light_preempt_boundary"))

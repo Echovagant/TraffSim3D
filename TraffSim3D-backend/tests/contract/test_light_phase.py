@@ -1,4 +1,4 @@
-"""Plan 073 Sprint 1: the traffic-light phase flip, pinned on the Python side.
+"""The traffic-light phase flip, pinned on the Python side.
 
 Every committed golden carries the **initial** phase only (`nsGreen: true`
 everywhere; the roundabout's light is both-green, so its swap is a no-op).

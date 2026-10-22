@@ -819,7 +819,7 @@ describe('RapierWorld — step', () => {
     // A 30fps render frame still advances exactly one 1/60 step.
     expect(w.step(1 / 30).dt).toBeCloseTo(1 / 60, 12)
     // Even an absurd 5s stall stays at fixedDt (the accumulator is only
-    // bookkeeping — M2-A never runs catch-up steps).
+    // bookkeeping — never runs catch-up steps).
     expect(w.step(5).dt).toBeCloseTo(1 / 60, 12)
   })
 

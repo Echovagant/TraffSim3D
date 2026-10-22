@@ -1,6 +1,6 @@
 // src/infrastructure/cesium/loadOSMScene.ts
 //
-// Plan 055: pull OSM buildings + roads from Overpass, hand the
+// Pull OSM buildings + roads from Overpass, hand the
 // GeoJSON FeatureCollection directly to Cesium.GeoJsonDataSource.
 //
 // Why pass an object instead of a URL:
@@ -12,7 +12,7 @@
 //     pass.
 //
 // Overpass bbox format: (south, west, north, east). We use the
-// same compact query templates as 054's MapImporterView.vue so
+// same compact query templates as the MapImporterView.vue so
 // users get consistent output regardless of which surface they use.
 
 import * as Cesium from 'cesium'
@@ -74,7 +74,7 @@ out body; >; out skel qt;
 //      "正在从 Overpass 加载 OSM 数据..." toast staying forever).
 //   2. Every page reload re-fetches the same bbox.
 //
-// Plan 056 added `GET /api/v1/maps/overpass` on the FastAPI backend
+// The FastAPI backend exposes `GET /api/v1/maps/overpass`
 // which forwards the query once, caches to `geojson/cache/<hash>.json`,
 // and serves subsequent identical queries from disk. The frontend
 // just hits our own endpoint (proxied via vite → `localhost:8000`).
@@ -156,7 +156,7 @@ const BUILDING_OPACITY = 0.75
 const DEFAULT_BUILDING_HEIGHT_M = 10
 const METERS_PER_LEVEL = 3.5
 
-// Plan 062: classify buildings by OSM tag for visual variety.
+// Classify buildings by OSM tag for visual variety.
 // Each category gets a distinct hue so a bird's-eye view reads
 // residential vs commercial vs public zones at a glance.
 const RESIDENTIAL_TAGS = new Set([
@@ -234,7 +234,7 @@ export const loadOSMScene = async (
 
   // Roads: polyline clamped to ground. Cesium's clampToGround flag
   // is the GIS-standard way to render roads without z-fighting on
-  // terrain (we don't use terrain in 055, but this is forward-compat).
+  // terrain (we don't use terrain here yet, but this is forward-compat).
   const roads = await Cesium.GeoJsonDataSource.load(roadsGeo, {
     clampToGround: true,
     stroke: Cesium.Color.fromCssColorString(ROAD_COLOR),

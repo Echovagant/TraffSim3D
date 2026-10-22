@@ -11,7 +11,7 @@ app = FastAPI(
     description="3D traffic simulation platform — RL engine and scene services.",
 )
 
-# Plan 052 follow-up: CORS for dev-mode OSM uploads.
+# CORS for dev-mode OSM uploads.
 # Without this, MapImporterView's POST /api/v1/maps/parse-osm fails
 # with "Failed to fetch" because the browser blocks the cross-origin
 # POST when the dev server (5173) talks to the backend (8000) directly
@@ -28,7 +28,7 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:4173",  # Vite preview
         "http://127.0.0.1:4173",
-        # Plan 073: the CI e2e job and the "independent port" workflow both
+        # The CI e2e job and the "independent port" workflow both
         # serve the frontend from 5188 (5173 is the project's default vite
         # port and can be occupied by another project on a shared machine).
         # Without these two origins a direct VITE_BACKEND_URL call from

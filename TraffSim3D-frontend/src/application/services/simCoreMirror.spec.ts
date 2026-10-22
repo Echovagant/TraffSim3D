@@ -1,6 +1,6 @@
 // src/application/services/simCoreMirror.spec.ts
 //
-// Plan 071: the L3 contract mirror — a 1:1 port of the Python training
+// The L3 contract mirror — a 1:1 port of the Python training
 // sim (`app/apps/rl/sim_core.py`).
 //
 // The expected values are measured from the Python side. Exact equality,
@@ -103,7 +103,7 @@ describe('simCoreMirror — episode limits', () => {
 })
 
 describe('simCoreMirror — termination rules', () => {
-  it('truncates and freezes once maxSteps is reached (Plan 067 latch)', () => {
+  it('truncates and freezes once maxSteps is reached (the truncation latch)', () => {
     const core = new SimCoreMirror('cross', 5)
     core.reset()
     for (let i = 0; i < 5; i++) core.step(1.0)
@@ -172,7 +172,7 @@ describe('simCoreMirror — observation', () => {
   })
 })
 
-// Plan 073 Sprint 2 (A2a): the mirror carries the same five signal actions
+// The mirror carries the same five signal actions
 // as the Python light. These are the TS-side pins of the *semantics*; the
 // *vocabulary* is cross-language and asserted by the Python contract test.
 describe('simCoreMirror — signal actions', () => {
@@ -287,7 +287,7 @@ describe('simCoreMirror — signal actions', () => {
   }
 
   it('a preempt right after a clearance does not kill the light', () => {
-    // Regression (Plan 073 Sprint 2 fix wave). The clearance that ends
+    // Regression (the clearance fix wave). The clearance that ends
     // resumes BEFORE the queued actions are consumed. Without that order a
     // preempt landing on the boundary step recorded the all-red state as
     // the resume point, and the light never went green again.
@@ -325,9 +325,9 @@ describe('simCoreMirror — signal actions', () => {
   })
 })
 
-// Plan 074 (T3): the mirror can run the contract vectors' two optional
+// The mirror can run the contract vectors' two optional
 // extras — the light override and the scheduled signal actions.
-describe('simCoreMirror — contract vector options (Plan 074)', () => {
+describe('simCoreMirror — contract vector options', () => {
   const lightAt = (ep: MirrorEpisode): Map<number, { nsGreen: boolean; ewGreen: boolean }> =>
     new Map(ep.samples.map((s) => [s.step, s.light]))
 
@@ -360,7 +360,7 @@ describe('simCoreMirror — contract vector options (Plan 074)', () => {
 
   it('keeps the light alive across the clearance boundary', () => {
     // A second preempt on the very step the phase resumed (step 40) must
-    // not wedge the light — the Plan 073 Sprint 2 regression.
+    // not wedge the light — the clearance regression.
     const ep = runEpisode('roundabout', new Array(400).fill(0), 10, 400, {
       lightOverride: { nsGreen: true, ewGreen: false },
       signalActions: [
@@ -387,7 +387,7 @@ describe('simCoreMirror — contract vector options (Plan 074)', () => {
   })
 })
 
-// Plan 076 S5a: the mirror can start the ego somewhere else.
+// The mirror can start the ego somewhere else.
 //
 // Every contract vector used to be a straight-line scenario, so Pure
 // Pursuit's angle was ~0, `steer` was 0, and the three turning constants
@@ -398,7 +398,7 @@ describe('simCoreMirror — contract vector options (Plan 074)', () => {
 //
 // The Python side applies the same override to `core.ego` right after
 // `reset()` — see `tests/contract/test_cross_lang_consistency.py`.
-describe('simCoreMirror — the ego start override (Plan 076 S5a)', () => {
+describe('simCoreMirror — the ego start override', () => {
   const lateral = { x: 60, z: -25, heading: Math.PI / 2, speed: 0 }
   const headingOffset = { x: 0, z: -25, heading: Math.PI / 2 + 2.0, speed: 0 }
 
@@ -470,8 +470,8 @@ describe('simCoreMirror — the ego start override (Plan 076 S5a)', () => {
   })
 })
 
-// Plan 076 T12: the rules the cross-language contract now covers.
-describe('simCoreMirror — Plan 076 T12 road rules', () => {
+// The rules the cross-language contract now covers.
+describe('simCoreMirror — the road rules', () => {
   it('classifies the red-light axis like the traffic model', () => {
     // 50 degrees is inside the band where the traffic model's
     // `approach_axis` (ns) and the old "within 0.5 rad of north" heuristic

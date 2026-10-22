@@ -1,10 +1,10 @@
 // src/application/services/fixedStepScheduler.ts
 //
-// Plan 038 (M2 → M3 bridge): a tiny scheduler that converts a
+// A tiny scheduler that converts a
 // stream of variable-rate wall-clock dt calls into a stream of
 // fixed-rate tick boundary events. Used to drive the trajectory
 // exporter at a steady 10 Hz regardless of how fast the render loop
-// is firing — RL training (M4) needs evenly-spaced samples so that
+// is firing — RL training needs evenly-spaced samples so that
 // the advantage estimator doesn't see Δt jitter.
 //
 // Usage:

@@ -1,4 +1,4 @@
-"""Plan 049: SB3 PPO checkpoint weights → JSON serialization.
+"""SB3 PPO checkpoint weights → JSON serialization.
 
 Loads a `.zip` checkpoint produced by `app.apps.rl.checkpoint.save_checkpoint()`
 and extracts the policy `state_dict()` to a JSON-serializable dict. The
@@ -12,7 +12,7 @@ Why JSON instead of ONNX:
   The input dim (14) is authoritative in `sim_core.OBS_DIM` — do not
   hardcode it here; read it from the checkpoint's state_dict shape.
 - Mvp scope: single architecture (MlpPolicy, default net_arch=[]). When
-  policy_kwargs support lands (M5+), we'll add ONNX as the fallback.
+  policy_kwargs support lands, we'll add ONNX as the fallback.
 
 This module is lazy-loaded by the API endpoint — `stable_baselines3` is
 NOT imported at module scope so test environments without SB3 installed

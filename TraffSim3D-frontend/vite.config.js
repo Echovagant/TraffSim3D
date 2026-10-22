@@ -10,14 +10,14 @@ export default defineConfig({
   plugins: [
     vue(),
     vueDevTools(),
-    // Plan 055: Cesium plugin — copies Cesium's static assets (Workers,
+    // Cesium plugin — copies Cesium's static assets (Workers,
     // ThirdParty, Assets, Widgets) to /Cesium/* in dev and emits the
     // CESIUM_BASE_URL script. Without this, Cesium tries to load
     // /Workers/*.js from the dev server root and fails with a 404
     // module-script error.
     cesium(),
     /**
-     * Plan 066: load the Cesium runtime on demand instead of on every page.
+     * Load the Cesium runtime on demand instead of on every page.
      *
      * `vite-plugin-cesium` injects `<script src="/cesium/Cesium.js">` into
      * `index.html` for production builds, because it externalises the `cesium`
@@ -52,13 +52,13 @@ export default defineConfig({
     },
   },
   server: {
-    // Plan A: forward FastAPI endpoints to the local backend so the browser
+    // Forward FastAPI endpoints to the local backend so the browser
     // can call `/api/v1/ping` and `/health` without CORS preflights in dev.
     // Production builds serve the API from the same origin (or a reverse
     // proxy) — this block is dev-only.
     //
-    // Plan 052 follow-up: read the backend port from `VITE_BACKEND_PORT`
-    // env (default 8000) so users who launch uvicorn on a non-default
+    // The backend port is read from the `VITE_BACKEND_PORT` env
+    // (default 8000) so users who launch uvicorn on a non-default
     // port don't need to edit this file. Frontend's `BACKEND_URL`
     // (`MapImporterView`, `AIPlaygroundView`) mirrors this env var so
     // direct fetches target the same port the proxy uses.
@@ -85,7 +85,7 @@ export default defineConfig({
   build: {
     // Split heavy vendor libs into their own chunks.
     //
-    // Plan 066 correction: the long-standing comment here claimed the home
+    // Correction: the long-standing comment here claimed the home
     // page used to download "a 2 MB WASM blob". That was already untrue for
     // Rapier — `RapierWorld.init()` lazy-imports it, so `rapier-*.js` is only
     // fetched when a 3D view opens. The real first-paint offender was

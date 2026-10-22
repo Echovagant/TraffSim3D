@@ -1,4 +1,4 @@
-"""M3 bbox wiring: the parser's existing clipping capability reaches the HTTP API.
+"""Bbox wiring: the parser's existing clipping capability reaches the HTTP API.
 
 `osm_parser.parse_osm_xml` / `parse_osmpbf` already accept `bbox`
 (south, west, north, east) and default to the `MAX_BBOX_DEG = 0.5`

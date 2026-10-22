@@ -1,4 +1,4 @@
-"""Plan 041: FastAPI /api/v1/maps/parse-osm endpoint tests.
+"""FastAPI /api/v1/maps/parse-osm endpoint tests.
 
 Uses httpx2 + ASGITransport (in-process, no subprocess overhead).
 """

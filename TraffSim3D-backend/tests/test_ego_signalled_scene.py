@@ -1,6 +1,6 @@
-"""Plan 076 T13: the signalled scene — the ego's traffic-light compliance.
+"""The signalled scene — the ego's traffic-light compliance.
 
-Plan 076 T12 measured that the ego **never faces a red light** in the four
+A measurement showed that the ego **never faces a red light** in the four
 training scenes: the light's phase clock advances every step, but the 30 s
 cycle puts the first phase change on step 300 — beyond every ego episode
 (`tests/test_ego_step_lower_bound.py` pins that). A scripted controller was
@@ -8,7 +8,7 @@ therefore never punished for ignoring the light, and the headline gate
 ("beat scripted pursuit + the best constant throttle") was **unreachable**:
 the baseline sat exactly on the physical step lower bound.
 
-T13 adds `cross_signalled`: the ego's axis starts **red** and turns green on
+A fifth scene was added: `cross_signalled`, whose ego axis starts **red** and turns green on
 step 121, inside the episode and inside the ego's approach. These are the
 regression gates for that scene:
 
@@ -166,7 +166,7 @@ def test_waiting_for_the_green_beats_running_the_red() -> None:
 
 
 def test_the_red_light_penalty_is_still_five() -> None:
-    """The -5 penalty is unchanged - T13 adds a scene, not a new rule.
+    """The -5 penalty is unchanged - a scene was added, not a new rule.
 
     The terminating step's reward is exactly the progress it made, minus
     the time it cost, minus the 5-point penalty.
@@ -190,13 +190,13 @@ def test_the_red_light_penalty_is_still_five() -> None:
 
 
 def test_the_other_scenes_still_start_green() -> None:
-    """T13 adds a scene; it does not change the four existing ones."""
+    """A scene was added; the four existing ones are unchanged."""
     for scene in ("cross", "corridor", "t_junction"):
         core = SimCore(scene_kind=scene, max_steps=200)
         core.reset()
         assert core.light.ns_green is True, f"{scene} no longer starts green"
         assert core.light.cycle_duration == 30.0, (
-            f"{scene}'s light cycle changed - T12's conclusion (the first "
+            f"{scene}'s light cycle changed - the earlier conclusion (the first "
             "swap on step 300, beyond every episode) has to be re-measured"
         )
 
@@ -240,7 +240,7 @@ def test_the_strongest_constant_baseline_is_not_on_the_bound_here() -> None:
     """The opposite of the four scenes: the baseline **fails** here.
 
     The four scenes' baseline sits exactly on the physical step lower
-    bound, which is why the gate was unreachable there (Plan 076 T12). In
+    bound, which is why the gate was unreachable there. In
     this scene the full-throttle baseline runs the red light instead, so
     the baseline is provably **not** optimal — a driver that looks at the
     light can beat it.
@@ -265,7 +265,7 @@ def test_the_scene_goal_line_is_the_cross_scenes() -> None:
 
 
 def test_an_unknown_scene_name_raises_instead_of_running_the_cross_scene() -> None:
-    """Plan 076 T13: a typo must not measure a different scene.
+    """A typo must not measure a different scene.
 
     `SimCore.reset()` used to fall through to the `cross` scene for any
     scene name it did not recognise. A caller that asked for a scene that

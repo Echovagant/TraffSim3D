@@ -21,7 +21,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.spec.ts', 'src/**/*.spec.ts'],
-    // Plan 042: exclude e2e specs (they run under Playwright, not vitest).
+    // Exclude e2e specs (they run under Playwright, not vitest).
     exclude: ['node_modules', 'dist', 'tests/e2e/**'],
     // The Rapier WASM + Three.js + Pinia stack is heavy; let Vite
     // pre-bundle it once for all tests.
@@ -30,7 +30,7 @@ export default defineConfig({
         web: { enabled: true },
       },
     },
-    // Plan C-1 / AC11a: coverage baseline. Scoped to the DDD layers —
+    // Coverage baseline. Scoped to the DDD layers —
     // entry point, type-only barrels and config files are excluded so the
     // number reflects testable logic, not file count.
     coverage: {
@@ -45,7 +45,7 @@ export default defineConfig({
         'src/shared/**/*.ts',
       ],
       exclude: ['**/*.spec.ts', '**/*.d.ts', '**/index.ts', '**/main.ts', '**/fixtures/**'],
-      // Plan 073: the documented "coverage >= 70%" gate is only real if it can
+      // The documented "coverage >= 70%" gate is only real if it can
       // fail. Without a threshold, `npm run test:coverage` merely *reports*
       // the number and coverage could decay silently. The backend already
       // gates on `pytest --cov=app --cov-fail-under=70`; this makes the

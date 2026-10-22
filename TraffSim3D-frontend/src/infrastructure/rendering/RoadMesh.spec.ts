@@ -121,7 +121,7 @@ describe('createRoadMesh — polyline road', () => {
     expect(p[17]).toBeCloseTo(10, 6)
   })
 
-  it('honours waypoint Y so ramps (Plan 036) tilt without extra code', () => {
+  it('honours waypoint Y so ramps tilt without extra code', () => {
     const ramp = makePolylineRoad(
       'r-ramp',
       [

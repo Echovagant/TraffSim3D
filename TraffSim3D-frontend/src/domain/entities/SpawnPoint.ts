@@ -1,6 +1,6 @@
 // src/domain/entities/SpawnPoint.ts
 //
-// Plan 037 (bug 3): explicit spawn-point entity. A road has 0..N
+// Explicit spawn-point entity. A road has 0..N
 // spawn points, each bound to a (roadId, laneIndex, s) tuple. When
 // `spawnVehicle` is called, it picks the first free spawn point
 // (`occupiedBy === null`) and marks it occupied. The tick releases

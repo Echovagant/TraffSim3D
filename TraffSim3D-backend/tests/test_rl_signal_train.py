@@ -1,6 +1,6 @@
 """`app/apps/rl/signal_train.py` — the signal agent's training entry point.
 
-The smoke test is the plan's T5 gate: train a **tiny** number of steps,
+The smoke test is the training gate: train a **tiny** number of steps,
 produce a checkpoint, export the weights, and assert the export is a
 **discrete** five-action policy (no `log_std`).
 
@@ -13,7 +13,7 @@ the ones the trained policy is compared against:
 - `evaluate_policy` must score a policy deterministically (the browser runs
   the argmax) and report the action histogram.
 
-Plan 074 T10 adds the multi-seed run:
+The multi-seed run is covered too:
 
 - the "pick the best" logic is pinned on a known set of candidates;
 - every seed's measured return has to be recorded — the seeds that
@@ -78,28 +78,47 @@ def rl_state(tmp_path, monkeypatch):
 
 
 def test_no_op_schedule_reproduces_the_fixed_cycle_baseline() -> None:
-    """The fixed 30/30 cycle must score -423.1 over 600 steps.
+    """The fixed 30/30 cycle on the **open** traffic: -292.8 over 600 steps.
 
-    This is the number Plan 074 T9 measured and the gate the trained policy
+    This is the number measured on the open traffic and the gate the trained policy
     is compared against; if it moves, the comparison is meaningless.
+
+    The closed loop's number was -423.1. The traffic
+    changed, so the baseline changed with it - that is the point of the
+    open-traffic model, and the reason the published numbers had to be
+    rewritten rather than annotated.
     """
     result = signal_train.evaluate_schedule(signal_train.NO_OP_INDEX)
     assert result["steps"] == 600
     assert result["action"] == "no_op"
-    assert result["return"] == pytest.approx(-423.1, abs=0.05)
+    assert result["return"] == pytest.approx(-292.8, abs=0.05)
 
 
 def test_the_degenerate_schedules_are_worse_than_the_fixed_cycle() -> None:
     """The other constant actions must all score below the fixed cycle.
 
-    These are the numbers Plan 074 T9 measured (flicker -437.2, starve
-    -455.4, preempt -777.6).
+    These are the numbers measured on the open traffic
+    (starve-one-axis -553.8, preempt -888.0). The flicker is **not** in
+    this list any more: in the open model it is the *better* schedule
+    (-260.8), because the delay is dominated by the red's duration rather
+    than by the inter-green clearance - the same flip the closed loop
+    had the other way round (in the closed loop: flicker -437.2 against the
+    fixed cycle's -423.1).
+
+    So the honest bar for a trained policy on the open traffic is the
+    **strongest constant schedule** (the flicker), not the fixed cycle.
     """
     baseline = signal_train.evaluate_schedule(signal_train.NO_OP_INDEX)["return"]
-    for name in ("shorten_red", "extend_green", "preempt"):
+    for name in ("extend_green", "preempt"):
         index = SIGNAL_ACTION_NAMES.index(name)
         result = signal_train.evaluate_schedule(index)
         assert result["return"] < baseline, f"{name} is not worse than the fixed cycle"
+
+    flicker = signal_train.evaluate_schedule(SIGNAL_ACTION_NAMES.index("shorten_red"))["return"]
+    assert flicker > baseline, (
+        "the flicker is the strongest constant schedule on the open "
+        f"traffic ({flicker} against {baseline})"
+    )
 
 
 def test_evaluate_schedule_reports_the_action_histogram() -> None:
@@ -131,7 +150,8 @@ def test_evaluate_policy_scores_deterministically() -> None:
     assert len(result["returns"]) == 3
     # The env is deterministic, so the episodes agree.
     assert result["returns"] == [result["returns"][0]] * 3
-    assert result["return"] == pytest.approx(-423.1, abs=0.05)
+    # The open traffic's fixed cycle: -292.8.
+    assert result["return"] == pytest.approx(-292.8, abs=0.05)
     assert result["actions"] == {"no_op": 1800}
 
 
@@ -149,7 +169,7 @@ def test_evaluate_policy_reports_the_action_distribution() -> None:
 
 @requires_sb3
 def test_training_smoke_produces_a_discrete_checkpoint(rl_state) -> None:
-    """THE T5 GATE: train a few steps -> checkpoint -> export -> discrete.
+    """THE SMOKE GATE: train a few steps -> checkpoint -> export -> discrete.
 
     The exported weights must have `action_dim == 5` and **no** `log_std`:
     an SB3 `CategoricalPolicy` has action logits, not a Gaussian log-std.
@@ -275,10 +295,10 @@ def test_main_baselines_prints_every_fixed_schedule(rl_state, monkeypatch, capsy
     out = capsys.readouterr().out
     for name in ("no_op", "shorten_red", "extend_green", "preempt"):
         assert name in out
-    assert "-423.1" in out
+    # The open traffic's fixed-cycle baseline.
+    assert "-292.8" in out
 
 
-@requires_sb3
 def test_main_trains_and_reports_the_best_return(rl_state, monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         sys,
@@ -340,7 +360,7 @@ def test_training_degrades_to_a_dry_run_without_sb3(rl_state, monkeypatch) -> No
 
 
 # --------------------------------------------------------------------------
-# Plan 074 T10: the multi-seed run
+# The multi-seed run
 # --------------------------------------------------------------------------
 
 
@@ -378,9 +398,9 @@ def test_select_best_seed_rejects_an_empty_candidate_list() -> None:
 
 
 def test_the_training_condition_is_the_dense_scenario_of_t9() -> None:
-    """The training condition must stay the scenario T9 measured.
+    """The training condition must stay the scenario that was measured.
 
-    The T9 numbers (-423.1 for the fixed cycle) were measured on the
+    Those numbers (-423.1 for the fixed cycle) were measured on the
     dense scenario; if the training condition drifted away from it, the
     baseline the trained policy is compared against would no longer be
     the published one.
@@ -426,15 +446,16 @@ def test_the_evaluation_condition_differs_from_the_training_condition() -> None:
         "return"
     ]
     assert train_base != eval_base
-    # The published T9 baseline still belongs to the training condition.
-    assert train_base == pytest.approx(-423.1, abs=0.05)
+    # The open traffic's fixed cycle on the training condition.
+    assert train_base == pytest.approx(-292.8, abs=0.05)
+    # ... and the evaluation condition's own.
+    assert eval_base == pytest.approx(-313.6, abs=0.05)
 
 
-@requires_sb3
 def test_the_multi_seed_run_records_every_seed(rl_state) -> None:
     """Every seed's result has to be recorded — the failures included.
 
-    The multi-seed run is the delivery form of T10: it must not keep
+    The multi-seed run is the delivery form of the procedure: it must not keep
     only the winner. Each record carries the seed's measured return and
     whether it beat the fixed cycle.
     """
@@ -613,7 +634,7 @@ def test_the_multi_seed_cli_reports_every_seed(rl_state, monkeypatch, capsys) ->
 
 
 # --------------------------------------------------------------------------
-# Plan 075: the evaluation series
+# The evaluation series
 # --------------------------------------------------------------------------
 
 
@@ -691,9 +712,9 @@ def test_the_training_run_appends_one_point_per_evaluation(rl_state) -> None:
 def test_each_point_carries_the_baseline_of_its_own_condition(rl_state) -> None:
     """A point's baseline is the fixed cycle **on that point's condition**.
 
-    Plan 074 T10 is explicit that two conditions' numbers are not
+    The multi-seed run is explicit that two conditions' numbers are not
     comparable, so a point may never borrow another condition's baseline.
-    The training condition's fixed cycle is -423.1 (Plan 074 T9); the
+    The training condition's fixed cycle is -423.1 (the dense scenario); the
     held-out evaluation condition's is a different number.
     """
     from app.apps.rl.signal_conditions import EVAL_CONDITION

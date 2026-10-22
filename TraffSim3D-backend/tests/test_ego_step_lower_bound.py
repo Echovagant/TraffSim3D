@@ -1,6 +1,6 @@
-"""Plan 076 T12: the physical step lower bound of the ego's arrival — as a gate.
+"""The physical step lower bound of the ego's arrival — as a gate.
 
-T12's central conclusion is that the headline gate ("beat the scripted
+The central conclusion is that the headline gate ("beat the scripted
 pursuit + the best constant throttle") is **unreachable in the four ego
 scenes**, and that this is a property of the scenes rather than of the
 training. The proof has two halves:
@@ -25,7 +25,7 @@ suite instead of being a one-off measurement: if the physics, the goal
 lines or the start pose change, this fails loudly and the document's
 numbers have to be rewritten.
 
-The third test pins the *other* half of T12's conclusion — that the ego
+The third test pins the *other* half of that conclusion — that the ego
 never faces a red light in these scenes, because the light's phase clock
 does advance every step but the 30 s cycle puts the first swap at step
 300, beyond the 200-step episode horizon.
@@ -56,9 +56,9 @@ START_Z = -25.0
 #: straight ahead), so the z-advance *is* the path length.
 START_HEADING = math.pi / 2
 
-#: The four scenes Plan 076 T12's conclusion is about.
+#: The four scenes that conclusion is about.
 #:
-#: Plan 076 T13 added a fifth scene (`cross_signalled`), whose ego axis
+#: A fifth scene (`cross_signalled`) was added later, whose ego axis
 #: starts **red**: there the baseline runs the red light instead of
 #: sitting on the physical bound — which is what makes the gate
 #: reachable there. The bound assertions below are therefore scoped to
@@ -138,12 +138,12 @@ def test_the_strongest_constant_baseline_sits_exactly_on_the_bound(scene: str) -
     assert result["steps"] == bound, (
         f"{scene}: the baseline takes {result['steps']} steps but the physical "
         f"lower bound is {bound} — the physics or the scene changed, so the "
-        f"numbers in Plan 076 have to be rewritten"
+        f"published numbers have to be rewritten"
     )
 
 
 def test_the_signalled_scene_is_not_on_the_bound() -> None:
-    """Plan 076 T13: the fifth scene is the deliberate exception.
+    """The fifth scene is the deliberate exception.
 
     In `cross_signalled` the ego's axis starts **red**, so the strongest
     constant throttle runs the red light instead of arriving on the
@@ -160,7 +160,7 @@ def test_the_signalled_scene_is_not_on_the_bound() -> None:
     assert result["reason"] == "red_light", (
         f"{scene}: the full-throttle baseline no longer runs the red light "
         f"({result['reason']}) — the scene stopped being a decision, so "
-        "Plan 076's T13 numbers have to be rewritten"
+        "the signalled scene's numbers have to be rewritten"
     )
     assert result["steps"] < bound, (
         f"{scene}: the baseline now takes {result['steps']} steps, which is "
@@ -170,7 +170,7 @@ def test_the_signalled_scene_is_not_on_the_bound() -> None:
 
 
 def test_the_light_never_swaps_inside_an_episode() -> None:
-    """The ego never faces a red light — the root of T12's dead end.
+    """The ego never faces a red light — the root of the dead end.
 
     The phase clock advances every step, but the cycle is 30 s, so the
     first swap lands at step 300 — beyond the 200-step horizon every ego
@@ -192,5 +192,5 @@ def test_the_light_never_swaps_inside_an_episode() -> None:
     assert first_swap > MAX_STEPS_DEFAULT, (
         f"the first swap at step {first_swap} now falls inside the "
         f"{MAX_STEPS_DEFAULT}-step episode — the scenes would start facing "
-        f"red lights, so T12's conclusion has to be re-measured"
+        f"red lights, so the conclusion has to be re-measured"
     )

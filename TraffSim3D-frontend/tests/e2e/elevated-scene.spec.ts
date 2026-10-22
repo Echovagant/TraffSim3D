@@ -1,5 +1,5 @@
 /**
- * Plan 042 / Plan 039 verification: elevated road scene.
+ * Verification: elevated road scene.
  *
  * Switch to the elevated scene (level=0 ground cross + ramp + level=1
  * high straight), confirm 4 default vehicles exist, and capture the

@@ -1,4 +1,4 @@
-"""Plan 041 + 046: OSM parser unit tests (XML + PBF)."""
+"""OSM parser unit tests (XML + PBF)."""
 
 from __future__ import annotations
 
@@ -110,14 +110,14 @@ def test_serializer_shape_roundtrip(sample_network: dict) -> None:
 
 
 def test_v7_level_field_compatibility(sample_network: dict) -> None:
-    """All roads have a level field (Plan 039 schema addition)."""
+    """All roads have a level field (schema addition)."""
     for r in sample_network["roads"]:
         assert "level" in r
         assert isinstance(r["level"], int)
 
 
 # ---------------------------------------------------------------------------
-# Plan 046: PBF parser tests.
+# PBF parser tests.
 # ---------------------------------------------------------------------------
 
 

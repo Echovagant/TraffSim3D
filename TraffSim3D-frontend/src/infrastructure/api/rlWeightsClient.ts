@@ -1,6 +1,6 @@
 // src/infrastructure/api/rlWeightsClient.ts
 //
-// Plan 049: fetch a saved PPO checkpoint's weights as JSON.
+// Fetch a saved PPO checkpoint's weights as JSON.
 //
 // The backend (`app/apps/rl/weights.py`) loads an SB3 .zip, extracts
 // the policy `state_dict()`, and returns architecture metadata plus

@@ -1,5 +1,5 @@
 /**
- * Plan 041 / Plan 042 verification: OSM import via the MapLab view.
+ * Verification: OSM import via the MapLab view.
  *
  * Strategy: stub the /api/v1/maps/parse-osm endpoint via Playwright
  * page.route() so the test is self-contained (no live backend).

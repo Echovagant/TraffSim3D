@@ -1,4 +1,4 @@
-// Plan 035: defaultScene factory tests.
+// defaultScene factory tests.
 //
 // Verifies the three demo scenes produce the expected topology:
 //   - cross: 2 roads + 1 (4-way) intersection + 6 vehicles
@@ -52,7 +52,7 @@ describe('buildRectangularLoopNetwork', () => {
   })
 })
 
-// Plan 039: elevated roads (Y-axis ramps + level tagging).
+// Elevated roads (Y-axis ramps + level tagging).
 describe('buildElevatedScene', () => {
   it('produces 4 roads, 2 intersections (1 signal + 1 ramp-end), 4 vehicles', () => {
     const net = buildElevatedScene()
@@ -87,7 +87,7 @@ describe('buildElevatedScene', () => {
   })
 })
 
-// Plan 040: multi-intersection corridor.
+// Multi-intersection corridor.
 describe('buildCorridorScene', () => {
   it('produces 3 roads, 2 intersections, 6 vehicles', () => {
     const net = buildCorridorScene()

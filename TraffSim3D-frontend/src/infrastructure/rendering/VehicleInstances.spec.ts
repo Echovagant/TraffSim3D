@@ -1,6 +1,6 @@
 // src/infrastructure/rendering/VehicleInstances.spec.ts
 //
-// Plan 062 replaces per-vehicle Groups with a pool of 3 InstancedMesh
+// Replaces per-vehicle Groups with a pool of 3 InstancedMesh
 // (one per type, 256 slots each). Everything interesting here is the
 // slot bookkeeping: allocate / remove / update / pickByInstance /
 // getPosition are all pure mappings over that pool, and the instance

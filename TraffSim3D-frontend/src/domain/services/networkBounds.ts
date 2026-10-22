@@ -1,6 +1,6 @@
 // src/domain/services/networkBounds.ts
 //
-// Plan 053: compute the XZ bounding box of a RoadNetwork.
+// Compute the XZ bounding box of a RoadNetwork.
 //
 // Used by the camera fit logic to position the camera so the entire
 // network is visible after OSM import. Pure domain (no Three.js) so

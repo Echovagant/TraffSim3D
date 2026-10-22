@@ -1,5 +1,5 @@
 /**
- * Plan 053: camera fit-to-scene verification.
+ * Camera fit-to-scene verification.
  *
  * Loads a scene, captures the camera's world position, switches to a
  * different scene (which triggers an auto-fit via fitRequestTick), and
@@ -29,7 +29,7 @@ const getCameraState = (page: import('@playwright/test').Page) =>
     return null
   })
 
-test('Plan 053: scene switch auto-fits the camera', async ({ page }) => {
+test('scene switch auto-fits the camera', async ({ page }) => {
   await waitForSceneReady(page)
 
   // Start on cross scene. Capture initial camera position by reading
@@ -57,7 +57,7 @@ test('Plan 053: scene switch auto-fits the camera', async ({ page }) => {
   await expectSceneScreenshot(page, 'cross-scene-fit.png')
 })
 
-test('Plan 053: manual fit button works after zooming out', async ({ page }) => {
+test('manual fit button works after zooming out', async ({ page }) => {
   await waitForSceneReady(page)
   await expect(page.locator('[data-testid="fit-scene-button"]')).toBeVisible()
 

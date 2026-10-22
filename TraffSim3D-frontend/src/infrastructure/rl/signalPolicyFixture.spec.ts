@@ -1,6 +1,6 @@
 // src/infrastructure/rl/signalPolicyFixture.spec.ts
 //
-// Plan 074 (T6): the **transfer check** for the signal policy.
+// The **transfer check** for the signal policy.
 //
 // The weights Python trains must be interpretable by the browser: the same
 // weights and the same observation must give the same action index in
@@ -33,7 +33,7 @@ const OBSERVATIONS = fixture.observations as number[][]
 const EXPECTED = fixture.expected_actions as number[]
 const EXPECTED_NAMES = fixture.expected_action_names as string[]
 
-describe('the signal policy transfer check (Plan 074 — T6)', () => {
+describe('the signal policy transfer check', () => {
   it('is a discrete five-action policy with no Gaussian log-std', () => {
     expect(POLICY.action_space).toBe('discrete')
     expect(POLICY.action_dim).toBe(5)

@@ -1,5 +1,5 @@
 /**
- * Plan 045 / Plan 042 verification: AI Playground with checkpoint list.
+ * Verification: AI Playground with checkpoint list.
  *
  * Stubs /api/v1/rl/checkpoints with a fake list, clicks "列出 checkpoints"
  * button, verifies the list renders, and screenshots baseline.

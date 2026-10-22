@@ -1,14 +1,14 @@
 /**
- * Plan 042 / Plan 038 verification: trajectory export CSV contains dt column.
+ * Verification: trajectory export CSV contains dt column.
  * Let the trajectory exporter accumulate rows, click the "📥 轨迹 CSV" button,
- * download the CSV, and verify the first line contains the dt column added in Plan 038.
+ * download the CSV, and verify the first line contains the dt column.
  */
 import { test, expect } from '@playwright/test'
 import { waitForSceneReady, SCREENSHOT_DIR } from './helpers/wait'
 import { promises as fs } from 'fs'
 import * as path from 'path'
 
-test('trajectory export CSV contains dt column (Plan 038)', async ({ page }) => {
+test('trajectory export CSV contains dt column', async ({ page }) => {
   await waitForSceneReady(page)
   // Let the trajectory exporter run for 3 seconds at 10Hz → ~30 rows per vehicle
   await page.waitForTimeout(3000)
@@ -27,7 +27,7 @@ test('trajectory export CSV contains dt column (Plan 038)', async ({ page }) => 
   await fs.mkdir(SCREENSHOT_DIR, { recursive: true })
   const outPath = path.join(SCREENSHOT_DIR, 'trajectory.csv')
   await fs.writeFile(outPath, text)
-  // Verify dt column header (Plan 038 addition)
+  // Verify the dt column header
   expect(text.split('\n')[0]).toContain('dt')
   // Sanity: at least one data row
   const lines = text.split('\n').filter((l) => l.length > 0)

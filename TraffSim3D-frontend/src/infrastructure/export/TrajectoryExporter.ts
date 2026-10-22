@@ -1,16 +1,16 @@
 // src/infrastructure/export/TrajectoryExporter.ts
 //
-// M2-C trajectory export. Buffers per-vehicle state at sample
+// Trajectory export. Buffers per-vehicle state at sample
 // interval (default 10Hz). Triggered manually via UI or auto-flush
 // at maxBufferRows. Output: CSV or JSON Blob for download.
 //
-// Plan 038: two changes:
+// Two changes:
 //   1. Add `dt` field per row (= sampleInterval). Downstream ML
-//      trainers (M4 RL) need the actual Δt between samples to know
+//      trainers (RL) need the actual Δt between samples to know
 //      whether the cadence is uniform.
 //   2. Validate filter: skip "dirty" samples (impossible speed /
 //      Δposition = 0 with reported high speed / impossible Δv).
-//      Plan 038 §5.2. The thresholds are conservative; if Rapier
+//      The thresholds are conservative; if Rapier
 //      glitches produce an out-of-range sample it is silently
 //      dropped instead of poisoning the buffer.
 
@@ -18,7 +18,7 @@ import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 
 export const TRAJECTORY_EXPORT_SCHEMA_VERSION = 1
 
-/** Plan 038: dirty-data thresholds. Conservative — false positives
+/** Dirty-data thresholds. Conservative — false positives
  *  (legitimate samples dropped) are far less costly than false
  *  negatives (poisoned RL training data). */
 export const DIRTY_DATA_THRESHOLDS = {
@@ -35,7 +35,7 @@ export const DIRTY_DATA_THRESHOLDS = {
 
 export interface TrajectoryRow {
   t: number // simTime (s)
-  /** Plan 038: actual sampling interval in seconds. Equal to the
+  /** Actual sampling interval in seconds. Equal to the
    *  sampleInterval passed to record() (== scheduler.fixedStepSec). */
   dt: number
   vehicleId: string
@@ -56,7 +56,7 @@ export interface ExportFormat {
 }
 
 /**
- * Plan 038: per-vehicle sample validation. Returns true if the
+ * Per-vehicle sample validation. Returns true if the
  * current sample is acceptable (write to buffer); false to drop.
  *
  * Always rejects samples with `speed > MAX_SPEED_MS` (glitch —
@@ -86,7 +86,7 @@ const isValidSample = (curr: TrajectoryRow, prev: TrajectoryRow | null): boolean
 export class TrajectoryExporter {
   private buffer: TrajectoryRow[] = []
   private lastSampleSimTime = -Infinity
-  /** Plan 038: per-vehicle previous sample for dirty-data validation. */
+  /** Per-vehicle previous sample for dirty-data validation. */
   private lastSamplePerVehicle = new Map<string, TrajectoryRow>()
   private cap: number
 
@@ -134,7 +134,7 @@ export class TrajectoryExporter {
       ? this.buffer
       : this.buffer.filter((r) => r.status !== 'crashed')
     if (format.kind === 'csv') {
-      // Plan 038: header now includes the `dt` column for ML training.
+      // The header now includes the `dt` column for ML training.
       const header = 't,dt,vehicleId,roadId,laneIndex,type,x,z,heading,speed,status\n'
       const rows = filtered
         .map((r) =>
@@ -170,7 +170,7 @@ export class TrajectoryExporter {
   clear(): void {
     this.buffer = []
     this.lastSampleSimTime = -Infinity
-    // Plan 038: drop the per-vehicle "previous sample" cache so a
+    // Drop the per-vehicle "previous sample" cache so a
     // fresh scene doesn't inherit stale speed deltas.
     this.lastSamplePerVehicle.clear()
   }

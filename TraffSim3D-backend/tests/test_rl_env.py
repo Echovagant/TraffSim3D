@@ -1,4 +1,4 @@
-"""Plan 044: Gymnasium env contract tests."""
+"""Gymnasium env contract tests."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def test_repeated_random_actions_eventually_terminates() -> None:
 
 
 def test_env_accepts_scene_kind_parameter() -> None:
-    """Plan 048: TrafficEnv accepts scene_kind='corridor' or 'cross'."""
+    """TrafficEnv accepts scene_kind='corridor' or 'cross'."""
     env_cross = TrafficEnv(scene_kind="cross")
     env_corr = TrafficEnv(scene_kind="corridor")
     assert env_cross.core.scene_kind == "cross"
@@ -70,7 +70,7 @@ def test_env_accepts_scene_kind_parameter() -> None:
 
 
 def test_env_corridor_drives_through_2_intersections() -> None:
-    """Plan 048: corridor env terminates with success_corridor."""
+    """Corridor env terminates with success_corridor."""
     env = TrafficEnv(scene_kind="corridor", max_steps=300)
     env.reset(seed=42)
     for _ in range(300):

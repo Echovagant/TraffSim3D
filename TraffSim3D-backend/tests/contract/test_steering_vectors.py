@@ -1,4 +1,4 @@
-"""Plan 076 S5a: the turning dimension is covered by the cross-language contract.
+"""The turning dimension is covered by the cross-language contract.
 
 Before this slice every contract vector was a **straight-line** scenario:
 the ego drove straight at its target, Pure Pursuit's angle was ~0, `steer`
@@ -67,7 +67,7 @@ SNAPSHOT_DIR = CONTRACT_DIR / "snapshots"
 # geometry rather than from the policy's steering residual.
 #
 # The contract's own classification (`_vector_names(turning=True)`) is
-# broader: it also contains Plan 076 T12's `steer_residual` vector, whose
+# broader: it also contains the `steer_residual` vector, whose
 # ego turns because the *policy* commands a residual. That vector is still
 # compared with the noise floor (the two runtimes' `sin`/`atan2` disagree in
 # the last bit on any turning trajectory) — but the assertions below are
@@ -278,7 +278,7 @@ def test_the_two_sides_stay_inside_the_noise_floor(vector_name: str) -> None:
 def test_a_mutated_turning_constant_turns_the_contract_red(
     vector_name: str, constant: str, value: float, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Plan 076 S5a: the blind spots are closed, and the check is permanent.
+    """The blind spots are closed, and the check is permanent.
 
     The constant is mutated **at runtime** - the method ADR-008 used for
     its own sweeps - so the test proves what the mutation check proved by

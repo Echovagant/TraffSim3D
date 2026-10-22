@@ -1,16 +1,16 @@
-"""Plan 076 T14: the mileage is only earned **on the road**.
+"""The mileage is only earned **on the road**.
 
-T12 latched "the ego left the road" so that the **success** needed the ego
+The sim latched "the ego left the road" so that the **success** needed the ego
 to have *stayed* on the road - but the mileage was still paid wherever the
 ego drove, so a policy could farm the progress by leaving the road.
 
-Plan 076 T13 measured that hole on the signalled scene: the trained policy
+The hole was measured on the signalled scene: the trained policy
 drove off the road after the green, forfeited the +5 success bonus and
 still collected the whole mileage - which is why its edge over the
 strongest constant throttle existed only at the 200-step horizon (and
 why a hand-written compliant driver beat it at every horizon).
 
-T14 closes the hole with the rule the success already used: the progress
+The hole is closed with the rule the success already used: the progress
 is zeroed for the rest of the episode once the ego has left the road, so
 the rule reads in one sentence - **the ego has to stay on the road to
 earn anything.**

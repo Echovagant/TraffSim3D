@@ -3,9 +3,9 @@
     <header class="lab-header">
       <router-link to="/" class="back-link">← 返回首页</router-link>
       <div class="title-row">
-        <span class="badge badge-active">M2 · Active</span>
+        <span class="badge badge-active">Active</span>
         <h1>SimulationLab</h1>
-        <p class="sub">M2 控制面板 — 物理 + 信号 + 传感器 (companion to SceneLab)</p>
+        <p class="sub">控制面板 — 物理 + 信号 + 传感器 (companion to SceneLab)</p>
       </div>
     </header>
 
@@ -166,15 +166,15 @@
         </div>
       </section>
 
-      <!-- 5. M2 vs M1 对照 -->
+      <!-- 5. 物理仿真接入前后的对照 -->
       <section class="card diff-card">
-        <h2>5. M2 vs M1 — 每个交互的影响差异</h2>
+        <h2>5. 物理仿真接入前后的对照 — 每个交互的影响差异</h2>
         <table class="diff-table">
           <thead>
             <tr>
               <th>交互</th>
-              <th>M1 (手算几何)</th>
-              <th>M2 (Rapier + 传感器)</th>
+              <th>接入前 (手算几何)</th>
+              <th>接入后 (Rapier + 传感器)</th>
             </tr>
           </thead>
           <tbody>
@@ -201,12 +201,12 @@
             <tr>
               <td>协调偏移</td>
               <td>N/A</td>
-              <td>🚦 协调配置 → 绿波带 (028)</td>
+              <td>🚦 协调配置 → 绿波带</td>
             </tr>
             <tr>
               <td>变道</td>
               <td>N/A</td>
-              <td>Inspector ◀▶ Change Lane (029)</td>
+              <td>Inspector ◀▶ Change Lane</td>
             </tr>
             <tr>
               <td>LiDAR</td>
@@ -221,7 +221,7 @@
             <tr>
               <td>轨迹导出</td>
               <td>无</td>
-              <td>10Hz 采样 → CSV (025)</td>
+              <td>10Hz 采样 → CSV</td>
             </tr>
             <tr>
               <td>性能</td>

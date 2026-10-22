@@ -2,7 +2,7 @@
 //
 // Hand-rolled minimal RoadNetwork fixtures for unit tests. Avoids
 // depending on `buildDefaultNetwork()` (whose shape evolves with
-// M1.5/M2 churn) — instead defines just the structure the tests
+// upstream churn) — instead defines just the structure the tests
 // need: 2 perpendicular roads, 1 intersection, 1 light.
 
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
@@ -57,7 +57,7 @@ export const makeTestVehicle = (overrides: Partial<Vehicle> = {}): Vehicle => ({
   s: 10,
   lane: LaneId.make('r-ns', 0),
   status: 'driving',
-  desiredStatus: 'driving', // Plan 037
+  desiredStatus: 'driving',
   enteredIntersectionAt: null,
   desiredLaneIndex: null,
   laneChangeStartedAt: null,
@@ -83,7 +83,7 @@ export const buildTestNetwork = (
 }
 
 /**
- * Plan 035: helper for tests that need a polyline road. Constructs a
+ * Helper for tests that need a polyline road. Constructs a
  * Road with `waypoints` populated; `startNode`/`endNode` mirror the
  * first/last waypoint per the data invariant.
  */

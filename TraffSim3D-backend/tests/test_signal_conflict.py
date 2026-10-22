@@ -1,4 +1,4 @@
-"""Plan 074 T8: the intersection conflict (the traffic layer).
+"""The intersection conflict (the traffic layer).
 
 One physical rule: **a vehicle may not enter the intersection while a
 vehicle of the other axis occupies it** — it stops at the stop line and
@@ -29,7 +29,7 @@ These tests pin:
   junction is occupied and drains once it is clear);
 * that the default path — the basis of the committed contract goldens —
   does not see the rule at all;
-* the reward gate of Plan 074 §3 T8.
+* the reward gate.
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ def test_a_cross_axis_vehicle_stops_at_the_stop_line_while_the_junction_is_occup
     """The junction is occupied by an NS vehicle; the EW axis has the
     green, but its vehicle must wait at the stop line.
 
-    This is the rule T8 adds: the green alone does not release a vehicle
+    This is the rule the conflict model adds: the green alone does not release a vehicle
     into a junction that the other axis is still using.
     """
     core = _core(
@@ -305,7 +305,7 @@ def test_the_default_path_ignores_the_conflict_rule() -> None:
 
 
 # --------------------------------------------------------------------------
-# The reward gate (Plan 074 §3 T8)
+# The reward gate
 # --------------------------------------------------------------------------
 
 
@@ -320,26 +320,37 @@ def test_the_flicker_still_beats_starving_one_axis() -> None:
     ), f"the flicker must beat starving one axis (flicker={flicker}, starve={starve})"
 
 
-def test_the_reward_gate_alternating_beats_the_flicker() -> None:
-    """Plan 074 §3 T8's core gate - and Plan 074 §3 T9's completion.
+def test_the_reward_gate_no_degenerate_schedule_beats_the_fixed_cycle() -> None:
+    """The conflict rule's core gate - and what it means now.
 
-    The **alternating** schedule must beat the **flicker** (switch as
-    often as legally possible), and the flicker must beat starving one
-    axis.
+    The gate has always been about the **degenerate** schedules: the
+    **flicker** (switch as often as legally possible) and **starving one
+    axis** must not beat the fixed cycle.
 
-    It did NOT hold for T8: the intersection conflict only bites when
+    It did NOT hold at first: the intersection conflict only bites when
     the junction happens to be occupied at the very moment of a phase
     change, and the training scenario was undersaturated (2 vehicles per
     axis, one every ~9 s), so the conflict fired 0 times and the flicker
     was still the best schedule.
 
-    It holds now, because Plan 074 §3 T9 added the two missing pieces
-    of physics: the **inter-green clearance** (6 s during which neither
-    axis may go after a phase change) and the **dense training
-    scenario** (a red phase now builds a queue of several vehicles).
-    Measured (600 steps, seed 0): alternating -423.1, flicker -437.2,
-    starve-one-axis -455.4 - the alternating schedule beats both
-    degenerate policies.
+    The inter-green clearance made the alternating schedule beat both degenerates
+    (-423.1 / -437.2 / -455.4) - the flicker was worse because the
+    **inter-green clearance** was the expensive part: it held the whole
+    fleet still.
+
+    **The traffic model changed** (the closed loop became the
+    browser-like open flow) and with it the cost structure: the delay is
+    now dominated by the **red's duration**, not by the clearance, so a
+    faster alternation has shorter reds and the flicker is now the
+    *better* constant schedule (measured -260.8 against the fixed
+    cycle's -292.8).
+
+    So the ordering between the fixed cycle and the flicker is a
+    property of the *traffic model*, and it flipped. What must NOT
+    flip is the gate that matters: **starving one axis must never be
+    the best schedule** - in the open model it is by far the worst
+    (-553.8, and the all-red -888.0), because the price of starving now
+    grows without bound.
 
     The assertion is the plan's gate verbatim: it must not be weakened
     to make the suite green.
@@ -348,9 +359,9 @@ def test_the_reward_gate_alternating_beats_the_flicker() -> None:
     flicker = _run([ACTION_INDEX["shorten_red"]] * 600)
     starve = _run([ACTION_INDEX["extend_green"]] * 600)
 
-    assert alternating > flicker, (
-        f"the alternating schedule must beat the flicker "
-        f"(alternating={alternating}, flicker={flicker})"
+    assert alternating > starve, (
+        f"starving one axis must not beat the fixed cycle "
+        f"(alternating={alternating}, starve={starve})"
     )
     assert flicker > starve, (
         f"the flicker must beat starving one axis " f"(flicker={flicker}, starve={starve})"
@@ -358,19 +369,25 @@ def test_the_reward_gate_alternating_beats_the_flicker() -> None:
 
 
 def test_the_measured_reward_ordering_under_the_conflict_rule() -> None:
-    """Pin the *measured* numbers of the three schedules under the
-    conflict rule, the inter-green clearance and the dense scenario.
+    """Pin the *measured* numbers of the three schedules - the **open
+    traffic's** numbers (600 steps, seed 0).
 
-    They are the numbers Plan 074 §3 T9 measured (600 steps, seed 0).
-    Before T9 they were alternating -109.2, flicker -97.2 and
-    starve-one-axis -117.2: the conflict rule moved them not at all,
-    because the scenario was too thin for the junction to ever be
-    occupied at a phase change.
+    They are the numbers measured on the **closed loop**
+    (-423.1 / -437.2 / -455.4). The open traffic replaced the closed loop with the
+    browser-like open flow, and the numbers moved with it: the fixed
+    cycle -292.8, the flicker -260.8, starving one axis -553.8.
+
+    The movement is not a tweak - it is a different model: the closed
+    loop's queue was capped by the fleet size, so its delay was bounded;
+    the open model's queue grows, so the same schedules cost (and the
+    starvation costs far more). The old numbers are still the closed
+    loop's numbers - they are pinned by
+    `tests/test_signal_open_traffic.py`, not by this module.
     """
     alternating = _run([ACTION_INDEX["no_op"]] * 600)
     flicker = _run([ACTION_INDEX["shorten_red"]] * 600)
     starve = _run([ACTION_INDEX["extend_green"]] * 600)
 
-    assert alternating == pytest.approx(-423.1, abs=0.05)
-    assert flicker == pytest.approx(-437.2, abs=0.05)
-    assert starve == pytest.approx(-455.4, abs=0.05)
+    assert alternating == pytest.approx(-292.8, abs=0.05)
+    assert flicker == pytest.approx(-260.8, abs=0.05)
+    assert starve == pytest.approx(-553.8, abs=0.05)

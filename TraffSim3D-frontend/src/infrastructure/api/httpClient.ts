@@ -1,7 +1,7 @@
 /**
  * Minimal typed HTTP client for the FastAPI backend.
  *
- * Why not axios/fetch wrapper library: the project targets M2-M5 features
+ * Why not axios/fetch wrapper library: the project targets backend-driven features
  * (scene sync, tick streaming, replay) and we want full control over timeouts,
  * error shapes, and (later) SSE/WebSocket support without dragging in a
  * generic HTTP lib. The surface is intentionally tiny — add methods, do

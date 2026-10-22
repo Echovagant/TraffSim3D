@@ -37,7 +37,7 @@ export interface Vehicle {
   color: string // hex string, e.g. '#3a86ff'
   status: VehicleStatus
   /**
-   * Plan 037 (bug 2): intent-based state, separate from the observable
+   * Intent-based state, separate from the observable
    * `status`. `desiredStatus` is what the *controller* wants (e.g. a
    * red-light approach means `desiredStatus='waiting'` while speed is
    * still > 0). The hysteresis in tick.ts promotes `desiredStatus` to
@@ -60,7 +60,7 @@ export interface Vehicle {
    */
   enteredIntersectionAt: number | null
   /**
-   * Plan 029 (M2 lane change): if non-null, vehicle is mid lane-change
+   * Lane change: if non-null, vehicle is mid lane-change
    * to this lane. Tick advances the lateral position and clears this
    * when the body reaches the target lane. Inspector / debugging read
    * this to show "changing" state. Set by `requestLaneChange`.
@@ -73,7 +73,7 @@ export interface Vehicle {
    */
   laneChangeStartedAt: number | null
   /**
-   * Plan 034: simTime at which the vehicle was spawned. Used by the
+   * simTime at which the vehicle was spawned. Used by the
    * OOB cleanup in tick.ts to skip vehicles that have just been
    * spawned (their Rapier body may take a frame to align with s=0).
    * Pre-existing vehicles default to 0 (treated as "infinitely old").

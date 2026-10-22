@@ -1,5 +1,5 @@
 /**
- * Plan 053 follow-up: camera fit behavior under Playwright.
+ * Camera fit behavior under Playwright.
  *
  * Scenarios covered (all driven by the window.__camera debug hook
  * exposed from useCameraControls.ts in DEV mode):
@@ -43,7 +43,7 @@ const wheel = async (page: Page, deltaY: number): Promise<void> => {
   await page.waitForTimeout(250)
 }
 
-test('Plan 053 follow-up: initial cross-scene fit + zoom limits', async ({ page }) => {
+test('initial cross-scene fit + zoom limits', async ({ page }) => {
   await waitForSceneReady(page)
   await settleFit(page)
 
@@ -59,7 +59,7 @@ test('Plan 053 follow-up: initial cross-scene fit + zoom limits', async ({ page 
   expect(cam!.minDistance).toBeLessThanOrEqual(10)
 })
 
-test('Plan 053 follow-up: wheel zooms in toward minDistance', async ({ page }) => {
+test('wheel zooms in toward minDistance', async ({ page }) => {
   await waitForSceneReady(page)
   await settleFit(page)
 
@@ -76,7 +76,7 @@ test('Plan 053 follow-up: wheel zooms in toward minDistance', async ({ page }) =
   expect(after!.distance).toBeGreaterThanOrEqual(after!.minDistance - 0.5)
 })
 
-test('Plan 053 follow-up: wheel zooms out toward maxDistance', async ({ page }) => {
+test('wheel zooms out toward maxDistance', async ({ page }) => {
   await waitForSceneReady(page)
   await settleFit(page)
 
@@ -91,7 +91,7 @@ test('Plan 053 follow-up: wheel zooms out toward maxDistance', async ({ page }) 
   expect(after!.distance).toBeLessThanOrEqual(after!.maxDistance + 0.5)
 })
 
-test('Plan 053 follow-up: fit button restores frame after manual zoom', async ({ page }) => {
+test('fit button restores frame after manual zoom', async ({ page }) => {
   await waitForSceneReady(page)
   await settleFit(page)
   const initial = await getCamera(page)
@@ -118,7 +118,7 @@ test('Plan 053 follow-up: fit button restores frame after manual zoom', async ({
   ).toBeLessThan(0.1)
 })
 
-test('Plan 053 follow-up: scene switch reruns fit', async ({ page }) => {
+test('scene switch reruns fit', async ({ page }) => {
   await waitForSceneReady(page)
   await settleFit(page)
   const cross = await getCamera(page)
@@ -138,7 +138,7 @@ test('Plan 053 follow-up: scene switch reruns fit', async ({ page }) => {
   await expectSceneScreenshot(page, 'camera-fit-loop.png')
 })
 
-test('Plan 053 follow-up: zoom limits scale with scene size', async ({ page }) => {
+test('zoom limits scale with scene size', async ({ page }) => {
   await waitForSceneReady(page)
   await settleFit(page)
   const cross = await getCamera(page)
@@ -157,9 +157,7 @@ test('Plan 053 follow-up: zoom limits scale with scene size', async ({ page }) =
   expect(loop!.minDistance).toBeGreaterThanOrEqual(5)
 })
 
-test('Plan 054 follow-up: right-click drag does NOT pan (mouseButtons.RIGHT = null)', async ({
-  page,
-}) => {
+test('right-click drag does NOT pan (mouseButtons.RIGHT = null)', async ({ page }) => {
   await waitForSceneReady(page)
   await settleFit(page)
   const before = await getCamera(page)

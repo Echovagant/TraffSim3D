@@ -16,7 +16,7 @@ most of the planet.
 ## Decision
 
 Adopt **OSM (`.osm` / `.pbf`) as the source-of-truth map format**, parsed
-in M3 by `app/apps/maps/` into an **internal graph structure** (nodes =
+by `app/apps/maps/` into an **internal graph structure** (nodes =
 intersections + way-points; edges = road segments; attributes = lanes,
 speed limits, turn restrictions, traffic-signal phasing). The internal
 graph is what the rest of the system (renderer, RL env, planner) reads;
@@ -30,8 +30,8 @@ OSM is the persistence format.
 - The A* / Dijkstra path planner sits on top of the internal graph,
   not on raw OSM data — so the env can re-plan on signal phase
   changes without re-parsing.
-- The frontend renders the internal graph via Three.js line segments
-  in M3; no raw OSM rendering.
+- The frontend renders the internal graph via Three.js line segments;
+  no raw OSM rendering.
 - This ADR is forward-compatible with future map sources (e.g.
   OpenDRIVE, lanelet2) by swapping the parser only.
 
@@ -43,4 +43,4 @@ OSM is the persistence format.
 - **Lanelet2 (autonomous-driving format)**: technically richer for
   lanelet-level modeling, but the OSM ecosystem tooling (osmium,
   OSMnx) is more accessible and the additional fidelity is not
-  needed for M1–M4.
+  needed at the current scope.

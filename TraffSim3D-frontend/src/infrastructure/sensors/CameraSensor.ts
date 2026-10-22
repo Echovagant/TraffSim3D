@@ -1,6 +1,6 @@
 // src/infrastructure/sensors/CameraSensor.ts
 //
-// M2-D (plan 025): virtual camera attached to a vehicle. Each tick
+// Virtual camera attached to a vehicle. Each tick
 // (when enabled) the sensor positions itself at the host vehicle's
 // pose and renders the scene to an offscreen WebGLRenderTarget.
 // The pixel buffer is then exposed as a CameraFrame which consumers

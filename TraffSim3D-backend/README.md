@@ -2,9 +2,9 @@
 
 Python FastAPI backend for the 3D traffic simulation platform. Hosts:
 
-- **`apps/maps/`** — OSM XML → RoadNetwork parser (Plan 041)
-- **`apps/rl/`** — Gymnasium env + PPO training (Plan 044)
-- **`apps/simulation/`, `apps/perception/`** — scaffolded, awaiting M2/M3 work
+- **`apps/maps/`** — OSM XML → RoadNetwork parser
+- **`apps/rl/`** — Gymnasium env + PPO training
+- **`apps/simulation/`, `apps/perception/`** — scaffolded, awaiting implementation
 
 The Vue 3 + Three.js frontend lives in `TraffSim3D-frontend/`. See
 `TraffSim3D.code-workspace` to open both folders together.
@@ -141,7 +141,7 @@ curl http://localhost:8000/api/v1/rl/status
 
 ### OpenStreetMap (default — free, no API key)
 
-Plan 041 parses `.osm` XML files into the frontend's `RoadNetwork`
+The OSM parser converts `.osm` XML files into the frontend's `RoadNetwork`
 format. The OSM data is governed by the **ODbL** (Open Database License):
 any UI displaying OSM-derived maps must include the attribution
 **"© OpenStreetMap 贡献者"**.
@@ -152,21 +152,21 @@ any UI displaying OSM-derived maps must include the attribution
 |---|---|---|---|---|
 | [openstreetmap.org Export](https://www.openstreetmap.org/export) | ~0.25 sq deg | .osm (XML) | Live | Quick small exports |
 | [Overpass API](https://overpass-api.de/) | arbitrary bbox + tags | .osm / GeoJSON | Live | Programmatic per-condition fetch |
-| [Geofabrik](https://download.geofabrik.de/asia/china.html) | Continent/country/province | .pbf / .shp | Daily~weekly | Bulk national/provincial |
+| [Geofabrik](https://download.geofabrik.de/) | Continent/country/province | .pbf / .shp | Daily~weekly | Bulk national/provincial |
 | [BBBike](https://download.bbbike.org/) | 200+ cities | .pbf / .shp / .geojson | Regular | City-level, multiple formats |
 | [Planet OSM](https://planet.openstreetmap.org/) | Global | .pbf (~59GB) / .xml (~106GB) | Weekly | Full-world offline DB |
 
-For **China specifically**:
-- Geofabrik: https://download.geofabrik.de/asia/china.html (daily updated)
-- Recommended cities to download: Shenzhen, Beijing, Shanghai, Guangzhou
+**Bulk downloads by area**:
+- Geofabrik: daily-updated extracts per region and country — https://download.geofabrik.de/
+- Pick the city extracts that match the area you want to simulate
 
-**China-specific caveats**:
-- OSM coverage is **incomplete** in mainland China (mapping restrictions,
+**Regional caveats**:
+- OSM coverage is **incomplete** in some regions (mapping restrictions,
   smaller volunteer community). Urban arterial roads are usually present,
   but `lanes`, `maxspeed`, `bridge` tags are often missing.
 - **Border/boundary data is unreliable** in OSM for geopolitical regions —
   do not rely on OSM admin boundaries for any boundary-sensitive use case.
-- For accurate China road data, **高德 (AutoNavi / Amap) 开放平台** or
+- For accurate regional road data, **高德 (AutoNavi / Amap) 开放平台** or
   **百度地图开放平台** are the commercial alternatives (require API key,
   ToS-restricted for commercial use). See "高德 follow-up" below.
 
@@ -184,12 +184,12 @@ For **China specifically**:
 > without re-distributing, but **any published derivative database must
 > also be ODbL**. See https://opendatacommons.org/licenses/odbl/.
 
-The frontend `MapImporterView.vue` includes this attribution footer
-per Plan 041's acceptance criteria.
+The frontend `MapImporterView.vue` includes this attribution footer, as
+the ODbL terms require.
 
-### 高德 (Amap) — China-specific, requires API key (follow-up)
+### 高德 (Amap) — requires API key (follow-up)
 
-> **Status**: not yet implemented. Planned for a post-044 plan.
+> **Status**: not yet implemented; planned as a follow-up.
 
 Workflow when implemented:
 1. User registers at https://lbs.amap.com/ → creates an application → gets an API key.
@@ -199,10 +199,10 @@ Workflow when implemented:
    shape as OSM parser output).
 5. The frontend adds a "地图源: OSM / 高德" selector.
 
-**Why two parsers**: OSM is universal + free but China coverage is poor.
-高德 has authoritative China data but is commercial (ToS-restricted).
+**Why two parsers**: OSM is universal + free but its coverage is uneven in some regions.
+高德 has authoritative regional data but is commercial (ToS-restricted).
 The MVP supports OSM for global coverage and adds 高德 as a follow-up
-for production China use.
+for production use in those regions.
 
 ---
 
@@ -248,7 +248,7 @@ TraffSim3D-backend/
 │   │       ├── env.py         # Gymnasium wrapper
 │   │       ├── status.py      # status.json I/O
 │   │       └── train.py       # PPO entry point
-│   ├── core/, models/, storage/  # scaffolded for M3+
+│   ├── core/, models/, storage/  # scaffolded, not yet implemented
 ├── tests/
 │   ├── test_smoke.py          # health + ping
 │   ├── test_osm_parser.py     # 10 unit tests for parser
@@ -264,6 +264,6 @@ TraffSim3D-backend/
 
 ## Follow-ups
 
-- **045**: Multi-agent RL, PPO long training runs, checkpoint management.
-- **045+**: OSM PBF parser (`osmpbf`), 高德 amap_parser, pre-extracted city files, OSM→elevated roads end-to-end e2e.
-- **046 (M5)**: Cross-language contract test (TS sim ↔ Python sim snapshot diff), production deployment (ADR-007 Docker Compose), test coverage ≥70%.
+- Multi-agent RL, PPO long training runs, checkpoint management.
+- OSM PBF parser (`osmpbf`), 高德 amap_parser, pre-extracted city files, OSM→elevated roads end-to-end e2e.
+- Cross-language contract test (TS sim ↔ Python sim snapshot diff), production deployment (ADR-007 Docker Compose), test coverage ≥70%.

@@ -18,7 +18,7 @@ export default defineConfig([
     // Plain .js files — use tseslint parser for proper ESM + TS-flavored
     // syntax (even though .js doesn't have type annotations, tseslint
     // parser is the same JS parser vue uses for its script blocks).
-    // Plan 052: vite.config.js reads `process.env.VITE_BACKEND_PORT`,
+    // vite.config.js reads `process.env.VITE_BACKEND_PORT`,
     // so add the `node` globals to the whole JS family.
     files: ['**/*.{js,mjs,jsx,ts}'],
     languageOptions: {
@@ -37,9 +37,9 @@ export default defineConfig([
     // .vue SFCs — need vue-eslint-parser as the outer parser so the
     // template block is parsed, and tseslint parser as the inner parser
     // so <script lang="ts"> blocks (and the type-only imports they
-    // contain) are understood. Plan 004 introduces the first .vue
-    // file with TS syntax (WorldCanvas imports `import type { ... }`),
-    // which exposed the missing double-parser config.
+    // contain) are understood. The first .vue file with TS syntax
+    // (WorldCanvas imports `import type { ... }`) exposed the missing
+    // double-parser config.
     files: ['**/*.vue'],
     languageOptions: {
       globals: {
@@ -61,8 +61,8 @@ export default defineConfig([
   {
     // .vue SFCs often import postprocessing/three classes for side-effect
     // (effect registration) or for API parity with sibling effects that
-    // are wired in a later plan. Until each SFC is fully wired, the
-    // tseslint parser (introduced in Plan 002) flags these as
+    // are wired later. Until each SFC is fully wired, the
+    // tseslint parser flags these as
     // 'no-unused-vars' and blocks the build. Turn it off for .vue only;
     // it remains on for plain .ts/.js files.
     files: ['**/*.vue'],
@@ -71,7 +71,7 @@ export default defineConfig([
     },
   },
   {
-    // .ts files introduced by Plan 003 (domain, store, renderer) frequently
+    // .ts files (domain, store, renderer) frequently
     // use the TS "type namespace" pattern (export interface X + export
     // const X = { ... } with the same name). ESLint's `no-redeclare` blocks
     // this. We also turn off `no-unused-vars` for type-signature-only
@@ -98,10 +98,10 @@ export default defineConfig([
     },
   },
   {
-    // Plan 006 — M2-A 强制 invariant I1 (domain 纯): domain 层不允许
-    // import three / @dimforge/rapier3d-compat / vue。这是 M2 设计契约
-    // plans/m2-interface-contract.md §I1 的**机器可执行**保障。
-    // 任何 domain/* 文件 import 这些包 → lint 报错。
+    // Invariant I1 (domain purity): the domain layer must not import
+    // three / @dimforge/rapier3d-compat / vue. This is the machine-enforced
+    // form of that design contract — any domain/* file importing these
+    // packages fails the lint.
     files: ['src/domain/**/*.{ts,js}'],
     rules: {
       'no-restricted-imports': [

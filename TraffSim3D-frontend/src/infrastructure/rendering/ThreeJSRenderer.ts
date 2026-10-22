@@ -46,7 +46,7 @@ export class ThreeJSRenderer {
   private getSelection: SelectionGetter | null = null
   private getTickPolicy: TickPolicyGetter | null = null
   private controls: { update: () => void } | null = null
-  // Plan 055: 'flat' (default) renders ground + road meshes (used by
+  // 'flat' (default) renders ground + road meshes (used by
   // /scene-editor). 'smart-city' skips both because Cesium provides
   // the basemap underneath. Setting this calls `buildScene` again
   // on the next frame so the rebuild is batched with the next tick.
@@ -59,7 +59,7 @@ export class ThreeJSRenderer {
     this.callbacks = callbacks
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color(0x0b1220)
-    // Plan 054: distance fog so the ground edge (no matter how large)
+    // Distance fog so the ground edge (no matter how large)
     // fades smoothly into the background color when the camera zooms
     // out. Without this, even a 50km ground plane shows a hard gray
     // rectangle against the dark background. Fog distance scales with
@@ -69,7 +69,7 @@ export class ThreeJSRenderer {
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 8000)
     this.camera.position.set(40, 35, 40)
     this.camera.lookAt(0, 0, 0)
-    // Plan 055: alpha:true + clearColor(0,0) makes the Three.js
+    // alpha:true + clearColor(0,0) makes the Three.js
     // canvas transparent so the Cesium basemap underneath shows
     // through. `premultipliedAlpha: false` lets Cesium (which uses
     // straight alpha) composite cleanly with our drawables. Without
@@ -96,7 +96,7 @@ export class ThreeJSRenderer {
   }
 
   /**
-   * Plan 054: retune fog + camera far plane for the current scene
+   * Retune fog + camera far plane for the current scene
    * scale. The renderer uses fixed defaults at construction time;
    * after a network replacement we want fog + far plane to extend
    * to the bbox half-extent + padding (matching the ground mesh
@@ -172,7 +172,7 @@ export class ThreeJSRenderer {
     const raycaster = new THREE.Raycaster()
     raycaster.setFromCamera(ndc, this.camera)
 
-    // Plan 062: vehicles are InstancedMesh — raycast against the 3 type
+    // Vehicles are InstancedMesh — raycast against the 3 type
     // meshes and use instanceId to resolve the entity.
     const vehicleMeshes = [
       this.built.vehicles.meshes.car,
@@ -252,7 +252,7 @@ export class ThreeJSRenderer {
   }
 
   /**
-   * Plan 055: switch between `flat` (ground + road meshes drawn by
+   * Switch between `flat` (ground + road meshes drawn by
    * Three.js) and `smart-city` (Cesium provides ground + roads,
    * Three.js only renders vehicles + lights + LiDAR). Triggers a
    * scene rebuild on the next frame via the existing network-change
@@ -296,7 +296,7 @@ export class ThreeJSRenderer {
       // Reconcile the scene with the current network. `onTick` above has
       // already mutated positions; this is where the per-frame visual sync
       // happens (cheap) plus the incremental add/remove diff (also cheap for
-      // the handful of entities an M1 scene holds). When paused, the network
+      // the handful of entities a demo scene holds). When paused, the network
       // is unchanged but we still want mesh positions to track the static
       // snapshot (a save/load could have replaced it under us).
       if (this.getNetwork) {

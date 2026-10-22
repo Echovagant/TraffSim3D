@@ -1,10 +1,10 @@
-// Plan 035: polyline lane-geometry tests.
+// Polyline lane-geometry tests.
 //
 // Covers the migration from 2-point straight roads to N-point polylines:
 //   - waypoints resolution
 //   - per-segment cumulative length caching
 //   - segmentAt lookup
-//   - 2-point road regression (matches pre-035 straight-line formulas)
+//   - 2-point road regression (matches the older straight-line formulas)
 //   - 3-point right-angle road (NE → corner → SW)
 //   - 4-point S-curve road
 //   - worldToLaneS round-trip
@@ -229,8 +229,8 @@ describe('intersectionSRange', () => {
     expect(hi).toBeCloseTo(21, 6)
   })
 })
-// Plan 039: ramp / level-tagged road geometry tests.
-describe('Plan 039 elevated road geometry', () => {
+// Ramp / level-tagged road geometry tests.
+describe('elevated road geometry', () => {
   const makeRamp = (): Road => ({
     id: 'r-ramp-test',
     startNode: { x: 0, y: 0, z: 0 },

@@ -121,8 +121,8 @@ const canChangeLaneLeft = computed(() => {
   const v = entity.value as Vehicle
   // Lane 0 is the rightmost (slow) lane by convention (see
   // laneGeometry.ts: laneForwardSign). "Left" = higher index
-  // (toward center of road). UI here is informal; plan 029
-  // will replace with a real action.
+  // (toward center of road). UI here is informal; a real action
+  // will replace it.
   return v.laneIndex > 0
 })
 const canChangeLaneRight = computed(() => {

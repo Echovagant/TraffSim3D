@@ -4,10 +4,10 @@
 // takes a Vehicle's current world position (set by Rapier) and
 // finds the nearest (laneIndex, s) on the vehicle's road.
 //
-// See ADR-003 for the algorithm
-// and edge cases. Naming: `findNearestLane` (006 §6 explicitly
-// forbids the old name `worldToLaneS` to avoid colliding with
-// the existing helper in domain/services/laneGeometry.ts).
+// The algorithm and its edge cases follow the Rapier integration
+// design. Naming: `findNearestLane` (the old name
+// `worldToLaneS` would collide with the existing helper in
+// domain/services/laneGeometry.ts).
 
 import type { Vehicle } from '@domain/entities/Vehicle'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
@@ -66,7 +66,7 @@ const projectOntoLane = (
   x: number,
   z: number,
 ): number => {
-  // Plan 035: delegate to the polyline-aware `worldToLaneS` from
+  // Delegate to the polyline-aware `worldToLaneS` from
   // laneGeometry. This picks the segment closest to (x, z) and
   // projects onto that segment's tangent, returning the arc-length s.
   return worldToLaneS(road, laneIndex, x, z)
@@ -146,7 +146,7 @@ export const findNearestLaneOnNetwork = (
   for (const road of Object.values(network.roads)) {
     const len = roadLength(road)
     for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
-      // Plan 035: polyline-aware via worldToLaneS. Picks the segment
+      // Polyline-aware via worldToLaneS. Picks the segment
       // closest to (position.x, position.z) and projects onto that
       // segment's tangent.
       const s = worldToLaneS(road, laneIndex, position.x, position.z)

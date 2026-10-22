@@ -1,6 +1,6 @@
 <template>
   <main class="smart-city">
-    <!-- Plan 055: Cesium viewer container (basemap). Sits at z=0;
+    <!-- Cesium viewer container (basemap). Sits at z=0;
          Three.js canvas overlays at z=1. Both fill the viewport. -->
     <div ref="cesiumContainer" class="cesium-container" data-testid="cesium-container" />
 
@@ -9,8 +9,8 @@
          Pointer events pass through to Cesium for camera control. -->
     <canvas ref="threeCanvas" data-testid="world-canvas" class="three-canvas" />
 
-    <!-- Floating top dock (Plan 055: minimal toolbar — full UI
-         redesign lives in Plan 057). -->
+    <!-- Floating top dock (minimal toolbar — the full UI
+         redesign is still to come). -->
     <header class="dock-top">
       <router-link to="/" class="link-home" title="返回首页">← 首页</router-link>
       <button
@@ -83,13 +83,13 @@
 
 <script setup lang="ts">
 /**
- * Plan 055: Smart City view — Cesium basemap + Three.js overlay.
+ * Smart City view — Cesium basemap + Three.js overlay.
  *
  * Layering (z=0 below, z=1 above):
  *   z=0  Cesium Viewer  — Gaode imagery + 3D buildings + polylines
  *   z=1  Three.js canvas — vehicles + traffic lights + LiDAR
  *
- * The existing M4 simulation (Rapier physics, PPO replay, signal
+ * The existing simulation (Rapier physics, PPO replay, signal
  * controllers) is unchanged — it operates on the same Pinia
  * worldStore, just rendered through a transparent Three.js layer
  * on top of the Cesium basemap.
@@ -101,8 +101,8 @@
  *     last known position (follows Three.js via cameraSync).
  *
  * The full bidirectional Three.js ↔ Cesium camera sync (mouse
- * drag on the basemap drives Three.js camera) is Plan 056 — for
- * 055 the MVP is one-way: Cesium drives the position, Three.js
+ * drag on the basemap drives Three.js camera) is not implemented yet —
+ * the MVP is one-way: Cesium drives the position, Three.js
  * mirrors it. The render loop calls `syncThreeCameraToCesium`
  * every frame.
  */
@@ -297,7 +297,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   display: block;
-  /* MVP (Plan 056 will refine): pointer events pass through to
+  /* MVP (will refine): pointer events pass through to
      Cesium so the user can pan / zoom the basemap. Vehicle
      interaction (drag, inspector) routes through world-space
      raycasts triggered from the editor's own handlers. */

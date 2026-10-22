@@ -1,4 +1,4 @@
-"""Plan 044: SimCore unit tests."""
+"""SimCore unit tests."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def test_obs_dim_is_14() -> None:
 
 
 def test_ego_y_in_obs() -> None:
-    """Plan 061: obs[13] reflects ego elevation."""
+    """obs[13] reflects ego elevation."""
     s = SimCore()
     s.reset()
     obs = s._obs()
@@ -70,7 +70,7 @@ def test_max_steps_truncates() -> None:
 
 
 def test_truncation_latches_and_freezes_the_world() -> None:
-    """Plan 067: once the time limit is hit, the episode is over.
+    """Once the time limit is hit, the episode is over.
 
     Before the fix, `truncated` was *recomputed* from
     `step_count >= max_steps` on every step, so the world kept simulating
@@ -133,7 +133,7 @@ def test_action_out_of_range_clamped() -> None:
     s.step(np.array([10.0, 10.0], dtype=np.float32))
 
 
-# Plan 048: corridor scene tests.
+# Corridor scene tests.
 def test_corridor_scene_ego_drives_through_2_intersections() -> None:
     """Corridor: ego starts at z=-25, target (0, 30). After driving
     forward, ego should reach z > 25 within max_steps, terminating
@@ -180,7 +180,7 @@ def test_corridor_success_grants_bonus_reward() -> None:
 
 
 def test_cross_scene_unchanged_after_corridor_added() -> None:
-    """Default scene_kind='cross' must preserve Plan 044 behavior."""
+    """Default scene_kind='cross' must preserve the original behavior."""
     s = SimCore()  # default cross
     s.reset()
     # Drive forward; should reach z > 25 in ~150 steps and terminate with 'success'

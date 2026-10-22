@@ -23,7 +23,7 @@ describe('TrajectoryExporter', () => {
     expect(exp.rowCount).toBe(3)
   })
 
-  it('CSV header has 11 columns (plan 038 added dt)', async () => {
+  it('CSV header has 11 columns (dt added)', async () => {
     const net = buildTestNetwork(0)
     exp.record(net, 0, 0.1)
     const blob = exp.exportAsBlob({ kind: 'csv', includeCrashed: true, sampleInterval: 0.1 })
@@ -68,9 +68,9 @@ describe('TrajectoryExporter', () => {
     expect(exp.rowCount).toBe(0)
   })
 
-  // ===== Plan 038: dirty-data filter + dt field =====
+  // ===== dirty-data filter + dt field =====
 
-  it('plan 038: every row carries dt = sampleInterval', async () => {
+  it('every row carries dt = sampleInterval', async () => {
     const net = buildTestNetwork(2)
     exp.record(net, 0, 0.1)
     exp.record(net, 0.1, 0.1)
@@ -82,7 +82,7 @@ describe('TrajectoryExporter', () => {
     }
   })
 
-  it('plan 038: dirty-data filter drops samples with speed > 50 m/s', () => {
+  it('dirty-data filter drops samples with speed > 50 m/s', () => {
     const net = buildTestNetwork(1)
     exp.record(net, 0, 0.1) // baseline (speed=0 from makeTestVehicle)
     const teleporting = net.vehicles['v-1']!
@@ -92,7 +92,7 @@ describe('TrajectoryExporter', () => {
     expect(exp.rowCount).toBe(1)
   })
 
-  it('plan 038: dirty-data filter drops collision-response frames (Δpos=0, speed>5)', () => {
+  it('dirty-data filter drops collision-response frames (Δpos=0, speed>5)', () => {
     const net = buildTestNetwork(1)
     exp.record(net, 0, 0.1)
     // First sample OK. Now Rapier reports the body hasn't moved but

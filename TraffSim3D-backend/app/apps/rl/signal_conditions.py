@@ -1,4 +1,4 @@
-"""Plan 074 T10: the traffic conditions the signal agent is trained and
+"""The traffic conditions the signal agent is trained and
 evaluated on.
 
 The signal agent's TRAINING episodes and its EVALUATION episodes must
@@ -27,13 +27,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# ===== Plan 074 T9: the dense training scenario =====
+# ===== the dense training scenario =====
 #
 # The cross scene has ONE vehicle per lane: an arrival every ~9 s. A red
 # phase therefore never builds a queue - the cross-axis queue holds one
 # or two vehicles - so "serve the other axis forever" costs almost
 # nothing and the signal agent has no trade-off to learn. The measured
-# consequence (Plan 074 §3 T9): starving one axis was only ~8 reward
+# consequence: starving one axis was only ~8 reward
 # worse than alternating, while the queue never built up at all.
 #
 # The dense scenario lays out a regular *stream* of traffic on every
@@ -88,7 +88,7 @@ DENSE_EW_VEHICLES_PER_LANE = 4
 
 @dataclass(frozen=True)
 class TrafficCondition:
-    """A named initial condition of the signal scene (Plan 074 T10).
+    """A named initial condition of the signal scene.
 
     ``name`` is the label the condition is reported under; the numbers
     are the condition itself. Two conditions with the same numbers are
@@ -110,6 +110,21 @@ class TrafficCondition:
     stream_spacing: float
     #: Where the signal's phase clock starts, in seconds.
     phase_offset: float
+    #: The **demand** of the open traffic model — how many
+    #: vehicles arrive per hour **per lane** on each axis.
+    #:
+    #: This is the knob the closed loop could not express: with a fixed
+    #: fleet per lane, the queue could never be longer than that fleet, so
+    #: the delay of a starved axis was capped at (fleet size x episode
+    #: length) — while the browser's traffic is open and its delay is not.
+    #:
+    #: The EW axis stays a third busier than the NS one, on purpose: the
+    #: balanced-demand model has a **degenerate optimum** (the agent learns
+    #: to starve an axis - see the `DENSE_EW_VEHICLES_PER_LANE` note), and
+    #: the open model does not remove that, it only makes the price of
+    #: starving unbounded.
+    ns_arrivals_per_hour: int = 0
+    ew_arrivals_per_hour: int = 0
 
     def describe(self) -> dict[str, object]:
         """The condition as a JSON-friendly dict (for the run metadata)."""
@@ -120,13 +135,19 @@ class TrafficCondition:
             "stream_start": self.stream_start,
             "stream_spacing": self.stream_spacing,
             "phase_offset": self.phase_offset,
+            "ns_arrivals_per_hour": self.ns_arrivals_per_hour,
+            "ew_arrivals_per_hour": self.ew_arrivals_per_hour,
         }
 
 
-#: The condition the policy is TRAINED on - the dense scenario of
-#: Plan 074 T9, unchanged. Its numbers are the module's constants, so
-#: the training episodes are bit-identical to the ones the T9 numbers
+#: The condition the policy is TRAINED on - the dense scenario,
+#: unchanged. Its numbers are the module's constants, so the
+#: training episodes are bit-identical to the ones the numbers
 #: (-423.1 for the fixed 30/30 cycle) were measured on.
+#:
+#: The **demand** (the arrival rate per lane) that the
+#: open traffic model needs. The closed loop's *fleet* is the initial
+#: state now; the demand is what keeps arriving.
 TRAIN_CONDITION = TrafficCondition(
     name="train",
     ns_vehicles_per_lane=DENSE_NS_VEHICLES_PER_LANE,
@@ -134,6 +155,8 @@ TRAIN_CONDITION = TrafficCondition(
     stream_start=DENSE_STREAM_START,
     stream_spacing=DENSE_STREAM_SPACING,
     phase_offset=0.0,
+    ns_arrivals_per_hour=300,
+    ew_arrivals_per_hour=400,
 )
 
 #: The EVALUATION condition - the held-out set the trained policy is
@@ -154,7 +177,7 @@ TRAIN_CONDITION = TrafficCondition(
 #:   were trained in.
 #:
 #: The EW axis stays the busier one (5 > 4), so the condition keeps
-#: the precondition the T9 measurements identified.
+#: the precondition the dense-scenario measurements identified.
 EVAL_CONDITION = TrafficCondition(
     name="eval",
     ns_vehicles_per_lane=4,
@@ -162,6 +185,8 @@ EVAL_CONDITION = TrafficCondition(
     stream_start=-30.0,
     stream_spacing=18.0,
     phase_offset=7.0,
+    ns_arrivals_per_hour=400,
+    ew_arrivals_per_hour=500,
 )
 
 #: The HOLDOUT condition - a third condition, used for **nothing but
@@ -176,4 +201,6 @@ HOLDOUT_CONDITION = TrafficCondition(
     stream_start=-32.0,
     stream_spacing=20.0,
     phase_offset=13.0,
+    ns_arrivals_per_hour=300,
+    ew_arrivals_per_hour=400,
 )

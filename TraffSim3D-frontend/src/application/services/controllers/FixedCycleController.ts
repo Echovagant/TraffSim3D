@@ -1,5 +1,5 @@
-// M1-equivalent: 30s green + 3s yellow + 30s red, no extension.
-// Reproduces the M1 hand-rolled cycle so the M1 perf gate stays
+// 30s green + 3s yellow + 30s red, no extension.
+// Reproduces the hand-rolled cycle so the frame-rate gate stays
 // valid when controllerKind='fixed-cycle'.
 import type { TrafficLight } from '@domain/entities/TrafficLight'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'

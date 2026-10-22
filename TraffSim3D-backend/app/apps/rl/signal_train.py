@@ -1,9 +1,9 @@
-"""Plan 074 (T5 + T10): the training entry point for the traffic-signal agent.
+"""The training entry point for the traffic-signal agent.
 
 The signal agent learns in `signal_env.SignalEnv` — a Gymnasium env with a
 `Discrete(5)` action space (the index is the position in
 `sim_core.SIGNAL_ACTION_NAMES`) and the six-dimensional observation of
-Plan 074 §2 D1. The reward is the **total delay** (D2): the negative area
+the contract. The reward is the **total delay**: the negative area
 under the two axes' queue-length curves.
 
 This module reuses the ego agent's machinery instead of inventing a parallel
@@ -27,8 +27,8 @@ listing keeps working.
 THE GATE — the trained policy must beat the fixed cycle
 --------------------------------------------------------
 The fixed 30/30 cycle (`no_op` on every step) is the baseline a trained
-policy has to beat: on the 600-step horizon it scores **-423.1**
-(Plan 074 T9). `evaluate_policy` measures the trained policy the same way —
+policy has to beat: on the 600-step horizon it scores **-423.1**.
+`evaluate_policy` measures the trained policy the same way —
 deterministic argmax, the same env, the same horizon — so the two numbers
 are comparable and not a comparison of two different measurement setups.
 
@@ -53,9 +53,9 @@ beat the baseline, and the two that did both landed on the *same* optimum
 rather than the last one, and the status file records the best return and
 the step it came from.
 
-T10 — MULTIPLE SEEDS, BEST OF N
--------------------------------
-Plan 074 T10 turns "a lucky seed" into a procedure: `train_signal_seeds`
+MULTIPLE SEEDS, BEST OF N
+-------------------------
+The multi-seed recipe turns "a lucky seed" into a procedure: `train_signal_seeds`
 trains several seeds and keeps the one with the best **measured**
 evaluation return. Every seed's number is recorded — in the run metadata,
 in the status document and in the CLI output — so a seed that collapsed
@@ -65,7 +65,7 @@ onto the baseline is reported, never hidden.
 the selection a measurement instead of self-deception:
 
 - the policy is **trained** on `signal_conditions.TRAIN_CONDITION` (the
-  dense scenario of Plan 074 T9, unchanged);
+  dense scenario, unchanged);
 - it is **scored** on `signal_conditions.EVAL_CONDITION` — more demand, a
   different headway and a different signal offset, i.e. a genuinely
   different initial condition. A different RNG seed would NOT do: the sim
@@ -77,10 +77,10 @@ Within a single seed, the best *checkpoint* is still chosen on the training
 condition (that is the usual "keep the best checkpoint of the run" rule);
 the held-out condition is only spent on the cross-seed selection.
 
-Plan 075 — THE EVALUATION SERIES
-------------------------------
+THE EVALUATION SERIES
+---------------------
 `signal_eval_return` is a **single number**: every evaluation overwrites it,
-so the run's history is lost. Plan 075 needs a **curve** — the policy's
+so the run's history is lost. The evaluation needs a **curve** — the policy's
 deterministic evaluation return against the training step — plus the
 fixed-cycle baseline it has to beat, so the status document keeps
 
@@ -91,7 +91,7 @@ fixed-cycle baseline it has to beat, so the status document keeps
 one point per evaluation. Two rules make the curve readable:
 
 - the `baseline` of a point is the fixed 30/30 cycle **measured on the very
-  condition the point was measured on** (Plan 074 T10: two different
+  condition the point was measured on** (two different
   conditions' numbers are not comparable);
 - the series is **bounded** (like `reward_history`), so the status document
   cannot grow without limit.
@@ -127,7 +127,7 @@ from .signal_conditions import (
 from .sim_core import SIGNAL_ACTION_NAMES
 
 #: The evaluation horizon: 600 sim steps at the 10 Hz clock = 60 s of wall
-#: clock. The fixed-schedule baselines of Plan 074 T9 were measured on this
+#: clock. The fixed-schedule baselines were measured on this
 #: horizon, so the trained policy has to be scored on it too.
 EVAL_STEPS = 600
 
@@ -136,7 +136,7 @@ EVAL_STEPS = 600
 #: pins the starting state.
 EVAL_SEED = 0
 
-#: The seed of the **evaluation** episodes (Plan 074 T10).
+#: The seed of the **evaluation** episodes.
 #:
 #: The sim is deterministic, so this seed changes nothing about the
 #: episodes — the separation between the training set and the evaluation
@@ -153,11 +153,11 @@ NO_OP_INDEX = SIGNAL_ACTION_NAMES.index("no_op")
 #: than to average noise.
 EVAL_EPISODES = 3
 
-#: The seeds a multi-seed run trains by default — the four Plan 074 S3b
+#: The seeds a multi-seed run trains by default — the four
 #: measured (two of them beat the baseline, two collapsed onto it).
 DEFAULT_SEEDS: tuple[int, ...] = (0, 1, 2, 3)
 
-#: How many evaluation points the status document keeps (Plan 075).
+#: How many evaluation points the status document keeps.
 #:
 #: The series is a *curve*, not a log: once the bound is reached the oldest
 #: points are dropped. The bound matches `status.append_reward`'s, so the
@@ -214,7 +214,7 @@ DEFAULT_GAE_LAMBDA = 0.95
 def make_env(max_steps: int = EVAL_STEPS, condition: TrafficCondition = TRAIN_CONDITION) -> Any:
     """A fresh `SignalEnv` on the horizon the baselines were measured on.
 
-    `condition` selects the scene's initial condition (Plan 074 T10): the
+    `condition` selects the scene's initial condition: the
     training condition by default, the held-out evaluation condition when
     the policy is scored.
     """
@@ -265,7 +265,7 @@ def evaluate_schedule(
 
     This is the baseline the trained policy is compared against. `no_op` on
     every step is the plain 30/30 cycle; the other four actions give the
-    degenerate schedules Plan 074 T9 measured (flicker / starve / preempt).
+    degenerate schedules that were measured (flicker / starve / preempt).
 
     The baseline has to be measured on the **same condition** as the policy
     it is compared against — the numbers of two different conditions are not
@@ -324,10 +324,10 @@ def append_eval_point(
 ) -> list[dict[str, Any]]:
     """Append one evaluation point to the series, keeping the series bounded.
 
-    The series is the curve the AI Playground draws (Plan 075): **one point
+    The series is the curve the AI Playground draws: **one point
     per evaluation**, each carrying the fixed-cycle baseline *measured on the
-    same condition as the point* — Plan 074 T10 is explicit that two
-    different conditions' numbers are not comparable, so a point may never
+    same condition as the point* — two different conditions' numbers are
+    not comparable, so a point may never
     borrow another condition's baseline.
 
     The bound keeps the status document from growing without limit: the
@@ -389,7 +389,7 @@ def train_signal_policy(
     policy", and the browser runs the **argmax**, which is what the
     evaluation measures.
 
-    Plan 074 T10 adds three things:
+    Three things are added on top of the single-seed run:
 
     - the policy is **also** scored on the held-out evaluation condition
       (`signal_conditions.EVAL_CONDITION`), and the summary says whether it
@@ -489,14 +489,14 @@ def train_signal_policy(
     best_step = 0
     best_state: dict[str, Any] | None = None
     best_actions: dict[str, int] = {}
-    # Plan 075: the evaluation **series** — one point per evaluation, so the
+    # The evaluation **series** — one point per evaluation, so the
     # AI Playground can draw the policy's return against the training step
     # next to the fixed-cycle baseline.
     eval_series: list[dict[str, Any]] = []
     # The fixed 30/30 cycle on the **training** condition — the bar this
     # run's evaluations are compared against. It is measured on the very
     # condition (and horizon) the evaluations below use, because two
-    # different conditions' numbers are not comparable (Plan 074 T10).
+    # different conditions' numbers are not comparable.
     # Measured once, lazily: the run does not need it before its first
     # evaluation.
     measured_baseline: float | None = train_baseline
@@ -558,7 +558,7 @@ def train_signal_policy(
     else:
         final_path = ckpt.save_checkpoint(model, best_step or total_steps)
 
-    # Plan 074 T10: score the policy on the **held-out** condition. The
+    # Score the policy on the **held-out** condition. The
     # number that decides which seed wins is measured here — never on the
     # episodes the policy was trained on.
     eval_result = evaluate_policy(
@@ -576,7 +576,7 @@ def train_signal_policy(
             condition=EVAL_CONDITION,
         )["return"]
     if train_baseline is None:
-        # The published T9 baseline: the fixed 30/30 cycle on the
+        # The published baseline: the fixed 30/30 cycle on the
         # **training** condition (-423.1 over 600 steps). The series already
         # measured it on that very condition, so reuse it instead of
         # measuring the same thing twice.
@@ -595,7 +595,7 @@ def train_signal_policy(
         s["baseline_no_op_return"] = train_baseline
         s["signal_eval_condition_return"] = eval_result["return"]
         s["signal_eval_condition_baseline"] = eval_baseline
-        # Plan 075: the fixed cycle of every condition this run reports on,
+        # The fixed cycle of every condition this run reports on,
         # so the UI can show the margin (and the generalisation gap)
         # without a second request.
         s["signal_baselines"] = {"train": train_baseline, "eval": eval_baseline}
@@ -620,7 +620,7 @@ def train_signal_policy(
         "beats_train_baseline": bool(best_return is not None and best_return > train_baseline),
         "device": resolved_device,
         "evaluation": evaluation,
-        # Plan 075: the evaluation curve (one point per evaluation).
+        # The evaluation curve (one point per evaluation).
         "eval_series": eval_series,
     }
 
@@ -628,7 +628,7 @@ def train_signal_policy(
 def select_best_seed(
     records: Sequence[dict[str, Any]], *, key: str = "eval_return"
 ) -> dict[str, Any]:
-    """The candidate with the highest measured return (Plan 074 T10).
+    """The candidate with the highest measured return.
 
     The selection is made on the **evaluation** condition — a condition the
     policy was not trained on — so the winner is not simply the seed that
@@ -663,7 +663,7 @@ def _seed_record(summary: dict[str, Any]) -> dict[str, Any]:
         "beats_baseline": bool(summary["beats_baseline"]),
         "best_step": int(summary["best_step"]),
         "checkpoint": str(summary["checkpoint"]),
-        # Plan 075: the seed's own evaluation curve, so every seed — the
+        # The seed's own evaluation curve, so every seed — the
         # collapsed ones included — can be looked at, not only the winner.
         "eval_series": list(summary.get("eval_series", [])),
     }
@@ -684,7 +684,7 @@ def _write_run_metadata(metadata: dict[str, Any]) -> Path:
 
 
 def _train_seed_worker(payload: dict[str, Any]) -> dict[str, Any]:
-    """Train one seed in a **worker process** (Plan 074 T10).
+    """Train one seed in a **worker process**.
 
     Module level so that `ProcessPoolExecutor` can pickle it: on Windows a
     worker is a fresh interpreter that re-imports this module. The worker
@@ -754,9 +754,9 @@ def train_signal_seeds(
     eval_every: int = 10_000,
     workers: int = 1,
 ) -> dict[str, Any]:
-    """Train several seeds and keep the best one (Plan 074 T10).
+    """Train several seeds and keep the best one.
 
-    The recipe of Plan 074 S3b is not seed-proof: of the four seeds that
+    The recipe is not seed-proof: of the four seeds that
     were measured, two beat the fixed cycle and two collapsed back onto it.
     This function makes the outcome a procedure instead of a lucky draw:
     every seed is trained, every seed is **scored on the held-out
@@ -799,7 +799,7 @@ def train_signal_seeds(
     s["latest_checkpoint"] = ""
     s["signal_seeds"] = seed_list
     s["signal_seed_count"] = len(seed_list)
-    # Plan 075: the evaluation curve and the per-condition baselines start
+    # The evaluation curve and the per-condition baselines start
     # empty — they are filled in as the run measures them.
     s["signal_eval_series"] = []
     s["signal_baselines"] = {}
@@ -891,7 +891,7 @@ def train_signal_seeds(
             records.append(_seed_record(summary))
             ss = st.read_status()
             ss["signal_seed_results"] = records
-            # Plan 075: the curve of the seed that just finished, so the
+            # The curve of the seed that just finished, so the
             # dashboard shows a live curve during a multi-seed run. The
             # final publish below replaces it with the **winner's** curve.
             ss["signal_eval_series"] = records[-1]["eval_series"]
@@ -942,7 +942,7 @@ def train_signal_seeds(
     s["signal_holdout_return"] = holdout["return"]
     s["signal_seed_results"] = records
     s["signal_run_metadata"] = str(metadata_path)
-    # Plan 075: the delivered policy's evaluation curve (the winner's own
+    # The delivered policy's evaluation curve (the winner's own
     # series — every seed's series stays in `signal_seed_results`), and the
     # fixed cycle of each condition the run reports on.
     s["signal_eval_series"] = list(winner.get("eval_series", []))
@@ -1008,9 +1008,7 @@ def _print_seed_results(records: Sequence[dict[str, Any]], baselines: dict[str, 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Train the traffic-signal policy (Plan 074 T5/T10)."
-    )
+    parser = argparse.ArgumentParser(description="Train the traffic-signal policy.")
     parser.add_argument("steps", nargs="?", type=int, default=200_000)
     parser.add_argument("--device", choices=["auto", "gpu", "cpu"], default="cpu")
     parser.add_argument("--save-every", type=int, default=10_000)

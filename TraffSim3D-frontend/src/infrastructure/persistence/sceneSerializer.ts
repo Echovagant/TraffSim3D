@@ -6,19 +6,19 @@ import type { Road } from '@domain/entities/Road'
 import { LightPhase } from '@domain/value-objects/Phase'
 import { createRoadNetwork } from '@domain/entities/RoadNetwork'
 
-// Bumped to v3 in M1.5: Vehicle gained `enteredIntersectionAt`
+// Bumped to v3: Vehicle gained `enteredIntersectionAt`
 // (simulation-time when the car first crossed into an intersection box;
 // used by the cross-road emergency-brake logic for right-of-way).
-// Bumped to v4 in M2-B (plan 007): LightPhase enum gained 7 new values
+// Bumped to v4: LightPhase enum gained 7 new values
 // (GreenLeft, YellowLeft, RedLeft, FlashingYellow, FlashingRed, AllRed, Dark).
 // hydrateNetwork must accept v3 + v4 scenes; v3 scenes with unknown
-// phase values fall back to Red (per plan 007 R1).
-// Bumped to v5 in plan 035: Road gained optional `waypoints: Position[]`
+// phase values fall back to Red (per the v4 migration rule).
+// Bumped to v5: Road gained optional `waypoints: Position[]`
 // (polyline support). Intersection gained `intersectionRadius: number`.
 // v5 scenes are direct supersets of v4 — old v4 scenes load transparently
 // with `waypoints === undefined` (geometry helpers fall back to straight
 // 2-point roads) and `intersectionRadius` defaults to 8 in code.
-// Bumped to v6 in plan 037: Vehicle gained `desiredStatus: VehicleStatus`
+// Bumped to v6: Vehicle gained `desiredStatus: VehicleStatus`
 // (intent-based state for the bug-2 hysteresis). RoadNetwork gained
 // `spawnPoints: Record<string, SpawnPoint>`. Old v5 scenes load with
 // `desiredStatus` defaulted to the vehicle's current `status` and an
@@ -32,7 +32,7 @@ export interface SerializedScene {
     roads: Road[]
     intersections: SerializedIntersection[]
     vehicles: Vehicle[]
-    /** Plan 037: optional on v5 → v6+ scenes; absent on older payloads. */
+    /** Optional on v5 → v6+ scenes; absent on older payloads. */
     spawnPoints?: SpawnPoint[]
   }
 }
@@ -99,13 +99,13 @@ const migrateScene = (d: unknown): SerializedScene | null => {
       // which returns null.
       return { ...obj, schemaVersion: SCENE_SCHEMA_VERSION } as SerializedScene
     case 4:
-      // Plan 035: v4 → v5. Road gains optional waypoints, Intersection
+      // v4 → v5. Road gains optional waypoints, Intersection
       // gains intersectionRadius. Old v4 scenes load as-is — geometry
       // helpers fall back to straight 2-point roads, intersection box
       // uses the per-intersection radius (default 8 in code).
       return { ...obj, schemaVersion: SCENE_SCHEMA_VERSION } as SerializedScene
     case 5:
-      // Plan 037: v5 → v6. Vehicle gains desiredStatus (defaults to
+      // v5 → v6. Vehicle gains desiredStatus (defaults to
       // the vehicle's current status on load), RoadNetwork gains
       // spawnPoints (empty on old scenes → no spawn limit). Same
       // shape, just a version bump.
@@ -180,7 +180,7 @@ export const hydrateNetwork = (raw: unknown): HydrationResult => {
   // Build network
   const net = createRoadNetwork()
   for (const r of n.roads as Array<Road>) {
-    // Plan 039: pre-v7 scenes don't have `level`. Default to 0 so
+    // Pre-v7 scenes don't have `level`. Default to 0 so
     // older localStorage payloads deserialize without error — they
     // simply render at ground level (existing behaviour). Will be
     // persisted with the field on next save.
@@ -191,7 +191,7 @@ export const hydrateNetwork = (raw: unknown): HydrationResult => {
   }
   for (const i of n.intersections as Array<SerializedIntersection>) net.intersections[i.id] = i
   for (const v of n.vehicles as Array<Vehicle>) {
-    // Plan 037: v5 → v6 migration. Old scenes don't have desiredStatus;
+    // v5 → v6 migration. Old scenes don't have desiredStatus;
     // default it to the vehicle's current status so the hysteresis
     // logic has a sensible "intent" value to start from.
     if (v.desiredStatus === undefined || v.desiredStatus === null) {

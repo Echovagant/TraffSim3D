@@ -7,7 +7,7 @@
 </template>
 
 <script setup>
-// Placeholder. Real implementation in M2.
+// Placeholder. Real implementation to follow.
 </script>
 
 <style scoped>

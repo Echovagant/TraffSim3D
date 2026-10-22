@@ -1,4 +1,4 @@
-"""Plan 045: Multi-agent Gymnasium env (parameter sharing).
+"""Multi-agent Gymnasium env (parameter sharing).
 
 Wraps N TrafficEnv instances in lockstep. All agents share the same PPO
 policy network (parameter sharing — common in MARL). Per-agent

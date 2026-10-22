@@ -1,6 +1,6 @@
 // src/shared/constants/simulation.spec.ts
 //
-// Plan 074 T9: the browser's minimum inter-green.
+// The browser's minimum inter-green.
 //
 // The inter-green is the "lost time" every phase change costs: the time
 // between the end of one axis' green and the start of the other axis'
@@ -22,7 +22,7 @@ import { CONFLICT_ALL_RED_SECS, MIN_INTER_GREEN_SECS, YELLOW_CLEAR_SECS } from '
 import type { TickContext } from '@/application/services/tick'
 import type { SignalController, SignalDecision } from '@/application/services/signalController'
 
-describe('the minimum inter-green (Plan 074 T9)', () => {
+describe('the minimum inter-green', () => {
   it('is six seconds', () => {
     expect(MIN_INTER_GREEN_SECS).toBe(6)
   })

@@ -1,10 +1,10 @@
-"""M3 Must: OSM import must produce a *queryable* graph (节点 + 边).
+"""OSM import must produce a *queryable* graph (节点 + 边).
 
-The parser emits a flat `roads` list. Plan 040 built a Node+Edge graph for a
+The parser emits a flat `roads` list. An earlier Node+Edge graph was built for a
 *synthetic* corridor demo scene, not for OSM import — so imported maps had no
 adjacency structure, and nothing could consume one. With `astar|dijkstra`
 at 0 hits repo-wide, the graph had no reader; that is the same
-"structure with no consumer" defect Plan 032's A* proposal was rejected for.
+"structure with no consumer" defect an earlier A* proposal was rejected for.
 
 `RoadGraph` supplies the missing piece: a node index, directed edges with real
 costs, and (per `road_graph`) A* routing so the structure is not dead code.

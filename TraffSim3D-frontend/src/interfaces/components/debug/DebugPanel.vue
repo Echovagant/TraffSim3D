@@ -17,7 +17,7 @@
       <span>信号</span>
       <b>{{ controllerKindLabel }}</b>
     </div>
-    <div v-if="isCoordinated" class="row" title="协调偏移表 (UI only, 028 生效)">
+    <div v-if="isCoordinated" class="row" title="协调偏移表 (UI only)">
       <span>偏移</span>
       <b>
         <span v-for="[pair, val] in coordinatedPairs" :key="pair" class="offset-chip">
@@ -107,13 +107,13 @@ const frameMax = computed(() => (store.frameMsMax === -Infinity ? 0 : store.fram
 const frameAvg = computed(() => store.frameMsAvg.toFixed(1))
 const fpsClass = computed(() => (store.fps >= M1_MIN_FPS ? 'ok' : 'warn'))
 
-// 027: controller kind label + coordinated offset list (read from worldStore).
+// controller kind label + coordinated offset list (read from worldStore).
 const controllerKindLabel = computed(() => {
   const k = store.controllerKind
   if (k === 'fixed-cycle') return '固定'
   if (k === 'actuated') return '感应'
   if (k === 'coordinated') return '协调'
-  return 'RL (stub)' // Plan 049/058 stub: does not implement RL control yet
+  return 'RL (stub)' // stub: does not implement RL control yet
 })
 const isCoordinated = computed(() => store.controllerKind === 'coordinated')
 const coordinatedPairs = computed(() =>

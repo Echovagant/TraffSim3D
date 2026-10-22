@@ -2,7 +2,7 @@
  * Typed surface over the FastAPI backend.
  *
  * Today this is just the two smoke endpoints (`/health`, `/api/v1/ping`).
- * As M2-M4 land (scene sync, tick streaming, RL training) new methods
+ * As more capabilities land (scene sync, tick streaming, RL training) new methods
  * will be appended here — the return types are designed to mirror the
  * Pydantic models the backend will eventually expose, so the call sites
  * in the application/services layer stay stable.

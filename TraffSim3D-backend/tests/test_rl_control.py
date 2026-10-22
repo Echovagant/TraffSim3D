@@ -1,4 +1,4 @@
-"""M4 Must: training task control — pause / resume / terminate.
+"""Training task control — pause / resume / terminate.
 
 Training runs as a detached subprocess (see `api/v1/rl.py` train endpoint),
 so the API process cannot reach into it. Control therefore travels through a

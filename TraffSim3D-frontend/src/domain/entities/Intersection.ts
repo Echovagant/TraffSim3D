@@ -8,7 +8,7 @@ export interface Intersection {
   /** Road ids that terminate at this intersection. */
   connectedRoads: string[]
   /**
-   * Plan 035: 路口 box 半径 (m). 决定 `inIntersectionBox` 检测范围
+   * 路口 box 半径 (m). 决定 `inIntersectionBox` 检测范围
    * (`[mid - radius, mid + radius]`). 默认 8.
    *
    * - 4-way 十字路口: 8 (覆盖 stop line ± STOP_LINE_DISTANCE = 5,
@@ -19,7 +19,7 @@ export interface Intersection {
    *   中的车).
    *
    * 直角转弯 road 本身不进任何 intersection.connectedRoads, 所以
-   * 不会被 inIntersectionBox 触发. 见 ADR-008.
+   * 不会被 inIntersectionBox 触发.
    */
   intersectionRadius: number
 }

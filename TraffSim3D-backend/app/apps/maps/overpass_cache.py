@@ -1,6 +1,6 @@
-"""Plan 056 follow-up: cached Overpass fetcher.
+"""Cached Overpass fetcher.
 
-The smart-city view (Plan 055) calls Overpass directly from the
+The smart-city view calls Overpass directly from the
 browser. Two problems:
   1. overpass-api.de is slow / blocked from China — the user sees
      the "正在从 Overpass 加载 OSM 数据..." toast stay forever.

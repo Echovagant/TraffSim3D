@@ -1,6 +1,6 @@
 // scripts/generate-contract-snapshots.ts
 //
-// Plan 071: generate the TS-side golden snapshots for the cross-language
+// Generate the TS-side golden snapshots for the cross-language
 // contract.
 //
 // Two goldens per vector:
@@ -81,7 +81,7 @@ interface Vector {
   /**
    * Optional: the ego pose to install right after the scene's `reset()`.
    *
-   * Plan 076 S5a. Every vector used to be a straight-line scenario, so
+   * Every vector used to be a straight-line scenario, so
    * Pure Pursuit's angle was ~0, `steer` was 0, and the three turning
    * constants (`LOOKAHEAD_DISTANCE`, `MAX_STEER`, `EGO_WHEELBASE`) were
    * blind spots: changing them changed no trajectory. A vector that starts
@@ -301,7 +301,7 @@ const main = (): void => {
         lightOverride,
         signalActions,
         egoStart,
-        // Plan 076 T12: the steering channel (`action[1]`) is a residual on
+        // The steering channel (`action[1]`) is a residual on
         // top of the scripted Pure Pursuit steer. The Python side reads the
         // same vector, so both sides drive the same trajectory.
         steerActions: actions.map((a) => a[1]!),
@@ -312,7 +312,7 @@ const main = (): void => {
       name: v.name,
       scene_kind: v.scene_kind,
       ego_id: v.ego_id,
-      // The shared signal-action vocabulary (Plan 073 Sprint 2). The Python
+      // The shared signal-action vocabulary. The Python
       // side compares this block against its own `sim_core` constants, so a
       // disagreement between the two sides' vocabularies turns the contract
       // red. Each side owns its own copy of the list — a file both sides
@@ -325,7 +325,7 @@ const main = (): void => {
         min_green_seconds: MIN_GREEN_SECS,
         inter_green_seconds: MIN_INTER_GREEN_SECS,
       },
-      // Plan 076 T12: the road rules — the road's half-width and each
+      // The road rules — the road's half-width and each
       // scene's goal line. The Python side cross-checks these against its
       // own `sim_core` copies, so a one-sided change of either turns the
       // contract red (each side owns its own copy on purpose: a file both
@@ -334,7 +334,7 @@ const main = (): void => {
         road_half_width: PYTHON_SIM.ROAD_HALF_WIDTH,
         scene_goal_z: { ...PYTHON_SIM.SCENE_GOAL_Z },
       },
-      // Plan 076 T13: the scene's **own** light schedule — the phase the
+      // The scene's **own** light schedule — the phase the
       // light starts in and the length of a phase. The Python side
       // compares this block against the light its own `SimCore.reset()`
       // installs, so a one-sided change of either turns the contract red
@@ -367,7 +367,7 @@ const main = (): void => {
         : {}),
       // The ego pose the mirror actually started from (absent → the
       // scene's own start). The Python side cross-checks it against the
-      // vector's copy — Plan 076 S5a.
+      // vector's copy.
       ...(egoStart
         ? {
             ego_start: {

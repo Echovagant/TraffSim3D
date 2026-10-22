@@ -276,7 +276,7 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   }
 }
 
-/* Plan 029 (M2 lane change): vehicles mid lane-change get a blue
+/* Vehicles mid lane-change get a blue
  *  pulse so the user can see what's moving sideways. */
 .row.changing {
   background: rgba(59, 130, 246, 0.18);

@@ -1,4 +1,4 @@
-"""Plan 073 Sprint 2 (A2a): the Python light accepts the shared signal actions.
+"""The Python light accepts the shared signal actions.
 
 The traffic signal became an externally-actionable control surface: the
 Python training sim now accepts the same five action names as the
@@ -209,7 +209,7 @@ def test_the_all_red_clearance_is_three_seconds() -> None:
 def test_a_preempt_right_after_a_clearance_does_not_kill_the_light() -> None:
     """The resume point must survive a preempt that lands on the boundary.
 
-    Regression (Plan 073 Sprint 2 fix wave). The clearance that ended with
+    Regression (an earlier fix to the signal actions). The clearance that ended with
     the previous step leaves the light **all-red** until the resume happens
     inside the next step. A preempt applied on that step used to overwrite
     the resume point with the all-red state, and the light then never went

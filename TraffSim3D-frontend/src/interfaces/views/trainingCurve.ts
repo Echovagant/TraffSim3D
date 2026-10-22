@@ -1,5 +1,5 @@
 /**
- * Plan 075: the geometry of the training-curve chart.
+ * The geometry of the training-curve chart.
  *
  * WHY A HELPER AT ALL
  * -------------------

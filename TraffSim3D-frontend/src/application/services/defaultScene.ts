@@ -13,7 +13,7 @@ const NS_GREEN = DEFAULT_CYCLE_SECONDS * (30 / 63) // ~30s
 const EW_GREEN = NS_GREEN
 
 /**
- * Plan 037: register a spawn point for `road` on its outer forward
+ * Register a spawn point for `road` on its outer forward
  * lane (lane 0). The returned spawn point is open (`occupiedBy = null`)
  * unless `occupiedBy` is supplied.
  */
@@ -67,14 +67,14 @@ const at = (
     desiredLaneIndex: null,
     laneChangeStartedAt: null,
     spawnedAt: 0,
-    desiredStatus: 'driving', // Plan 037: intent-based state
+    desiredStatus: 'driving', // intent-based state
   }
 }
 
 /**
- * Plan 035: helper for the common case of a straight 2-point road. Saves
+ * Helper for the common case of a straight 2-point road. Saves
  * typing `startNode`, `endNode`, `laneCount`, `speedLimit` separately
- * when the road is just a single segment. Plan 039: `level` parameter
+ * when the road is just a single segment. The `level` parameter
  * defaults to 0 (ground). High-level roads pass `level: 1` etc.
  */
 const roadStraight = (
@@ -95,14 +95,14 @@ const roadStraight = (
 
 /**
  * Build the default cross-intersection scene (renamed from
- * `buildDefaultNetwork` in plan 035). One NS + one EW road, both 60u
+ * `buildDefaultNetwork`). One NS + one EW road, both 60u
  * long, 6 lanes, 6 default vehicles spread across all 4 directions.
  */
 export const buildCrossIntersectionNetwork = (): RoadNetwork => {
   const net = createRoadNetwork()
 
   // Roads: one NS, one EW, both 60u long, 6 lanes (3 each direction).
-  // M1.5 — closer to a Chinese city arterial: 3 lanes forward
+  // Closer to a Chinese city arterial: 3 lanes forward
   // (right-turn, straight, left-turn from the curb) and 3 lanes
   // backward (left-turn, straight, right-turn from the median). The
   // 6-lane layout also stresses the spawn / collision code paths
@@ -158,7 +158,7 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
     at(roadEW, 1, ewLen * 0.15, 6, { id: 'v-6', type: 'bus', color: '#22c55e', status: 'driving' }),
   ]
   for (const v of defaults) net.vehicles[v.id] = v
-  // Plan 037: register one open spawn point per road. Default vehicles
+  // Register one open spawn point per road. Default vehicles
   // sit at s=15–25 (not s=0), so they don't conflict with spawn traffic.
   for (const road of [roadNS, roadEW]) {
     const sp = defaultSpawnPoint(road)
@@ -169,14 +169,14 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
 
 /**
  * Back-compat alias: `buildDefaultNetwork` is the original name and is
- * still imported by tests / persistence restore paths. Plan 035 just
+ * still imported by tests / persistence restore paths. The rename just
  * renames the implementation; the alias keeps the legacy callers
  * compiling until they migrate.
  */
 export const buildDefaultNetwork = buildCrossIntersectionNetwork
 
 /**
- * Plan 035: T-junction demo scene.
+ * T-junction demo scene.
  *
  * Layout: EW road (full length) with one NS road attached at its midpoint,
  * and a separate S arm continuing south. Net effect: 3 roads meeting at
@@ -234,7 +234,7 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
     at(roadEW, 1, ewLen * 0.7, 8, { id: 'v-t4', type: 'bus', color: '#fbbf24', status: 'driving' }),
   ]
   for (const v of defaults) net.vehicles[v.id] = v
-  // Plan 037: spawn points on each of the 3 roads. EW gets the entry
+  // Spawn points on each of the 3 roads. EW gets the entry
   // from each side; NS arms each get one.
   for (const road of [roadEW, roadN, roadS]) {
     const sp = defaultSpawnPoint(road)
@@ -244,17 +244,17 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
 }
 
 /**
- * Plan 035: rectangular-loop demo scene.
+ * Rectangular-loop demo scene.
  *
  * 4 straight roads forming a 60×60 square loop, joined at 4 corner
  * intersections (no traffic lights — corner is a smooth turn). Each
  * road is 2 lanes (1 forward, 1 backward). 8 default vehicles spread
  * around the loop so the user sees a circulating traffic pattern.
  *
- * Trade-off note (plan 035 maintenance): vehicles do NOT decelerate on
+ * Trade-off note: vehicles do NOT decelerate on
  * approach to corners. Rapier will let them take the chord at full
  * speed; if Rapier physics pushes them outside their lane, the OOB
- * cleanup (plan 034) catches and respawns them. 036 will add proper
+ * cleanup catches and respawns them. Later work will add proper
  * cornering via lookahead steering.
  */
 export const buildRectangularLoopNetwork = (): RoadNetwork => {
@@ -310,7 +310,7 @@ export const buildRectangularLoopNetwork = (): RoadNetwork => {
     )
   }
   for (const v of defaults) net.vehicles[v.id] = v
-  // Plan 037: 1 spawn point per road (4 total).
+  // 1 spawn point per road (4 total).
   for (let i = 0; i < 4; i++) {
     const road = net.roads[`r-loop-${i}`]!
     const sp = defaultSpawnPoint(road)
@@ -320,7 +320,7 @@ export const buildRectangularLoopNetwork = (): RoadNetwork => {
 }
 
 /**
- * Plan 039: 高架桥 demo scene.
+ * 高架桥 demo scene.
  *
  * 布局 (俯视):
  *          N (level=0)
@@ -394,7 +394,7 @@ export const buildElevatedScene = (): RoadNetwork => {
     { x: HIGH_END_X, y: LEVEL_HEIGHT, z: 0 },
     4,
     13.89,
-    1, // level=1 (Plan 039)
+    1, // level=1
   )
   net.roads[roadEWHigh.id] = roadEWHigh
 
@@ -479,7 +479,7 @@ export const buildElevatedScene = (): RoadNetwork => {
   return net
 }
 /**
- * Plan 040: 多路口走廊 demo scene.
+ * 多路口走廊 demo scene.
  *
  * 布局 (俯视):
  *          (z=-30, NS 路北端)
@@ -502,7 +502,7 @@ export const buildElevatedScene = (): RoadNetwork => {
  * - r-ew-north:     EW 60u 长路 (x=-30..+30, z=-30), level=0
  * - r-ew-south:     EW 60u 长路 (x=-30..+30, z=+30), level=0
  * - 2 intersections, 6 vehicles spread across 4 road segments
- * - Coordinated offsets for both intersection pairs (Plan 028 绿波带扩展)
+ * - Coordinated offsets for both intersection pairs (绿波带扩展)
  */
 export const buildCorridorScene = (): RoadNetwork => {
   const net = createRoadNetwork()
@@ -593,7 +593,7 @@ export const buildCorridorScene = (): RoadNetwork => {
   }
   net.intersections[intersectionSouth.id] = intersectionSouth
 
-  // 6 default vehicles spread across 4 road segments (Plan 039 OOB 教训: 拉开距离)
+  // 6 default vehicles spread across 4 road segments (OOB 教训: 拉开距离)
   const nsLen = roadLength(roadNS)
   const ewLen = roadLength(roadEWNorth)
   const defaults: Vehicle[] = [

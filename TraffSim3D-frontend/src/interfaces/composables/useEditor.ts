@@ -46,7 +46,7 @@ export const useEditor = (rendererRef: { value: ThreeJSRenderer | null }) => {
     const dx = event.clientX - dragStart.x
     const dy = event.clientY - dragStart.y
     // 4px threshold distinguishes click from drag (don't lower it
-    // — see plan 023 maintenance notes).
+    // — the threshold is tuned to the pointer behaviour).
     if (!isDragging && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
     isDragging = true
     const worldPos = rendererRef.value.screenToGround(event.clientX, event.clientY)

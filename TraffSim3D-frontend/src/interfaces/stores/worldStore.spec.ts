@@ -1,4 +1,4 @@
-// Plan 035 follow-up: regression test for the `switchScene` bug.
+// Regression test for the `switchScene` bug.
 //
 // Bug history: `worldStore.network` was originally a plain closure
 // variable; `replaceNetwork` did `network = next`. Pinia setup stores
@@ -14,7 +14,7 @@
 // whose `roads` / `intersections` / `vehicles` come from the T
 // factory, and `currentSceneKind` must update.
 //
-// Plan 049: adds RL replay surface tests (loadPolicy / startReplay /
+// Also adds RL replay surface tests (loadPolicy / startReplay /
 // stopReplay / clearPolicy) below.
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
@@ -74,7 +74,7 @@ describe('worldStore.switchScene', () => {
   })
 })
 
-describe('worldStore.loadNetwork (Plan 054: imported OSM/PBF scenes)', () => {
+describe('worldStore.loadNetwork (imported OSM/PBF scenes)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
@@ -99,7 +99,7 @@ describe('worldStore.loadNetwork (Plan 054: imported OSM/PBF scenes)', () => {
   })
 })
 
-describe('worldStore.replay (Plan 049)', () => {
+describe('worldStore.replay', () => {
   let fetchSpy: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
@@ -204,7 +204,7 @@ describe('worldStore.replay (Plan 049)', () => {
   })
 })
 
-describe('worldStore signal policy (Plan 074 — T6)', () => {
+describe('worldStore signal policy', () => {
   let fetchSpy: ReturnType<typeof vi.fn>
 
   beforeEach(() => {

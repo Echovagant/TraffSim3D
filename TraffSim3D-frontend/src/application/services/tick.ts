@@ -1,16 +1,16 @@
 // src/application/services/tick.ts
 //
-// M2-C (plan 017): tick signature is `tick(network, dt, simTime, ctx: TickContext)`.
-// This supersedes plan 010's 6-arg signature. The 5th param is now a
+// Tick signature is `tick(network, dt, simTime, ctx: TickContext)`.
+// This supersedes the earlier 6-arg signature. The 5th param is now a
 // single `ctx: TickContext` that bundles:
-//   - rapierWorld       (M2-A physics)
-//   - signal            (M2-B per-light signal controllers)
-//   - trajectoryExporter (M2-C per-tick trajectory sample)
-//   - sensorRegistry    (M2-C per-tick LiDAR scan)
-//   - lidarEnabled      (M2-C UI toggle)
-//   - getHostPose       (M2-C sensor host pose lookup)
+//   - rapierWorld       (physics)
+//   - signal            (per-light signal controllers)
+//   - trajectoryExporter (per-tick trajectory sample)
+//   - sensorRegistry    (per-tick LiDAR scan)
+//   - lidarEnabled      (UI toggle)
+//   - getHostPose       (sensor host pose lookup)
 //
-// See plans/m2-interface-contract.md §4 for the per-tick event ordering.
+// See the interface contract for the per-tick event ordering.
 
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { Vehicle } from '@domain/entities/Vehicle'
@@ -69,12 +69,12 @@ import type { PolicyAction, PolicyWeights } from '@infrastructure/rl/types'
 export interface SignalContext {
   controllers: Map<string, SignalController>
   controllerKind: ControllerKind
-  /** Plan 028: read by tick when lazily creating a new
-   *  CoordinatedController (M2-B green-wave). */
+  /** Read by tick when lazily creating a new
+   *  CoordinatedController (green-wave). */
   getCoordinatedOffsets: () => ReadonlyMap<string, number>
   isCoordinatedEnabled: () => boolean
   /**
-   * Plan 074 (T6): where the RL controller's actions come from.
+   * Where the RL controller's actions come from.
    *
    * A **getter**, not a value: the signal policy is loaded at runtime, and
    * a controller that was created before the policy arrived would hold a
@@ -92,33 +92,33 @@ export interface TickContext {
   lidarEnabled: boolean
   /** Lookup host vehicle's live pose (used by sensor scan). */
   getHostPose: (vehicleId: string) => { position: Vec3; heading: number } | null
-  /** Plan 038: optional fixed-step scheduler. When non-null, the
+  /** Optional fixed-step scheduler. When non-null, the
    *  trajectory exporter is only invoked on fixed-step boundaries
    *  (10 Hz by default), regardless of how fast the render loop
    *  fires. When null, the exporter runs per-frame (back-compat
-   *  for tests and the legacy M2-C path). */
+   *  for tests and the legacy per-frame path). */
   fixedStepScheduler: FixedStepScheduler | null
-  /** Vehicle currently being dragged on the 3D canvas (M1.5, plan 023).
+  /** Vehicle currently being dragged on the 3D canvas.
    *  When non-null, tick() skips Rapier applyControl + position re-derivation
    *  for this vehicle so the drag handler can move it freely. */
   draggingId: string | null
-  /** Plan 034: hard-delete a vehicle whose road is missing (e.g. sceneIO
+  /** Hard-delete a vehicle whose road is missing (e.g. sceneIO
    *  load replaced the network while a vehicle still held a stale
    *  roadId). Wired by worldStore.addTickContext(). */
   removeVehicle: (vehicleId: string) => void
-  /** Plan 049: optional loaded RL policy (SB3 PPO MlpPolicy weights).
+  /** Optional loaded RL policy (SB3 PPO MlpPolicy weights).
    *  When non-null AND `replayTargetId` is set, tick() drives the
    *  target vehicle's `targetSpeed` from a PPO inference each step.
    *  When null, replay is disabled regardless of `replayTargetId`. */
   policy: PolicyWeights | null
-  /** Plan 049: id of the vehicle currently being controlled by the
+  /** Id of the vehicle currently being controlled by the
    *  loaded policy. When null, no replay this tick. While the replay
    *  path is driving this vehicle (a policy is loaded or an action is
    *  injected), the constraint layers (light / car-follow / cross-road
    *  yield) skip it — PPO learned to handle them via its obs. */
   replayTargetId: string | null
   /**
-   * Plan 071: a fixed action applied to the replay target this tick,
+   * A fixed action applied to the replay target this tick,
    * overriding the policy's output. Lets the contract harness drive the
    * product replay path deterministically, with no trained checkpoint.
    */
@@ -126,7 +126,7 @@ export interface TickContext {
 }
 
 /**
- * Plan 071: is the replay path actually driving this vehicle this tick?
+ * Is the replay path actually driving this vehicle this tick?
  *
  * `replayTargetId` alone only *nominates* a vehicle. That vehicle's speed
  * is owned by the policy (or by an injected fixed action) only when one of
@@ -148,7 +148,7 @@ const GREEN_LIKE = new Set<LightPhase>([LightPhase.Green, LightPhase.GreenLeft])
 const YELLOW_LIKE = new Set<LightPhase>([LightPhase.Yellow, LightPhase.YellowLeft])
 /**
  * "This axis currently has the right of way" — green, or the clearance-yellow
- * that follows it. Used by the RL replay observation (Plan 069) to mirror
+ * that follows it. Used by the RL replay observation to mirror
  * Python's `ns_green` / `ew_green` semantics, where exactly one axis is
  * always permitted.
  */
@@ -183,7 +183,7 @@ const resolveSignalConflicts = (inter: Intersection): void => {
 
 export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: TickContext): void => {
   // 1. Advance traffic-light phases via per-light SignalController
-  //    (M2-B, plan 010). Replaces M1's hard-coded 30/3/30 loop.
+  //    Replaces the hand-rolled 30/3/30 loop.
   if (ctx.signal) {
     for (const inter of Object.values(network.intersections)) {
       for (const light of inter.trafficLights) {
@@ -209,7 +209,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       resolveSignalConflicts(inter)
     }
   } else {
-    // M1 fallback: no Rapier → no controllers yet, keep hand-rolled cycle.
+    // Fallback: no Rapier → no controllers yet, keep hand-rolled cycle.
     for (const inter of Object.values(network.intersections)) {
       for (const light of inter.trafficLights) {
         light.phaseRemaining -= dt
@@ -230,10 +230,10 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     }
   }
 
-  // 2. Stamp each vehicle's intersection-entry time (M1.5 — keep).
+  // 2. Stamp each vehicle's intersection-entry time.
   updateIntersectionEntry(network, simTime)
 
-  // 2.5. (Plan 049) RL replay override. When a policy + replay target
+  // 2.5. RL replay override. When a policy + replay target
   //      are set, build a 14-dim obs matching Python's `SimCore._obs()`,
   //      run the in-browser MlpPolicy forward pass, and write the
   //      resulting accel straight into the target's `targetSpeed`. The
@@ -245,7 +245,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     const replayV = network.vehicles[ctx.replayTargetId]
     if (replayV && isReplayDriven(ctx, replayV)) {
       const obs = buildReplayObs(replayV, network)
-      // Plan 071: an injected fixed action overrides the policy, so the
+      // An injected fixed action overrides the policy, so the
       // replay path can be measured without a checkpoint.
       const action: PolicyAction = ctx.replayAction
         ? [ctx.replayAction[0], ctx.replayAction[1]]
@@ -268,7 +268,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   for (const v of Object.values(network.vehicles)) {
     const road = network.roads[v.roadId]
     if (!road) continue
-    // Plan 071: the replay target's speed is owned by the policy (or by
+    // The replay target's speed is owned by the policy (or by
     // an injected action) and was written in step 2.5. Overwriting it
     // here discarded the policy's output entirely — the replay vehicle
     // drove at the road speed limit.
@@ -293,7 +293,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     }
   }
 
-  // 3.5. (Plan 037 bug 2) Controller → desiredStatus. We compute the
+  // 3.5. Controller → desiredStatus. We compute the
   //      controller's intent here (separately from `status`) so the
   //      hysteresis in step 11 has a stable target to converge to.
   //      `crashed` is sticky: nothing in the controller overrides it.
@@ -309,7 +309,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     v.desiredStatus = v.targetSpeed < 0.5 ? 'waiting' : 'driving'
   }
 
-  // 4. Cross-road yield (先到先行) — M1.5 right-of-way priority.
+  // 4. Cross-road yield (先到先行) — right-of-way priority.
   applyCrossRoadYield(network, ctx)
 
   // 5-6. Hand each vehicle's control to Rapier + step.
@@ -400,7 +400,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       }
     }
 
-    // Plan 037c: Pure Pursuit steering — turn toward the lookahead
+    // Pure Pursuit steering — turn toward the lookahead
     // point on the lane. Runs after step 8 (position re-derived) so
     // v.position / heading are fresh. Applies angular velocity to Rapier
     // bodies before the lane-change branch (which handles lateral slide).
@@ -428,13 +428,13 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       ctx.rapierWorld.setVehicleAngularVelocity(v.id, omega)
     }
   } else {
-    // M1 fallback: no Rapier → hand-rolled move+s wrap. Plan 037
+    // Fallback: no Rapier → hand-rolled move+s wrap. This path
     // replaces the previous hard-coded accel=3.5 / decel=10 with
     // smoothAccel (per-type dynamics).
     for (const v of Object.values(network.vehicles)) {
       const road = network.roads[v.roadId]
       if (!road) continue
-      // Plan 071: the replay target already carries the Python-exact next
+      // The replay target already carries the Python-exact next
       // speed (step 2.5). Ramping it through smoothAccel would cap the
       // acceleration at VEHICLE_DYN[type].accel (2.0 m/s²) instead of
       // Python's 3.0 — cross-language difference #7.
@@ -457,7 +457,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     }
   }
 
-  // Plan 029 (M2 lane change): per-vehicle lane-change branch.
+  // Lane-change branch (per vehicle).
   // Runs after both Rapier and hand-rolled paths so position/heading
   // are fresh. For vehicles with desiredLaneIndex set, applies a
   // lateral linvel toward the target lane and clears state when
@@ -494,16 +494,16 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     }
   }
 
-  // 9. (M2-C) LiDAR scan — only when enabled (perf gate). 017 H1 fix:
+  // 9. LiDAR scan — only when enabled (perf gate). The fix:
   //    scan() is actually called from inside tick.ts.
   if (ctx.lidarEnabled && ctx.sensorRegistry && ctx.rapierWorld) {
     ctx.sensorRegistry.scanAll(ctx.rapierWorld, simTime, ctx.getHostPose)
   }
 
-  // 10. (M2-C / Plan 038) Trajectory export — fixed-step rate.
-  //     Plan 038: when a FixedStepScheduler is provided, only call
+  // 10. Trajectory export — fixed-step rate.
+  //     When a FixedStepScheduler is provided, only call
   //     record() on fixed-step boundaries (default 10 Hz). Without
-  //     a scheduler, fall back to per-frame (the M2-C default).
+  //     a scheduler, fall back to per-frame (the default).
   if (ctx.trajectoryExporter) {
     if (ctx.fixedStepScheduler) {
       // Drain any extra steps accumulated by a long wallDt (e.g.
@@ -524,12 +524,12 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     }
   }
 
-  // 11. Update status (Plan 037 bug 2 — hysteresis).
+  // 11. Update status (hysteresis).
   for (const v of Object.values(network.vehicles)) {
     v.status = statusFromHysteresis(v.status, v.desiredStatus, v.speed)
   }
 
-  // 11.5. (Plan 037 bug 3) Release spawn points when the occupying
+  // 11.5. Release spawn points when the occupying
   //      vehicle has driven past SPAWN_POINT_RELEASE_DISTANCE metres
   //      along its lane. Empty spawnPoints map → no-op (back-compat).
   if (Object.keys(network.spawnPoints).length > 0) {
@@ -552,10 +552,10 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     }
   }
 
-  // 12. (Plan 034) OOB cleanup. Vehicles that have drifted > 50m from
+  // 12. OOB cleanup. Vehicles that have drifted > 50m from
   //     their (road, lane, s) geometry are respawned at s=0. Vehicles
   //     whose road is missing (e.g. after a scene load) are hard-deleted.
-  //     See ADR-008 for the design.
+  //     See the out-of-bounds cleanup design for the details.
   tickOobCleanup(
     {
       getRoad: (id) => network.roads[id],
@@ -571,7 +571,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   )
 }
 
-// ===== Plan 029 (M2 lane change) — control constants =====
+// ===== lane change — control constants =====
 /** P-controller gain for lateral linvel (1/s). 2.0 means a 1m gap
  *  gets 2 m/s of lateral velocity. */
 const STEER_GAIN = 2.0
@@ -580,12 +580,12 @@ const MAX_LATERAL_MS = 4.0
 /** Stuck-lane-change abort timeout (seconds). */
 const LANE_CHANGE_TIMEOUT_S = 5.0
 
-/** M1.5 — stamp simTime on entering intersection. */
+/** Stamp simTime on entering intersection. */
 const updateIntersectionEntry = (network: RoadNetwork, simTime: number): void => {
   for (const v of Object.values(network.vehicles)) {
     const road = network.roads[v.roadId]
     if (!road) continue
-    // Plan 035: pick the per-intersection radius when the vehicle's
+    // Pick the per-intersection radius when the vehicle's
     // road is connected to one (T / corner intersections may have
     // different radii than the 4-way default). Falls back to the
     // STOP_LINE_DISTANCE*2 default if no connected intersection matches.
@@ -603,19 +603,19 @@ const updateIntersectionEntry = (network: RoadNetwork, simTime: number): void =>
   }
 }
 
-/** M1 复制 — 红灯/黄灯 prepare-to-stop 逻辑 (M2-B 仍要用). */
+/** 红灯/黄灯 prepare-to-stop 逻辑 (信号灯控制器仍要用). */
 const applyTrafficLightConstraint = (
   v: Vehicle,
   road: Road,
   network: RoadNetwork,
   ctx: TickContext,
 ) => {
-  // Plan 049: replay target handles lights itself via obs.
+  // Replay target handles lights itself via obs.
   if (isReplayDriven(ctx, v)) return
   const len = roadLength(road)
   for (const inter of Object.values(network.intersections)) {
     if (!inter.connectedRoads.includes(road.id)) continue
-    // Plan 035: stop-line distance follows the per-intersection radius
+    // Stop-line distance follows the per-intersection radius
     // (T路口 6, corner 4) instead of the fixed STOP_LINE_DISTANCE=5.
     // This keeps the brake-trigger window consistent with the visual
     // stop line drawn by createRoadMarkings.
@@ -629,7 +629,7 @@ const applyTrafficLightConstraint = (
       const lightAxisMatches =
         (roadIsNS && light.axis === 'ns') || (!roadIsNS && light.axis === 'ew')
       if (!lightAxisMatches) continue
-      // M2-B (plan 016 H3): exhaustive phase set.
+      // Exhaustive phase set.
       // Red-family phases (Red / RedLeft / AllRed / FlashingRed) = full stop.
       // Yellow-family (Yellow / YellowLeft) = prepare to stop.
       // FlashingYellow = slow down (not stop). FlashingRed = stop (4-way).
@@ -656,14 +656,14 @@ const applyTrafficLightConstraint = (
   }
 }
 
-/** M1 复制 — Newell car-following. */
+/** Newell car-following. */
 const applyCarFollowingConstraint = (
   v: Vehicle,
   road: Road,
   network: RoadNetwork,
   ctx: TickContext,
 ) => {
-  // Plan 049: replay target handles follower distance via obs.
+  // Replay target handles follower distance via obs.
   if (isReplayDriven(ctx, v)) return
   const sign = laneForwardSign(v.laneIndex, road.laneCount)
   let bestGap = Infinity
@@ -682,7 +682,7 @@ const applyCarFollowingConstraint = (
   }
   if (!leader) return
   const gap = Math.max(0, bestGap - 4)
-  // Plan 037 bug 1.3: simplified Gipps — adds a relative-velocity
+  // Simplified Gipps — adds a relative-velocity
   // braking component to the safe gap so the follower preempts the
   // leader's deceleration. Without it, Newell's `speed*TIME_HEADWAY +
   // MIN_GAP` under-protects when the leader is braking hard.
@@ -702,7 +702,7 @@ const applyCrossRoadYield = (network: RoadNetwork, ctx: TickContext): void => {
       const roadB = network.roads[b.roadId]
       if (!roadB) continue
       if (a.roadId === b.roadId) continue
-      // The later arrival yields. Plan 071: the replay target's speed is
+      // The later arrival yields. The replay target's speed is
       // owned by the policy (or by an injected action) — the yield rule
       // must not discard it, or the policy's output dies one step after
       // it was written.
@@ -728,11 +728,11 @@ const classifyContacts = (network: RoadNetwork, events: ReadonlyArray<ContactEve
     const va = network.vehicles[e.colliderA]
     const vb = network.vehicles[e.colliderB]
     if (!va || !vb) continue
-    // Plan 037 bug 2.3: respect impulse threshold. Taps below the
+    // Respect the impulse threshold. Taps below the
     // threshold (e.g. cars nudging in stop-and-go) leave both
     // vehicles `driving`. Currently Rapier reports impulse=0 on
     // every contact, so the threshold defaults to 0 and every
-    // contact still triggers `crashed` (back-compat with 009).
+    // contact still triggers `crashed` (back-compat with the original Rapier integration).
     if (e.impulse < CRASH_IMPULSE_THRESHOLD) continue
     va.status = 'crashed'
     vb.status = 'crashed'
@@ -743,7 +743,7 @@ const classifyContacts = (network: RoadNetwork, events: ReadonlyArray<ContactEve
 // from this module without touching the shared constants path.
 export { DEFAULT_CONTROLLER_KIND }
 
-// ===== Plan 049: RL replay obs builder =====
+// ===== RL replay obs builder =====
 //
 // Mirror of Python `SimCore._obs()` so the in-browser MlpPolicy sees
 // the same 14-dim input it was trained against. Offsets (50m for
@@ -778,7 +778,7 @@ export const buildReplayObs = (ego: Vehicle, network: RoadNetwork): number[] => 
   obs[4] = 0 // accel placeholder (Python: not used by PPO)
   obs[5] = 0 // steer placeholder (Python: not used by PPO)
 
-  // Traffic light bits — Python parity (Plan 069).
+  // Traffic light bits — Python parity.
   //
   // Python's `SimCore._obs()` sets:
   //     obs[6] = 1 if ns_green else 0      # the NS axis, ALWAYS
@@ -849,7 +849,7 @@ export const buildReplayObs = (ego: Vehicle, network: RoadNetwork): number[] => 
   for (let i = 0; i < 5; i++) {
     obs[8 + i] = Math.min(1, (distances[i] ?? NORMALIZE_DIST) / NORMALIZE_DIST)
   }
-  // Plan 061: keep the replay vector aligned with Python SimCore._obs().
+  // Keep the replay vector aligned with Python SimCore._obs().
   obs[13] = Math.max(-1, Math.min(1, ego.position.y / 10.0))
   return obs
 }

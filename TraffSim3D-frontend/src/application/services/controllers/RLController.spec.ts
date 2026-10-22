@@ -1,8 +1,8 @@
 // src/application/services/controllers/RLController.spec.ts
 //
-// Plan 073 Sprint 2 (A2a): the RL controller is a real control surface.
+// The RL controller is a real control surface.
 //
-// The contract is plans/legacy/007-m2-signal-controller.md §2:
+// The contract is:
 //   - `applyAction` is synchronous and only mutates the pending-action
 //     queue — it never calls `decide()`.
 //   - the next `decide()` consumes the queue.
@@ -139,11 +139,11 @@ describe('RLController — the five actions', () => {
   })
 
   it('shorten_red never drops a green below the minimum-green floor', () => {
-    // Plan 074 T7: the symmetric counterpart of the red floor — "a red
+    // The symmetric counterpart of the red floor — "a red
     // is never shorter than MIN_RED_SECS, a green is never shorter than
     // MIN_GREEN_SECS". Without it a controller that shortens on every
     // decision flickers the light (0.6 s per phase), which no driver can
-    // react to (ADR-008).
+    // react to.
     const c = new RLController()
     const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: MIN_GREEN_SECS + 2 })
     c.applyAction(light, 'shorten_red')
@@ -236,7 +236,7 @@ describe('RLController — the all-red resume point', () => {
   }
 
   it('a preempt on the boundary step does not kill the light', () => {
-    // Regression (Plan 073 Sprint 2 fix wave). The clearance that ends
+    // Regression (the clearance fix wave). The clearance that ends
     // resumes BEFORE the queued actions are applied. Without that order a
     // preempt landing on the boundary step recorded the *all-red* state as
     // the resume point, and the light was then stuck AllRed forever — it

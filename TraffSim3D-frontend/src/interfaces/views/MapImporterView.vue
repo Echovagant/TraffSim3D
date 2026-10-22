@@ -3,7 +3,7 @@
     <router-link to="/" class="back-link">← 返回首页</router-link>
 
     <header class="header">
-      <span class="badge">M3 · 041</span>
+      <span class="badge">OSM</span>
       <h1>MapLab</h1>
       <p class="sub">OSM 地图导入与路网生成</p>
     </header>
@@ -116,7 +116,7 @@
     <section class="card">
       <h2>示例 fixture</h2>
       <p class="muted">
-        Plan 041 自带 <code>sample-4way.osm</code>（4 路口 + 1 高架桥段）位于
+        自带 <code>sample-4way.osm</code>（4 路口 + 1 高架桥段）位于
         <code>tests/e2e/fixtures/</code>。
       </p>
       <button class="ghost" data-testid="load-fixture-button" @click="loadFixture">
@@ -125,8 +125,8 @@
     </section>
 
     <!--
-      ODbL attribution footer (Plan 041 acceptance criteria + 045
-      follow-up "OSM真实数据" addition).
+      ODbL attribution footer (an acceptance criterion of the
+      "OSM真实数据" addition).
       OSM data is © OpenStreetMap contributors, licensed under ODbL.
       Required for any UI displaying OSM-derived maps.
     -->
@@ -145,8 +145,8 @@
 
 <script setup lang="ts">
 /**
- * Plan 041: MapLab — OSM file importer.
- * Plan 052 follow-up: Overpass query templates + backend port env var.
+ * MapLab — OSM file importer.
+ * Overpass query templates + backend port env var.
  *
  * The import flow:
  *   1. Copy an Overpass query from the templates below into
@@ -179,7 +179,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const file = ref<File | null>(null)
 const uploading = ref(false)
 
-// --- M3 bbox clipping (只加载仿真区域) --------------------------------
+// --- bbox clipping (只加载仿真区域) --------------------------------
 // Off by default so an untouched upload produces the exact same request URL
 // as before the bbox wiring (e2e stubs match the bare parse-pbf URL).
 // Inputs are kept as strings so a blank field reads as "unspecified" rather
@@ -248,7 +248,7 @@ interface UploadResult {
 
 const lastResult = ref<UploadResult | null>(null)
 
-// Plan 052: VITE_BACKEND_URL overrides the default port for users who
+// VITE_BACKEND_URL overrides the default port for users who
 // run uvicorn on a non-default port (the proxy in vite.config.js reads
 // the same env var). When VITE_BACKEND_URL is unset we use a relative
 // URL ("") so the request goes through the vite proxy at /api/v1 —
@@ -380,7 +380,7 @@ const onUpload = async (): Promise<void> => {
       roads: unknown[]
       intersections: { trafficLights: unknown[] }[]
     }
-    // Plan 054: pass the source filename so the toolbar can show
+    // Pass the source filename so the toolbar can show
     // "📂 福田.osm" instead of the generic scene-kind dropdown.
     // The second arg sets `currentSceneKind = 'imported'` and
     // bumps the camera fit tick (via replaceNetwork).
@@ -625,7 +625,7 @@ button.ghost:hover {
   margin-top: 8px;
 }
 
-/* M3 bbox clipping controls. */
+/* bbox clipping controls. */
 .bbox-block {
   margin: 12px 0;
   padding: 12px 14px;
@@ -679,7 +679,7 @@ code {
   color: #93c5fd;
 }
 
-/* Plan 052: Overpass query templates. */
+/* Overpass query templates. */
 .overpass-tabs {
   display: flex;
   gap: 6px;

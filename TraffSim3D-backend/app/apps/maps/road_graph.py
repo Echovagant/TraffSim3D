@@ -1,9 +1,9 @@
-"""M3 Must: turn a parsed OSM RoadNetwork into a queryable graph.
+"""Turn a parsed OSM RoadNetwork into a queryable graph.
 
 The parser emits a flat `roads` list — convenient for rendering, useless for
-anything that has to *decide*. §4.2 M3 promises "路网转换为内部图结构
+anything that has to *decide*. The requirement is "路网转换为内部图结构
 （节点+边）"; before this module the only Node+Edge graph in the repo
-(Plan 040) belonged to a synthetic corridor demo, so imported OSM maps had no
+belonged to a synthetic corridor demo, so imported OSM maps had no
 adjacency and no consumer could exist.
 
 This module supplies the missing structure and, with it, a consumer: A* routing.

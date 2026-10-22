@@ -1,17 +1,17 @@
 // src/infrastructure/sensors/LidarSensor.ts
 //
 // 16-line mechanical LiDAR. 360° horizontal × [-25°, +3°] vertical.
-// Per 008 §1.1: 16-line default (性能预算紧). 16线 = 360 × 16 = 5760
+// 16-line default (性能预算紧). 16线 = 360 × 16 = 5760
 // rays / frame, Rapier castRayBatch 实测 ~5-10ms / 帧 (30 FPS).
 //
-// mountHeight 按 vehicle type 查表 (008 §1.2):
+// mountHeight 按 vehicle type 查表:
 //   car   = 1.5m
 //   truck = 2.2m
 //   bus   = 2.6m
 //
-// Self-occlusion (H4 fix, plan 017): castRayBatch 时把 host vehicle 的
+// Self-occlusion (H4 fix): castRayBatch 时把 host vehicle 的
 // collider handle 列入 excludeColliderHandles, 保证 self-hits = 0
-// (008 §1 R-验证). Filtering is post-cast in JS (castRayBatch doesn't
+// (R-验证). Filtering is post-cast in JS (castRayBatch doesn't
 // take excludeColliders yet — future RapierWorld extension can push
 // filtering down for ~10% perf gain).
 
@@ -26,11 +26,11 @@ export interface LidarConfig {
   verticalRays: number
   maxRange: number
   noiseStddev: number
-  /** Collider handles to skip (host vehicle's own body). 008 §1 R-验证. */
+  /** Collider handles to skip (host vehicle's own body). R-验证. */
   excludeColliderHandles: ReadonlyArray<string>
-  /** Plan 033: 扫描间隔秒. Default 0.1 (10Hz). 设为 0 表示不 throttle. */
+  /** 扫描间隔秒. Default 0.1 (10Hz). 设为 0 表示不 throttle. */
   scanIntervalSec?: number
-  /** Plan 033: 水平方位角 (度). Default 90 (前向扇形). */
+  /** 水平方位角 (度). Default 90 (前向扇形). */
   azimuthDeg?: number
 }
 
@@ -79,12 +79,12 @@ export class LidarSensor {
 
   /**
    * Scan once. Signature is `scan(world, simTime, hostPose)` per
-   * 008 §1. mountHeight comes from LidarConfig (configured at mount,
+   * mountHeight comes from LidarConfig (configured at mount,
    * not per-call).
    *
    * Returns `null` if the sensor is throttled (scanIntervalSec not yet
    * elapsed). This lets the caller skip the latestFrame update while
-   * leaving the previous frame visible. (Plan 033.)
+   * leaving the previous frame visible.
    */
   scan(
     world: RapierWorld,
@@ -112,7 +112,7 @@ export class LidarSensor {
       const sinV = Math.sin(vAng)
       const cosV = Math.cos(vAng)
       for (let j = 0; j < nH; j++) {
-        // Plan 033: azimuth front扇形 (default -45° to +45°), centered on heading.
+        // Azimuth front扇形 (default -45° to +45°), centered on heading.
         const hAng = hostPose.heading - azHalf + (azimuth * j) / Math.max(1, nH - 1)
         origins.push({
           x: hostPose.position.x,

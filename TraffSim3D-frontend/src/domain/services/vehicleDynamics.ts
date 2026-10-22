@@ -1,13 +1,13 @@
 // src/domain/services/vehicleDynamics.ts
 //
-// Plan 037: pure functions for vehicle dynamics + status-decision.
+// Pure functions for vehicle dynamics + status-decision.
 // tick.ts calls these in step 3-4 (target speed) and step 11 (status).
 // Keeping the math here means the integration logic stays linear and
 // these helpers can be unit-tested in isolation.
 //
 // All functions are pure: same input → same output, no side effects.
 
-// Plan 037 (bug 1): ramp speed toward `targetSpeed`, limited by
+// Ramp speed toward `targetSpeed`, limited by
 // `maxAccel`. Returns the new speed value (does not mutate the
 // vehicle). The ramp linearly accelerates toward `targetSpeed`; if
 // the gap is smaller than `maxAccel * dt`, the new speed snaps to
@@ -53,7 +53,7 @@ export const smoothAccel = (
 }
 
 /**
- * Plan 037 (bug 1): simplified Gipps safe-following gap. Newell's
+ * Simplified Gipps safe-following gap. Newell's
  * rule assumes the leader travels at constant speed, which causes
  * the follower to misjudge when the leader is decelerating (e.g.
  * approaching a red light). Gipps accounts for the relative speed
@@ -84,7 +84,7 @@ export const safeGapGipps = (
 }
 
 /**
- * Plan 037 (bug 2): hysteresis state machine.
+ * Hysteresis state machine.
  *
  * Returns the next observable `status` given the current observable
  * status, the desired status (controller's intent), and the current
@@ -141,7 +141,7 @@ export const statusFromHysteresis = (
 }
 
 /**
- * Plan 037 (bug 3 helper): clamp a desired speed to the per-type
+ * Clamp a desired speed to the per-type
  * dynamics ceiling. Used by tick.ts to make sure `v.targetSpeed`
  * never asks for more than the vehicle can physically deliver. This
  * replaces the previous single-MAX_ACCEL clamp which ignored vehicle
@@ -160,7 +160,7 @@ export const clampTargetSpeedByType = (
 }
 
 /**
- * Plan 037 (bug 1): compute the new speed for the hand-rolled (M1
+ * Compute the new speed for the hand-rolled (physics-free
  * fallback) tick path. Replaces the previous `v.speed += 3.5*dt`
  * one-liner with a per-type ramp.
  */

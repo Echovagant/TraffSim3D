@@ -33,5 +33,5 @@ export const defaultHttp = createHttpClient()
 // No prefix so `health()` resolves to `/health`, not `/api/v1/health`.
 export const metaHttp = createHttpClient('')
 export const defaultBackend = createBackendService(defaultHttp, metaHttp)
-// Plan 049: default RL weights client — same /api/v1 prefix as the rest.
+// Default RL weights client — same /api/v1 prefix as the rest.
 export const defaultRLWeights = createRLWeightsClient(defaultHttp)

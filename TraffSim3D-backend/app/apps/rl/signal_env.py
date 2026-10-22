@@ -1,12 +1,12 @@
-"""Plan 074 Sprint 3 (S3a-2): the environment a signal agent can learn in.
+"""The environment a signal agent can learn in.
 
 The agent controls the **traffic light**, not a vehicle. The traffic
 itself is the thing being controlled: with `responsive_traffic` on
-(Plan 074 S3a-1) the NPCs brake at the stop line on a red, queue up
+the NPCs brake at the stop line on a red, queue up
 behind each other and are released by the green — so the agent's action
 has a *causal* effect on the traffic it is scored on.
 
-Observation — Plan 074 §2 D1, six dimensions, and the order is part of
+Observation — six dimensions, and the order is part of
 the cross-language contract:
 
 ===== ===================================================================
@@ -22,10 +22,10 @@ idx   meaning                        normalisation
 
 Index 5 is the *elapsed* fraction of the current phase on the Python
 side; the browser's counterpart is the *remaining* fraction. The two are
-complements of each other — the plan deliberately compares the schema,
+complements of each other — the contract deliberately compares the schema,
 not the numbers (the two traffic models are not the same model).
 
-Reward — Plan 074 §2 D2, the **total delay**: the negative area under the
+Reward — the **total delay**: the negative area under the
 per-axis queue-length curve, i.e. ``-(q_ns + q_ew) * dt`` per step. Both
 axes are priced, which is what makes the reward a mitigation for the
 "hold one axis green forever" risk: ``MAX_GREEN_SECS`` bounds the
@@ -33,7 +33,7 @@ green's *remaining* time, not its wall-clock duration, so a policy that
 extends on every step would starve the cross traffic — and the
 cross traffic's waiting is in the reward.
 
-Minimum green time — Plan 074 T7 (§2 D5). A controller that shortens the
+Minimum green time. A controller that shortens the
 phase on every decision would *flicker* the light: 0.6 s per phase,
 which no driver can react to and which — because the vehicles never come
 to a full stop — was scored as "no delay at all" and therefore looked
@@ -68,6 +68,7 @@ from .signal_conditions import (
 from .sim_core import (
     DT,
     MAX_STEPS_DEFAULT,
+    MIN_GAP,
     MIN_GREEN_SECS,
     NPC_SPEED,
     PHASE_ADJUST_SECS,
@@ -92,7 +93,7 @@ __all__ = [
     "TrafficCondition",
 ]
 
-# The observation dimensionality (Plan 074 §2 D1).
+# The observation dimensionality.
 SIG_OBS_DIM = 6
 
 # The queue length that saturates the normalised observation (idx 0 / 1).
@@ -100,12 +101,12 @@ SIG_OBS_DIM = 6
 # be comparable at all.
 MAX_QUEUE = 10
 
-# ===== Plan 074 T9/T10: the dense training scenario =====
+# ===== the dense training scenario =====
 #
 # The scenario itself (the demand, the headway and the lane layout) lives
 # in `signal_conditions.py` - it is the *training condition* of the
 # signal agent, and the evaluation condition has to be defined next to
-# it (Plan 074 T10). The constants are re-exported here so that the
+# it. The constants are re-exported here so that the
 # scenario keeps one obvious home for the code that builds it.
 #
 # The scene itself (`SimCore._reset_cross`) is NOT touched: the contract
@@ -123,6 +124,11 @@ _LANES: dict[tuple[str, int], tuple[tuple[float, float], tuple[float, float], fl
     ("ew", -1): ((0.0, 1.0), (-1.0, 0.0), math.pi),
 }
 
+#: Where a vehicle that arrives on an **empty** lane is
+#: placed - the lane's upstream end, measured from the intersection centre
+#: (the same place the closed loop's stream starts).
+OPEN_TRAFFIC_ENTRY_DISTANCE = -24.0
+
 
 def _lane_of(vehicle: Vehicle) -> tuple[str, int]:
     """The (axis, direction of travel) a vehicle runs in.
@@ -137,6 +143,16 @@ def _lane_of(vehicle: Vehicle) -> tuple[str, int]:
     else:
         direction = 1 if math.cos(vehicle.heading) >= 0 else -1
     return axis, direction
+
+
+def _lane_distance(vehicle: Vehicle, along: tuple[float, float]) -> float:
+    """How far along its lane a vehicle is, measured from the intersection
+    centre (negative = upstream of it).
+
+    The lane's `along` is the unit vector pointing downstream, so the
+    projection of the position onto it is the distance along the lane.
+    """
+    return vehicle.x * along[0] + vehicle.z * along[1]
 
 
 def _lateral_offset(vehicle: Vehicle, axis: str) -> float:
@@ -188,22 +204,38 @@ class SignalEnv(gym.Env[np.ndarray, int]):
         max_steps: int = MAX_STEPS_DEFAULT,
         scene_kind: str = "cross",
         condition: TrafficCondition = TRAIN_CONDITION,
+        open_traffic: bool = True,
     ) -> None:
         super().__init__()
         # `responsive_traffic=True` — without it the NPCs would ignore
         # the light and the reward would not depend on the action.
+        #
+        # `open_traffic=True` — the traffic is **generated**
+        # (at the condition's demand) and **leaves the world** after
+        # crossing the intersection, instead of being a fixed fleet that
+        # is respawned at the mirrored position. The closed loop caps the
+        # queue at the fleet size, which caps the delay of a starved axis;
+        # the browser's traffic does not, so the model has to match it.
+        #
+        # `open_traffic=False` is still reachable (and is what the
+        # closed-loop numbers were measured on) — the flag is a knob, not a
+        # replacement.
         self.core = SimCore(
             max_steps=max_steps,
             scene_kind=scene_kind,
             responsive_traffic=True,
+            open_traffic=open_traffic,
         )
-        # Plan 074 T10: the initial condition of the scene. The default is
+        # The initial condition of the scene. The default is
         # the training condition, so the training episodes are exactly the
-        # ones Plan 074 T9 measured (-423.1 for the fixed 30/30 cycle).
+        # ones the dense scenario measured (-423.1 for the fixed 30/30 cycle).
         self.condition = condition
         # The ego is a passenger here: no throttle, no steering.
         self._ego_action = np.zeros(2, dtype=np.float32)
         self._total_delay = 0.0
+        # The lanes of the scene and the arrival clocks.
+        self._lanes: dict[tuple[str, int], tuple[float, tuple[float, float], float]] = {}
+        self._arrival_clock: dict[tuple[str, int], float] = {}
 
     # -- Gymnasium API ------------------------------------------------
 
@@ -215,12 +247,16 @@ class SignalEnv(gym.Env[np.ndarray, int]):
     ) -> tuple[np.ndarray, dict[str, Any]]:
         super().reset(seed=seed)
         self.core.reset(seed=seed)
-        # Plan 074 T10: the condition's signal offset. `SimCore.reset`
+        # The condition's signal offset. `SimCore.reset`
         # recreates the light, so the phase clock starts at 0 — the
         # condition puts it where the condition says.
         self.core.light.cycle_timer = self.condition.phase_offset
         self._park_ego()
+        # The lanes are read from the scene's own vehicles
+        # **before** the traffic is laid out (the layout replaces them).
+        self._lanes = self._build_lanes()
         self._densify_traffic()
+        self._arrival_clock = {key: 0.0 for key in self._lanes}
         self._total_delay = 0.0
         return self._obs(), {}
 
@@ -231,7 +267,7 @@ class SignalEnv(gym.Env[np.ndarray, int]):
                 f"signal action index {index} out of range; expected 0..{len(SIGNAL_ACTION_NAMES) - 1}"
             )
         name = SIGNAL_ACTION_NAMES[index]
-        # Plan 074 T7 (§2 D5): the minimum green time. `shorten_red`
+        # The minimum green time. `shorten_red`
         # advances the swap, which takes `PHASE_ADJUST_SECS` off the
         # *current green's* remaining time — so applying it when the green
         # has less than `MIN_GREEN_SECS + PHASE_ADJUST_SECS` left would
@@ -240,10 +276,15 @@ class SignalEnv(gym.Env[np.ndarray, int]):
         masked = name == "shorten_red" and not self._may_shorten_red()
         if not masked:
             # The action is queued and consumed by this step's light update
-            # (Plan 074 D3: applied *before* the step, consumed *in* it).
+            # (applied *before* the step, consumed *in* it).
             self.core.light.apply_action(name)
 
         _, _, terminated, truncated, core_info = self.core.step(self._ego_action)
+
+        # The arrivals of the open traffic model. The
+        # vehicles that have crossed the intersection have already left
+        # the world (the sim removed them); this puts the new ones in.
+        self._spawn_arrivals()
 
         queue_ns = self.core.queue_length("ns")
         queue_ew = self.core.queue_length("ew")
@@ -274,7 +315,7 @@ class SignalEnv(gym.Env[np.ndarray, int]):
     def _may_shorten_red(self) -> bool:
         """May a `shorten_red` action be applied right now?
 
-        Plan 074 T7 (§2 D5): the minimum green time.
+        The minimum green time.
 
         The Python light model has a single phase clock, and `shorten_red`
         advances the swap by `PHASE_ADJUST_SECS` — so it takes exactly that
@@ -290,7 +331,7 @@ class SignalEnv(gym.Env[np.ndarray, int]):
         sides (a cross-language contract constant).
         """
         if self.core.in_clearance:
-            # Plan 074 T9: the light is in its inter-green clearance. The
+            # The light is in its inter-green clearance. The
             # phase clock is frozen there, so an adjustment would not
             # shorten the red - it would shorten the *next* green, below
             # the minimum green time. Refused.
@@ -302,16 +343,21 @@ class SignalEnv(gym.Env[np.ndarray, int]):
     def _park_ego(self) -> None:
         """Move the ego out of the traffic.
 
-        It is parked beyond the respawn radius (|z| > 40), so no NPC can
-        ever reach it, and it is far outside the intersection, so the
-        ego's own red-light rule cannot fire either.
+        The open traffic model can queue a lane **arbitrarily
+        far upstream** (that is the whole point — the closed loop capped the
+        queue at the fleet size), so "out of the traffic" no longer means
+        "beyond the world's edge": the ego is parked **beside** the roads,
+        20 m east of the nearest lane, where no queue can reach it.
+
+        It is far outside the intersection, so the ego's own red-light rule
+        cannot fire either.
         """
-        self.core.ego.x = 0.0
+        self.core.ego.x = 20.0
         self.core.ego.z = -45.0
         self.core.ego.speed = 0.0
 
     def _densify_traffic(self) -> None:
-        """Lay out the dense scenario's traffic (Plan 074 T9).
+        """Lay out the dense scenario's traffic.
 
         Every lane of the scene carries a regular *stream* of vehicles
         along its circulation path, spaced `DENSE_STREAM_SPACING` metres
@@ -328,7 +374,7 @@ class SignalEnv(gym.Env[np.ndarray, int]):
         on it and their goldens must not move.
 
         The placement is fully deterministic: no randomness anywhere.
-        The numbers come from the env's **condition** (Plan 074 T10):
+        The numbers come from the env's **condition**:
         the training condition reproduces the constants above, another
         condition lays the same kind of traffic out differently.
         """
@@ -351,8 +397,73 @@ class SignalEnv(gym.Env[np.ndarray, int]):
                 stream.append(Vehicle(x=x, z=z, heading=heading, speed=NPC_SPEED))
         core.npcs = stream
 
+    def _build_lanes(self) -> dict[tuple[str, int], tuple[float, tuple[float, float], float]]:
+        """The lanes of the scene: their lateral offset, direction and heading.
+
+        The lanes themselves (axis, direction of travel, lateral offset
+        and heading) come from the scene's own vehicles, so the scenario
+        follows the scene if the scene ever moves a lane - exactly like
+        `_densify_traffic` does.
+        """
+        lanes: dict[tuple[str, int], tuple[float, tuple[float, float], float]] = {}
+        for npc in self.core.npcs:
+            axis, direction = _lane_of(npc)
+            key = (axis, direction)
+            lane = _LANES.get(key)
+            if lane is None or key in lanes:
+                continue
+            _, along, heading = lane
+            lanes[key] = (_lateral_offset(npc, axis), along, heading)
+        return lanes
+
+    def _spawn_arrivals(self) -> None:
+        """The open traffic model's arrivals.
+
+        One vehicle per lane every `headway` seconds, where the headway
+        comes from the condition's **demand** (the arrivals per hour per
+        lane) - the knob the closed loop could not express.
+
+        The arrival joins at the **back of the lane's queue** (the last
+        vehicle of that lane, `MIN_GAP` further back), or at the lane's
+        entry if the lane is empty. That placement is what makes the
+        queue grow without a cap: the world has no road limit, so a lane
+        that has been starved keeps the vehicles that are waiting for it
+        instead of having them replaced by fresh arrivals further up.
+        """
+        if not self.core.open_traffic:
+            return
+        for key, lane in self._lanes.items():
+            axis = key[0]
+            rate = (
+                self.condition.ew_arrivals_per_hour
+                if axis == "ew"
+                else self.condition.ns_arrivals_per_hour
+            )
+            if rate <= 0:
+                continue
+            headway = 3600.0 / float(rate)
+            clock = self._arrival_clock.get(key, 0.0) + DT
+            while clock >= headway:
+                clock -= headway
+                self._spawn_arrival(key, lane)
+            self._arrival_clock[key] = clock
+
+    def _spawn_arrival(
+        self, key: tuple[str, int], lane: tuple[float, tuple[float, float], float]
+    ) -> None:
+        """Put one arriving vehicle on its lane."""
+        axis, _direction = key
+        lateral, along, heading = lane
+        distance = OPEN_TRAFFIC_ENTRY_DISTANCE
+        for npc in self.core.npcs:
+            if _lane_of(npc) != key:
+                continue
+            distance = min(distance, _lane_distance(npc, along) - MIN_GAP)
+        x, z = _lane_point(axis, lateral, along, distance)
+        self.core.npcs.append(Vehicle(x=x, z=z, heading=heading, speed=NPC_SPEED))
+
     def _obs(self) -> np.ndarray:
-        """The six-dimensional signal observation (Plan 074 §2 D1)."""
+        """The six-dimensional signal observation."""
         light = self.core.light
         obs = np.zeros(SIG_OBS_DIM, dtype=np.float32)
         obs[0] = min(self.core.queue_length("ns") / MAX_QUEUE, 1.0)

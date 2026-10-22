@@ -1,5 +1,5 @@
 /**
- * Plan 044 GPU extension — opt-in real PPO training e2e.
+ * GPU extension — opt-in real PPO training e2e.
  *
  * This test runs REAL PPO training, not the dry-run fake. It is NOT
  * included in `npm run test:e2e` (the default suite, which is for CI).
@@ -7,7 +7,7 @@
  *
  *     npm run test:e2e:real
  *
- * Skip conditions (per .claude/CLAUDE.md Playwright exception list):
+ * Skip conditions (this spec is on the Playwright exception list):
  * - Backend not reachable on http://localhost:8000
  * - Backend reports cuda_available: false
  * - Backend reports sb3_available: false

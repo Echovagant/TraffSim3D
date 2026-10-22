@@ -10,7 +10,7 @@ export interface FocusTarget {
 }
 
 /**
- * Plan 053: "fit-to-network" target. Distinct from `FocusTarget`
+ * "fit-to-network" target. Distinct from `FocusTarget`
  * because the consumer needs both the network bbox AND the camera's
  * distance / polar angle (not just a single world point). The bounds
  * + aspect ratio let the renderer compute a camera position that
@@ -46,7 +46,7 @@ export const consumePendingFocus = (): FocusTarget | null => {
 
 export const _pendingFocusRef = pendingFocus
 
-/** Plan 053: request the camera to fit a network bbox. */
+/** Request the camera to fit a network bbox. */
 export const requestFitToNetwork = (target: FitTarget): void => {
   pendingFit.value = target
 }

@@ -1,6 +1,6 @@
 // src/domain/services/egoKernel.spec.ts
 //
-// Plan 071: the L1 kernel — a 1:1 port of the Python ego kinematics.
+// The L1 kernel — a 1:1 port of the Python ego kinematics.
 //
 // The expected numbers below are **measured from the Python sim**
 // (`app/apps/rl/sim_core.py`), not derived by hand. They are bit-exact
@@ -77,7 +77,7 @@ describe('egoKernel — pythonSpeedStep', () => {
     expect(ego.z).toBe(26.20100000000003)
     // The lateral value is the last-bit wobble of the Pure Pursuit angle
     // after the ego passes its target (alpha -> +-pi, sin(alpha) -> +-1.2e-16).
-    // It flipped sign with the alpha fix (Plan 076 T11); the magnitude is
+    // It flipped sign with the alpha fix; the magnitude is
     // unchanged, and Python measures the same value.
     expect(ego.x).toBe(-8.404945169006555e-15)
   })
@@ -94,7 +94,7 @@ describe('egoKernel — pythonSteer', () => {
     // The target is to the vehicle's **left** (a larger targetAngle in the
     // (x, z) plane), so the textbook alpha is positive and the steer is
     // positive — the vehicle turns towards the target. (The sign flipped
-    // with the alpha fix, Plan 076 T11; the old expectation encoded the
+    // with the alpha fix; the old expectation encoded the
     // inverted alpha, which made the ego steer away from its target.)
     expect(pythonSteer(ego, [0, 0])).toBe(PYTHON_SIM.MAX_STEER)
   })
@@ -110,7 +110,7 @@ describe('egoKernel — pythonSteer', () => {
     // CPython: steer = 0.39425420560955743 (verified against sim_core.py's
     // (alpha + pi) % (2*pi) - pi). The "always add 2*pi and re-mod" spelling
     // yields 0.39425420560955776 here — 1 ULP off from Python.
-    // (The sign flipped with the alpha fix, Plan 076 T11; the magnitude is
+    // (The sign flipped with the alpha fix; the magnitude is
     // unchanged.)
     expect(pythonSteer({ x: 0, z: 0, heading: -0.7283761257056431, speed: 0 }, [1, 0])).toBe(
       0.39425420560955743,
