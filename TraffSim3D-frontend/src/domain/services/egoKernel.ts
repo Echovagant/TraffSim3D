@@ -162,10 +162,15 @@ export const pythonSpeedStep = (speed: number, action0: number, dt: number): num
  *
  * NOTE: this is the **training sim's** convention, and this kernel is its
  * 1:1 port. The browser's *lane-following* controller
- * (`src/domain/services/purePursuit.ts`) computes an alpha with the opposite
- * sign **on purpose** — there the steering is handed to Rapier as an angular
- * velocity about the **y axis**, whose sense is opposite to this plane's
- * `heading`. Do not "fix" one to match the other.
+ * (`src/domain/services/purePursuit.ts`) uses the **same** alpha sign: the
+ * steering it computes is handed to Rapier as an angular velocity about the
+ * world **+Y** axis, and the heading the simulation reports
+ * (`RapierWorld.readPose`) is that same +Y yaw — so a positive steer
+ * increases the heading, exactly the sense this law assumes. Until
+ * 2026-10-22 that file used the opposite sign on the (incorrect) belief
+ * that the two ran in opposite frames; the browser's traffic then steered
+ * away from its lane. Both files now use the textbook alpha — keep them
+ * that way, and do not reintroduce a sign difference between them.
  */
 export const pythonSteer = (ego: EgoState, target: readonly [number, number]): number => {
   const dx = target[0] - ego.x

@@ -415,6 +415,35 @@ in their own frame; the browser's traffic demonstrably follows the lanes.
 The product's RL replay path uses only the kernel's **speed** half, so the
 browser's behaviour is unaffected by the fix either way.
 
+> **⚠ 2026-10-22 更正：上面那段「浏览器故意用相反符号」是错的，那条推理不成立。**
+>
+> 浏览器侧的转向确实交给 Rapier 当 **+Y 角速度**（`setVehicleAngularVelocity`
+> → `setAngvel({y: omega})`），但**仿真报告的 heading 就是同一个 +Y 偏航**
+> （`readPose` → `atan2(2(wy+xz), 1-2(y²+x²))`，对偏航四元数即 h 本身）
+> ⇒ **+Y 角速度使 heading 增大**，与教科书式推导假设的方向**一致**，
+> **不存在需要补偿的反向坐标系**。
+>
+> 实测（仓库自己的 `tick()` + 真实 Rapier WASM，同一场景同一随机种子，
+> 只改 `purePursuit.ts` 的 alpha 符号）：
+>
+> | `purePursuit.ts` 的 alpha | 15 秒内 5 m 漂移守卫回弹次数 |
+> |---|---|
+> | `heading - lookaheadAngle`（旧） | **5** |
+> | `lookaheadAngle - heading`（新，与 `pythonSteer` 一致） | **0** |
+>
+> ⇒ 旧符号让浏览器的车**转向远离车道**，再被 5 m 守卫拽回、速度清零，
+> 反复循环；而且 `purePursuit.spec.ts` 把反号断言成了「正确」，**把 bug 锁在了单测里**。
+> ⇒ 现在三处（`sim_core.py`、`egoKernel.ts` 的 `pythonSteer`、
+> `purePursuit.ts`）**统一为教科书式 alpha**。
+>
+> **为什么契约看不见它**：契约比的是 `sim_core.py` ↔ `simCoreMirror.ts`
+> （训练侧的 1:1 移植），**浏览器那条 Rapier 路径根本没有向量**。
+> ⇒ 现在补上的钉子：`purePursuit.spec.ts` 断言
+> **① 转向必须让航向朝目标靠近**（性质断言，不再锁死某个符号）、
+> **② `computeSteeringAngle` 必须与 `pythonSteer` 在同一几何上完全一致**
+> ——而 `pythonSteer` 是被 169 组契约向量对着 Python 钉住的，
+> 于是浏览器路径**传递性地**被钉住。
+
 **Consequence for the trained policies**: an ego agent trained before this fix
 learned to steer the wrong way ⇒ **it has to be retrained**. The checkpoints
 are not committed, so nothing stale is left in the repository.
@@ -501,6 +530,37 @@ recomputed golden against the committed file).
 | `SCENE_GOAL_Z` | **caught** — same block, per scene | **caught** (same block) | **no** (it did not exist before the `road_rules` block) |
 | **traffic-light phase duration** (`TrafficLight.cycle_duration` / `PYTHON_SIM.LIGHT_CYCLE_SECONDS`) | **partially covered** — caught when the first flip lands inside the *sampled* window (≤ 25.0 s); a drift of 30 → 26 s is **not** caught | same | **no** (was fully blind) |
 | **a scene's own light schedule** (the start phase + the cycle length) | **caught** — the golden's `scene_light` block carries the TS side's copy and the Python side compares it item by item | **caught** (same block) | **no** (it did not exist before the `scene_light` block) |
+| **the browser's Rapier path** (`purePursuit.ts` + `tick.ts` + `RapierWorld.ts`) | **not comparable** — it is a *physics* path, not the hand-rolled kinematics this contract compares | **not comparable** (same) | **no** — this gap is what let the Pure Pursuit alpha sign bug survive in the browser while the training sim was fixed (2026-10-22) |
+
+### The browser's Rapier path — covered by a different mechanism, and how that failed once
+
+The vectors compare `sim_core.py` against `simCoreMirror.ts` — the **training
+sim's** 1:1 TypeScript port. The **browser's** simulation is a different
+implementation (`purePursuit.ts` + `tick.ts` + Rapier WASM), and **no vector
+compares it**. That gap is not academic: on 2026-10-22 the browser's Pure
+Pursuit alpha sign was inverted (the training sim's had been fixed three
+months earlier), the browser's traffic steered away from its lane, and the
+5 m drift guard kept snapping it back — while 169/169 contract vectors and
+the frontend unit suite stayed green. The unit test asserted the wrong sign
+as correct.
+
+**How it is pinned now** (a different mechanism, deliberately):
+
+| Pin | What it asserts |
+|---|---|
+| `purePursuit.spec.ts` — "steering always turns the heading TOWARD the lookahead point" | a **property**, not a memorized sign: applying the steering must reduce the heading error. A flipped alpha fails it |
+| `purePursuit.spec.ts` — "agrees with the training sim kernel (`pythonSteer`) on the same geometry" | the browser controller and the contract-pinned kernel must produce the **same** steering angle for the same geometry |
+
+Because `pythonSteer` is pinned against Python by the vectors above, the
+browser's controller is pinned **transitively**. Two caveats are stated
+plainly rather than left implicit:
+
+- the browser's steering clamp is **π/4**, the training sim's is
+  `MAX_STEER = 0.4` rad — a known cross-language difference (documented
+  separately), so the agreement test only compares inside the shared range;
+- the browser's **tick loop, lane model, stop line and trajectory exporter**
+  are still outside any committed test. They are not covered by this document
+  and should not be described as if they were.
 
 ### The traffic-light phase duration — partially covered
 

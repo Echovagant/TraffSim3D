@@ -5,8 +5,13 @@ import {
   STEER_SPEED_GAIN,
   DEFAULT_PURE_PURSUIT,
 } from './purePursuit'
+import { pythonSteer } from './egoKernel'
+import { PYTHON_SIM } from '@shared/constants/simulation'
 import { makePolylineRoad } from '@__fixtures__/testNetwork'
 import { lanePoint } from './laneGeometry'
+
+/** Wrap an angle to (-π, π]. */
+const wrapPi = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a))
 
 /** NS road: startNode (0,0,-30) → endNode (0,0,30).
  *  Forward tangent = +Z direction → heading = Math.PI/2.
@@ -31,36 +36,67 @@ describe('computeSteeringAngle', () => {
     expect(Math.abs(delta)).toBeLessThan(0.05)
   })
 
-  it('heading too far right → steer left (delta > 0)', () => {
-    // Add 0.5 rad to the correct heading (Math.PI/2 + 0.5).
-    // Lookahead is still at Math.PI/2 (forward), so alpha = -0.5 rad.
-    // Vehicle must steer left to correct → delta > 0.
+  it('steering always turns the heading TOWARD the lookahead point', () => {
+    // The property that matters, stated so a sign error cannot pass again:
+    // applying the steering must bring the heading *closer* to the direction
+    // of the lookahead point.
+    //
+    // How the browser integrates it: `delta` becomes an angular velocity
+    // about the world +Y axis (`setVehicleAngularVelocity` → `setAngvel`),
+    // and the heading the sim reports is that same +Y yaw (`readPose`). So a
+    // positive delta *increases* the reported heading, at `delta * GAIN` rad/s.
+    //
+    // This test previously asserted a hard-coded sign and thereby pinned the
+    // inverted alpha that made the browser's traffic steer away from its lane
+    // (fixed 2026-10-22).
+    const lookaheadAngle = Math.PI / 2 // the NS road's forward direction
     const lp = lanePoint(nsRoad, 0, 10)
-    const delta = computeSteeringAngle(
-      lp.position.x,
-      lp.position.z,
-      Math.PI / 2 + 0.5,
-      nsRoad,
-      0,
-      10,
-    )
-    expect(delta).toBeGreaterThan(0)
+
+    for (const offset of [-0.6, -0.2, 0.2, 0.6]) {
+      const heading = lookaheadAngle + offset
+      const delta = computeSteeringAngle(lp.position.x, lp.position.z, heading, nsRoad, 0, 10)
+
+      const errBefore = Math.abs(wrapPi(heading - lookaheadAngle))
+      const headingAfter = heading + delta * STEER_SPEED_GAIN * (1 / 60)
+      const errAfter = Math.abs(wrapPi(headingAfter - lookaheadAngle))
+
+      expect(errAfter).toBeLessThan(errBefore)
+    }
   })
 
-  it('heading too far left → steer right (delta < 0)', () => {
-    // Subtract 0.5 rad from the correct heading (Math.PI/2 - 0.5).
-    // Lookahead is at Math.PI/2 (forward), so alpha = +0.5 rad.
-    // Vehicle must steer right to correct → delta < 0.
+  it('agrees with the training sim kernel (pythonSteer) on the same geometry', () => {
+    // `egoKernel.ts` is the training sim's 1:1 TypeScript port, and the
+    // cross-language contract pins it against Python. This controller is the
+    // browser's Rapier path — it must not drift from the kernel's alpha sign.
+    //
+    // On a straight road the lookahead point sits exactly LOOKAHEAD_DISTANCE
+    // ahead, so the denominator and the wheelbase match and the two steering
+    // laws must agree exactly (both stay inside the ±MAX_STEER clamp here).
     const lp = lanePoint(nsRoad, 0, 10)
-    const delta = computeSteeringAngle(
+    const heading = Math.PI / 2 + 0.5
+    const target: readonly [number, number] = [
+      lanePoint(nsRoad, 0, 10 + PYTHON_SIM.LOOKAHEAD_DISTANCE).position.x,
+      lanePoint(nsRoad, 0, 10 + PYTHON_SIM.LOOKAHEAD_DISTANCE).position.z,
+    ]
+
+    const browserDelta = computeSteeringAngle(
       lp.position.x,
       lp.position.z,
-      Math.PI / 2 - 0.5,
+      heading,
       nsRoad,
       0,
       10,
+      {
+        wheelbase: PYTHON_SIM.EGO_WHEELBASE,
+        lookahead: PYTHON_SIM.LOOKAHEAD_DISTANCE,
+      },
     )
-    expect(delta).toBeLessThan(0)
+    const kernelDelta = pythonSteer(
+      { x: lp.position.x, z: lp.position.z, heading, speed: 0 },
+      target,
+    )
+
+    expect(browserDelta).toBeCloseTo(kernelDelta, 12)
   })
 
   it('steering is clamped to ±π/4 even with tiny lookahead', () => {

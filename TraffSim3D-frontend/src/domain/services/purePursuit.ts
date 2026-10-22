@@ -85,23 +85,32 @@ export const computeSteeringAngle = (
   // 3. Angle of the lookahead vector relative to world X-axis
   const lookaheadAngle = Math.atan2(dz, dx)
 
-  // 4. Alpha: angle from vehicle heading to lookahead direction.
-  //    NOTE the sign: this is `heading - lookaheadAngle`, i.e. the
-  //    **negative** of the textbook Pure Pursuit alpha. That is deliberate
-  //    here and must not be "corrected" to match
-  //    `src/domain/services/egoKernel.ts` (the training sim's kernel, which
-  //    uses the textbook `targetAngle - heading`):
+  // 4. Alpha: the angle from the vehicle's heading to the lookahead direction.
+  //    This is the **textbook** Pure Pursuit alpha (Coulter 1992):
+  //    `alpha = lookaheadAngle - heading`, so `sin(alpha) > 0` means the
+  //    target is ahead and to the left, and the steer turns **towards** it.
   //
-  //      - this controller's `delta` is handed to Rapier as an angular
-  //        velocity about the **y axis**, whose sense is opposite to the
-  //        (x, z) plane's `heading` convention the sim integrates;
-  //      - the kernel's steer is integrated directly as `heading += steer*dt`
-  //        in that same (x, z) convention.
+  //    The steering is applied as an angular velocity about the world **+Y**
+  //    axis (`RapierWorld.setVehicleAngularVelocity` → `setAngvel({y: omega})`),
+  //    and the heading the simulation integrates and reports
+  //    (`RapierWorld.readPose` → `atan2(2(wy+xz), 1-2(y²+x²))`) **is** that
+  //    same +Y yaw. A positive omega therefore *increases* the reported
+  //    heading — the same sense in which the textbook law is derived. There is
+  //    no frame flip to compensate for.
   //
-  //    So the two files compute the same-looking expression with opposite
-  //    signs, and **both are correct** — in their own frame. Flipping this
-  //    one would make the browser's traffic leave the lanes.
-  let alpha = heading - lookaheadAngle
+  //    This is the same convention as the training sim and its 1:1 TypeScript
+  //    port (`src/domain/services/egoKernel.ts` → `pythonSteer`, and
+  //    `sim_core.py` → `alpha = target_angle - heading`). All three use the
+  //    textbook sign; keep them that way.
+  //
+  //    It was the other way round until 2026-10-22: this file computed
+  //    `alpha = heading - lookaheadAngle` on the (incorrect) belief that the
+  //    +Y angular velocity ran against the heading convention. The consequence
+  //    was that the browser's traffic steered **away** from its lane and the
+  //    5 m drift guard kept snapping it back. It went unnoticed because the
+  //    cross-language contract only pins the *training* sim — the browser's
+  //    Rapier path was never compared against it.
+  let alpha = lookaheadAngle - heading
 
   // 5. Normalize to (-π, π]
   alpha = Math.atan2(Math.sin(alpha), Math.cos(alpha))
