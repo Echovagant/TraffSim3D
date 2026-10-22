@@ -24,8 +24,15 @@ export class BackendError extends Error {
 }
 
 export interface HttpClient {
-  /** Issue a GET against `path` (relative to the configured base URL) and return the parsed JSON. */
-  get<T>(path: string): Promise<T>
+  /** Issue a GET against `path` (relative to the configured base URL) and return the parsed JSON.
+   *  `options.timeoutMs` overrides the client-wide timeout for this one
+   *  request — use it for endpoints that are legitimately slower than the rest. */
+  get<T>(path: string, options?: RequestOptions): Promise<T>
+}
+
+export interface RequestOptions {
+  /** Timeout for this request in milliseconds. Falls back to the client-wide default. */
+  timeoutMs?: number
 }
 
 export interface HttpClientOptions {
@@ -45,10 +52,15 @@ export const createHttpClient = (
   const timeoutMs = options.timeoutMs ?? 3000
   const prefix = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
 
-  const request = async <T>(method: string, path: string): Promise<T> => {
+  const request = async <T>(
+    method: string,
+    path: string,
+    requestOptions: RequestOptions = {},
+  ): Promise<T> => {
     const url = `${prefix}${path.startsWith('/') ? path : `/${path}`}`
+    const requestTimeoutMs = requestOptions.timeoutMs ?? timeoutMs
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs)
     try {
       const res = await fetch(url, {
         method,
@@ -68,7 +80,7 @@ export const createHttpClient = (
     } catch (err) {
       if (err instanceof BackendError) throw err
       if (err instanceof DOMException && err.name === 'AbortError') {
-        throw new BackendError(`${method} ${url} timed out after ${timeoutMs}ms`, 0, null)
+        throw new BackendError(`${method} ${url} timed out after ${requestTimeoutMs}ms`, 0, null)
       }
       // Network error (server down, CORS, offline).
       const msg = err instanceof Error ? err.message : String(err)
@@ -79,7 +91,8 @@ export const createHttpClient = (
   }
 
   return {
-    get: <T>(path: string) => request<T>('GET', path),
+    get: <T>(path: string, requestOptions?: RequestOptions) =>
+      request<T>('GET', path, requestOptions),
   }
 }
 

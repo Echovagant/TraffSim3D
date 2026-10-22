@@ -8,10 +8,10 @@
  * directly with their own base URL.
  */
 export { createHttpClient, BackendError } from './httpClient'
-export type { HttpClient, HttpClientOptions } from './httpClient'
+export type { HttpClient, HttpClientOptions, RequestOptions } from './httpClient'
 export { createBackendService } from './backendService'
 export type { BackendService, HealthResponse, PingResponse } from './backendService'
-export { createRLWeightsClient } from './rlWeightsClient'
+export { createRLWeightsClient, RL_WEIGHTS_TIMEOUT_MS } from './rlWeightsClient'
 export type { CheckpointWeightsResponse, RLWeightsClient } from './rlWeightsClient'
 export {
   OSM_DEFAULT_CLIP_DEG,

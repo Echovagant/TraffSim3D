@@ -17,18 +17,67 @@ Why JSON instead of ONNX:
 This module is lazy-loaded by the API endpoint — `stable_baselines3` is
 NOT imported at module scope so test environments without SB3 installed
 can still import the rest of the package.
+
+Export caching
+--------------
+A checkpoint's weights are immutable for as long as the file is: the same
+`.zip` always exports to the same JSON. Re-loading the PPO model and
+re-serialising its `state_dict()` on *every* request cost 0.5–8 s per call
+(measured 2026-10-23), which is why the browser's first "load the trained
+policy" click blew through the shared 3 s client timeout.
+
+`export_weights()` therefore memoises the export per checkpoint file. The
+cache key is `(resolved path, size, mtime_ns, content digest)` — any of
+those changing means the file was rewritten, so an entry can never serve a
+stale payload. The content digest makes that check *exact*: a checkpoint
+re-saved with the same size and within the filesystem's timestamp
+granularity still invalidates the entry.
 """
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import threading
 from numbers import Integral
 from pathlib import Path
 from typing import Any
+
+# Bounded FIFO of exported checkpoints. Only the handful of checkpoints a
+# user actually opens in the browser matter; the rest are evicted.
+_CACHE_MAX_ENTRIES = 8
+
+# Key: (resolved path, size, mtime_ns, sha256 of the file bytes).
+_CACHE: dict[tuple[str, int, int, str], dict[str, Any]] = {}
+
+# One export at a time: two concurrent cold requests must not both load a
+# ~155 KB PPO model into a 6 GB VRAM box.
+_CACHE_LOCK = threading.Lock()
 
 
 class WeightsUnavailableError(RuntimeError):
     """Raised when weights cannot be exported (SB3 not installed, file
     unreadable, or layer shape unexpected)."""
+
+
+def clear_weights_cache() -> None:
+    """Drop every memoised export.
+
+    Exposed for tests and for an explicit "re-read the checkpoint" — the
+    normal invalidation path is the (path, size, mtime, digest) key, not
+    this.
+    """
+    with _CACHE_LOCK:
+        _CACHE.clear()
+
+
+def _file_digest(path: Path) -> str:
+    """SHA-256 of the file's bytes — the exact half of the cache key."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 16), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _action_space_kind(model: Any) -> str:
@@ -74,11 +123,39 @@ def export_weights(checkpoint_path: Path) -> dict[str, Any]:
       omitted, and the consumer runs the discrete forward pass (the
       TypeScript side's `mlpForwardDiscrete`).
 
+    The export is memoised per checkpoint file — see the module docstring.
+    A rewritten checkpoint (different size / mtime / bytes) is re-exported;
+    a failed export is never cached, so the caller still sees the real
+    error.
+
     Raises:
         FileNotFoundError: if `checkpoint_path` doesn't exist.
         WeightsUnavailableError: if SB3 is missing or the policy layout is
             unrecognized (e.g. user set non-default policy_kwargs).
     """
+    path = Path(checkpoint_path)
+    if not path.exists():
+        raise FileNotFoundError(f"checkpoint not found: {checkpoint_path}")
+
+    stat = path.stat()
+    key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns, _file_digest(path))
+
+    with _CACHE_LOCK:
+        cached = _CACHE.get(key)
+        if cached is None:
+            cached = _export_weights_uncached(path)
+            if len(_CACHE) >= _CACHE_MAX_ENTRIES:
+                # FIFO eviction — dicts keep insertion order.
+                del _CACHE[next(iter(_CACHE))]
+            _CACHE[key] = cached
+
+    # Hand out a copy: the memoised payload must stay immutable for every
+    # later caller.
+    return copy.deepcopy(cached)
+
+
+def _export_weights_uncached(checkpoint_path: Path) -> dict[str, Any]:
+    """The actual export — no caching. See `export_weights`."""
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"checkpoint not found: {checkpoint_path}")
 
@@ -90,7 +167,13 @@ def export_weights(checkpoint_path: Path) -> dict[str, Any]:
         ) from e
 
     try:
-        model = PPO.load(str(checkpoint_path))
+        # `device="cpu"`: the export only reads `state_dict()` — it never
+        # runs a forward pass. Letting SB3 pick the GPU ("auto") would
+        # initialise a CUDA context for nothing, which cost 4.2 s per cold
+        # load on this machine (and steals VRAM from a concurrent training
+        # run). The exported numbers are identical either way — the tensors
+        # are moved to CPU for serialisation anyway.
+        model = PPO.load(str(checkpoint_path), device="cpu")
     except Exception as e:
         raise WeightsUnavailableError(
             f"failed to load checkpoint {checkpoint_path.name}: {e}",

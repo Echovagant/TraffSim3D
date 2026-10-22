@@ -16,6 +16,7 @@ triple from `sim_core.OBS_DIM` — a regression to hardcoded dims fails loudly.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -144,6 +145,7 @@ def _install_fake_sb3(
     state_dict: dict[str, Any] | None = None,
     load_error: BaseException | None = None,
     load_calls: list[str] | None = None,
+    load_kwargs: list[dict[str, Any]] | None = None,
     action_space: Any = None,
 ) -> None:
     """Put a fake `stable_baselines3.PPO` on the import path.
@@ -156,9 +158,11 @@ def _install_fake_sb3(
 
     class _FakePPO:
         @staticmethod
-        def load(path: str) -> Any:
+        def load(path: str, **kwargs: Any) -> Any:
             if load_calls is not None:
                 load_calls.append(path)
+            if load_kwargs is not None:
+                load_kwargs.append(kwargs)
             if load_error is not None:
                 raise load_error
             model = SimpleNamespace(policy=SimpleNamespace(state_dict=lambda: inner_sd))
@@ -173,6 +177,19 @@ def _install_fake_sb3(
 
 def _hide_sb3(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "stable_baselines3", None)
+
+
+@pytest.fixture(autouse=True)
+def _clear_export_cache():
+    """Every test starts with an empty export cache.
+
+    The cache is keyed on the checkpoint file's identity, and tests share
+    the same fixture bytes — so without this, a later test could be served
+    an earlier test's export.
+    """
+    rl_weights.clear_weights_cache()
+    yield
+    rl_weights.clear_weights_cache()
 
 
 # --------------------------------------------------------------------------
@@ -343,11 +360,15 @@ def test_export_weights_passes_str_path_to_ppo_load(
 ) -> None:
     path = _checkpoint(tmp_path)
     calls: list[str] = []
-    _install_fake_sb3(monkeypatch, load_calls=calls)
+    kwargs: list[dict[str, Any]] = []
+    _install_fake_sb3(monkeypatch, load_calls=calls, load_kwargs=kwargs)
 
     rl_weights.export_weights(path)
 
     assert calls == [str(path)]
+    # The export only reads the state_dict — it must not initialise a
+    # CUDA context (that cost 4.2 s per cold load on this machine).
+    assert kwargs == [{"device": "cpu"}]
 
 
 # --------------------------------------------------------------------------
@@ -461,3 +482,126 @@ def test_export_weights_reports_the_first_missing_key(
         rl_weights.export_weights(_checkpoint(tmp_path))
 
     assert "'mlp_extractor.policy_net.0.weight'" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------
+# export cache
+# --------------------------------------------------------------------------
+
+
+def _install_content_dependent_sb3(monkeypatch: pytest.MonkeyPatch, load_calls: list[str]) -> None:
+    """A fake SB3 whose exported weights depend on the checkpoint's bytes.
+
+    Makes "the file changed" observable *in the payload*, so a test can
+    prove the cache did not serve a stale export.
+    """
+
+    class _FakePPO:
+        @staticmethod
+        def load(path: str, **kwargs: Any) -> Any:
+            load_calls.append(path)
+            content_sum = float(sum(Path(path).read_bytes()))
+            sd = _make_state_dict({k: (TINY_SHAPES[k], TINY_STATE_VALUES[k]) for k in TINY_SHAPES})
+            sd["action_net.bias"] = _FakeTensor((2,), [content_sum, 1.0])
+            return SimpleNamespace(policy=SimpleNamespace(state_dict=lambda: sd))
+
+    sb3_mod = ModuleType("stable_baselines3")
+    sb3_mod.PPO = _FakePPO  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "stable_baselines3", sb3_mod)
+
+
+def test_export_weights_loads_the_checkpoint_only_once_per_file(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two exports of an unchanged checkpoint must not load the model twice.
+
+    Loading a PPO checkpoint and re-serialising it cost 0.5–8 s per call —
+    that is exactly what the cache removes.
+    """
+    calls: list[str] = []
+    _install_fake_sb3(monkeypatch, load_calls=calls)
+    path = _checkpoint(tmp_path)
+
+    first = rl_weights.export_weights(path)
+    second = rl_weights.export_weights(path)
+
+    assert calls == [str(path)]
+    assert first == second
+
+
+def test_export_weights_re_exports_a_rewritten_checkpoint(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A checkpoint whose bytes changed must not be served from the cache."""
+    calls: list[str] = []
+    _install_content_dependent_sb3(monkeypatch, calls)
+    path = _checkpoint(tmp_path)
+
+    first = rl_weights.export_weights(path)
+    path.write_bytes(b"PK\x03\x04-a-different-archive")
+    second = rl_weights.export_weights(path)
+
+    assert len(calls) == 2
+    assert first["layers"]["action_net.bias"][0] != second["layers"]["action_net.bias"][0]
+    assert first != second
+
+
+def test_export_weights_re_exports_when_size_and_mtime_are_unchanged(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same size, same mtime, different bytes → still not stale.
+
+    The cache key carries a content digest, so a checkpoint re-saved with
+    the same length inside the filesystem's timestamp granularity cannot
+    be served from the previous export.
+    """
+    calls: list[str] = []
+    _install_content_dependent_sb3(monkeypatch, calls)
+    path = _checkpoint(tmp_path)
+    stat = path.stat()
+
+    first = rl_weights.export_weights(path)
+    path.write_bytes(b"PK\x03\x04-not-a-real-archivX")  # same length
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))  # same mtime
+    second = rl_weights.export_weights(path)
+
+    assert path.stat().st_size == stat.st_size
+    assert path.stat().st_mtime_ns == stat.st_mtime_ns
+    assert len(calls) == 2
+    assert first["layers"]["action_net.bias"][0] != second["layers"]["action_net.bias"][0]
+
+
+def test_export_weights_does_not_cache_a_failure(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed export must not be memoised as a payload.
+
+    The endpoint maps `WeightsUnavailableError` to a 503 — a cached
+    failure would keep reporting 503 even after the backend is repaired.
+    """
+    calls: list[str] = []
+    _install_fake_sb3(monkeypatch, load_error=ValueError("corrupt archive"), load_calls=calls)
+
+    with pytest.raises(WeightsUnavailableError):
+        rl_weights.export_weights(_checkpoint(tmp_path))
+
+    # SB3 is healthy again → the next call must succeed, not replay the error.
+    _install_fake_sb3(monkeypatch, load_calls=calls)
+    result = rl_weights.export_weights(_checkpoint(tmp_path))
+
+    assert result["obs_dim"] == 3
+    assert len(calls) == 2
+
+
+def test_export_weights_hands_out_an_independent_copy(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller mutating the payload must not corrupt the cached export."""
+    _install_fake_sb3(monkeypatch)
+    path = _checkpoint(tmp_path)
+
+    first = rl_weights.export_weights(path)
+    first["layers"]["action_net.bias"][0] = 999.0
+    first["obs_dim"] = 4242
+    second = rl_weights.export_weights(path)
+
+    assert second["layers"]["action_net.bias"][0] == -1.0
+    assert second["obs_dim"] == 3

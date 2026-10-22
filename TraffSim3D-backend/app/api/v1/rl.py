@@ -261,13 +261,22 @@ async def training_config() -> dict[str, Any]:
 
 
 @router.get("/rl/checkpoints/{name}/weights", tags=["rl"])
-async def get_checkpoint_weights(name: str) -> dict[str, Any]:
+def get_checkpoint_weights(name: str) -> dict[str, Any]:
     """Export a saved PPO checkpoint as JSON-serializable weights.
 
     The frontend uses this to instantiate an in-browser MlpPolicy for
     replay (see `src/infrastructure/rl/mlpInference.ts`). Returns the
     policy `state_dict()` flattened to nested lists + architecture
     metadata (`obs_dim`, `action_dim`, `hidden_sizes`).
+
+    Deliberately a **sync** endpoint: the export loads a PPO checkpoint
+    (cold: seconds), and FastAPI runs sync endpoints in the threadpool.
+    As an `async def` it would block the whole event loop for the
+    duration of the load, stalling every other request.
+
+    The export itself is memoised per checkpoint file by
+    `app.apps.rl.weights.export_weights`, so only the first request per
+    checkpoint pays the load cost.
 
     Errors:
       - 404: checkpoint file not found
