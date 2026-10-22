@@ -381,9 +381,16 @@ def main() -> None:
     )
     parser.add_argument(
         "--scene-kind",
-        choices=["cross", "corridor", "t_junction", "roundabout"],
+        choices=["cross", "corridor", "t_junction", "roundabout", "cross_signalled"],
         default="cross",
-        help="Sim topology (Plan 048). 'corridor' = 2 4-way intersections + 60m corridor. 't_junction' = 3-way T intersection. 'roundabout' = circular intersection.",
+        help=(
+            "Sim topology (Plan 048). 'corridor' = 2 4-way intersections + 60m "
+            "corridor. 't_junction' = 3-way T intersection. 'roundabout' = "
+            "circular intersection. 'cross_signalled' (Plan 076 T13) = the "
+            "cross scene with the ego's own axis starting RED on a 12 s "
+            "cycle - the scene in which a scripted baseline is provably not "
+            "optimal."
+        ),
     )
     parser.add_argument(
         "--curriculum",

@@ -223,6 +223,24 @@
       "max_steps": 30,
       "actions": [[0.25, 0.5]],
       "repeat": 30
+    },
+    {
+      "name": "cross_signalled_light_phase",
+      "scene_kind": "cross_signalled",
+      "ego_id": "v-1",
+      "n_steps": 300,
+      "max_steps": 300,
+      "actions": [[0.0, 0.0]],
+      "repeat": 300
+    },
+    {
+      "name": "cross_signalled_red_light",
+      "scene_kind": "cross_signalled",
+      "ego_id": "v-1",
+      "n_steps": 60,
+      "max_steps": 60,
+      "actions": [[1.0, 0.0]],
+      "repeat": 60
     }
   ]
 }

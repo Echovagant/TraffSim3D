@@ -1,0 +1,93 @@
+{
+  "name": "cross_signalled_red_light",
+  "scene_kind": "cross_signalled",
+  "ego_id": "v-1",
+  "signal_vocabulary": {
+    "actions": [
+      "extend_green",
+      "shorten_red",
+      "preempt",
+      "force_all_red",
+      "no_op"
+    ],
+    "all_red_seconds": 3,
+    "phase_adjust_seconds": 5,
+    "max_green_seconds": 60,
+    "min_green_seconds": 10,
+    "inter_green_seconds": 6
+  },
+  "road_rules": {
+    "road_half_width": 3.5,
+    "scene_goal_z": {
+      "cross": 25,
+      "corridor": 25,
+      "t_junction": -3,
+      "roundabout": 5,
+      "cross_signalled": 25
+    }
+  },
+  "scene_light": {
+    "cycle_seconds": 12,
+    "ns_green_at_reset": false,
+    "ew_green_at_reset": true
+  },
+  "final_state": {
+    "terminated": true,
+    "truncated": false,
+    "reason": "red_light",
+    "final_step": 34,
+    "final_z": -7.1499999999999995,
+    "final_x": 1.0929972682390127e-15,
+    "final_speed": 10.200000000000003
+  },
+  "samples": [
+    {
+      "step": 0,
+      "ego_id": "v-1",
+      "x": 0,
+      "z": -25,
+      "heading": 1.5707963267948966,
+      "speed": 0,
+      "light": {
+        "nsGreen": false,
+        "ewGreen": true
+      }
+    },
+    {
+      "step": 10,
+      "ego_id": "v-1",
+      "x": 1.0103336092965665e-16,
+      "z": -23.35,
+      "heading": 1.5707963267948966,
+      "speed": 3,
+      "light": {
+        "nsGreen": false,
+        "ewGreen": true
+      }
+    },
+    {
+      "step": 20,
+      "ego_id": "v-1",
+      "x": 3.8576374173141627e-16,
+      "z": -18.7,
+      "heading": 1.5707963267948966,
+      "speed": 5.999999999999998,
+      "light": {
+        "nsGreen": false,
+        "ewGreen": true
+      }
+    },
+    {
+      "step": 30,
+      "ego_id": "v-1",
+      "x": 8.541911424052788e-16,
+      "z": -11.05,
+      "heading": 1.5707963267948966,
+      "speed": 9,
+      "light": {
+        "nsGreen": false,
+        "ewGreen": true
+      }
+    }
+  ]
+}

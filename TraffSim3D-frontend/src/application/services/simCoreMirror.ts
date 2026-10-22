@@ -28,7 +28,7 @@ import {
   type SignalActionName,
 } from '@shared/constants/simulation'
 
-export type SceneKind = 'cross' | 'corridor' | 't_junction' | 'roundabout'
+export type SceneKind = 'cross' | 'corridor' | 't_junction' | 'roundabout' | 'cross_signalled'
 
 export type TerminationReason =
   | 'success'
@@ -178,12 +178,19 @@ export const ALL_RED_STEPS = Math.round(ALL_RED_SECS / PYTHON_SIM.DT)
 /**
  * A fresh light, built the way Python's `TrafficLight(...)` constructor
  * builds one: the phase clock at zero, no queued action, no clearance.
+ *
+ * `cycleDuration` defaults to the default 30 s cycle; the signalled scene
+ * passes its own (Plan 076 T13).
  */
-export const createMirrorLight = (nsGreen: boolean, ewGreen: boolean): MirrorLight => ({
+export const createMirrorLight = (
+  nsGreen: boolean,
+  ewGreen: boolean,
+  cycleDuration: number = PYTHON_SIM.LIGHT_CYCLE_SECONDS,
+): MirrorLight => ({
   nsGreen,
   ewGreen,
   cycleTimer: 0,
-  cycleDuration: PYTHON_SIM.LIGHT_CYCLE_SECONDS,
+  cycleDuration,
   pendingActions: [],
   allRedSteps: 0,
   resumeState: null,
@@ -219,6 +226,22 @@ const approachAxis = (heading: number): 'ns' | 'ew' =>
  */
 const lateralOffset = (vehicle: MirrorVehicle): number =>
   approachAxis(vehicle.heading) === 'ns' ? Math.abs(vehicle.x) : Math.abs(vehicle.z)
+
+/**
+ * The scene's **own** light — the one `reset()` installs, before any
+ * vector-level `lightOverride` is applied.
+ *
+ * Plan 076 T13. The contract generator writes this into every golden, and
+ * the Python side compares it against the light its own `SimCore.reset()`
+ * installs — item by item. Each side owns its own schedule (the four
+ * default scenes run the 30 s cycle; `cross_signalled` starts the ego's
+ * axis red on a 12 s cycle), so a one-sided change turns the contract red.
+ */
+export const sceneLight = (sceneKind: SceneKind): MirrorLight => {
+  const core = new SimCoreMirror(sceneKind)
+  core.reset()
+  return core.light
+}
 
 /**
  * A port of Python's `SimCore`.
@@ -277,7 +300,15 @@ export class SimCoreMirror {
     // never raise, and `obs[6:8]` reports `(1, 0)` instead of Python's `(1, 1)`.
     // Swapping `(true, true)` is a no-op, so Python's roundabout light never
     // changes.
-    this.light = createMirrorLight(true, this.sceneKind === 'roundabout')
+    //
+    // Plan 076 T13: `_reset_cross_signalled` is the third case — the ego's
+    // axis starts **red** (`ns_green=False, ew_green=True`) and the cycle is
+    // the scene's own 12 s, so the phase changes at step 121 — inside the
+    // episode, unlike the default 30 s cycle (step 300).
+    this.light =
+      this.sceneKind === 'cross_signalled'
+        ? createMirrorLight(false, true, PYTHON_SIM.CROSS_SIGNALLED_CYCLE_SECONDS)
+        : createMirrorLight(true, this.sceneKind === 'roundabout')
     this.simTime = 0
     this.stepCount = 0
     this.terminated = false
@@ -335,8 +366,23 @@ export class SimCoreMirror {
           },
         ]
         break
+      case 'cross_signalled':
+        // Plan 076 T13: only the east-west cross traffic. A north-south
+        // NPC would be respawned by the default traffic model's
+        // out-of-bounds rule (`x -> -0.8 x`), which converges onto the
+        // ego's own centreline within two respawns and would then drive
+        // into a **stopped** ego. Measured over 400 steps, the east-west
+        // traffic never comes closer than 5.2 m to an ego stopped at the
+        // stop line. It crosses the ego's path on steps 17-21, 107-111,
+        // 199-203 and 289-293, which do **not** overlap the light-aware
+        // drive's crossing window (~150-167) — so the scene's
+        // discriminating power comes entirely from the red light.
+        this.npcs = [
+          { x: -15, z: 0, heading: 0, speed: PYTHON_SIM.NPC_SPEED, y: 0 },
+          { x: 15, z: 3.5, heading: Math.PI, speed: PYTHON_SIM.NPC_SPEED, y: 0 },
+        ]
+        break
       case 'cross':
-      default:
         this.npcs = [
           { x: 0, z: 15, heading: Math.PI / 2, speed: PYTHON_SIM.NPC_SPEED, y: 0 },
           { x: 3.5, z: -15, heading: -Math.PI / 2, speed: PYTHON_SIM.NPC_SPEED, y: 0 },
@@ -344,6 +390,12 @@ export class SimCoreMirror {
           { x: 15, z: 3.5, heading: Math.PI, speed: PYTHON_SIM.NPC_SPEED, y: 0 },
         ]
         break
+      default:
+        // Plan 076 T13: an unknown scene name is an error, not a silent
+        // fall-through to the `cross` scene — the Python side raises too
+        // (`SimCore.reset()`). A caller that asked for a scene that does
+        // not exist must not end up measuring the `cross` scene.
+        throw new Error(`unknown sceneKind ${String(this.sceneKind)}`)
     }
   }
 

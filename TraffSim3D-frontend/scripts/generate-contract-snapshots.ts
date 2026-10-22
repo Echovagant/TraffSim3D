@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url'
 import {
   assertValidSignalActions,
   runEpisode,
+  sceneLight,
   type MirrorEgoStart,
   type MirrorLightOverride,
   type MirrorSignalAction,
@@ -306,6 +307,7 @@ const main = (): void => {
         steerActions: actions.map((a) => a[1]!),
       },
     )
+    const light = sceneLight(v.scene_kind)
     const scenario = {
       name: v.name,
       scene_kind: v.scene_kind,
@@ -331,6 +333,19 @@ const main = (): void => {
       road_rules: {
         road_half_width: PYTHON_SIM.ROAD_HALF_WIDTH,
         scene_goal_z: { ...PYTHON_SIM.SCENE_GOAL_Z },
+      },
+      // Plan 076 T13: the scene's **own** light schedule — the phase the
+      // light starts in and the length of a phase. The Python side
+      // compares this block against the light its own `SimCore.reset()`
+      // installs, so a one-sided change of either turns the contract red
+      // (each side owns its own schedule on purpose).
+      //
+      // This is the scene's light, *before* any vector-level
+      // `light_override` — that override is recorded separately below.
+      scene_light: {
+        cycle_seconds: light.cycleDuration,
+        ns_green_at_reset: light.nsGreen,
+        ew_green_at_reset: light.ewGreen,
       },
       // The light override the mirror actually ran with (absent → the
       // scene's own light). The Python side cross-checks it against the

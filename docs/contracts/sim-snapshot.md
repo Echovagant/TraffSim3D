@@ -1,5 +1,24 @@
 # Cross-Language Sim Contract
 
+> **状态（2026-10-21，Plan 076 T13）：信号灯合规场景进入契约 —— 第五个场景，两条新向量。**
+> T12 的结论是「在四个场景里 ego 从不面对红灯」——灯的相位钟每步都在走，但 30 s
+> 周期 ⇒ 首次换相在**第 300 步**，而 episode 在第 200 步就截断 ⇒ `red_light`
+> 终止数 = **0** ⇒ 脚本控制器永远不吃那 −5 ⇒ 「AI 学会开车」的门禁**不可达**
+> （基线可证站在物理步数下界上）。T13 新增场景 **`cross_signalled`**：ego 轴
+> **从红灯开始**（`ns_green=False`），周期 **12 s** ⇒ 首次换相在**第 121 步**，
+> 落在 episode 之内 ⇒ ego 必须**决策**：红灯停在停止线前，绿灯起步。
+> ⇒ 新增 2 条向量：`cross_signalled_light_phase`（停车 300 步 ⇒ 采样到的灯态
+> **两次换相**（样本步 130 / 250）⇒ **场景的灯周期首次可观测**）、
+> `cross_signalled_red_light`（满油门 ⇒ 第 34 步进路口 ⇒ `red_light` 终止）。
+> ⇒ golden 新增 `scene_light` 块（场景自己的灯：起始相位 + 周期长度），由
+> Python 侧**逐项**比对（两侧各持一份自己的拷贝 —— 共用一个文件会让比对变成空话）。
+> ⇒ 既有 12 条向量的**轨迹、终止原因与最终状态逐位不变**：重录 golden 的 diff
+> 只有新增的 `scene_light` 块 + `road_rules.scene_goal_z` 里新增的一行
+> （15 个文件各 **+7 行 / −1 行**，那 −1 行只是 JSON 逗号；**样本与终态零改动**），
+> 15 个 `ts_kernel_*.json` **逐字节不变**。
+> 实测（2026-10-21）：`pytest tests/contract/` → **161 passed / 0 failed / 0 skipped**
+> （原 128；新增 33 条来自 2 条新向量的场景/kernel/常量/词表比对 + 变异门禁）。
+>
 > **状态（2026-10-21，Plan 076 T12）：道路规则进入契约 —— 两条规则从「隐含」变成「被向量覆盖」。**
 > T12 给 ego 的训练 sim 改了四条规则（转向残量 / 时间项从奖励翻成成本 / 成功条件加横向约束 /
 > 红灯轴向用交通模型的 `approach_axis`）。**其中两条是跨语言规则**：红灯的轴向判定与
@@ -163,6 +182,8 @@ it needs a scalar-level entry point into the obs builder. See "Not covered".
 | `red_light_axis_disagreement` | cross | **Plan 076 T12 — the red-light axis rule.** The ego **drives into** the intersection on a heading of **50°**, i.e. inside the band where the traffic model's `approach_axis()` (ns) and the old "within 0.5 rad of north" heuristic (ew) disagree, with the NS axis red. It starts on the 50° ray towards the Pure Pursuit target, so the scripted steer is exactly 0 and the heading cannot drift out of the band; it **enters the box at step 30** — a *sample point*, with a 0.54 m margin outside and 0.15 m inside, so a 1-ULP difference between the two runtimes cannot flip the entry. Both sides call it a red-light run; the old rule let it through. This is the vector that makes the axis rule **observable** instead of implicit. |
 | `off_road_no_success` | cross | **Plan 076 T12 — the success's road constraint.** The ego starts **6 m** off the centreline (beyond the 3.5 m road half-width) and drives **across** the goal line: the route is wrong, so neither side may score the success. The latch is permanent — leaving the road and coming back does not restore it. |
 | `steer_residual` | cross | **Plan 076 T12 — the steering residual.** A non-zero `action[1]` (0.5), i.e. the policy's correction **on top of** the scripted Pure Pursuit steer. The old mirror ignored `action[1]` entirely, so this vector is what makes the steering channel observable on both sides. 30 steps, truncated at the limit (a turning trajectory ⇒ compared within the libm noise floor). |
+| `cross_signalled_light_phase` | cross_signalled | **Plan 076 T13 — the signalled scene's light schedule.** The ego's own axis starts **red** and the scene runs a **12 s** cycle, so the phase changes twice inside the episode: the sampled light bits flip on the samples of steps **130** (green) and **250** (red). This is the first vector that makes a scene's **own** light schedule observable — the four default scenes' 30 s cycle swaps on step 300, which no episode reaches. The ego stands still, so the episode truncates at step 300. |
+| `cross_signalled_red_light` | cross_signalled | **Plan 076 T13 — the red-light rule, in a scene that has one.** Full throttle: the ego enters the intersection on step **34**, while its own axis is still red, and both sides call it a red-light run. It is the vector that makes "the ego faces a red light" a *contract-covered* fact rather than a claim about the training. |
 
 > **这两条向量是刻意极端的压力用例**，不是现实场景（偏出 60 m、航向偏 115°）。
 > 极端是有理由的：契约比较的是**采样点**（每 10 步一个），
@@ -197,7 +218,7 @@ fields:
 | Field | Meaning |
 |---|---|
 | `name` | The vector's name. It selects the goldens `ts_<name>.json` and `ts_kernel_<name>.json`, and the regenerated `python_<name>.json`. |
-| `scene_kind` | The Python scene to run: `cross` / `corridor` / `t_junction` / `roundabout`. |
+| `scene_kind` | The Python scene to run: `cross` / `corridor` / `t_junction` / `roundabout` / `cross_signalled` (Plan 076 T13). An **unknown** name is an error on the Python side (`SimCore.reset()` raises) — it used to fall through to the `cross` scene, which silently measured a different scene. |
 | `ego_id` | The ego's id, recorded in every sample. |
 | `n_steps` | The **expanded** action count (see the expansion rule below). Neither side reads it today. |
 | `actions` | The literal action list. Each entry is a **pair**, and **both elements are read** (Plan 076 T12): the first is the acceleration command, clipped to `[-1, 1]` and scaled to 3 m/s²; the second is the **steering residual** — a correction *on top of* the scripted Pure Pursuit steer, clipped to `[-1, 1]`, scaled by `MAX_STEER` and clipped together with the scripted steer. It used to be that **only the first element was read** ("the steer is not taken from the action — both sides compute it with Pure Pursuit"), and every vector's second element was `0.0`, so the two sides *coincidentally* agreed. The `steer_residual` vector (second element `0.5`) is what makes the dimension observable. |
@@ -291,6 +312,8 @@ the same shape — looks like this:
 | `signal_vocabulary.max_green_seconds` | The upper bound (s) on a green phase's **remaining** time after `extend_green`. Compared against `sim_core.MAX_GREEN_SECS`. |
 | `signal_vocabulary.min_green_seconds` | The lower bound (s) on a green phase's **remaining** time — a green may not be shortened below it (Plan 074 T7). Compared against `sim_core.MIN_GREEN_SECS`. |
 | `signal_vocabulary.inter_green_seconds` | The **inter-green clearance** (s) a phase change costs: the time between the end of one axis' green and the start of the other axis' green, during which no new vehicle may go (Plan 074 T9). The browser derives it from its clearance-yellow (3 s) plus the all-red the conflict resolution forces (3 s); the Python training sim charges the same 6 s on every phase change (`sim_core.CLEARANCE_SECS`). Compared against `sim_core.CLEARANCE_SECS`. |
+| `road_rules` | **Plan 076 T12.** The road rules — the road's half-width and each scene's goal line — as the **TypeScript side's** copies. The Python side compares them item by item against its own `sim_core` copies. |
+| `scene_light` | **Plan 076 T13.** The **scene's own** light schedule: `{"cycle_seconds": …, "ns_green_at_reset": …, "ew_green_at_reset": …}` — the phase the light starts in and the length of a phase. It is the scene's light, *before* any vector-level `light_override` (which is recorded separately). The Python side compares it against the light its own `SimCore.reset()` installs. |
 | `light_override` | **Optional** — present only when the vector has one. The light the mirror actually ran with: `{"ns_green": …, "ew_green": …}`. The Python side cross-checks it against the vector's copy. |
 | `signal_actions` | **Optional** — present only when the vector has some. The signal-action sequence the mirror actually applied: `[{"step": N, "action": "…"}, …]`. **The Python side reads the sequence from here** (the golden is the single source it applies, exactly like the `signal_vocabulary` block) and cross-checks it against the vector's copy, so a golden that was not regenerated after a vector edit cannot hide the drift. |
 | `ego_start` | **Optional** — present only when the vector has one (Plan 076 S5a). The pose the mirror actually started the ego from: `{"x": …, "z": …, "heading": …, "speed": …}`. The Python side cross-checks it against the vector's copy, exactly like `light_override`. |
@@ -465,6 +488,7 @@ recomputed golden against the committed file).
 | `ROAD_HALF_WIDTH` (Plan 076 T12) | **caught** — the golden's `road_rules` block carries the TS side's copy and the Python side compares it item by item | **caught** (same block) | **no** (it did not exist before T12) |
 | `SCENE_GOAL_Z` (Plan 076 T12) | **caught** — same block, per scene | **caught** (same block) | **no** (it did not exist before T12) |
 | **traffic-light phase duration** (`TrafficLight.cycle_duration` / `PYTHON_SIM.LIGHT_CYCLE_SECONDS`) | **partially covered** — caught when the first flip lands inside the *sampled* window (≤ 25.0 s); a drift of 30 → 26 s is **not** caught | same | **no** (was fully blind) |
+| **a scene's own light schedule** (Plan 076 T13: the start phase + the cycle length) | **caught** — the golden's `scene_light` block carries the TS side's copy and the Python side compares it item by item | **caught** (same block) | **no** (it did not exist before T13) |
 
 ### The traffic-light phase duration — partially covered
 
@@ -511,7 +535,10 @@ runs the `t_junction` episode at 30 s / 25.5 s / 25.0 s and checks that the
    reachable episode lengths are `cross` 39, `corridor` 45, `t_junction` 257,
    `roundabout` 400 (truncation only, and its light is both-green so its swap
    is a no-op). The `cross` scene is the worst case: the northbound NPC
-   respawns on the ego's own line.
+   respawns on the ego's own line. — **Plan 076 T13 adds the fifth scene**,
+   `cross_signalled`, whose layout is built from that same measurement (no
+   north-south NPC ⇒ a parked ego is never hit) and whose cycle is 12 s, so
+   its phase changes land on steps 121 and 241 — well inside the episode.
 2. ~~**Every vector is straight-line**, so `steer ≡ 0`. The Pure Pursuit
    denominator, the steer clamp and the wheelbase therefore cannot affect the
    trajectory at all.~~ — **closed in Plan 076 S5a**: the two `steer_*` vectors
@@ -523,11 +550,25 @@ runs the `t_junction` episode at 30 s / 25.5 s / 25.0 s and checks that the
 
 ### How to close the rest
 
-1. **Add a Python scene whose signalled ego can idle for ≥ 300 steps** — the
+1. ~~**Add a Python scene whose signalled ego can idle for ≥ 300 steps** — the
    phase flips at 300 steps, so the window must reach that far. This needs a
    scene whose NPC layout never reaches the ego, which is scene-extension
    work (Plan 073 Sprint 5), not a vector change: with the current four
-   scenes it is **provably impossible** (the reachability numbers above).
+   scenes it is **provably impossible** (the reachability numbers above).~~
+   — **done in Plan 076 T13**: the `cross_signalled` scene is exactly that
+   scene. Its NPC layout was chosen from a **measurement**, not by taste: the
+   default traffic model's out-of-bounds rule mirrors an NPC's x
+   (`x -> -0.8 x`), which converges onto the ego's own centreline within two
+   respawns (measured: `-3.5 -> 2.8 -> -2.24 -> 1.79`), so a **north-south**
+   NPC would rear-end a stopped ego. The scene therefore carries only the
+   east-west cross traffic, which never comes within **5.2 m** of an ego
+   stopped at the stop line (measured over 400 steps). The
+   `cross_signalled_light_phase` vector then idles for 300 steps and records
+   **two** phase changes. (The cross traffic plays **no part** in the winning
+   run: it crosses the ego's path on steps 17-21 / 107-111 / 199-203 /
+   289-293, which do **not** overlap the light-aware drive's crossing window
+   (~150-167) ⇒ the scene's discriminating power comes **entirely from the
+   red light**.)
 2. ~~**Add a vector that actually steers** (a target off the ego's heading), so
    `LOOKAHEAD_DISTANCE`, `MAX_STEER` and `EGO_WHEELBASE` become observable.~~
    — **done in Plan 076 S5a** (the `steer_lateral_offset` and
@@ -535,6 +576,11 @@ runs the `t_junction` episode at 30 s / 25.5 s / 25.0 s and checks that the
 3. ~~**Record the light bits in the golden samples**~~ — **done** in Sprint 1:
    the light is now compared directly instead of only through its side
    effect on the termination reason.
+4. **The new scene's *own* schedule is pinned as a constant** — **done in
+   Plan 076 T13**: the golden's `scene_light` block carries the TypeScript
+   side's copy of every scene's start phase and cycle length, and the Python
+   side compares it item by item. A one-sided change of either turns the
+   contract red even when the sampled bits happen not to move.
 
 ### The turning dimension — the exact-equality premise, measured (Plan 076 S5a)
 

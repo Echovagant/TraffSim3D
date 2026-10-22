@@ -59,7 +59,43 @@ SCENE_GOAL_Z = {
     "corridor": 25.0,
     "t_junction": -3.0,
     "roundabout": 5.0,
+    # Plan 076 T13: the signalled scene's goal line is the same one the
+    # `cross` scene uses - the difference between the two scenes is the
+    # **light schedule**, not the route.
+    "cross_signalled": 25.0,
 }
+
+# ===== Plan 076 T13: the signalled scene's light schedule =====
+#
+# The four scenes above run the default 30 s cycle, so the first phase
+# change lands on step 300 - beyond every ego episode (Plan 076 T12's
+# "the light never swaps inside an episode"). That is why the ego never
+# faces a red light in them, and why a scripted controller is never
+# punished for ignoring the light.
+#
+# `cross_signalled` is the scene that gives the ego a **decision**: its
+# own axis starts **RED** and turns **GREEN** inside the episode, so a
+# driver that does not look at the light pays for it (-5 for a red-light
+# run, -10 for a collision).
+#
+# The cycle length is measured, not guessed (ADR-008):
+#
+# - the **green** window must be long enough for the ego to clear the
+#   intersection from a standstill: 33 steps (3.3 s) from the stop line
+#   (z = -8) to the far edge (z = +8), 47 steps (4.7 s) to the goal
+#   line (z = +25). A 12 s green is 120 steps - 3.6x the longest of
+#   those, so even a slow start clears the intersection inside it;
+# - the **red** window must be long enough that the strongest constant
+#   throttle cannot simply slip through on the green: a constant
+#   throttle may only enter the intersection once the green starts,
+#   which forces it to crawl, and a crawling throttle cannot reach the
+#   goal inside the episode horizon (measured: the best constant
+#   throttle is truncated at 200 steps, while the light-aware drive
+#   finishes in 179).
+#
+# 12 s is also an ordinary red-light duration, so the scene is not a
+# contrived puzzle.
+CROSS_SIGNALLED_CYCLE_SECONDS = 12.0
 
 # Pure Pursuit (Coulter 1992) — see ADR-004
 LOOKAHEAD_DISTANCE = 8.0
@@ -460,13 +496,26 @@ class SimCore:
         self._pending_swap = None
         # Plan 076 T12: the off-road latch is per-episode state too.
         self._off_road = False
+        if self.scene_kind == "cross":
+            return self._reset_cross()
         if self.scene_kind == "corridor":
             return self._reset_corridor()
         if self.scene_kind == "t_junction":
             return self._reset_t_junction()
         if self.scene_kind == "roundabout":
             return self._reset_roundabout()
-        return self._reset_cross()
+        if self.scene_kind == "cross_signalled":
+            return self._reset_cross_signalled()
+        # Plan 076 T13: an unknown scene name used to fall through to the
+        # `cross` scene, which is a silent lie: a caller that asked for a
+        # scene that does not exist measured the **cross** scene instead
+        # (and its numbers looked perfectly plausible). The scene list is
+        # the contract's (`SCENE_GOAL_Z`), so an unknown name is a bug in
+        # the caller and is reported as one.
+        raise ValueError(
+            f"unknown scene_kind {self.scene_kind!r}; "
+            f"expected one of {sorted(SCENE_GOAL_Z)}"
+        )
 
     def _reset_cross(self) -> np.ndarray:
         """Original cross scene (Plan 044). Single 4-way intersection."""
@@ -560,6 +609,61 @@ class SimCore:
         ]
         # Roundabout has no traffic lights (yield-on-entry)
         self.light = TrafficLight(ns_green=True, ew_green=True)
+        self.sim_time = 0.0
+        self.step_count = 0
+        self._terminated = False
+        self._terminated_reason = ""
+        self._truncated = False
+        return self._obs()
+
+    def _reset_cross_signalled(self) -> np.ndarray:
+        """Plan 076 T13: the signalled cross - the ego's axis starts RED.
+
+        The four scenes above leave the ego's axis green for the whole
+        episode, so the ego never faces a red light and a scripted
+        controller is never punished for ignoring the light (Plan 076
+        T12). Here the ego's axis starts **red** and turns green at step
+        121 (12 s) - inside the episode, and inside the ego's approach.
+
+        The NPC layout is the **measured** one, not a copy of the `cross`
+        scene's:
+
+        - Only the **east-west cross traffic** is on the road. A
+          north-south NPC would be respawned by the default traffic
+          model's out-of-bounds rule (``x -> -0.8 x``), which converges
+          onto the ego's own centreline within two respawns (measured:
+          x = -3.5 -> 2.8 -> -2.24 -> 1.79). It would then drive straight
+          into a **stopped** ego - the scenario would be unwinnable, not
+          merely hard.
+        - The east-west traffic never comes closer than **5.2 m** to an
+          ego stopped at the stop line (measured over 400 steps), so it
+          never interferes with an ego that waits.
+
+        What the cross traffic does **not** do is create a second timed
+        decision: it crosses the ego's path (|x| < 2) on steps 17-21,
+        107-111, 199-203 and 289-293, while the light-aware drive is in
+        the intersection on steps ~150-167. Those windows do not overlap,
+        so in the winning run the cross traffic plays **no part at all**
+        - the scene's discriminating power comes **entirely from the red
+        light**. The traffic is here to keep the scene a real
+        intersection, not to add a second thing to get right.
+
+        The ego's start pose, the goal line and the Pure Pursuit target
+        are the `cross` scene's - the only difference is the light
+        schedule.
+        """
+        self.ego = Vehicle(x=0.0, z=-25.0, heading=math.pi / 2, speed=0.0)
+        # 2 NPCs: the east-west cross traffic (the `cross` scene's pair).
+        self.npcs = [
+            Vehicle(x=-15.0, z=0.0, heading=0.0, speed=NPC_SPEED),   # EB
+            Vehicle(x=15.0, z=3.5, heading=math.pi, speed=NPC_SPEED),  # WB
+        ]
+        # The ego's axis starts RED: the phase swaps to green at step 121.
+        self.light = TrafficLight(
+            ns_green=False,
+            ew_green=True,
+            cycle_duration=CROSS_SIGNALLED_CYCLE_SECONDS,
+        )
         self.sim_time = 0.0
         self.step_count = 0
         self._terminated = False

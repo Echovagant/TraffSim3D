@@ -61,6 +61,10 @@ _SCENE_REASONS = {
     "corridor": ("success_corridor", "collision", "red_light"),
     "t_junction": ("success_t_junction", "collision", "red_light"),
     "roundabout": ("success_roundabout", "collision", "red_light"),
+    # Plan 076 T13: the signalled scene shares the `cross` scene's success
+    # reason - the difference between the two scenes is the light schedule,
+    # not the route.
+    "cross_signalled": ("success", "collision", "red_light"),
 }
 
 
@@ -536,6 +540,45 @@ def test_the_road_rules_constants_match_the_typescript_golden(vector_name: str) 
     assert rules["scene_goal_z"] == SCENE_GOAL_Z, (
         f"{v['name']}: the scene goal lines differ "
         f"(typescript={rules['scene_goal_z']}, python={SCENE_GOAL_Z})"
+    )
+
+
+@pytest.mark.parametrize("vector_name", [v["name"] for v in _load_vectors()])
+def test_the_scene_light_schedule_matches_the_typescript_golden(vector_name: str) -> None:
+    """Plan 076 T13: the scene's light schedule is a contract constant too.
+
+    Four of the five scenes run the default 30 s cycle, whose first phase
+    change lands on step 300 — beyond every ego episode, which is why the
+    ego never faces a red light in them. The fifth (`cross_signalled`)
+    starts the ego's axis **red** on a 12 s cycle, so the phase changes
+    *inside* the episode.
+
+    Both sides own their own schedule (Python in `sim_core.py`,
+    TypeScript in `@shared/constants/simulation`), and the golden carries
+    the TypeScript side's copy, which is compared here item by item. A
+    file both sides read would make this comparison vacuous.
+    """
+    v = _vector(vector_name)
+    golden = _require_snapshot(_golden_path(v["name"]))
+    block = golden.get("scene_light")
+    assert block is not None, (
+        f"{v['name']}: the TS golden carries no 'scene_light' block. "
+        "Regenerate it with: cd ../TraffSim3D-frontend && npm run contract:gen"
+    )
+
+    core = SimCore(scene_kind=v["scene_kind"])
+    core.reset()
+    assert block["cycle_seconds"] == core.light.cycle_duration, (
+        f"{v['name']}: the scene's light cycle differs "
+        f"(typescript={block['cycle_seconds']}, python={core.light.cycle_duration})"
+    )
+    assert block["ns_green_at_reset"] == core.light.ns_green, (
+        f"{v['name']}: the scene's starting phase differs "
+        f"(typescript={block['ns_green_at_reset']}, python={core.light.ns_green})"
+    )
+    assert block["ew_green_at_reset"] == core.light.ew_green, (
+        f"{v['name']}: the scene's starting phase differs "
+        f"(typescript={block['ew_green_at_reset']}, python={core.light.ew_green})"
     )
 
 

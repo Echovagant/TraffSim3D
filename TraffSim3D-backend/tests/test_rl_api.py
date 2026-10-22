@@ -142,10 +142,16 @@ async def test_train_independent_writes_agent_rewards(client: AsyncClient) -> No
 
 @pytest.mark.asyncio
 async def test_scenes_endpoint_returns_list(client: AsyncClient) -> None:
-    """Plan 048: GET /api/v1/rl/scenes returns the supported scene kinds."""
+    """Plan 048/076: GET /api/v1/rl/scenes returns the supported scene kinds.
+
+    Plan 076 T13 added `cross_signalled` — the scene whose ego axis starts
+    red, i.e. the one in which a scripted baseline is provably not optimal.
+    """
     r = await client.get("/api/v1/rl/scenes")
     assert r.status_code == 200
-    assert r.json() == {"scenes": ["cross", "corridor", "t_junction", "roundabout"]}
+    assert r.json() == {
+        "scenes": ["cross", "corridor", "t_junction", "roundabout", "cross_signalled"]
+    }
 
 
 @pytest.mark.asyncio

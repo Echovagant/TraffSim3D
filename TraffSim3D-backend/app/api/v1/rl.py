@@ -23,7 +23,9 @@ class TrainRequest(BaseModel):
     n_agents: int = 2  # Plan 045: stacked TrafficEnvs sharing PPO
     save_every: int = 5000  # Plan 045: checkpoint save interval
     independent_agents: bool = False  # Plan 047: per-agent PPO policies
-    scene_kind: str = "cross"  # Plan 048: 'cross' | 'corridor' | 't_junction' | 'roundabout'
+    scene_kind: str = (
+        "cross"  # Plan 048/076: 'cross' | 'corridor' | 't_junction' | 'roundabout' | 'cross_signalled'
+    )
     curriculum: bool = False  # Curriculum learning: progressive scene difficulty
 
 
@@ -223,8 +225,8 @@ async def prune_checkpoints() -> dict[str, Any]:
 
 @router.get("/rl/scenes", tags=["rl"])
 async def list_scenes() -> dict[str, Any]:
-    """List supported sim scene kinds (Plan 048)."""
-    return {"scenes": ["cross", "corridor", "t_junction", "roundabout"]}
+    """List supported sim scene kinds (Plan 048, Plan 076 T13)."""
+    return {"scenes": ["cross", "corridor", "t_junction", "roundabout", "cross_signalled"]}
 
 
 @router.get("/rl/training-config", tags=["rl"])
@@ -237,7 +239,7 @@ async def training_config() -> dict[str, Any]:
     """
     return {
         "algorithms": ["PPO", "SAC", "TD3"],
-        "scenes": ["cross", "corridor", "t_junction", "roundabout"],
+        "scenes": ["cross", "corridor", "t_junction", "roundabout", "cross_signalled"],
         "devices": ["auto", "gpu", "cpu"],
         "hyperparameters": {
             "learning_rate": {"default": 3e-4, "min": 1e-6, "max": 1e-2, "step": 1e-5},

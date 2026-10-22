@@ -22,8 +22,14 @@
       "cross": 25,
       "corridor": 25,
       "t_junction": -3,
-      "roundabout": 5
+      "roundabout": 5,
+      "cross_signalled": 25
     }
+  },
+  "scene_light": {
+    "cycle_seconds": 30,
+    "ns_green_at_reset": true,
+    "ew_green_at_reset": false
   },
   "final_state": {
     "terminated": true,

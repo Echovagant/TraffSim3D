@@ -56,6 +56,17 @@ START_Z = -25.0
 #: straight ahead), so the z-advance *is* the path length.
 START_HEADING = math.pi / 2
 
+#: The four scenes Plan 076 T12's conclusion is about.
+#:
+#: Plan 076 T13 added a fifth scene (`cross_signalled`), whose ego axis
+#: starts **red**: there the baseline runs the red light instead of
+#: sitting on the physical bound — which is what makes the gate
+#: reachable there. The bound assertions below are therefore scoped to
+#: the four original scenes, and the new scene gets the opposite
+#: assertion (`test_the_signalled_scene_is_not_on_the_bound`), so
+#: neither claim can be quietly broken.
+T12_SCENES = ("cross", "corridor", "t_junction", "roundabout")
+
 
 def _closed_form(steps: int) -> float:
     """The displacement after `steps` steps of full throttle."""
@@ -108,7 +119,7 @@ def test_the_bound_is_the_first_step_that_reaches_the_goal_line(scene: str) -> N
     assert after >= needed, f"{scene}: step {bound} does not reach the goal"
 
 
-@pytest.mark.parametrize("scene", sorted(SCENE_GOAL_Z))
+@pytest.mark.parametrize("scene", T12_SCENES)
 def test_the_strongest_constant_baseline_sits_exactly_on_the_bound(scene: str) -> None:
     """The baseline is at the physical floor — this is why the gate ties.
 
@@ -128,6 +139,33 @@ def test_the_strongest_constant_baseline_sits_exactly_on_the_bound(scene: str) -
         f"{scene}: the baseline takes {result['steps']} steps but the physical "
         f"lower bound is {bound} — the physics or the scene changed, so the "
         f"numbers in Plan 076 have to be rewritten"
+    )
+
+
+def test_the_signalled_scene_is_not_on_the_bound() -> None:
+    """Plan 076 T13: the fifth scene is the deliberate exception.
+
+    In `cross_signalled` the ego's axis starts **red**, so the strongest
+    constant throttle runs the red light instead of arriving on the
+    physical floor. That is what makes the gate reachable there: the
+    baseline is provably **not** optimal, so a policy that looks at the
+    light can beat it.
+    """
+    scene = "cross_signalled"
+    bound = _lower_bound(SCENE_GOAL_Z[scene])
+    result = ego_eval.evaluate_constant_throttle(
+        ego_eval.FULL_THROTTLE, scene_kind=scene, steps=ego_eval.EVAL_STEPS
+    )
+
+    assert result["reason"] == "red_light", (
+        f"{scene}: the full-throttle baseline no longer runs the red light "
+        f"({result['reason']}) — the scene stopped being a decision, so "
+        "Plan 076's T13 numbers have to be rewritten"
+    )
+    assert result["steps"] < bound, (
+        f"{scene}: the baseline now takes {result['steps']} steps, which is "
+        f"not before the physical bound ({bound}) — the scene's light "
+        "schedule has to be re-measured"
     )
 
 

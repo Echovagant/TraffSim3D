@@ -413,7 +413,28 @@ export const PYTHON_SIM = {
     corridor: 25.0,
     t_junction: -3.0,
     roundabout: 5.0,
+    /**
+     * Python: `SCENE_GOAL_Z["cross_signalled"]` — Plan 076 T13.
+     *
+     * The signalled scene's goal line is the `cross` scene's: the two
+     * scenes differ in the **light schedule**, not in the route.
+     */
+    cross_signalled: 25.0,
   },
+  /**
+   * Python: `sim_core.CROSS_SIGNALLED_CYCLE_SECONDS` — the light cycle of
+   * the `cross_signalled` scene (s per phase).
+   *
+   * Plan 076 T13. The other four scenes run the default 30 s cycle, whose
+   * first phase change lands on step 300 — beyond every ego episode, which
+   * is why the ego never faces a red light in them. The signalled scene
+   * starts the ego's axis **red** and turns it green at step 121 (12 s),
+   * inside the episode.
+   *
+   * Each side owns its own copy on purpose: a file both sides read would
+   * make the contract's comparison of this constant vacuous.
+   */
+  CROSS_SIGNALLED_CYCLE_SECONDS: 12.0,
 } as const
 
 /**
