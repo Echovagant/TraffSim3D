@@ -21,6 +21,12 @@
 > 只有新增的 `scene_light` 块 + `road_rules.scene_goal_z` 里新增的一行
 > （15 个文件各 **+7 行 / −1 行**，那 −1 行只是 JSON 逗号；**样本与终态零改动**），
 > 15 个 `ts_kernel_*.json` **逐字节不变**。
+> ⇒ **T14 改了奖励之后，这条仍然成立**（实测，不是推断）：golden 的 sample 里
+> **没有 reward 字段**（只有位姿与灯态）⇒ 改奖励动不了 golden ⇒
+> `git diff HEAD -- tests/contract/snapshots/` **为空**（每个已入库的 golden 逐字节
+> 相同）⇒ 契约 **169 passed**。
+> ⇒ **奖励本身与 `light_cycle_seconds` 这两个训练用旋钮是契约之外的具名盲区** ——
+> 见下面「The two training-only knobs」一节。
 > 实测（2026-10-22）：`pytest tests/contract/` → **169 passed / 0 failed / 0 skipped**
 > （T13 后 161；T14 的第三条向量 + 它的变异门禁 +8）。
 >
@@ -951,6 +957,23 @@ and is recorded in Plan 074 §2 D1.
   speed", not a defect to be fixed here — re-arming the clamp would hand the
   constraint layer ownership of a speed the policy is supposed to own. The
   vehicle was already stuck before the exemption existed.
+
+### The two training-only knobs (Plan 076 T14) — **named blind spots**
+
+Two things the Python training sim has and the contract does **not** compare.
+Both are listed here on purpose: a blind spot that is not written down is
+indistinguishable from a coverage gap nobody noticed.
+
+| Blind spot | What it is | Why the contract does not cover it |
+|---|---|---|
+| **The reward function** | `reward = PROGRESS_WEIGHT * progress − TIME_COST`, and (Plan 076 T14) the mileage is only earned **while the ego is on the road** (`progress = 0` once the off-road latch is set) | The mirror has **no reward at all** — the contract compares the trajectory, the termination and the light bits, never a return. The goldens' samples carry the pose and the light bits only (**no reward field**), so changing the reward **cannot** move a golden. Measured: after T14 changed the reward, **every committed golden stayed byte-identical** (`git diff` on `tests/contract/snapshots/` is empty) and the contract still passes (169). |
+| **`SimCore.light_cycle_seconds`** | An **optional override** of the signalled scene's light cycle, used by the light curriculum in `app/apps/rl/train.py` (`--light-curriculum`). `None` — the default — is the scene's own cycle, and that is the value the `scene_light` block pins | The TypeScript mirror has **no counterpart** (the mirror always runs the default cycle), and the contract vectors always run the default too. It is a **training-only** knob, exactly like `responsive_traffic` (see the coverage boundary above). The default is pinned *as a constant* by the `scene_light` block, so a one-sided change of the default still turns the contract red. |
+
+⇒ **What this means for a reader**: the contract proves the two sides agree on
+**what the ego does**, not on **what it is paid** and not on the training
+knobs. A change to the reward can therefore pass every contract gate — which
+is why Plan 076's gates (the ego gate, the step lower bound, the training
+report) are the ones that have to catch it.
 
 ## Platform assumption
 
