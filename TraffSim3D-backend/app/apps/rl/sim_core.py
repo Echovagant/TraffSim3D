@@ -489,6 +489,23 @@ class SimCore:
     # sensitive area and must not grow.
     _clearance_steps: int = 0
     _pending_swap: tuple[bool, bool] | None = None
+    # Plan 076 T14: the light cycle of the **signalled** scene, overridable
+    # for training.
+    #
+    # `None` (the default) means the scene's own cycle
+    # (`CROSS_SIGNALLED_CYCLE_SECONDS`) - that is the value the cross-language
+    # contract pins, and it is what the committed goldens run. A number
+    # overrides it for **training only** (the light curriculum in
+    # `app/apps/rl/train.py`): the compliant behaviour - "brake while the
+    # light is red" - is almost never sampled in a 12 s red, but it is
+    # sampled in a 6 s one, and the observation is memoryless, so what the
+    # policy learns is a *light-state condition* and transfers across red
+    # lengths.
+    #
+    # This is a **Python-only** knob, like `responsive_traffic`: the
+    # TypeScript contract mirror has no counterpart and the contract does
+    # not cover it (the contract always runs the default cycle).
+    light_cycle_seconds: float | None = None
 
     def reset(self, seed: int | None = None) -> np.ndarray:
         # Plan 074 T9: the inter-green clearance is per-episode state.
@@ -662,7 +679,11 @@ class SimCore:
         self.light = TrafficLight(
             ns_green=False,
             ew_green=True,
-            cycle_duration=CROSS_SIGNALLED_CYCLE_SECONDS,
+            cycle_duration=(
+                CROSS_SIGNALLED_CYCLE_SECONDS
+                if self.light_cycle_seconds is None
+                else self.light_cycle_seconds
+            ),
         )
         self.sim_time = 0.0
         self.step_count = 0
@@ -670,6 +691,40 @@ class SimCore:
         self._terminated_reason = ""
         self._truncated = False
         return self._obs()
+
+    def pursuit_target(self) -> tuple[float, float]:
+        """The scripted Pure Pursuit target of this scene.
+
+        - `cross`: the intersection centre (0, 0);
+        - `corridor`: the north end of the corridor (0, +30), so the ego
+          passes both intersections instead of stalling at the first one;
+        - `roundabout`: the north exit (0, +10);
+        - `cross_signalled` (Plan 076 T14): the **goal line**
+          (0, +25) - not the intersection centre.
+
+        Why the signalled scene differs: the `cross` scene's target is a
+        point the ego *passes* on the way, and after passing it the
+        scripted Pure Pursuit pulls the ego back towards it, so the ego's
+        heading starts to drop. That is harmless in the `cross` scene (the
+        goal is only 24 m further and the ego arrives with momentum), but
+        in the signalled scene the ego has just spent 121 steps waiting
+        for the green and then has to cover the rest of the route on its
+        own. The measured effect was that the policy - whose "brake"
+        behaviour is keyed on the heading - kept braking after the
+        crossing and stopped 2.3 m short of the goal line.
+
+        A target that stays *ahead* of the ego for the whole route is the
+        convention the `corridor` and `roundabout` scenes already use.
+
+        (The TS contract mirror has the same method, `target()`.)
+        """
+        if self.scene_kind == "corridor":
+            return (0.0, 30.0)
+        if self.scene_kind == "roundabout":
+            return (0.0, ROUNDABOUT_RADIUS)
+        if self.scene_kind == "cross_signalled":
+            return (0.0, SCENE_GOAL_Z["cross_signalled"])
+        return (0.0, 0.0)
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         """One 0.1s step. Returns (obs, reward, terminated, truncated, info)."""
@@ -683,17 +738,8 @@ class SimCore:
 
         # 1) Apply ego control via accel + Pure Pursuit steer
         accel_cmd = float(np.clip(action[0], -1.0, 1.0)) * 3.0   # m/s²
-        # Pure Pursuit target:
-        #   cross: intersection center (0, 0)
-        #   corridor: north end of corridor (0, +30), so ego passes
-        #     both intersections instead of stalling at the first one
-        #   roundabout: north exit (0, +10)
-        if self.scene_kind == "corridor":
-            target = (0.0, 30.0)
-        elif self.scene_kind == "roundabout":
-            target = (0.0, ROUNDABOUT_RADIUS)
-        else:
-            target = (0.0, 0.0)
+        # Pure Pursuit target: see `pursuit_target()`.
+        target = self.pursuit_target()
         dx = target[0] - self.ego.x
         dz = target[1] - self.ego.z
         target_angle = math.atan2(dz, dx)
@@ -726,6 +772,18 @@ class SimCore:
         self.ego.heading += steer * DT  # simplified bicycle model
         self.ego.x += self.ego.speed * math.cos(self.ego.heading) * DT
         self.ego.z += self.ego.speed * math.sin(self.ego.heading) * DT
+
+        # Plan 076 T14: has the ego left the road?
+        #
+        # T12 latched this so the **success** needs the ego to have
+        # *stayed* on the road. The latch is read by the **reward** as
+        # well (the mileage is only earned on the road), so it is set
+        # here - right after the kinematics, which are its only input -
+        # instead of further down. The ego's pose is final at this
+        # point, so the latch value is the same as before; only the
+        # order relative to the reward changed.
+        if lateral_offset(self.ego) > ROAD_HALF_WIDTH:
+            self._off_road = True
 
         # 3) Advance NPCs (constant speed, straight or circular for roundabout)
         if self.scene_kind == "roundabout":
@@ -838,6 +896,20 @@ class SimCore:
         # that reaches the goal earns exactly the distance to it.
         goal_z = self.goal_z
         progress = min(self.ego.z, goal_z) - min(prev_z, goal_z)
+        # Plan 076 T14: the mileage is only earned **on the road**.
+        #
+        # T12's rule was "the success needs the ego to have **stayed** on
+        # the road", but it guarded the success only - the mileage was
+        # still paid wherever the ego drove, so a policy could farm the
+        # progress by leaving the road. Plan 076 T13 measured that hole
+        # on the signalled scene: the trained policy drove off the road
+        # after the green, forfeited the +5 success bonus and still
+        # collected the whole mileage.
+        #
+        # The same latch now covers the mileage, so the rule reads in one
+        # sentence: **the ego has to stay on the road to earn anything.**
+        if self._off_road:
+            progress = 0.0
         # The per-step charge is a **cost**, not an alive bonus: the passage
         # of time is priced the right way round (sooner is better), and
         # there is nothing to farm - standing still pays the cost without
@@ -859,10 +931,11 @@ class SimCore:
             self._terminated_reason = "red_light"
             reward -= 5.0
 
-        # Plan 076 T12: has the ego left the road? The latch is permanent
-        # - the success needs the ego to have STAYED on the road.
-        if lateral_offset(self.ego) > ROAD_HALF_WIDTH:
-            self._off_road = True
+        # Plan 076 T12: the "the ego left the road" latch is set right
+        # after the kinematics (Plan 076 T14 moved it up there, because
+        # the reward reads it: the mileage is only earned on the road).
+        # It is permanent - the success needs the ego to have STAYED on
+        # the road.
 
         # Plan 048: corridor has TWO intersections and a "pass through
         # both" success condition.

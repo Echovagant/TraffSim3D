@@ -1,24 +1,28 @@
 # Cross-Language Sim Contract
 
-> **状态（2026-10-21，Plan 076 T13）：信号灯合规场景进入契约 —— 第五个场景，两条新向量。**
+> **状态（2026-10-21，Plan 076 T13；2026-10-22 T14 补第三条向量）：信号灯合规场景进入契约 —— 第五个场景，三条新向量。**
 > T12 的结论是「在四个场景里 ego 从不面对红灯」——灯的相位钟每步都在走，但 30 s
 > 周期 ⇒ 首次换相在**第 300 步**，而 episode 在第 200 步就截断 ⇒ `red_light`
 > 终止数 = **0** ⇒ 脚本控制器永远不吃那 −5 ⇒ 「AI 学会开车」的门禁**不可达**
 > （基线可证站在物理步数下界上）。T13 新增场景 **`cross_signalled`**：ego 轴
 > **从红灯开始**（`ns_green=False`），周期 **12 s** ⇒ 首次换相在**第 121 步**，
 > 落在 episode 之内 ⇒ ego 必须**决策**：红灯停在停止线前，绿灯起步。
-> ⇒ 新增 2 条向量：`cross_signalled_light_phase`（停车 300 步 ⇒ 采样到的灯态
+> ⇒ 新增 3 条向量：`cross_signalled_light_phase`（停车 300 步 ⇒ 采样到的灯态
 > **两次换相**（样本步 130 / 250）⇒ **场景的灯周期首次可观测**）、
-> `cross_signalled_red_light`（满油门 ⇒ 第 34 步进路口 ⇒ `red_light` 终止）。
+> `cross_signalled_red_light`（满油门 ⇒ 第 34 步进路口 ⇒ `red_light` 终止）、
+> `cross_signalled_full_crossing`（T14：绿灯覆盖 + **转向残量 0.05** ⇒ 穿过路口
+> ⇒ **场景自己的 Pure Pursuit 目标**可观测 —— 目标从路口中心改成终点线之后，
+> 轨迹差 **2.59 m**）。
 > ⇒ golden 新增 `scene_light` 块（场景自己的灯：起始相位 + 周期长度），由
 > Python 侧**逐项**比对（两侧各持一份自己的拷贝 —— 共用一个文件会让比对变成空话）。
 > ⇒ 既有 **15** 条向量的**轨迹、终止原因与最终状态逐位不变**（T12 加了 3 条
-> 转向向量后是 15 条，T13 加 2 条 ⇒ 17 条）：重录 golden 的 diff
+> 转向向量后是 15 条，T13 加 2 条 ⇒ 17 条，T14 加 1 条 ⇒ **18 条**）：重录
+> golden 的 diff
 > 只有新增的 `scene_light` 块 + `road_rules.scene_goal_z` 里新增的一行
 > （15 个文件各 **+7 行 / −1 行**，那 −1 行只是 JSON 逗号；**样本与终态零改动**），
 > 15 个 `ts_kernel_*.json` **逐字节不变**。
-> 实测（2026-10-21）：`pytest tests/contract/` → **161 passed / 0 failed / 0 skipped**
-> （原 128；新增 33 条来自 2 条新向量的场景/kernel/常量/词表比对 + 变异门禁）。
+> 实测（2026-10-22）：`pytest tests/contract/` → **169 passed / 0 failed / 0 skipped**
+> （T13 后 161；T14 的第三条向量 + 它的变异门禁 +8）。
 >
 > **状态（2026-10-21，Plan 076 T12）：道路规则进入契约 —— 两条规则从「隐含」变成「被向量覆盖」。**
 > T12 给 ego 的训练 sim 改了四条规则（转向残量 / 时间项从奖励翻成成本 / 成功条件加横向约束 /
@@ -185,6 +189,7 @@ it needs a scalar-level entry point into the obs builder. See "Not covered".
 | `steer_residual` | cross | **Plan 076 T12 — the steering residual.** A non-zero `action[1]` (0.5), i.e. the policy's correction **on top of** the scripted Pure Pursuit steer. The old mirror ignored `action[1]` entirely, so this vector is what makes the steering channel observable on both sides. 30 steps, truncated at the limit (a turning trajectory ⇒ compared within the libm noise floor). |
 | `cross_signalled_light_phase` | cross_signalled | **Plan 076 T13 — the signalled scene's light schedule.** The ego's own axis starts **red** and the scene runs a **12 s** cycle, so the phase changes twice inside the episode: the sampled light bits flip on the samples of steps **130** (green) and **250** (red). This is the first vector that makes a scene's **own** light schedule observable — the four default scenes' 30 s cycle swaps on step 300, which no episode reaches. The ego stands still, so the episode truncates at step 300. |
 | `cross_signalled_red_light` | cross_signalled | **Plan 076 T13 — the red-light rule, in a scene that has one.** Full throttle: the ego enters the intersection on step **34**, while its own axis is still red, and both sides call it a red-light run. It is the vector that makes "the ego faces a red light" a *contract-covered* fact rather than a claim about the training. |
+| `cross_signalled_full_crossing` | cross_signalled | **Plan 076 T14 — the scene's Pure Pursuit target.** The light is overridden to green and the ego drives across the intersection **with a steering residual of 0.05**, so the trajectory keeps turning. That is what makes the scene's own pursuit target observable: the target is the **goal line** (0, +25), not the intersection centre (0, 0) — the centre is a point the ego passes on the way, and a pursuit that keeps aiming at it pulls the ego back after the crossing (measured: the heading drops, and the policy - whose "brake" behaviour is keyed on the heading - then stops 2.3 m short of the goal line). With the target on the goal line the two variants differ by **2.59 m** of x. A perfectly straight ego is *insensitive* to the target (the pursuit angle is ±π, whose sine is ~1e-16), which is why the residual is needed. |
 
 > **这两条向量是刻意极端的压力用例**，不是现实场景（偏出 60 m、航向偏 115°）。
 > 极端是有理由的：契约比较的是**采样点**（每 10 步一个），

@@ -17,6 +17,11 @@ class TrafficEnv(gym.Env[np.ndarray, np.ndarray]):
 
     Plan 048: `scene_kind='corridor'` switches to a 2-intersection
     corridor topology for multi-intersection training.
+
+    Plan 076 T14: `light_cycle_seconds` overrides the **signalled** scene's
+    light cycle for training (the light curriculum in `train.py`). `None`
+    (the default) is the scene's own cycle — the value the cross-language
+    contract pins.
     """
 
     metadata = {"render_modes": []}
@@ -28,9 +33,14 @@ class TrafficEnv(gym.Env[np.ndarray, np.ndarray]):
         self,
         max_steps: int = MAX_STEPS_DEFAULT,
         scene_kind: str = "cross",  # Plan 048: 'cross' | 'corridor'
+        light_cycle_seconds: float | None = None,
     ) -> None:
         super().__init__()
-        self.core = SimCore(max_steps=max_steps, scene_kind=scene_kind)
+        self.core = SimCore(
+            max_steps=max_steps,
+            scene_kind=scene_kind,
+            light_cycle_seconds=light_cycle_seconds,
+        )
 
     def reset(
         self,

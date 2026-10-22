@@ -403,6 +403,11 @@ export class SimCoreMirror {
   private target(): readonly [number, number] {
     if (this.sceneKind === 'corridor') return [0, 30]
     if (this.sceneKind === 'roundabout') return [0, PYTHON_SIM.ROUNDABOUT_RADIUS]
+    // Plan 076 T14: the signalled scene's target is the **goal line**, not
+    // the intersection centre — a pursuit target that stays ahead of the
+    // ego for the whole route (the same convention the corridor and
+    // roundabout scenes use). See Python's `SimCore.step()`.
+    if (this.sceneKind === 'cross_signalled') return [0, PYTHON_SIM.SCENE_GOAL_Z.cross_signalled]
     return [0, 0]
   }
 

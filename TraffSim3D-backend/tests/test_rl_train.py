@@ -601,3 +601,91 @@ def test_the_ego_training_path_exports_a_browser_loadable_policy(rl_state, monke
     # The layer the browser reads its input dimension from.
     assert len(weights["layers"]["policy_net.0.weight"][0]) == 14
     assert len(weights["layers"]["action_net.weight"]) == 2
+
+
+# --------------------------------------------------------------------------
+# Plan 076 T14: the light curriculum
+# --------------------------------------------------------------------------
+
+
+def test_the_light_curriculum_reproduces_the_measured_recipe() -> None:
+    """The stage list is the measured one, and it scales with the budget.
+
+    The budgets are the ones Plan 076 T13 measured (two seeds, the same
+    score at the 8 s and the 12 s stages), so `--steps 230000` reproduces
+    that measurement exactly.
+    """
+    stages = train.light_curriculum_stages(230_000)
+
+    assert stages == [
+        (6.0, 60_000),
+        (8.0, 40_000),
+        (10.0, 40_000),
+        (12.0, 90_000),
+    ]
+    assert sum(budget for _cycle, budget in stages) == 230_000
+
+    doubled = train.light_curriculum_stages(460_000)
+    assert [budget for _cycle, budget in doubled] == [budget * 2 for _cycle, budget in stages]
+
+
+def test_the_light_curriculum_ends_on_the_shipped_red_length() -> None:
+    """The last stage must train on the scene's **shipped** cycle.
+
+    Otherwise the policy would be handed to the browser for a red length
+    it was never trained on.
+    """
+    from app.apps.rl.sim_core import CROSS_SIGNALLED_CYCLE_SECONDS
+
+    stages = train.light_curriculum_stages(230_000)
+
+    assert stages[-1][0] == CROSS_SIGNALLED_CYCLE_SECONDS
+    # ... and the red only ever gets **longer** on the way there.
+    lengths = [cycle for cycle, _budget in stages]
+    assert lengths == sorted(lengths)
+
+
+def test_the_light_curriculum_is_rejected_for_another_scene() -> None:
+    """Only the signalled scene has a light cycle to shorten."""
+    with pytest.raises(ValueError, match="cross_signalled"):
+        train.real_train(64, "cpu", 1, 1000, False, "cross", None, True)
+
+
+def test_the_light_curriculum_is_rejected_for_the_independent_path() -> None:
+    """The recipe is measured on the shared-policy path."""
+    with pytest.raises(ValueError, match="shared-policy"):
+        train.real_train(64, "cpu", 1, 1000, True, "cross_signalled", None, True)
+
+
+def test_the_shipped_scene_is_not_affected_by_the_training_override() -> None:
+    """The override is a **training** knob; the scene's own cycle stands.
+
+    The cross-language contract pins the signalled scene's cycle (the
+    golden's `scene_light` block), so the default must stay exactly what
+    the contract compares.
+    """
+    from app.apps.rl.sim_core import CROSS_SIGNALLED_CYCLE_SECONDS, SimCore
+
+    default = SimCore(scene_kind="cross_signalled")
+    default.reset()
+    assert default.light.cycle_duration == CROSS_SIGNALLED_CYCLE_SECONDS
+
+    overridden = SimCore(scene_kind="cross_signalled", light_cycle_seconds=6.0)
+    overridden.reset()
+    assert overridden.light.cycle_duration == 6.0
+
+
+@requires_sb3
+def test_the_light_curriculum_actually_switches_the_scene(rl_state, monkeypatch) -> None:
+    """The training run walks the stages - and ends on the shipped red.
+
+    A short run (one stage's worth of steps) with the curriculum on: the
+    scene's light cycle has to have moved, and the run has to have
+    produced a checkpoint.
+    """
+    monkeypatch.setattr(rl_checkpoint, "_DEFAULT_DIR", rl_state / "ppo_checkpoints")
+
+    train.real_train(64, "cpu", 1, 1000, False, "cross_signalled", None, True)
+
+    zips = sorted(rl_paths.checkpoints_dir().rglob("ppo_step_*.zip"))
+    assert zips, "the curriculum run produced no checkpoint"

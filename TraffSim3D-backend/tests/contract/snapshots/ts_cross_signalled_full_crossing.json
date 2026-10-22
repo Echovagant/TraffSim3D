@@ -1,0 +1,121 @@
+{
+  "name": "cross_signalled_full_crossing",
+  "scene_kind": "cross_signalled",
+  "ego_id": "v-1",
+  "signal_vocabulary": {
+    "actions": [
+      "extend_green",
+      "shorten_red",
+      "preempt",
+      "force_all_red",
+      "no_op"
+    ],
+    "all_red_seconds": 3,
+    "phase_adjust_seconds": 5,
+    "max_green_seconds": 60,
+    "min_green_seconds": 10,
+    "inter_green_seconds": 6
+  },
+  "road_rules": {
+    "road_half_width": 3.5,
+    "scene_goal_z": {
+      "cross": 25,
+      "corridor": 25,
+      "t_junction": -3,
+      "roundabout": 5,
+      "cross_signalled": 25
+    }
+  },
+  "scene_light": {
+    "cycle_seconds": 12,
+    "ns_green_at_reset": false,
+    "ew_green_at_reset": true
+  },
+  "light_override": {
+    "ns_green": true,
+    "ew_green": false
+  },
+  "final_state": {
+    "terminated": true,
+    "truncated": false,
+    "reason": "success",
+    "final_step": 58,
+    "final_z": 26.186649508546672,
+    "final_x": -0.52161230627709,
+    "final_speed": 16.67
+  },
+  "samples": [
+    {
+      "step": 0,
+      "ego_id": "v-1",
+      "x": 0,
+      "z": -25,
+      "heading": 1.5707963267948966,
+      "speed": 0,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 10,
+      "ego_id": "v-1",
+      "x": -0.018724177544103954,
+      "z": -23.350115754716246,
+      "heading": 1.585964516090959,
+      "speed": 3,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 20,
+      "ego_id": "v-1",
+      "x": -0.11225083185766417,
+      "z": -18.701065425041516,
+      "heading": 1.5933658353466793,
+      "speed": 5.999999999999998,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 30,
+      "ego_id": "v-1",
+      "x": -0.2972319436440122,
+      "z": -11.053303343159271,
+      "heading": 1.59546638847126,
+      "speed": 9,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 40,
+      "ego_id": "v-1",
+      "x": -0.54614891207161,
+      "z": -0.4062180424981836,
+      "heading": 1.5923465757505124,
+      "speed": 12.000000000000007,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    },
+    {
+      "step": 50,
+      "ego_id": "v-1",
+      "x": -0.7583254857967909,
+      "z": 13.242029131539997,
+      "heading": 1.5794613564456077,
+      "speed": 15.000000000000014,
+      "light": {
+        "nsGreen": true,
+        "ewGreen": false
+      }
+    }
+  ]
+}

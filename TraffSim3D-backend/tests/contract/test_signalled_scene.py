@@ -61,6 +61,10 @@ VECTOR_PATH = CONTRACT_DIR / "test_vector.json"
 PHASE_VECTOR = "cross_signalled_light_phase"
 #: The vector that runs the red light.
 RED_LIGHT_VECTOR = "cross_signalled_red_light"
+#: The vector that drives the ego all the way across the intersection
+#: (with the light overridden to green), i.e. the one that exercises the
+#: scene's Pure Pursuit **target**.
+CROSSING_VECTOR = "cross_signalled_full_crossing"
 
 
 def _sample_every() -> int:
@@ -240,3 +244,61 @@ def test_the_two_sides_agree_on_the_red_light_run() -> None:
     py = _ensure_python_snapshot(v, sample_every=_sample_every())
     ts = _golden(RED_LIGHT_VECTOR)
     _assert_agrees(v, py, ts, _LIBM_NOISE_FLOOR)
+
+
+# --------------------------------------------------------------------------
+# The scene's Pure Pursuit target
+# --------------------------------------------------------------------------
+
+
+def test_the_crossing_vector_drives_past_the_intersection() -> None:
+    """The vector has to exercise the part of the route the target drives.
+
+    Plan 076 T14: the signalled scene's Pure Pursuit target is the **goal
+    line**, not the intersection centre (a point the ego passes on the way
+    - after which the scripted pursuit pulls the ego back and its heading
+    drops). The other two vectors stop before that point, so only this one
+    can see the target.
+    """
+    golden = _golden(CROSSING_VECTOR)
+
+    assert golden["final_state"]["reason"] == "success"
+    assert golden["final_state"]["final_z"] > 20.0, (
+        "the vector does not reach the far side of the intersection - it "
+        "cannot observe the pursuit target"
+    )
+    # It crosses the intersection centre (z = 0) on the way.
+    assert any(sample["z"] < 0.0 < golden["final_state"]["final_z"] for sample in golden["samples"])
+
+
+def test_the_pursuit_target_is_observable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mutation gate: the signalled scene's pursuit target is observable.
+
+    Putting the target back to the intersection centre (0, 0) - the
+    `cross` scene's target - pulls the ego back after the crossing and
+    changes the trajectory, so the contract has to notice.
+    """
+    v = _vector(CROSSING_VECTOR)
+    ts = _golden(CROSSING_VECTOR)
+
+    monkeypatch.setattr(SimCore, "pursuit_target", lambda self: (0.0, 0.0))
+    mutated = _ensure_python_snapshot(v, sample_every=_sample_every())
+
+    assert mutated["samples"] != ts["samples"], (
+        "the mutated pursuit target did not change the trajectory - the "
+        "vector does not observe the target"
+    )
+    with pytest.raises(AssertionError):
+        _assert_agrees(v, mutated, ts, _LIBM_NOISE_FLOOR)
+
+
+def test_the_signalled_scene_pursues_its_goal_line() -> None:
+    """The target is the goal line - a point that stays ahead of the ego."""
+    core = SimCore(scene_kind="cross_signalled")
+    core.reset()
+
+    target = core.pursuit_target()
+    assert target == (0.0, sim_core.SCENE_GOAL_Z["cross_signalled"])
+    assert target[1] > sim_core.SCENE_GOAL_Z["cross_signalled"] * 0.9

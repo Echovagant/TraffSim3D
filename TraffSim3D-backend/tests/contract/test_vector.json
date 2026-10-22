@@ -241,6 +241,16 @@
       "max_steps": 60,
       "actions": [[1.0, 0.0]],
       "repeat": 60
+    },
+    {
+      "name": "cross_signalled_full_crossing",
+      "scene_kind": "cross_signalled",
+      "ego_id": "v-1",
+      "n_steps": 120,
+      "max_steps": 120,
+      "actions": [[1.0, 0.05]],
+      "repeat": 120,
+      "light_override": { "ns_green": true, "ew_green": false }
     }
   ]
 }

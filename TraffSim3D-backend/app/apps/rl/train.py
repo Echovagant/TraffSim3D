@@ -124,6 +124,58 @@ def dry_run(
         st.finalize_status("dry_run_completed")
 
 
+#: Plan 076 T14: the **light curriculum** for the signalled scene.
+#:
+#: (the red's length in seconds, the env steps spent on that stage).
+#:
+#: Why it exists (Plan 076 T13, measured): PPO cannot learn the compliant
+#: behaviour in the shipped 12 s red on its own — the compliant branch is
+#: "brake while `obs[6] == 0`" for **120 consecutive steps**, which a
+#: Gaussian policy with a mean near zero almost never samples, so the
+#: policy only ever sees "run the red" (+11) and "stand still" (-10) and
+#: settles on the former. In a **6 s** red the same branch is sampled
+#: often enough (measured: the policy learns it in 25k steps) — but at
+#: that length the strongest constant throttle slips through on the green
+#: and the scene's gate is a tie (measured -0.100).
+#:
+#: The stages therefore walk the red from 6 s up to the shipped length.
+#: What transfers is the **light-state condition**, not a step count: the
+#: observation is memoryless, so the policy can only learn "brake while
+#: red, go while green" — which holds for any red length.
+#:
+#: The budgets are the **measured** ones (T13: two seeds, the same score
+#: at the 8 s and the 12 s stages).
+LIGHT_CURRICULUM_STAGES = (
+    (6.0, 60_000),
+    (8.0, 40_000),
+    (10.0, 40_000),
+    (12.0, 90_000),
+)
+
+
+def light_curriculum_stages(total_steps: int) -> list[tuple[float, int]]:
+    """The curriculum's stages, scaled to `total_steps`.
+
+    The budgets are the measured ones; a different `total_steps` scales
+    them proportionally, so `--steps 230000` reproduces the measurement
+    exactly and `--steps 460000` doubles every stage.
+    """
+    from .sim_core import CROSS_SIGNALLED_CYCLE_SECONDS
+
+    if LIGHT_CURRICULUM_STAGES[-1][0] != CROSS_SIGNALLED_CYCLE_SECONDS:
+        raise ValueError(
+            "the light curriculum was measured for a "
+            f"{LIGHT_CURRICULUM_STAGES[-1][0]} s red, but the signalled "
+            f"scene's cycle is now {CROSS_SIGNALLED_CYCLE_SECONDS} s - "
+            "re-measure the curriculum before using it"
+        )
+    measured = sum(budget for _cycle, budget in LIGHT_CURRICULUM_STAGES)
+    return [
+        (cycle, max(1, round(total_steps * budget / measured)))
+        for cycle, budget in LIGHT_CURRICULUM_STAGES
+    ]
+
+
 def real_train(
     total_steps: int,
     device: str,
@@ -132,6 +184,7 @@ def real_train(
     independent: bool = False,
     scene_kind: str = "cross",
     seed: int | None = None,
+    light_curriculum: bool = False,
 ) -> None:
     """Real PPO training via stable-baselines3 on the resolved device.
 
@@ -146,6 +199,13 @@ def real_train(
     when it is given none, so two runs of the same command differ; the
     signal trainer takes a seed for the same reason
     (`signal_train.train_signal_policy`).
+
+    `light_curriculum=True` (Plan 076 T14): walk the **signalled** scene's
+    red from short to long, so the policy learns the light-state condition
+    ("brake while red, go while green") on a red short enough for the
+    exploration to reach it, and then carries that condition over to the
+    shipped red length. It only makes sense for `cross_signalled` and on
+    the shared-policy path.
     """
     from . import capabilities as caps
     from . import checkpoint as ckpt
@@ -153,6 +213,19 @@ def real_train(
     from . import status as st
 
     resolved_device, reason = caps.resolve_device(device)
+
+    if light_curriculum:
+        if scene_kind != "cross_signalled":
+            raise ValueError(
+                "the light curriculum only applies to the 'cross_signalled' "
+                f"scene (got {scene_kind!r}) - the other scenes have no "
+                "light cycle to shorten"
+            )
+        if independent:
+            raise ValueError(
+                "the light curriculum is measured on the shared-policy path "
+                "(--independent is not supported with it)"
+            )
 
     # A fresh run starts with no outstanding pause/terminate request.
     ctl.clear_control()
@@ -163,6 +236,7 @@ def real_train(
     s["n_agents"] = n_agents
     s["independent_agents"] = independent
     s["scene_kind"] = scene_kind
+    s["light_curriculum"] = light_curriculum
     s["latest_checkpoint"] = ""
     st.write_status(s)
 
@@ -260,7 +334,25 @@ def real_train(
                 st.append_reward(float(ep_buf[-1]["r"]))
         return True
 
-    model.learn(total_timesteps=total_steps, callback=on_step)
+    if light_curriculum:
+        # Plan 076 T14: the light curriculum. Each stage shortens the
+        # signalled scene's red, learns on it, and the next stage puts the
+        # red back towards the shipped length. The scene reads the cycle
+        # at `reset()`, so a stage change takes effect at the next
+        # episode boundary.
+        stages = light_curriculum_stages(total_steps)
+        for cycle, stage_steps in stages:
+            for sub_env in env.envs:
+                sub_env.core.light_cycle_seconds = cycle
+            model.learn(
+                total_timesteps=stage_steps,
+                reset_num_timesteps=False,
+                callback=on_step,
+            )
+            if st.read_status().get("running") is False:
+                return
+    else:
+        model.learn(total_timesteps=total_steps, callback=on_step)
     # A terminate request stops SB3 early; don't relabel it as "completed".
     if st.read_status().get("running") is False:
         return
@@ -393,6 +485,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--light-curriculum",
+        action="store_true",
+        help=(
+            "Plan 076 T14: walk the signalled scene's red from short to long "
+            "while training, so the policy learns the light-state condition "
+            "('brake while red, go while green') on a red the exploration can "
+            "reach, and then carries it over to the shipped 12 s red. Only "
+            "valid with --scene-kind cross_signalled."
+        ),
+    )
+    parser.add_argument(
         "--curriculum",
         action="store_true",
         help="Curriculum learning: progressive scene difficulty (cross → t_junction → roundabout → corridor).",
@@ -430,6 +533,7 @@ def main() -> None:
             args.independent,
             args.scene_kind,
             args.seed,
+            args.light_curriculum,
         )
     except ImportError as e:
         print(f"SB3 unavailable ({e}); falling back to dry-run path.")
