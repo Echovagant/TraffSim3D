@@ -66,7 +66,7 @@
         </label>
         <label class="ctrl">
           <input v-model="dryRun" type="checkbox" data-testid="dry-run-checkbox" />
-          Dry-run (跳过 PPO，写假历史)
+          Dry-run 演示 (不执行 PPO, 曲线为合成数据)
         </label>
         <button
           class="primary"
@@ -117,18 +117,36 @@
           ><strong data-testid="metric-n-agents">{{ status.n_agents ?? '—' }}</strong>
         </div>
         <div class="metric">
+          <span>设备</span><strong data-testid="metric-device">{{ status.device || '—' }}</strong>
+        </div>
+        <div class="metric">
+          <span>场景</span><strong data-testid="metric-scene">{{ sceneLabel }}</strong>
+        </div>
+        <div class="metric">
           <span>最近 reward</span
           ><strong data-testid="metric-last-reward">{{
             formatNumber(status.last_reward, 2)
           }}</strong>
         </div>
-        <div class="metric" style="grid-column: span 2">
+        <div class="metric metric-wide">
           <span>最新 checkpoint</span>
           <strong data-testid="metric-checkpoint" :title="status.latest_checkpoint || ''">
             {{ status.latest_checkpoint || '—' }}
           </strong>
+          <span
+            v-if="isDryRun && status.latest_checkpoint"
+            class="dry-badge"
+            data-testid="checkpoint-dry-run-badge"
+            >dry-run 合成文件名</span
+          >
         </div>
-        <div class="metric" style="grid-column: span 2">
+        <div class="metric metric-wide">
+          <span>结束原因 (reason)</span>
+          <strong class="reason-text" data-testid="metric-reason">{{
+            status.reason || '—'
+          }}</strong>
+        </div>
+        <div class="metric metric-wide">
           <span>状态</span>
           <strong data-testid="metric-running">{{ status.running ? '运行中' : '已结束' }}</strong>
         </div>
@@ -136,7 +154,15 @@
     </section>
 
     <section class="card">
-      <h2>Reward 曲线 <span class="muted small">（逐 episode 采样回报 · 含噪声）</span></h2>
+      <h2>
+        Reward 曲线
+        <span class="muted small">{{
+          isDryRun ? '（dry-run 合成数据 · 非真实回报）' : '（逐 episode 采样回报 · 含噪声）'
+        }}</span>
+      </h2>
+      <p v-if="runProvenance" class="prov" :class="runProvenance.tone" data-testid="run-provenance">
+        {{ runProvenance.text }}
+      </p>
       <div v-if="status.reward_history.length === 0" class="muted">
         暂无数据 — 点击"开始训练"以生成样本。
       </div>
@@ -187,8 +213,13 @@
         class="muted small"
         data-testid="reward-curve-note"
       >
-        这是训练时随机策略<strong>采样</strong>得到的逐 episode
-        回报，噪声大、口径与下面的评估曲线不同 —— 它不能与固定周期基线比较，也不能与评估回报比较。
+        <template v-if="isDryRun">
+          这是 dry-run <strong>合成</strong>的曲线 —— 按构造生成，与策略学习无关，不能读作学习效果。
+        </template>
+        <template v-else>
+          这是训练时随机策略<strong>采样</strong>得到的逐 episode
+          回报，噪声大、口径与下面的评估曲线不同 —— 它不能与固定周期基线比较，也不能与评估回报比较。
+        </template>
       </p>
     </section>
 
@@ -565,17 +596,27 @@ interface SignalSeedResult {
 
 interface Status {
   running: boolean
+  /** Whether the live run is paused (the pause/resume control channel). */
+  paused?: boolean
   step: number
+  /** The step budget the run was started with. */
+  total_steps?: number
   episode_count: number
   last_reward: number
   reward_history: number[]
   started_at_ms: number
   finished_at_ms: number | null
+  /** The backend's own verdict on the run — how it ended, and whether it
+   *  was a dry run. `dry_run*` reasons mean no PPO ever ran. */
+  reason?: string
   device?: string
   device_reason?: string
   n_agents?: number
   independent_agents?: boolean
+  scene_kind?: string
   latest_checkpoint?: string
+  /** 'signal' when the signal-light agent wrote this status. */
+  policy_kind?: string
   /** Per-agent reward history (only when independent_agents=true).
    *  Keys are stringified int agent_ids ("0", "1", ...). */
   agent_rewards?: Record<string, number[]>
@@ -622,7 +663,13 @@ const sceneKind = ref<'cross' | 'corridor' | 't_junction' | 'roundabout'>('cross
 const independentAgents = ref(false)
 const curriculumMode = ref(false)
 const device = ref<'auto' | 'gpu' | 'cpu'>('auto')
-const dryRun = ref(true)
+/**
+ * The primary action must be a **real** training run.
+ *
+ * The dry-run path fabricates its reward series (`(0.5 + 0.5i + 0.1·sin i)`
+ * by construction), so it may only ever be an explicit opt-in.
+ */
+const dryRun = ref(false)
 const running = ref(false)
 const error = ref<string | null>(null)
 const status = ref<Status>({
@@ -788,7 +835,7 @@ const capabilitiesNote = computed(() => {
   const c = caps.value
   if (!c) return '检测后端能力中…'
   if (!c.sb3_available) {
-    return '⚠ stable-baselines3 未安装（未跑 `uv sync --extra rl`），将自动 fallback 到 dry-run。'
+    return '⚠ stable-baselines3 未安装：训练会退化为 dry-run（界面会标注"未执行 PPO"），不会产出真实策略。'
   }
   if (!c.cuda_available) {
     return `ℹ 未检测到 CUDA（torch ${c.torch_version || '未装'}），将使用 CPU。`
@@ -797,6 +844,70 @@ const capabilitiesNote = computed(() => {
     return `⚠ GPU 显存仅 ${c.vram_gb.toFixed(1)} GB < ${c.min_vram_gb} GB 阈值，auto 会 fallback CPU。`
   }
   return `✓ GPU 可用: ${c.device_name} (${c.vram_gb.toFixed(1)} GB)`
+})
+
+// ===== the run's provenance ================================================
+//
+// The curve on screen is only meaningful together with **where it came
+// from**. The backend says so in two independent places: the resolved
+// device is `dry_run` when stable-baselines3 is missing, and the final
+// `reason` is `dry_run*` on every synthetic path. The UI must never
+// present a synthetic series as a learning curve — so a run counts as a
+// dry run if *either* signal says so, and only a run that says neither
+// is presented as a real training run.
+
+const SCENE_LABELS: Record<string, string> = {
+  cross: '单路口',
+  corridor: '走廊 (2 路口)',
+  t_junction: 'T 型路口',
+  roundabout: '环形路口',
+  cross_signalled: '信号灯路口',
+}
+
+const sceneLabel = computed(() => {
+  const kind = status.value.scene_kind
+  if (!kind) return '—'
+  return SCENE_LABELS[kind] ?? kind
+})
+
+/** True when the run on screen never executed PPO. */
+const isDryRun = computed<boolean>(() => {
+  const s = status.value
+  if (s.device === 'dry_run') return true
+  return (s.reason ?? '').startsWith('dry_run')
+})
+
+interface Provenance {
+  tone: 'warn' | 'ok'
+  text: string
+}
+
+/**
+ * One honest line about where the curve came from.
+ *
+ * Nothing is claimed beyond what the backend's own status says: a dry run
+ * is labelled as synthetic, a real run is labelled with the device and
+ * the scene it ran on.
+ */
+const runProvenance = computed<Provenance | null>(() => {
+  const s = status.value
+  const hasRun = s.running || s.step > 0 || s.reward_history.length > 0
+  if (!hasRun) return null
+  if (isDryRun.value) {
+    // A fallback reason ("auto_fallback_no_sb3") explains *why* there was
+    // no PPO; "dry_run_requested" only repeats what the label says.
+    const why =
+      s.device_reason && s.device_reason !== 'dry_run_requested' ? `（${s.device_reason}）` : ''
+    return {
+      tone: 'warn',
+      text: `本次为 dry-run 演示（未执行 PPO）${why} —— 下面的 reward 曲线是合成数据，不是学习曲线。`,
+    }
+  }
+  const parts = ['真实 PPO 训练']
+  if (s.policy_kind === 'signal') parts.push('信号灯 agent (离散动作)')
+  if (s.device) parts.push(`设备 ${s.device}`)
+  if (s.scene_kind) parts.push(`场景 ${sceneLabel.value}`)
+  return { tone: 'ok', text: parts.join(' · ') }
 })
 
 const chartW = 600
@@ -1055,7 +1166,9 @@ const onStart = async (): Promise<void> => {
     }
     running.value = true
     showFlashMessage(
-      `训练已启动 (${steps.value} 步, ${nAgents.value} agents, dry_run=${dryRun.value})`,
+      `训练已启动 (${steps.value} 步, ${nAgents.value} agents, ${
+        dryRun.value ? 'dry-run 演示 — 不执行 PPO' : '真实 PPO'
+      })`,
       'info',
     )
     await refreshStatus()
@@ -1295,6 +1408,45 @@ button.ghost:disabled {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.metric.metric-wide {
+  grid-column: span 2;
+}
+.metric .reason-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #cbd5e1;
+  word-break: break-all;
+}
+.metric span.dry-badge {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.18);
+  color: #fcd34d;
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+/* Where the curve came from — a dry run must never read as a real one. */
+.prov {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+.prov.warn {
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fcd34d;
+}
+.prov.ok {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(148, 163, 184, 0.25);
+  color: #cbd5e1;
 }
 .metric span {
   font-size: 11px;

@@ -18,7 +18,9 @@ router = APIRouter()
 
 class TrainRequest(BaseModel):
     steps: int = 1000
-    dry_run: bool = True
+    # A real PPO run is the default: `dry_run` fabricates an ascending reward
+    # curve and must be asked for explicitly.
+    dry_run: bool = False
     device: str = "auto"  # 'auto' | 'gpu' | 'cpu' — GPU support
     n_agents: int = 2  # stacked TrafficEnvs sharing PPO
     save_every: int = 5000  # checkpoint save interval

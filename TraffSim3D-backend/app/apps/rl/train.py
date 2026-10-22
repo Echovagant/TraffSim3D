@@ -86,6 +86,10 @@ def dry_run(
     s["independent_agents"] = independent
     s["n_agents"] = n_agents
     s["scene_kind"] = scene_kind
+    # No device ran anything: say so in the same field the real path uses,
+    # so the UI can answer "where did this come from" for a dry run too.
+    s["device"] = "dry_run"
+    s["device_reason"] = "dry_run_requested"
     st.write_status(s)
 
     n_episodes = max(1, total_steps // 200)
@@ -107,8 +111,12 @@ def dry_run(
         s["step"] = total_steps
         s["episode_count"] = n_episodes
         s["last_reward"] = float(s["reward_history"][-1]) if s["reward_history"] else 0.0
+        # The marker sits on *every* name, not once at the end of the
+        # list: "a.zip, b.zip, c.zip (dry_run)" reads as if only the last
+        # agent was a dry run, and this name is what the UI shows next to
+        # the curve.
         s["latest_checkpoint"] = ", ".join(
-            f"ppo_agent{i}_step_{total_steps:07d}.zip" for i in range(n_agents)
+            f"ppo_agent{i}_step_{total_steps:07d}.zip (dry_run)" for i in range(n_agents)
         )
         st.write_status(s)
         st.finalize_status(

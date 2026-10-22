@@ -310,6 +310,24 @@ describe('AIPlaygroundView — the training curve', () => {
     expect(view.find('[data-testid="reward-line"]').exists()).toBe(true)
   })
 
+  it('says the curve is synthetic when the run was a dry run', async () => {
+    // A dry run's series is fabricated by construction. Calling it a
+    // "sampled return" would dress synthetic data up as a measurement.
+    const view = await mountViewWithStatus({
+      ...FAKE_STATUS,
+      reason: 'dry_run_completed',
+      device: 'dry_run',
+      latest_checkpoint: 'ppo_step_0000400.zip (dry_run)',
+    })
+
+    const note = view.get('[data-testid="reward-curve-note"]').text()
+    expect(note).toContain('合成')
+    expect(note).not.toContain('采样')
+
+    const provenance = view.get('[data-testid="run-provenance"]').text()
+    expect(provenance).toContain('未执行 PPO')
+  })
+
   it('shows neither the curve nor the table when the run measured nothing', async () => {
     fetchSpy.mockImplementation((url: string) => {
       if (String(url).includes('/rl/status')) {

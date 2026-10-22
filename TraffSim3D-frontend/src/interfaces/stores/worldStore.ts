@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, shallowRef } from 'vue'
+import { ref, shallowRef, watch } from 'vue'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { Vehicle } from '@domain/entities/Vehicle'
 import type { TrafficLight } from '@domain/entities/TrafficLight'
@@ -548,9 +548,31 @@ export const useWorldStore = defineStore('world', () => {
     tickRate.value = ladder[next]!
   }
 
-  // FPS rolling window (500ms)
+  // ===== frame-time / FPS measurement =====
+  //
+  // The `dt` that reaches step() is clamped twice on its way in: the
+  // renderer caps it at 0.1 s (tab-switch guard) and the store caps it
+  // at 1/30 s (anti-tunnelling guard). Measuring frame times from that
+  // value made a 20 fps page read as 30 fps and pinned the reported
+  // frame time at 33.3 ms — the readouts could not describe a slow
+  // frame at all.
+  //
+  // step() is called exactly once per rendered frame (the renderer's
+  // rAF loop is its only caller), so the wall-clock gap between two
+  // consecutive calls IS the frame interval. That is what is measured
+  // now: `performance.now()` deltas, never the clamped dt. The FPS
+  // number is therefore the real render rate and can go below 30 fps
+  // or report a frame longer than 33.3 ms.
+  //
+  // A gap longer than FRAME_SAMPLE_MAX_GAP_MS means the simulation was
+  // not running (paused / route change / backgrounded tab) rather than
+  // a slow frame. Such samples are dropped and the rolling window is
+  // restarted, so a 10 s pause cannot masquerade as a 10 s frame.
+  const FRAME_SAMPLE_MAX_GAP_MS = 1000
+
+  let lastStepAtMs: number | null = null
   let frameCount = 0
-  let fpsAcc = 0
+  let fpsWindowMs = 0
   let lastFpsUpdateMs = performance.now()
 
   // Frame-time rolling window (30 frames, ~0.5s at 60fps).
@@ -564,11 +586,37 @@ export const useWorldStore = defineStore('world', () => {
   let frameWindowMs = 0
   let frameWindowCount = 0
 
+  // A pause stops the renderer from calling step(), so the first
+  // sample after resuming would span the whole pause. Drop the
+  // baseline on every pause / resume so the pause gap is never
+  // counted as a slow frame.
+  watch(isRunning, () => {
+    lastStepAtMs = null
+  })
+
+  /** Clear the FPS / frame-time readouts and restart the measurement
+   *  window. Called by a view that mounts a fresh renderer, so the
+   *  readouts describe the current session instead of the previous
+   *  route's leftovers. */
+  const resetFrameStats = (): void => {
+    fps.value = 0
+    frameMsMin.value = Infinity
+    frameMsMax.value = -Infinity
+    frameMsAvg.value = 0
+    frameWindowMs = 0
+    frameWindowCount = 0
+    frameCount = 0
+    fpsWindowMs = 0
+    lastStepAtMs = null
+    lastFpsUpdateMs = performance.now()
+  }
+
   const step = (dt: number): number => {
     // Clamp dt (I5): 防止卡顿后大跳跃穿模, AND 防止 rAF 边界
-    // 偶发的负 dt 进入 frame-time 统计 (会把 min 拉到 -0.x ms,
-    // 看起来像 bug). 上下界都 clamp 后 simTime/tick/frame 统计
-    // 都用同一个值.
+    // 偶发的负 dt 进入仿真推进 (会把车辆位置往回推). 上下界都 clamp 后
+    // simTime/tick 都用同一个值.
+    // 注意: 帧率 / 帧耗时**不**用这个值 — 它们测的是真实的帧间隔,
+    // 见下面的 frame-time 统计块.
     const clampedDt = Math.max(0, Math.min(dt, 1 / 30))
     simTime += clampedDt
     tick(network.value, clampedDt, simTime, {
@@ -610,27 +658,41 @@ export const useWorldStore = defineStore('world', () => {
 
     tickCount.value += 1
 
-    // Frame-time stats
-    const ms = clampedDt * 1000
-    frameMsMin.value = Math.min(frameMsMin.value, ms)
-    frameMsMax.value = Math.max(frameMsMax.value, ms)
-    frameWindowMs += ms
-    frameWindowCount += 1
-    if (frameWindowCount >= 30) {
-      frameMsAvg.value = frameWindowMs / frameWindowCount
+    // Frame-time stats + FPS, measured from the wall clock between
+    // two consecutive frames (see the measurement block above). The
+    // clamped `dt` is deliberately NOT used here — it can never
+    // describe a frame slower than 33.3 ms.
+    const nowMs = performance.now()
+    const elapsedMs = lastStepAtMs === null ? null : nowMs - lastStepAtMs
+    lastStepAtMs = nowMs
+    if (elapsedMs === null || elapsedMs < 0 || elapsedMs >= FRAME_SAMPLE_MAX_GAP_MS) {
+      // No sample yet, or the sim was not running (pause / route
+      // change / backgrounded tab): drop the stale window so the
+      // averages describe the current run.
+      frameCount = 0
+      fpsWindowMs = 0
       frameWindowMs = 0
       frameWindowCount = 0
+    } else {
+      frameMsMin.value = Math.min(frameMsMin.value, elapsedMs)
+      frameMsMax.value = Math.max(frameMsMax.value, elapsedMs)
+      frameWindowMs += elapsedMs
+      frameWindowCount += 1
+      if (frameWindowCount >= 30) {
+        frameMsAvg.value = frameWindowMs / frameWindowCount
+        frameWindowMs = 0
+        frameWindowCount = 0
+      }
+      frameCount += 1
+      fpsWindowMs += elapsedMs
     }
 
-    // FPS rolling window
-    frameCount += 1
-    fpsAcc += clampedDt
-    const now = performance.now()
-    if (now - lastFpsUpdateMs >= 500) {
-      fps.value = fpsAcc > 0 ? Math.round(frameCount / fpsAcc) : 0
+    // FPS rolling window (500 ms of wall clock)
+    if (nowMs - lastFpsUpdateMs >= 500) {
+      if (fpsWindowMs > 0) fps.value = Math.round((frameCount * 1000) / fpsWindowMs)
       frameCount = 0
-      fpsAcc = 0
-      lastFpsUpdateMs = now
+      fpsWindowMs = 0
+      lastFpsUpdateMs = nowMs
     }
 
     // Returned to the renderer so it can drive flashing light phases
@@ -1047,6 +1109,7 @@ export const useWorldStore = defineStore('world', () => {
     frameMsMin,
     frameMsMax,
     frameMsAvg,
+    resetFrameStats,
     togglePause,
     setRunning,
     setTickRate,

@@ -269,8 +269,13 @@ def test_dry_run_independent_builds_one_curve_per_agent(rl_state) -> None:
     assert status["running"] is False
     assert status["reason"] == "dry_run_independent_completed"
     assert status["independent_agents"] is True
+    # Every name carries the dry-run marker: this string is what the UI
+    # shows next to the curve, so it must not be readable as a real
+    # checkpoint.
     assert status["latest_checkpoint"] == (
-        "ppo_agent0_step_0000600.zip, ppo_agent1_step_0000600.zip, ppo_agent2_step_0000600.zip"
+        "ppo_agent0_step_0000600.zip (dry_run), "
+        "ppo_agent1_step_0000600.zip (dry_run), "
+        "ppo_agent2_step_0000600.zip (dry_run)"
     )
 
 
