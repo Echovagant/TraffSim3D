@@ -439,7 +439,7 @@ cd TraffSim3D-backend
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-2026-10-21 实测**收集到 292 个用例**（约 2 秒）。
+实测**收集到 616 个用例**（613 通过 / 3 跳过，约 4–5 分钟 —— 训练路径的用例会真的起 PPO 子进程，耗时主要在那里）。
 
 覆盖率（需先装 `pytest-cov`）：
 
@@ -482,7 +482,7 @@ npm run lint            # ESLint（会自动修复）
 `simCoreMirror.ts` 或 `tick.ts` 时它照样绿；只跑第 2 步则只证明 golden 与 TS
 代码一致，不证明两个实现一致。**两者合起来才是契约。**
 
-> **e2e job 为什么暂时不阻塞**：仓库的 25 张视觉回归基线是在 **Windows +
+> **e2e job 为什么暂时不阻塞**：仓库的 28 张视觉回归基线是在 **Windows +
 > Chromium 1228（headless, SwiftShader）** 上录的。Linux runner 的 Chromium
 > 版本与字体光栅化都不同，像素比对**预期**会不一致，而本机没有 Linux runner
 > 可以验证。因此该 job 标了 `continue-on-error: true`，并且**没有**排除视觉

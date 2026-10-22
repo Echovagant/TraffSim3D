@@ -28,6 +28,17 @@ curl http://localhost:8000/health
 
 Python 3.12, `uv` package manager. `pyproject.toml` lists all deps.
 
+> **If `uv sync` hangs** (no output, CPU idle) on a slow or filtered network,
+> `uv`'s HTTP client can stall instead of failing. Fall back to the venv
+> interpreter directly — see [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md)
+> §3 for the mirror-source setup:
+>
+> ```bash
+> python -m venv .venv
+> .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+> .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+> ```
+
 ---
 
 ## Testing
@@ -43,8 +54,13 @@ uv run ruff check .
 uv run mypy app
 ```
 
+The same fallback applies here — replace `uv run python -m …` with
+`.\.venv\Scripts\python.exe -m …` when `uv` stalls.
+
 Tests use **httpx2 + ASGITransport** for in-process FastAPI testing
-(no uvicorn subprocess overhead — each test runs in <100ms).
+(no uvicorn subprocess overhead). The full suite is **616 collected**
+(613 passed, 3 skipped) and takes roughly 4–5 minutes — the training-path
+tests spawn real PPO subprocesses, so they dominate the runtime.
 
 ---
 
@@ -211,19 +227,25 @@ for production use in those regions.
 Training status (current step, reward history, running flag) is persisted
 to a JSON file:
 
-- Default path: `/tmp/traffic_ppo_status.json`
+- Default path: `<backend root>/.data/training_status.json`
+  (anchored to the backend directory on purpose — a `/tmp` default is a trap on
+  Windows, where it resolves against the current drive rather than a temp dir)
 - Override via env: `TRAFFIC_PPO_STATUS=/path/to/status.json`
+- The checkpoint directory and the training-control file live next to it
+  (`.data/`), overridable via `PPO_CHECKPOINT_DIR` and `TRAFFIC_PPO_CONTROL`
 - Format:
   ```json
   {
     "running": false,
+    "paused": false,
     "step": 1000,
+    "total_steps": 1000,
     "episode_count": 5,
     "last_reward": 12.5,
     "reward_history": [0.1, 0.5, 1.2, ...],
     "started_at_ms": 1719374400000,
     "finished_at_ms": 1719374405000,
-    "reason": "dry_run_completed"
+    "reason": "ppo_completed on cpu (1 agents)"
   }
   ```
 
@@ -242,20 +264,20 @@ TraffSim3D-backend/
 │   │   ├── maps.py            # POST /api/v1/maps/parse-osm
 │   │   └── rl.py              # POST /api/v1/rl/train + GET /api/v1/rl/{status,capabilities}
 │   ├── apps/
-│   │   ├── maps/osm_parser.py # XML → RoadNetwork
-│   │   └── rl/
-│   │       ├── sim_core.py    # Minimal Python sim (4-way intersection)
-│   │       ├── env.py         # Gymnasium wrapper
-│   │       ├── status.py      # status.json I/O
-│   │       └── train.py       # PPO entry point
+│   │   ├── maps/              # OSM XML + PBF → RoadNetwork, road graph, Overpass cache
+│   │   ├── rl/                # Gymnasium env, PPO training, checkpoints, weights export
+│   │   ├── simulation/        # scaffolded, not yet implemented
+│   │   └── perception/        # scaffolded, not yet implemented
 │   ├── core/, models/, storage/  # scaffolded, not yet implemented
 ├── tests/
 │   ├── test_smoke.py          # health + ping
-│   ├── test_osm_parser.py     # 10 unit tests for parser
-│   ├── test_api_maps.py       # 3 httpx2 in-process API tests
-│   ├── test_rl_sim.py         # 7 sim core unit tests
-│   ├── test_rl_env.py         # 6 Gym env contract tests
-│   └── test_rl_api.py         # 2 RL API tests
+│   ├── test_osm_parser.py     # OSM XML + PBF parser
+│   ├── test_road_graph.py     # road graph + A* (with a Dijkstra oracle)
+│   ├── test_api_maps.py       # in-process API tests
+│   ├── test_rl_sim.py         # sim core unit tests
+│   ├── test_rl_env.py         # Gym env contract tests
+│   ├── test_rl_api.py         # RL API tests
+│   └── contract/              # cross-language contract vectors
 ├── pyproject.toml
 └── README.md (this file)
 ```
@@ -264,6 +286,6 @@ TraffSim3D-backend/
 
 ## Follow-ups
 
-- Multi-agent RL, PPO long training runs, checkpoint management.
-- OSM PBF parser (`osmpbf`), 高德 amap_parser, pre-extracted city files, OSM→elevated roads end-to-end e2e.
-- Cross-language contract test (TS sim ↔ Python sim snapshot diff), production deployment (ADR-007 Docker Compose), test coverage ≥70%.
+- Multi-agent RL at scale, PPO long training runs, checkpoint management.
+- 高德 amap_parser, pre-extracted city files, OSM→elevated roads end-to-end e2e.
+- Coverage is currently **90 %** (`pytest --cov=app`); the CI gate is ≥ 70 %.

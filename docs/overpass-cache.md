@@ -39,13 +39,14 @@ GET /api/v1/maps/overpass/cache
 
 ## Test results
 
-- 71/71 backend pass (was 68, +3 cache tests):
+- Backend suite: **616 collected** (613 passed, 3 skipped), including the three
+  cache tests:
   - `test_cache_miss_then_hit` — first call hits Overpass + writes
     cache; second call reads disk without HTTP
   - `test_different_queries_get_different_cache_keys` — no cross-talk
   - `test_atomic_write` — write-through tmp file → atomic replace
-- 180/180 frontend unit pass
-- 31/31 frontend e2e pass
+- Frontend unit suite: **736 passed**
+- Frontend e2e suite: **41 tests — 40 passed, 1 skipped**
 
 ## Cache invalidation
 

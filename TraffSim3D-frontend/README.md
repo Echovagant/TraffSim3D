@@ -35,11 +35,17 @@ npm run test:e2e           # Playwright end-to-end + visual regression
 npm run contract:check     # cross-language contract snapshots
 ```
 
-Unit tests cover the pure functions in `src/domain/`, the serializer in
-`src/infrastructure/persistence/`, the `tick` step function in
-`src/application/services/` and the views. The end-to-end suite drives a live
-dev server and compares screenshots against the baselines in
-`../e2e-output/baseline/`.
+Unit tests (736 across 55 files) cover the pure functions in `src/domain/`,
+the serializer in `src/infrastructure/persistence/`, the `tick` step function in
+`src/application/services/` and the controllers. The end-to-end suite (41
+Playwright tests) drives a live dev server and compares screenshots against the
+baselines in `../e2e-output/baseline/`.
+
+Coverage of the **views** is uneven, and worth knowing before you rely on it:
+only the AI Playground has view-level specs (`AIPlaygroundView.spec.ts`,
+`AIPlaygroundTrainingCurve.spec.ts`). The other screens are covered by
+end-to-end specs — except `/simulation-lab`, `/backend` and `/deliverables`,
+which currently have **no** view-level test at all.
 
 ## Architecture cheat sheet
 
