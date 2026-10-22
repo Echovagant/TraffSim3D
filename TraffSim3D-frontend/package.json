@@ -2,6 +2,7 @@
   "name": "traffsim3d-frontend",
   "version": "0.0.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
@@ -14,7 +15,7 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "test:e2e:perf": "playwright test tests/e2e/m1-perf-gate.spec.ts",
+    "test:e2e:perf": "playwright test tests/e2e/perf-gate.spec.ts",
     "test:e2e:probe": "playwright test tests/e2e/scene-capacity-probe.spec.ts",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:update": "playwright test --update-snapshots",

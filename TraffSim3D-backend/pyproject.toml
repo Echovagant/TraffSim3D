@@ -2,13 +2,14 @@
 name = "traffsim3d-backend"
 version = "0.1.0"
 description = "TraffSim3D backend: FastAPI + PyTorch multi-agent RL service for 3D traffic simulation"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
-    "python-multipart>=0.0.20",  # Plan 041: required for UploadFile endpoints
+    "python-multipart>=0.0.20",  # required for UploadFile endpoints
     "gymnasium>=1.3.0",
     "numpy>=2.5.0",
     "pbf>=0.2.0",
@@ -27,7 +28,7 @@ dev = [
 rl = [
     "stable-baselines3>=2.2",
 ]
-# PyTorch is intentionally NOT pinned here yet — added in M4 when the RL engine lands.
+# PyTorch is intentionally NOT pinned here — it is added with the RL engine.
 # Pinning now risks 2 GB+ installs of a torch version that may not have wheels for the local Python.
 
 [build-system]
