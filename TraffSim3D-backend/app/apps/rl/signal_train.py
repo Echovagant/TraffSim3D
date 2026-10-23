@@ -27,31 +27,55 @@ listing keeps working.
 THE GATE — the trained policy must beat the fixed cycle
 --------------------------------------------------------
 The fixed 30/30 cycle (`no_op` on every step) is the baseline a trained
-policy has to beat: on the 600-step horizon it scores **-423.1**.
-`evaluate_policy` measures the trained policy the same way —
+policy has to beat. `evaluate_policy` measures the trained policy the same way —
 deterministic argmax, the same env, the same horizon — so the two numbers
 are comparable and not a comparison of two different measurement setups.
 
-MEASURED (2026-10-21, seed 0, 300 k steps, ~20 min on one CPU core):
+MEASURED on the current environment (600-step horizon, the open-traffic
+model, one CPU core):
 
-    fixed 30/30 (no_op)          -423.1
-    trained signal policy         **-399.9**   (23.2 better, 5.5 %)
-    trained action mix            no_op 358 / shorten_red 242 (of 600)
+    fixed 30/30 (no_op)          -292.8   (train condition)
+    fixed 30/30 (no_op)          -313.6   (eval condition)
+    fixed 30/30 (no_op)          -233.8   (holdout condition)
 
-The trained policy's mix is the rule the measurements predicted: shorten the
-green while it is still young, which lets the busier axis get its green
-earlier. A brute-force search over that rule family (`.data` scratch script)
-puts the best reachable return at **-399.9** — the policy found the optimum
-of that family, not merely "better than the baseline".
+WHAT THE REWARD MODEL CAN REACH — measured, not asserted. A policy that
+shortens the green while it is still young (letting the busier axis get
+its green earlier) beats the fixed cycle on **every** condition:
 
-**Seed sensitivity**: the recipe is not seed-proof. Measured over four
-seeds (300 k steps each): seed 0 → **-399.9**, seed 1 → -423.1 (its action
-distribution collapsed onto `no_op` before the conditional rule was found),
-seed 2 → **-399.9**, seed 3 → -423.1 (same collapse). So **2 of 4 seeds**
-beat the baseline, and the two that did both landed on the *same* optimum
-(-399.9). The run therefore keeps the **best** checkpoint it measured
-rather than the last one, and the status file records the best return and
-the step it came from.
+    constant `shorten_red`       -260.8 / -236.0 / -216.4
+                                   (gap +32.0 / +77.6 / +17.4)
+
+    best conditional rule        -222.6 on the train condition (gap +70.2)
+
+So the environment is **not** degenerate: a reachable optimum exists, and
+the reward is dense enough to express it. What the environment does *not*
+give the learner is a **one-step** signal — shortening a phase pays off
+later, when the other axis gets its green earlier. Measured over one
+episode, the one-step reward difference between `shorten_red` and `no_op`
+is ~0 (296 of 601 steps identical, mean +0.0013). A policy has to learn
+the *delayed* payoff through the value function, which is why the training
+recipe below matters so much.
+
+TRAINING RECIPE — see `ACTION_PRIOR_BIAS` and `DEFAULT_ENT_COEF` for the
+measurements that fix those two numbers. The short version: a strong
+`no_op` prior with no entropy term collapses (every seed ended on
+`no_op` for all 600 steps, with a return exactly equal to the baseline's
+— the policy had learned nothing); a weaker prior plus a non-zero
+entropy coefficient reaches **+44.80** over the fixed cycle on the train
+condition.
+
+The run keeps the **best** checkpoint it measured rather than the last
+one: the evaluation curve is not monotone (the policy can fall back onto
+the default), so "the last checkpoint" is not necessarily "the best
+policy", and the browser runs the **argmax**, which is what the evaluation
+measures. The status file records the best return and the step it came
+from.
+
+**Seed sensitivity**: the recipe is not seed-proof — the search has to
+escape a starting point that is deliberately biased, and how well it does
+so varies with the seed. Every seed's number is recorded — in the run
+metadata, in the status document and in the CLI output — so a seed that
+collapsed onto the baseline is reported, never hidden.
 
 MULTIPLE SEEDS, BEST OF N
 -------------------------
@@ -85,7 +109,7 @@ deterministic evaluation return against the training step — plus the
 fixed-cycle baseline it has to beat, so the status document keeps
 
     "signal_eval_series": [
-        {"step": 10000, "return": -455.4, "baseline": -423.1, "condition": "train"},
+        {"step": 10000, "return": -248.0, "baseline": -292.8, "condition": "train"},
     ]
 
 one point per evaluation. Two rules make the curve readable:
@@ -179,11 +203,44 @@ EVAL_SERIES_MAX_POINTS = 200
 #: not a change to the MDP: the action space, the reward, the traffic model
 #: and the signal semantics are untouched, and nothing stops the agent from
 #: moving the bias back if the data says so.
+#:
+#: HOW STRONG IT SHOULD BE — measured, not guessed. The prior used to bias
+#: `no_op` by **+3.0** with **no** entropy term. That combination collapses:
+#: the policy starts at `p(no_op) ≈ 0.9`, and the reward gives it almost
+#: nothing to leave. Measured over 300 k steps, every seed ended on
+#: `no_op` for all 600 steps, with a return *exactly equal* to the fixed
+#: cycle's — the policy had learned nothing at all.
+#:
+#: The reason the gradient cannot rescue it: the one-step advantage of
+#: `shorten_red` over `no_op` is ~0 (measured: 296 of 601 steps had an
+#: identical reward, mean difference +0.0013) because shortening a phase
+#: pays off *later*, when the other axis gets its green earlier. A policy
+#: that is already 90 % committed to `no_op` needs a very large accumulated
+#: advantage to escape, and it never accumulates one.
+#:
+#: The fix is a **weaker** prior on `no_op` plus a **non-zero** entropy
+#: coefficient, so the search actually explores. Measured on the training
+#: condition (600 steps, fixed-cycle baseline −292.80):
+#:
+#:     prior no_op=+3.0, ent 0.00  ->  p(no_op)=0.904, gap  ±0.00  (collapsed)
+#:     prior no_op=+2.0, ent 0.01  ->  p(no_op)=0.537, gap  −5.40  (escaped, not converged)
+#:     prior no_op=+1.0, ent 0.02  ->  p(no_op)=0.198, gap +44.80  (learned)
+#:
+#: The third row is the recipe: it reaches **+44.80** over the fixed
+#: cycle, with an action mix of `shorten_red` 1614 / `no_op` 186. A weaker
+#: prior with *no* entropy term is not enough either — with `ent_coef = 0`
+#: the same prior walks into the all-red cliff instead (measured: −888.00,
+#: i.e. every step `force_all_red`).
 ACTION_PRIOR_BIAS: dict[str, float] = {
-    "no_op": 3.0,
+    "no_op": 1.0,
     "preempt": -3.0,
     "force_all_red": -3.0,
 }
+
+#: PPO's entropy coefficient. The exploration term that lets the policy
+#: leave the prior's starting point — see `ACTION_PRIOR_BIAS` for the
+#: measurements that fix this number.
+DEFAULT_ENT_COEF = 0.02
 
 #: The discount factor the run uses by default.
 #:
@@ -365,7 +422,7 @@ def train_signal_policy(
     learning_rate: float = 3e-4,
     gamma: float = DEFAULT_GAMMA,
     gae_lambda: float = DEFAULT_GAE_LAMBDA,
-    ent_coef: float = 0.0,
+    ent_coef: float = DEFAULT_ENT_COEF,
     n_steps: int = 2048,
     batch_size: int = 64,
     eval_every: int = 10_000,
@@ -577,7 +634,8 @@ def train_signal_policy(
         )["return"]
     if train_baseline is None:
         # The published baseline: the fixed 30/30 cycle on the
-        # **training** condition (-423.1 over 600 steps). The series already
+        # **training** condition (-292.8 over 600 steps, measured on the
+        # current open-traffic environment). The series already
         # measured it on that very condition, so reuse it instead of
         # measuring the same thing twice.
         train_baseline = (
@@ -748,7 +806,7 @@ def train_signal_seeds(
     learning_rate: float = 3e-4,
     gamma: float = DEFAULT_GAMMA,
     gae_lambda: float = DEFAULT_GAE_LAMBDA,
-    ent_coef: float = 0.0,
+    ent_coef: float = DEFAULT_ENT_COEF,
     n_steps: int = 2048,
     batch_size: int = 64,
     eval_every: int = 10_000,
@@ -1031,7 +1089,7 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--gamma", type=float, default=DEFAULT_GAMMA)
     parser.add_argument("--gae-lambda", type=float, default=DEFAULT_GAE_LAMBDA)
-    parser.add_argument("--ent-coef", type=float, default=0.0)
+    parser.add_argument("--ent-coef", type=float, default=DEFAULT_ENT_COEF)
     parser.add_argument("--n-steps", type=int, default=2048, help="PPO's rollout length.")
     parser.add_argument("--batch-size", type=int, default=64, help="PPO's minibatch size.")
     parser.add_argument(

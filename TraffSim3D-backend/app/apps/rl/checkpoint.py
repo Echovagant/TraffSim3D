@@ -81,21 +81,46 @@ def list_checkpoints() -> list[dict[str, Any]]:
     Each entry includes `agent_id` (parsed from filename; null for
     shared-policy checkpoints): ppo_agent0_step_*.zip → 0,
     ppo_step_*.zip → None.
+
+    Two families of checkpoint live side by side, and the API has to tell
+    them apart — the ego agent drives (continuous, two actions) while the
+    signal agent commands the traffic light (discrete, five actions). The
+    browser rejects a checkpoint whose action space does not match the
+    policy it is loaded into, so the listing says which is which:
+
+    - `ppo_step_*.zip` / `ppo_agent<N>_step_*.zip` → `policy_kind = "ego"`
+    - `signal_seed<N>_step_*.zip` → `policy_kind = "signal"`
+
+    The signal family used to be invisible here: the listing's pattern
+    matched only the ego names, so the API never offered a signal
+    checkpoint and the UI's signal-policy picker could only ever list
+    ego policies — which the loader then rejects, because an ego policy
+    is continuous and a signal policy must be discrete.
     """
     import re
 
     pattern = re.compile(r"^ppo(?:_agent(\d+))?_step_\d+\.zip$")
+    signal_pattern = re.compile(r"^signal_seed\d+_step_\d+\.zip$")
     if not _DEFAULT_DIR.exists():
         return []
     files: list[Path] = []
     for sub in _DEFAULT_DIR.iterdir():
         if sub.is_dir():
             for p in sub.iterdir():
-                if pattern.match(p.name):
+                if pattern.match(p.name) or signal_pattern.match(p.name):
                     files.append(p)
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     out: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for p in files:
+        # The same checkpoint name can live in more than one directory (a
+        # run's own pid-scoped dir and a curated one). The API addresses a
+        # checkpoint by **name**, so a duplicate would show up twice in the
+        # picker and could resolve to either copy. Keep the newest of each
+        # name — the files are sorted newest-first, so the first one wins.
+        if p.name in seen:
+            continue
+        seen.add(p.name)
         m = pattern.match(p.name)
         agent_id: int | None = int(m.group(1)) if (m and m.group(1)) else None
         out.append(
@@ -103,6 +128,9 @@ def list_checkpoints() -> list[dict[str, Any]]:
                 "name": p.name,
                 "process": p.parent.name,
                 "agent_id": agent_id,
+                # "ego" | "signal" — the agent the checkpoint belongs to.
+                # The frontend uses it to fill the right picker.
+                "policy_kind": "signal" if signal_pattern.match(p.name) else "ego",
                 "size_kb": round(p.stat().st_size / 1024, 1),
                 "mtime_ms": int(p.stat().st_mtime * 1000),
             }
@@ -112,13 +140,20 @@ def list_checkpoints() -> list[dict[str, Any]]:
 
 def prune_all_checkpoints(keep_total: int = CHECKPOINT_KEEP) -> int:
     """Delete old checkpoints across all processes, keeping the newest
-    `keep_total` overall. Returns number of files deleted."""
+    `keep_total` overall. Returns number of files deleted.
+
+    Both checkpoint families are pruned: the ego policies
+    (`ppo_step_*.zip`) and the signal policies (`signal_seed*_step_*.zip`).
+    The signal family was previously missed, so a long-running signal
+    training session accumulated its checkpoints without limit.
+    """
     if not _DEFAULT_DIR.exists():
         return 0
     files: list[Path] = []
     for sub in _DEFAULT_DIR.iterdir():
         if sub.is_dir():
             files.extend(sub.glob("ppo_step_*.zip"))
+            files.extend(sub.glob("signal_seed*_step_*.zip"))
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     deleted = 0
     for p in files[keep_total:]:

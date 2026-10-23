@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.apps.rl import capabilities as rl_caps
 from app.apps.rl import checkpoint as rl_ckpt
@@ -158,6 +158,69 @@ async def status() -> dict[str, Any]:
             "independent_agents": False,
         }
     return s
+
+
+class SignalTrainRequest(BaseModel):
+    """A request to train the traffic-signal policy.
+
+    The signal agent is a *different* agent from the ego policy: it
+    commands the traffic light (discrete, five actions) instead of
+    driving a vehicle (continuous, two actions), and it learns on its
+    own environment. It therefore needs its own endpoint — posting a
+    signal request to `/rl/train` would spawn the ego trainer and
+    produce a policy the browser cannot load into the light controller.
+    """
+
+    steps: int = 300_000
+    device: str = "cpu"  # 'auto' | 'gpu' | 'cpu'
+    seeds: list[int] = Field(default_factory=lambda: [0])
+    save_every: int = 10_000
+
+
+@router.post("/rl/signal/train", tags=["rl"])
+async def train_signal(req: SignalTrainRequest) -> dict[str, Any]:
+    """Start a traffic-signal training run (subprocess) and return immediately.
+
+    The run writes the same status document the ego trainer writes, so
+    `GET /rl/status` reports its progress the same way; the status
+    carries `policy_kind = "signal"` to tell the two agents apart.
+    """
+    from app.apps.rl import control as rl_control
+
+    # A fresh run must not inherit a stale pause / terminate request.
+    rl_control.clear_control()
+
+    import subprocess
+
+    backend_root = Path(__file__).resolve().parents[3]  # noqa: ASYNC240
+    args = [
+        sys.executable,
+        "-m",
+        "app.apps.rl.signal_train",
+        str(req.steps),
+        "--device",
+        req.device,
+        "--save-every",
+        str(req.save_every),
+    ]
+    if req.seeds:
+        args += ["--seeds", ",".join(str(seed) for seed in req.seeds)]
+    proc = subprocess.Popen(  # noqa: ASYNC220
+        args,
+        cwd=str(backend_root),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return {
+        "ok": True,
+        "dry_run": False,
+        "pid": proc.pid,
+        "steps": req.steps,
+        "device": req.device,
+        "seeds": req.seeds,
+        "save_every": req.save_every,
+        "policy_kind": "signal",
+    }
 
 
 @router.get("/rl/capabilities", tags=["rl"])

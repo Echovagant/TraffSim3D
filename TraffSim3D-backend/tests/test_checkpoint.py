@@ -81,20 +81,87 @@ def test_prune_old_keeps_n_newest(tmp_ckpt_dir: Path) -> None:
 
 
 def test_prune_all_checkpoints_across_processes(tmp_ckpt_dir: Path) -> None:
-    """Two fake processes each have 4 checkpoints → keep 5 total."""
+    """Two fake processes each have 4 checkpoints → keep 5 total.
+
+    The step numbers differ between the two processes, which is what the
+    trainer produces: the step number is part of the file name, so two
+    concurrent runs reach the same number only by coincidence. The names
+    must not collide, because the API addresses a checkpoint by name.
+    """
     import time
 
-    for pid in ["pid111", "pid222"]:
+    for pid, base in [("pid111", 0), ("pid222", 100)]:
         sub = tmp_ckpt_dir / pid
         sub.mkdir(parents=True, exist_ok=True)
         for i in range(4):
-            p = sub / f"ppo_step_{i:07d}.zip"
+            p = sub / f"ppo_step_{base + i:07d}.zip"
             p.write_bytes(b"x")
             os.utime(p, (time.time() + i, time.time() + i))
     deleted = ckpt.prune_all_checkpoints(keep_total=5)
     assert deleted == 3
     remaining = ckpt.list_checkpoints()
     assert len(remaining) == 5
+
+
+def test_list_checkpoints_dedupes_by_name(tmp_ckpt_dir: Path) -> None:
+    """The same checkpoint name in two directories is listed once.
+
+    The API addresses a checkpoint by **name**, so a name that exists in
+    two directories would have to resolve to one of them — and the
+    listing must not offer the same name twice. The newest copy wins.
+    """
+    import time
+
+    for pid, offset in [("pid111", 0), ("pid222", 10)]:
+        sub = tmp_ckpt_dir / pid
+        sub.mkdir(parents=True, exist_ok=True)
+        p = sub / "ppo_step_0000042.zip"
+        p.write_bytes(b"x")
+        os.utime(p, (time.time() + offset, time.time() + offset))
+
+    listed = ckpt.list_checkpoints()
+    names = [c["name"] for c in listed]
+    assert names.count("ppo_step_0000042.zip") == 1
+    # The newest copy wins, so the entry points at the newer process.
+    newest = next(c for c in listed if c["name"] == "ppo_step_0000042.zip")
+    assert newest["process"] == "pid222"
+
+
+def test_list_checkpoints_reports_signal_policies(tmp_ckpt_dir: Path) -> None:
+    """A signal checkpoint is listed and tagged as a signal policy.
+
+    The two agents' checkpoints used to be indistinguishable to the API:
+    the listing's pattern matched only the ego file names, so a signal
+    policy never appeared — and the browser's signal-policy picker could
+    therefore only offer ego policies, which its loader then rejects
+    (an ego policy is continuous, a signal policy must be discrete).
+    """
+    sub = tmp_ckpt_dir / "pid999"
+    sub.mkdir(parents=True, exist_ok=True)
+    (sub / "signal_seed1_step_0007000.zip").write_bytes(b"x")
+    (sub / "ppo_step_0000001.zip").write_bytes(b"x")
+
+    listed = {c["name"]: c for c in ckpt.list_checkpoints()}
+    assert listed["signal_seed1_step_0007000.zip"]["policy_kind"] == "signal"
+    assert listed["ppo_step_0000001.zip"]["policy_kind"] == "ego"
+
+
+def test_prune_all_checkpoints_prunes_signal_policies(tmp_ckpt_dir: Path) -> None:
+    """The signal family is pruned too.
+
+    It used to be missed by the prune's glob, so a long signal training
+    session accumulated its checkpoints without limit.
+    """
+    sub = tmp_ckpt_dir / "pid999"
+    sub.mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        (sub / f"signal_seed0_step_{i:07d}.zip").write_bytes(b"x")
+
+    deleted = ckpt.prune_all_checkpoints(keep_total=1)
+    assert deleted == 2
+    remaining = [c["name"] for c in ckpt.list_checkpoints()]
+    # The newest file survives — the prune keeps the most recent ones.
+    assert remaining == ["signal_seed0_step_0000002.zip"]
 
 
 def test_list_checkpoints_empty_when_no_dir(
