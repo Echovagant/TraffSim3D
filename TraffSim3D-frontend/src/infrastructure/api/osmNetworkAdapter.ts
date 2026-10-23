@@ -197,6 +197,11 @@ const normalizeRoad = (raw: unknown): Road | null => {
     : []
 
   const laneCount = Math.max(1, int(raw.laneCount, DEFAULT_LANE_COUNT))
+  // The OSM parser emits `oneway` for every road it parses. Keeping it
+  // here is what lets the network-level simulator honour a one-way
+  // street; dropping it (as this adapter used to) turned every one-way
+  // street in an imported map into a two-way one.
+  const oneway = raw.oneway === true ? true : raw.oneway === false ? false : null
   return {
     id,
     startNode,
@@ -207,6 +212,7 @@ const normalizeRoad = (raw: unknown): Road | null => {
     laneCount,
     speedLimit: num(raw.speedLimit, DEFAULT_SPEED_LIMIT),
     level: int(raw.level, 0),
+    ...(oneway === null ? {} : { oneway }),
   }
 }
 
@@ -258,6 +264,13 @@ const normalizeSpawnPoint = (raw: unknown, index: number): SpawnPoint | null => 
     id,
     roadId,
     laneIndex: Math.max(0, int(raw.laneIndex, 0)),
+    // `s` is the arc length along the road where the car appears, and it
+    // is **the backend's value**. An OSM junction is a node shared by two
+    // ways, so it sits at a way *endpoint*: the backend projects the
+    // junction onto the road and puts the spawn point at the end that is
+    // furthest from every junction on it. Resetting `s` to 0 here would
+    // put every imported car back into a junction — which is exactly what
+    // this adapter used to do by derivation.
     s: Math.max(0, num(raw.s, 0)),
     occupiedBy,
   }
@@ -412,12 +425,20 @@ export interface DeriveSpawnPointsOptions {
 }
 
 /**
- * Derive spawn points from the network's roads.
+ * Derive spawn points from the network's roads — the **fallback** for a
+ * payload that carries none.
  *
- * One spawn point per road on lane 0 (the rightmost forward lane) at
- * `s = 0` (the road's start). The app models a road's intersection at
- * its *midpoint*, so the road's start is the point furthest away from
- * any stop line.
+ * The backend's spawn points win whenever the payload has any. An OSM
+ * junction is a node *shared* by two ways, so it sits at a way endpoint,
+ * and `s = 0` (the road's start) is therefore usually right inside the
+ * junction. The backend avoids that: it projects every junction onto its
+ * road and places the spawn point at the end of the road that is
+ * furthest from all of them (see `app/apps/maps/osm_parser.py`).
+ *
+ * This function only runs when the payload carries no spawn points at all
+ * (an old backend, or a hand-written payload). It derives one spawn point
+ * per road on lane 0 (the rightmost forward lane) at `s = 0` (the road's
+ * start).
  *
  * Returns the number of spawn points that were added.
  */

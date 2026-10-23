@@ -34,4 +34,18 @@ export interface Road {
    * 缺字段时填 0.
    */
   level: number
+  /**
+   * Whether the road is one-way (traffic may only travel along it).
+   *
+   * The OSM parser emits this for every road it parses — the `oneway`
+   * tag, with `junction=roundabout` implying it when the tag is absent
+   * (see `app/apps/maps/osm_parser.py`). It used to be dropped on the
+   * way in, so a one-way street in an imported map came back as a
+   * two-way one and traffic could drive against it.
+   *
+   * `undefined` means "not stated" — every road of the built-in scenes
+   * and every scene saved before this field existed. The simulation reads
+   * that as two-way, so the default behaviour is unchanged.
+   */
+  oneway?: boolean
 }

@@ -18,7 +18,7 @@
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { Vehicle, VehicleType } from '@domain/entities/Vehicle'
 import { LaneId } from '@domain/value-objects/LaneId'
-import { lanePoint, roadLength } from '@domain/services/laneGeometry'
+import { lanePoint, roadLength, roadStopLines } from '@domain/services/laneGeometry'
 
 const DEFAULT_COLORS: Record<VehicleType, string> = {
   car: '#3a86ff',
@@ -115,12 +115,25 @@ const isSpotFree = (
  */
 const findFreeLanes = (network: RoadNetwork, minGap: number): SpawnCandidate[] => {
   const candidates: SpawnCandidate[] = []
+  const intersections = Object.values(network.intersections)
   for (const road of Object.values(network.roads)) {
     if (road.laneCount === 0) continue
     for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
       const len = roadLength(road)
       if (len < minGap * 2) continue // road too short for the gap
-      // Sample positions: avoid the intersection area (center of road).
+      // Sample positions: avoid the intersection area.
+      //
+      // The junction is **not** at the road's midpoint — on an imported
+      // OSM map it sits at a way endpoint, and the stop line follows the
+      // projection of that junction onto the road. The same source the
+      // tick uses to place the stop line is used here, so a vehicle is
+      // never spawned inside the area the light governs.
+      //
+      // `roadStopLines` returns the arc length of every stop line on this
+      // road; a road without a junction yields an empty list, and the
+      // midpoint is not used as a stand-in (there is no intersection to
+      // avoid in that case).
+      const stopLines = roadStopLines(road, intersections)
       const stopZone = 5 // matches STOP_LINE_DISTANCE
       const margin = 1
       const minS = margin
@@ -131,8 +144,8 @@ const findFreeLanes = (network: RoadNetwork, minGap: number): SpawnCandidate[] =
       let foundInLane: SpawnCandidate | null = null
       for (let t = 0; t < trials; t++) {
         const s = minS + Math.random() * (maxS - minS)
-        // Avoid the intersection area (s ≈ len/2 ± stopZone).
-        if (Math.abs(s - len / 2) < stopZone) continue
+        // Avoid the intersection area (around each stop line).
+        if (stopLines.some((stopS) => Math.abs(s - stopS) < stopZone)) continue
         const c: SpawnCandidate = { roadId: road.id, laneIndex, s }
         if (isSpotFree(network, c, minGap)) {
           foundInLane = c

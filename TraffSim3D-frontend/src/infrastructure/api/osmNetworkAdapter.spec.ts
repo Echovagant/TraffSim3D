@@ -175,6 +175,35 @@ describe('normalizeOsmPayload — tolerance for a partially filled payload', () 
   })
 })
 
+describe('normalizeOsmPayload — the one-way flag survives the import', () => {
+  it('keeps `oneway: true` on a one-way road', () => {
+    // The OSM parser emits `oneway` for every road. It used to be dropped
+    // here, so a one-way street in an imported map came back as a two-way
+    // one and traffic could drive against it.
+    const { network } = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      roads: [{ ...BACKEND_PAYLOAD.roads[0], oneway: true }, BACKEND_PAYLOAD.roads[1]],
+    })
+    expect(network.road('w-201')?.oneway).toBe(true)
+  })
+
+  it('keeps `oneway: false` on a two-way road', () => {
+    const { network } = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      roads: [{ ...BACKEND_PAYLOAD.roads[0], oneway: false }, BACKEND_PAYLOAD.roads[1]],
+    })
+    expect(network.road('w-201')?.oneway).toBe(false)
+  })
+
+  it('leaves the flag undefined when the payload does not state it', () => {
+    // The built-in scenes and every scene saved before the field existed
+    // carry no flag; the simulation reads that as two-way, so the default
+    // behaviour is unchanged.
+    const { network } = normalizeOsmPayload(BACKEND_PAYLOAD)
+    expect(network.road('w-201')?.oneway).toBeUndefined()
+  })
+})
+
 describe('normalizeOsmPayload — coordinate frame', () => {
   it('converts the backend frame (north-positive Z) into the app frame (north = -Z)', () => {
     const { network } = normalizeOsmPayload(BACKEND_PAYLOAD)
@@ -240,6 +269,71 @@ describe('import → normalize → spawn (the end-to-end chain)', () => {
     const added = deriveSpawnPoints(network)
     expect(added).toBe(0)
     expect(Object.keys(network.spawnPoints)).toHaveLength(2)
+  })
+})
+
+describe('normalizeOsmPayload — the spawn point arc length', () => {
+  // The backend computes `s` itself: an OSM junction is a node *shared*
+  // by two ways, so it sits at a way endpoint, and `s = 0` (the road's
+  // start) is therefore usually right inside the junction. The backend
+  // projects the junction onto the road and puts the spawn point at the
+  // end that is furthest from every junction on it.
+  //
+  // The adapter must keep that value. It used to derive its own spawn
+  // points at `s = 0`, which put every imported car into a junction.
+
+  const BACKEND_SPAWN = {
+    id: 'sp-w-201-0',
+    roadId: 'w-201',
+    laneIndex: 0,
+    s: 137.5,
+    occupiedBy: null,
+  }
+
+  it('keeps the arc length the backend computed', () => {
+    const { network } = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      spawnPoints: [BACKEND_SPAWN],
+    })
+    expect(network.spawnPoint('sp-w-201-0')?.s).toBe(137.5)
+  })
+
+  it('does not derive spawn points when the payload carries them', () => {
+    const { network, stats } = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      spawnPoints: [BACKEND_SPAWN],
+    })
+    expect(stats.derivedSpawnPoints).toBe(0)
+    // Only the backend's spawn point exists — nothing was added.
+    expect(Object.keys(network.spawnPoints)).toEqual(['sp-w-201-0'])
+  })
+
+  it('derives spawn points only when the payload carries none', () => {
+    const { spawnPoints: _omitted, ...withoutSpawnPoints } = BACKEND_PAYLOAD
+    const { network, stats } = normalizeOsmPayload(withoutSpawnPoints)
+    expect(stats.derivedSpawnPoints).toBe(2)
+    // The fallback keeps the historical shape: one per road, lane 0, s = 0.
+    expect(network.spawnPoint('sp-w-201-0')?.s).toBe(0)
+    expect(network.spawnPoint('sp-w-202-0')?.s).toBe(0)
+  })
+
+  it('spawns the vehicle at the arc length the backend asked for', () => {
+    const { network } = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      spawnPoints: [BACKEND_SPAWN],
+    })
+    expect(spawnImportedVehicles(network, 1)).toBe(1)
+    const vehicle = network.vehicles['v-1']!
+    expect(vehicle.roadId).toBe('w-201')
+    // The car enters at the backend's arc length, not at the road's start.
+    expect(vehicle.s).toBe(137.5)
+  })
+
+  it('spawns the vehicle at the road start when the payload had no spawn points', () => {
+    const { spawnPoints: _omitted, ...withoutSpawnPoints } = BACKEND_PAYLOAD
+    const { network } = normalizeOsmPayload(withoutSpawnPoints)
+    expect(spawnImportedVehicles(network, 1)).toBe(1)
+    expect(network.vehicles['v-1']!.s).toBe(0)
   })
 })
 
