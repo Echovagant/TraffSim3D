@@ -551,7 +551,8 @@
           未加载 — 上面有 {{ signalCheckpoints.length }} 个信号灯 checkpoint,选一个再点「加载」。
         </template>
         <template v-else>
-          未加载 — 先点「训练信号灯 agent」跑一次训练(约 10 分钟),训练完成后点「列出 checkpoints」再加载。
+          未加载 — 先点「训练信号灯 agent」跑一次训练(约 10 分钟),训练完成后点「列出
+          checkpoints」再加载。
         </template>
       </p>
 

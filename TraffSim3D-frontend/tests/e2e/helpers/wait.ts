@@ -87,8 +87,24 @@ export const SCENE_CLIP = { x: 265, y: 270, width: 700, height: 460 } as const
  * `isRunning` freezes the fixed-step scheduler. Call this BEFORE
  * `expectSceneScreenshot`, and note that the captured frame therefore shows a
  * paused sim — re-record affected baselines after adding this call.
+ *
+ * `resetFirst` puts the vehicles back where the scene put them before
+ * freezing. Freezing alone is not enough: the vehicles have already driven
+ * wherever they happened to be when the freeze happened, and how far they
+ * got depends on how long the run took — which is exactly the variability
+ * the freeze was supposed to remove. With the reset, the captured frame
+ * shows the scene as it was authored, so the baseline is reproducible.
  */
-export const pauseSimulation = async (page: Page): Promise<void> => {
+export const pauseSimulation = async (page: Page, { resetFirst = true } = {}): Promise<void> => {
+  if (resetFirst) {
+    await page.evaluate(() => {
+      const w = window as unknown as { __world?: { reset?: () => void } }
+      if (w.__world?.reset) w.__world.reset()
+    })
+    // The reset rebuilds the bodies; give the renderer a frame to pick the
+    // new poses up before the freeze is observed.
+    await page.waitForTimeout(250)
+  }
   await page.evaluate(() => {
     const w = window as unknown as { __world?: { isRunning?: boolean } }
     if (w.__world) w.__world.isRunning = false

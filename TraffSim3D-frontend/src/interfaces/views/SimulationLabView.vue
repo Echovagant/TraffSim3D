@@ -86,6 +86,10 @@
             <div class="stat" title="每个渲染帧 +1；store 变更通知也会 +1">
               <span>仿真 tick</span><b data-testid="sim-tick">{{ world.tickCount }}</b>
             </div>
+            <div class="stat" title="车偏离车道后会被刹停并放回路口起点 — 这里记录最近一次的原因">
+              <span>越界处理</span
+              ><b data-testid="oob-event" :title="oobEventDetail">{{ oobEventLabel }}</b>
+            </div>
           </div>
         </section>
 
@@ -184,6 +188,13 @@
               >{{ world.trajectoryExporter.rowCount }} /
               {{ world.trajectoryExporter.maxBufferRows }} 行</b
             >
+            <b
+              data-testid="trajectory-dropped"
+              :class="{ warn: droppedSamples() > 0 }"
+              title="脏数据过滤器丢弃的样本数 / 全部样本数"
+            >
+              丢弃 {{ droppedSamples() }} / {{ totalSamples() }} ({{ dropRateText() }})
+            </b>
             <button class="btn" data-testid="trajectory-csv" @click="exportTrajectoryCsv">
               ⬇ CSV
             </button>
@@ -264,9 +275,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useWorldStore, type SceneKind } from '@interfaces/stores/worldStore'
 import { getAxisQueueLength } from '@application/services/signalController'
+import { subscribeOobEvents, type OobEvent } from '@application/services/oobCleanup'
+import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
 import { M1_MIN_FPS } from '@shared/constants/simulation'
 import { CoordinatedConfigModal } from '@interfaces/components/editor'
 import WorldCanvas from '@interfaces/components/scene/WorldCanvas.vue'
@@ -280,6 +293,48 @@ const showCoordinated = ref(false)
 // page's run instead of the previous route's leftovers.
 onMounted(() => {
   world.resetFrameStats()
+})
+
+// ===== trajectory loss =====
+//
+// The exporter is a plain class instance, so its counters are not
+// reactive on their own. They are read through plain functions (not
+// computeds — a computed without a reactive dependency would be
+// cached forever) so every re-render of this page — which happens on
+// every simulation tick — reads the current numbers.
+const droppedSamples = (): number => world.trajectoryExporter.droppedSampleCount
+const recordedSamples = (): number => world.trajectoryExporter.rowCount
+const totalSamples = (): number => recordedSamples() + droppedSamples()
+const dropRateText = (): string =>
+  totalSamples() > 0 ? `${((droppedSamples() / totalSamples()) * 100).toFixed(1)}%` : '—'
+
+// ===== out-of-bounds handling =====
+//
+// A vehicle that leaves the road network is braked to a stop and then
+// put back at the road start. The reason is shown here, so the reset
+// is never a silent blink.
+const lastOobEvent = ref<OobEvent | null>(null)
+/** Short label for the panel — the full reason is the tooltip. */
+const OOB_EVENT_LABELS: Record<OobEvent['kind'], string> = {
+  'exit-start': '驶离中',
+  reset: '已复位',
+  'orphan-removed': '已移除',
+}
+const oobEventLabel = computed(() =>
+  lastOobEvent.value
+    ? `${OOB_EVENT_LABELS[lastOobEvent.value.kind]} ${lastOobEvent.value.vehicleId}`
+    : '—',
+)
+const oobEventDetail = computed(() => lastOobEvent.value?.reason ?? '')
+let unsubscribeOobEvents: (() => void) | null = null
+onMounted(() => {
+  unsubscribeOobEvents = subscribeOobEvents((event) => {
+    lastOobEvent.value = event
+  })
+})
+onUnmounted(() => {
+  unsubscribeOobEvents?.()
+  unsubscribeOobEvents = null
 })
 
 // 1. 场景统计
@@ -343,6 +398,8 @@ const onLidarCloudsToggle = (e: Event): void =>
 const onCameraToggle = (e: Event): void =>
   world.setCameraEnabled((e.target as HTMLInputElement).checked)
 const exportTrajectoryCsv = (): void => {
+  const dropped = droppedSamples()
+  const recorded = recordedSamples()
   const blob = world.trajectoryExporter.exportAsBlob({
     kind: 'csv',
     includeCrashed: true,
@@ -354,6 +411,18 @@ const exportTrajectoryCsv = (): void => {
   a.download = `trajectory-${Date.now()}.csv`
   a.click()
   URL.revokeObjectURL(url)
+  // Say it out loud when the file is missing rows: a lossy export the
+  // user cannot see is a lossy export they train on by accident.
+  if (dropped > 0) {
+    showFlashMessage(
+      `轨迹已导出 ${recorded} 行 — 脏数据过滤器丢弃了 ${dropped} 个样本（${(
+        (dropped / (recorded + dropped)) *
+        100
+      ).toFixed(1)}%）`,
+      'warn',
+      5000,
+    )
+  }
 }
 
 // 4. 性能
@@ -646,6 +715,15 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
 .traj-row b {
   color: #fbbf24;
   margin-left: auto;
+}
+/* The drop counter sits next to the row counter, not pushed to the
+   far edge like it. */
+.traj-row b + b {
+  margin-left: 0;
+}
+/* Samples were lost: the file the user downloads is incomplete. */
+.traj-row b.warn {
+  color: #f87171;
 }
 .traj-row .btn {
   margin-left: 8px;

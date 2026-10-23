@@ -48,7 +48,9 @@ describe('SimulationLabView — the dashboard must run a live simulation', () =>
     // PiP mounted before the toggle never renders a frame.
     expect(view.findComponent(CameraView).exists()).toBe(false)
 
-    await view.get('[data-testid="camera-toggle"]').setChecked(true)
+    // `setValue(true)` — vue-test-utils has no `setChecked`; for a
+    // checkbox, `setValue` sets `checked` and fires `change`.
+    await view.get('[data-testid="camera-toggle"]').setValue(true)
     await view.vm.$nextTick()
     expect(view.findComponent(CameraView).exists()).toBe(true)
     view.unmount()

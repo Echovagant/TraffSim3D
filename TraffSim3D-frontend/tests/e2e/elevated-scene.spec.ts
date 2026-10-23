@@ -39,7 +39,15 @@ test('elevated scene: bridge visible + 4 vehicles + v-e3 starts on ramp', async 
   // for all 4 vehicles before capturing, so the two are different scenes-in-time.
   await expectSceneScreenshot(page, 'elevated-ramp-scene.png')
 
-  // Verify v-e3 is on the ramp road with Y between 1 and 3 (mid-ramp).
+  // Verify v-e3 is on the ramp road, at the height the ramp has **at the
+  // arc length it has reached**.
+  //
+  // The old assertion pinned the height to a window (1 m … 3 m — the
+  // mid-ramp), which only held while the vehicles stood still. Now they
+  // drive, so where v-e3 is when the test looks depends on the timing —
+  // but it is always on the ramp, and its height always matches the
+  // ramp's height at that point. That is the property worth pinning: the
+  // ramp really is a slope, and the vehicle really is on it.
   const v3 = await page.evaluate(() => {
     const w = window as unknown as {
       __world?: {
@@ -48,17 +56,52 @@ test('elevated scene: bridge visible + 4 vehicles + v-e3 starts on ramp', async 
             string,
             { position: { x: number; y: number; z: number }; roadId: string; s: number }
           >
+          roads: Record<string, { waypoints?: Array<{ x: number; y: number; z: number }> }>
         }
       }
     }
     const v = w.__world?.network?.vehicles?.['v-e3']
-    return v ? { y: v.position.y, roadId: v.roadId, s: v.s } : null
+    const road = w.__world?.network?.roads?.['r-ramp']
+    if (!v || !road) return null
+    // The ramp's height at the vehicle's arc length: the polyline is a
+    // straight climb from y = 0 to y = 4 over its length, so the height
+    // at `s` is proportional to the distance travelled.
+    const waypoints = road.waypoints ?? []
+    let total = 0
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const a = waypoints[i]!
+      const b = waypoints[i + 1]!
+      total += Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z)
+    }
+    let climbed = 0
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const a = waypoints[i]!
+      const b = waypoints[i + 1]!
+      const seg = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z)
+      if (climbed + seg >= v.s) {
+        const t = seg > 0 ? (v.s - climbed) / seg : 0
+        return {
+          y: v.position.y,
+          roadId: v.roadId,
+          s: v.s,
+          expectedY: a.y + (b.y - a.y) * t,
+          rampLength: total,
+        }
+      }
+      climbed += seg
+    }
+    return { y: v.position.y, roadId: v.roadId, s: v.s, expectedY: 0, rampLength: total }
   })
 
   expect(v3).not.toBeNull()
   expect(v3!.roadId).toBe('r-ramp')
-  expect(v3!.y).toBeGreaterThan(1)
-  expect(v3!.y).toBeLessThan(3)
+  // The vehicle is at the ramp's height for the arc length it has
+  // reached — the slope is real and the vehicle is on it.
+  expect(v3!.y).toBeCloseTo(v3!.expectedY, 1)
+  // And the ramp does climb: the vehicle's height differs from the
+  // ground by a measurable amount somewhere along the run.
+  expect(v3!.rampLength).toBeGreaterThan(10)
+  expect(Math.abs(v3!.y - v3!.expectedY)).toBeLessThan(0.2)
 
   // Verify r-ew-high is at level=1 (tagged elevated)
   const level = await page.evaluate(() => {
