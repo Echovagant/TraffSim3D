@@ -77,12 +77,22 @@ async def test_parse_osm_response_carries_origin_and_spawn_points(
     assert isinstance(body["originLat"], float)
     assert isinstance(body["originLon"], float)
     road_ids = {road["id"] for road in body["roads"]}
+    road_lengths = {
+        road["id"]: sum(
+            ((b["x"] - a["x"]) ** 2 + (b["y"] - a["y"]) ** 2 + (b["z"] - a["z"]) ** 2) ** 0.5
+            for a, b in zip(road["waypoints"], road["waypoints"][1:], strict=False)
+        )
+        for road in body["roads"]
+    }
     assert body["spawnPoints"], "no spawn points in the response"
     for spawn in body["spawnPoints"]:
         assert spawn["roadId"] in road_ids
         assert spawn["id"] == f"sp-{spawn['roadId']}-{spawn['laneIndex']}"
         assert spawn["laneIndex"] == 0
-        assert spawn["s"] == 0
+        # The spawn point is on the road, and never at its travel end: the
+        # simulation treats a road as a loop and would teleport a car that
+        # starts there straight back to the start of the road.
+        assert 0.0 <= spawn["s"] < road_lengths[spawn["roadId"]]
         assert spawn["occupiedBy"] is None
 
 

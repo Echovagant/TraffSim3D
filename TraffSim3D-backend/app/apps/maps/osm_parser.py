@@ -53,6 +53,26 @@ way is one-way even when it carries no `oneway` tag — OSM *implies*
 `oneway=yes` for it — and OSM draws roundabout ring ways in the
 direction of traffic flow, so the digitisation direction already is the
 travel direction and must not be flipped.
+
+Where the junction is, and where the cars appear
+-------------------------------------------------
+An intersection is an OSM node shared by two or more ways; its position
+is that node's projected coordinate. A junction is therefore almost never
+in the *middle* of a way — it sits at one of the way's endpoints.
+
+Both ends of the pipeline project the junction onto the road to find out
+where it actually is: the backend (`_project_intersection_on_road`) and
+the frontend (`projectIntersectionOnRoad` in
+`TraffSim3D-frontend/src/domain/services/laneGeometry.ts`) run the same
+algorithm and reject the same projections, so the stop line the frontend
+draws and the spawn point the backend emits refer to the same place on
+the same road.
+
+That projection also decides where the cars appear. Spawning at `s = 0`
+(the road's start) used to drop every imported car into a junction,
+because the road's start is where the junction usually is. The spawn
+point now goes to the end of the road that is furthest from every
+junction on it (`_spawn_arc_length`).
 """
 
 from __future__ import annotations
@@ -101,6 +121,22 @@ BBox = tuple[float, float, float, float]  # (south, west, north, east)
 # has more than the single lane a one-way road ends up with.
 SPAWN_MIN_ROAD_LENGTH_M = 20.0
 SPAWN_MIN_LANES = 2
+
+# How far (m) an intersection position may sit from a connected road's
+# centreline and still be trusted as "this intersection is on that road".
+#
+# The number mirrors the frontend's `MAX_INTERSECTION_OFFSET_M`
+# (`TraffSim3D-frontend/src/domain/services/laneGeometry.ts`) on purpose:
+# both ends have to reject the same projections. If the backend trusted a
+# projection the frontend rejects (or the other way round), the two sides
+# would place the stop line and the spawn point at different spots on the
+# very same road.
+#
+# A road that really carries the intersection touches it, so the
+# perpendicular distance is ~0. Beyond the threshold the intersection
+# belongs to some other road (or the projection failed), and the caller
+# falls back to the road midpoint instead of inventing a position.
+MAX_INTERSECTION_OFFSET_M = 30.0
 
 # OSM `oneway` values meaning "traffic runs along the digitisation direction".
 _ONEWAY_FORWARD = frozenset({"yes", "true", "1"})
@@ -335,14 +371,209 @@ def _pick_level(counter: Counter) -> int:
     return min(counter, key=lambda level: (abs(level), -counter[level], level))
 
 
-def _polyline_length(waypoints: Sequence[dict[str, Any]]) -> float:
-    total = 0.0
+def _polyline_cumulative_lengths(waypoints: Sequence[dict[str, Any]]) -> list[float]:
+    """Per-segment cumulative arc length; the last entry is the total."""
+    cumulative: list[float] = []
+    acc = 0.0
     for a, b in zip(waypoints, waypoints[1:], strict=False):
-        total += math.dist(
+        acc += math.dist(
             (float(a.get("x", 0.0)), float(a.get("y", 0.0)), float(a.get("z", 0.0))),
             (float(b.get("x", 0.0)), float(b.get("y", 0.0)), float(b.get("z", 0.0))),
         )
-    return total
+        cumulative.append(acc)
+    return cumulative
+
+
+def _polyline_length(waypoints: Sequence[dict[str, Any]]) -> float:
+    cumulative = _polyline_cumulative_lengths(waypoints)
+    return cumulative[-1] if cumulative else 0.0
+
+
+def _project_onto_polyline(
+    waypoints: Sequence[dict[str, Any]],
+    x: float,
+    z: float,
+) -> tuple[float, float]:
+    """Project a world position onto a polyline.
+
+    Returns `(s, distance)`: the arc length of the closest point on the
+    polyline (measured from the first waypoint) and the perpendicular
+    distance (m) from the world position to that point.
+
+    This is the backend twin of the frontend's `worldToCenterlineS`
+    (`TraffSim3D-frontend/src/domain/services/laneGeometry.ts`): every
+    segment is projected onto separately and the segment with the smallest
+    perpendicular distance wins. The two implementations must agree — the
+    frontend places the stop line from the projection and the backend
+    places the spawn point from it, and a drifting pair would put a car
+    into a junction the other end believes is elsewhere.
+
+    Frame note: the backend's Z is north-positive (`z = (lat - origin_lat)
+    * 111000`), the frontend's Z is north-negative. The projection is
+    invariant under `z -> -z`:
+      * the perpendicular distance uses `(z - pz) ** 2` — a square, so the
+        sign cancels;
+      * the segment parameter `((z - az) * dz) / |d|^2` is a product of
+        two factors that flip sign together — the product is unchanged;
+      * the arc length is a distance.
+    So the `s` and the `distance` returned here are numerically identical
+    in either frame and no sign fix-up is needed. (A *signed* along-road
+    offset would need one; nothing here is signed.)
+    """
+    cumulative = _polyline_cumulative_lengths(waypoints)
+    if not cumulative or len(waypoints) < 2:
+        return 0.0, math.inf
+
+    best_s = 0.0
+    best_perp_sq = math.inf
+    for index in range(len(waypoints) - 1):
+        a = waypoints[index]
+        b = waypoints[index + 1]
+        ax = float(a.get("x", 0.0))
+        az = float(a.get("z", 0.0))
+        dx = float(b.get("x", 0.0)) - ax
+        dz = float(b.get("z", 0.0)) - az
+        flat_len = math.hypot(dx, dz)
+        if flat_len < 1e-6:
+            # Degenerate segment (duplicate waypoint) — no tangent to
+            # project onto. Skipped, exactly like the frontend does.
+            continue
+        seg_start = cumulative[index - 1] if index > 0 else 0.0
+        seg_len_3d = cumulative[index] - seg_start
+        # Parameter of the closest point on the segment, clamped to [0, 1].
+        t = ((x - ax) * dx + (z - az) * dz) / (flat_len * flat_len)
+        t = max(0.0, min(1.0, t))
+        px = ax + dx * t
+        pz = az + dz * t
+        perp_sq = (x - px) ** 2 + (z - pz) ** 2
+        if perp_sq < best_perp_sq:
+            best_perp_sq = perp_sq
+            best_s = seg_start + t * seg_len_3d
+
+    total = cumulative[-1]
+    return max(0.0, min(total, best_s)), math.sqrt(best_perp_sq)
+
+
+def _project_intersection_on_road(
+    road: dict[str, Any],
+    intersection: dict[str, Any],
+) -> tuple[float, bool]:
+    """Where an intersection sits on a road — `(s, projected)`.
+
+    The intersection's world position is projected onto the road's
+    centreline; the resulting arc length is the single source of truth for
+    where the junction is on that road.
+
+    When the projection cannot be trusted — the intersection is further
+    than `MAX_INTERSECTION_OFFSET_M` from the road, or the road is
+    degenerate — the **road midpoint** is returned with `projected = False`.
+    That is the same degradation the frontend applies
+    (`projectIntersectionOnRoad`), so both ends fall back to the same
+    place and a bad projection can never move a spawn point to a nonsense
+    location.
+    """
+    waypoints = road.get("waypoints") or []
+    length = _polyline_length(waypoints)
+    if length < 1e-6:
+        return 0.0, False
+    position = intersection.get("position") or {}
+    x = float(position.get("x", 0.0))
+    z = float(position.get("z", 0.0))
+    s, distance = _project_onto_polyline(waypoints, x, z)
+    if not math.isfinite(distance) or distance > MAX_INTERSECTION_OFFSET_M:
+        return length / 2.0, False
+    return s, True
+
+
+def _spawn_arc_length(
+    road: dict[str, Any],
+    intersections: Sequence[dict[str, Any]],
+) -> float:
+    """The arc length of this road's spawn point.
+
+    One spawn point per road, placed at the point that is **furthest from
+    every intersection on that road** — measured to the *edge* of the
+    intersection box, not to its centre.
+
+    Rationale: an OSM way very often *starts* at an intersection — that
+    is how the intersection is detected in the first place (a node shared
+    by two or more ways). Spawning at `s = 0` therefore dropped the car
+    straight into the junction, which is where it was spawned before this
+    rule existed.
+
+    The candidates are the road's two ends and the midpoints between
+    consecutive intersections, because on a line the point furthest from a
+    set of points is always one of those. Each candidate is scored by
+    its distance to the **nearest intersection box edge**, so a point
+    just outside a junction beats one further away from a junction that
+    is not on this road at all.
+
+    Two constraints shape the result:
+
+    - The road's **end** (`s = length`) is not a candidate for a forward
+      lane: the simulation treats the road as a loop, so a car that
+      starts at the travel end is teleported back to `s ≈ 0` on its first
+      tick — which is where the junction usually is. The end is therefore
+      only used when it is the *start* of the lane (`s = 0`).
+    - A road without any intersection keeps `s = 0` (unchanged
+      behaviour).
+    """
+    waypoints = road.get("waypoints") or []
+    length = _polyline_length(waypoints)
+    if length < 1e-6:
+        return 0.0
+    road_id = str(road.get("id", ""))
+    # (arc length of the junction centre, radius of its box)
+    junctions: list[tuple[float, float]] = []
+    for intersection in intersections:
+        connected = intersection.get("connectedRoads") or []
+        if road_id not in connected:
+            continue
+        s, _projected = _project_intersection_on_road(road, intersection)
+        radius = float(intersection.get("intersectionRadius", 0) or 0)
+        junctions.append((s, radius))
+    if not junctions:
+        return 0.0
+    junctions.sort()
+
+    # The junction **boxes** cut the road into stretches of open ground.
+    # The spawn point goes in the middle of the widest of them.
+    #
+    # Working with the boxes rather than the centres matters: a wide
+    # intersection reaches far along the road, and a point that is clear
+    # of the *centre* can still be inside the box the traffic light
+    # governs.
+    spans = sorted((max(0.0, s - radius), min(length, s + radius)) for s, radius in junctions)
+    free: list[tuple[float, float]] = []
+    cursor = 0.0
+    for lo, hi in spans:
+        if lo > cursor:
+            free.append((cursor, lo))
+        cursor = max(cursor, hi)
+    if cursor < length:
+        free.append((cursor, length))
+
+    # The spawn point goes in the middle of an open stretch. The stretch
+    # at the very end of the road is usable like any other: its midpoint
+    # is always strictly inside the road, so the travel end is never
+    # chosen. (The simulation treats a road as a loop, so a car that
+    # started exactly at the travel end would be teleported back to the
+    # start of the road on its first tick — which is where a junction
+    # usually is.)
+    candidates: list[float] = []
+    for lo, hi in free:
+        if hi - lo <= 1e-6:
+            continue
+        candidates.append((lo + hi) / 2.0)
+    if not candidates:
+        # Every part of the road is inside a junction box. Fall back to
+        # the point that is least deep inside one.
+        return min((max(0.0, s - radius) for s, radius in junctions), default=0.0)
+    # Prefer the point with the most room around it.
+    return max(
+        candidates,
+        key=lambda c: min(abs(c - s) - radius for s, radius in junctions),
+    )
 
 
 def _empty_network(origin_lat: float, origin_lon: float) -> dict[str, Any]:
@@ -356,13 +587,20 @@ def _empty_network(origin_lat: float, origin_lon: float) -> dict[str, Any]:
     }
 
 
-def _build_spawn_points(roads: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_spawn_points(
+    roads: Sequence[dict[str, Any]],
+    intersections: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """One spawn point per road that can actually hold a car.
 
     The shape is part of the cross-end contract:
     `{id, roadId, laneIndex, s, occupiedBy}`, where `laneIndex` counts
     lanes in the direction of travel and `s` is the distance along the road
     from its start.
+
+    `s` is not always 0: it is the end of the road that is furthest from
+    every junction on it (see `_spawn_arc_length`), so an imported map
+    does not spawn its cars inside an intersection.
     """
     spawn_points: list[dict[str, Any]] = []
     for road in roads:
@@ -376,7 +614,7 @@ def _build_spawn_points(roads: Sequence[dict[str, Any]]) -> list[dict[str, Any]]
                 "id": f"sp-{road_id}-0",
                 "roadId": road_id,
                 "laneIndex": 0,
-                "s": 0.0,
+                "s": _spawn_arc_length(road, intersections),
                 "occupiedBy": None,
             }
         )
@@ -638,7 +876,7 @@ def _build_network(
         "roads": roads,
         "intersections": intersections,
         "vehicles": [],
-        "spawnPoints": _build_spawn_points(roads),
+        "spawnPoints": _build_spawn_points(roads, intersections),
         "originLat": origin_lat,
         "originLon": origin_lon,
     }
