@@ -388,10 +388,12 @@ jobs:
           # accepted by the browser.
           VITE_BACKEND_PORT: '8001'
           VITE_BACKEND_URL: 'http://localhost:8001'
-          # The only spec that talks to a REAL backend reads its base URL
-          # from here. It used to hard-code :8000, which made it skip
-          # itself in CI (the backend runs on :8001 there) — so the one
-          # spec that exercised the real pipeline was never run by the
-          # pipeline.
+          # The base URL of the REAL backend, used by the one spec that
+          # talks to it without stubbing. That spec is opt-in (it starts
+          # a real PPO run and would leave the shared training status
+          # behind for every later spec), so it skips itself here —
+          # `E2E_REAL_TRAINING` is deliberately not set in CI. The
+          # variable is still passed so the skip reason names the right
+          # backend instead of the default :8000.
           E2E_BACKEND_URL: 'http://localhost:8001'
         run: npx playwright test --config=playwright.ci.config.ts

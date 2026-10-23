@@ -1,29 +1,40 @@
 /**
  * GPU extension — opt-in real PPO training e2e.
  *
- * This test runs REAL PPO training, not the dry-run fake. It is NOT
- * included in `npm run test:e2e` (the default suite, which is for CI).
- * Run it manually on a GPU dev machine:
+ * This test runs REAL PPO training, not the dry-run fake. It is NOT part
+ * of `npm run test:e2e` (the default suite, which is what CI runs).
+ * Run it manually on a machine whose backend has SB3 installed:
  *
  *     npm run test:e2e:real
  *
- * Skip conditions (this spec is on the Playwright exception list):
+ * WHY IT IS OPT-IN
+ * -----------------
+ * A real run writes the shared training-status document and the
+ * checkpoint directory. Every spec that runs after it then reads a
+ * status that belongs to that run — which is how
+ * `ai-playground-scene.spec.ts` ended up clicking a training button the
+ * page had already disabled, and failing on an empty request body.
+ * CI reaches a backend as well, so "the backend is unreachable" is not
+ * a usable gate: the gate has to be explicit.
+ *
+ * `npm run test:e2e:real` sets `E2E_REAL_TRAINING=1`. It goes through
+ * `scripts/run-real-e2e.mjs` because `FOO=1 cmd` is not valid in
+ * cmd.exe, and this project does not depend on `cross-env`.
+ *
+ * Skip conditions:
+ * - The opt-in gate is off (i.e. in the default suite)
  * - Backend not reachable on $E2E_BACKEND_URL (default http://localhost:8000)
- * - Backend reports cuda_available: false
  * - Backend reports sb3_available: false
  *
  * The backend URL comes from the environment because the port is not the
  * same everywhere: a local dev backend runs on :8000, CI runs it on
- * :8001 (see .github/workflows/ci.yml). The old hard-coded :8000 made
- * this spec skip itself in CI — the only spec that talks to a real
- * backend was therefore never exercised by the pipeline.
+ * :8001 (see .github/workflows/ci.yml).
  *
  * This test exercises the full backend → frontend pipeline:
  *   1. Fetch /api/v1/rl/capabilities to detect GPU + SB3
  *   2. Trigger real PPO for N=200 steps via /api/v1/rl/train (dry_run=false)
- *   3. Poll /api/v1/rl/status until running=true
- *   4. Wait a few seconds for partial progress
- *   5. Screenshot the in-progress state for visual review
+ *   3. Poll /api/v1/rl/status until the step counter advances
+ *   4. Screenshot the in-progress state for visual review
  *
  * The test intentionally does NOT wait for training to complete (that
  * could take minutes on CPU). It verifies the start flow + UI updates.
@@ -42,7 +53,17 @@ import { SCREENSHOT_DIR } from './helpers/wait'
 const BACKEND_URL = process.env.E2E_BACKEND_URL ?? 'http://localhost:8000'
 const STEPS = 200
 
+/**
+ * The opt-in gate. See the file header for why a real run cannot be
+ * part of the default suite.
+ */
+const REAL_TRAINING_ENABLED = process.env.E2E_REAL_TRAINING === '1'
+
 test('real PPO training: starts, updates chart, captures GPU/CPU state', async ({ page }) => {
+  if (!REAL_TRAINING_ENABLED) {
+    test.skip(true, 'Real PPO training is opt-in — run `npm run test:e2e:real`.')
+    return
+  }
   // 1. Check capabilities via direct HTTP call (cheaper than routing through page)
   const api = await request.newContext({ baseURL: BACKEND_URL })
   let capsResp

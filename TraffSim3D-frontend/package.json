@@ -19,7 +19,7 @@
     "test:e2e:probe": "playwright test tests/e2e/scene-capacity-probe.spec.ts",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:update": "playwright test --update-snapshots",
-    "test:e2e:real": "playwright test tests/e2e/ai-playground-real.spec.ts",
+    "test:e2e:real": "node scripts/run-real-e2e.mjs",
     "lint": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
