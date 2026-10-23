@@ -42,8 +42,48 @@ describe('ActuatedController', () => {
     const net = buildTestNetwork(0)
     const light = makeTestLight({ phase: LightPhase.Red, phaseRemaining: 20, axis: 'ns' })
     const d = c.decide(light, net, 0)
-    expect(d.phase).toBe(LightPhase.Yellow)
+    // The red is **shortened**, not replaced: the phase stays red and the
+    // remaining red is cut to the floor. The old code switched the phase
+    // to Yellow here, and a Yellow's only successor is Red(BASE_RED) — so
+    // the shortened red could never reach Green.
+    expect(d.phase).toBe(LightPhase.Red)
+    expect(d.duration).toBe(MIN_RED_SECS)
     expect(d.actions[0]?.name).toBe('shorten_red')
+  })
+
+  it('counts the reds it shortened', () => {
+    const net = buildTestNetwork(0)
+    const counter = new ActuatedController()
+    const light = makeTestLight({ phase: LightPhase.Red, phaseRemaining: 20, axis: 'ns' })
+    expect(counter.shortenRedCount).toBe(0)
+    counter.decide(light, net, 0)
+    expect(counter.shortenRedCount).toBe(1)
+  })
+
+  it('reaches green even when the red is shortened on every check', () => {
+    // The livelock this class used to have: the red was replaced by a
+    // Yellow, the Yellow's only successor was a **full** red, and the
+    // next check shortened that one again — red → yellow → red → … , so
+    // the axis never got a green at all. The invariant: a red always
+    // ends, so the light reaches Green.
+    const net = buildTestNetwork(0)
+    const controller = new ActuatedController()
+    const light = makeTestLight({ phase: LightPhase.Red, phaseRemaining: 20, axis: 'ns' })
+    const dt = 1 / 60
+    let simTime = 0
+    let sawGreen = false
+    for (let frame = 0; frame < 20 / dt && !sawGreen; frame += 1) {
+      simTime += dt
+      light.phaseRemaining -= dt
+      const d = controller.decide(light, net, simTime)
+      light.phase = d.phase
+      light.phaseRemaining = d.duration
+      if (light.phase === LightPhase.Green) sawGreen = true
+    }
+    expect(sawGreen).toBe(true)
+    // The shortening really did fire — the green is not an accident of
+    // the red simply running out.
+    expect(controller.shortenRedCount).toBeGreaterThan(0)
   })
 
   it('does not shorten red below MIN_RED_SECS', () => {
@@ -87,7 +127,8 @@ describe('ActuatedController on an imported OSM map', () => {
     light.phaseRemaining = 20
 
     const d = c.decide(light, net, 0)
-    expect(d.phase).toBe(LightPhase.Yellow)
+    expect(d.phase).toBe(LightPhase.Red)
+    expect(d.duration).toBe(MIN_RED_SECS)
     expect(d.actions[0]?.name).toBe('shorten_red')
   })
 

@@ -7,6 +7,27 @@
 // intentional: 007 §3.B says "shorten red when opposite queue = 0",
 // and the default scene always has cars. Operators wanting the
 // shortening visible should load a low-density scene.
+//
+// ## The shortening shortens the red — it never replaces it
+//
+// "Shorten the red" means **cut the remaining red down to the floor**
+// (`MIN_RED_SECS`), exactly like the five-action vocabulary's
+// `shorten_red` and the Python sim's `shorten_red` do: the phase stays
+// red, only the clock changes. The red then counts down and the phase
+// machine's Red → Green transition runs as usual.
+//
+// The previous code switched the phase to Yellow instead. A Yellow's
+// only successor is Red(BASE_RED), so the shortened red could never
+// reach Green — red → yellow → red → … , forever. With the opposite
+// axis's queue empty for long stretches (the queue statistic counts the
+// vehicles actually waiting at the projected stop lines, so a moving
+// axis reads "no queue"), the axis held at red never got a green at
+// all: in the built-in cross scene three of the six vehicles stood at
+// the stop line for the whole run while the opposite axis ran free.
+//
+// The invariant this class must keep: **a red always ends, so every
+// axis reaches Green.** Nothing here may restart a red — the remaining
+// red only ever counts down.
 import type { TrafficLight } from '@domain/entities/TrafficLight'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { SignalAction, SignalController, SignalDecision } from '../signalController'
@@ -23,6 +44,23 @@ const BASE_GREEN = 30
 const BASE_RED = 30
 
 export class ActuatedController implements SignalController {
+  /**
+   * How many times this light's red was shortened.
+   *
+   * Diagnostic only — the shortening itself is reported per decision as
+   * the `shorten_red` action. The counter exists because the livelock
+   * this class used to have was **silent**: a light that shortened its
+   * red on every cycle and never reached green looked exactly like a
+   * light with no traffic. A caller that wants to see the shortening
+   * (a debug panel, a test) can read it without parsing decisions.
+   */
+  private shortenedReds = 0
+
+  /** How many reds this light shortened — see {@link shortenedReds}. */
+  get shortenRedCount(): number {
+    return this.shortenedReds
+  }
+
   decide(light: TrafficLight, network: RoadNetwork, simTime: number): SignalDecision {
     let phase: LightPhase = light.phase
     let duration = light.phaseRemaining
@@ -60,8 +98,14 @@ export class ActuatedController implements SignalController {
       if (oppositeRoads.length > 0 && light.phaseRemaining > MIN_RED_SECS) {
         const oppositeQueue = getAxisQueueLength(oppositeLight, network, simTime)
         if (oppositeQueue === 0) {
-          phase = LightPhase.Yellow
-          duration = YELLOW_CLEAR_SECS
+          // The red is **shortened**, not replaced: the remaining red is
+          // cut down to the floor and then counts down to zero, so the
+          // machine's Red → Green transition still runs. Switching the
+          // phase to Yellow here (the old behaviour) sent the light
+          // into a red → yellow → red loop with no path to Green —
+          // see the module header.
+          duration = MIN_RED_SECS
+          this.shortenedReds += 1
           return {
             phase,
             duration,
