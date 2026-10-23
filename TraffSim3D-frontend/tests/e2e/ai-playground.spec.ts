@@ -10,6 +10,7 @@
  *  - Screenshot captured for visual regression
  */
 import { test, expect } from '@playwright/test'
+import { expectVisualScreenshot } from './helpers/visual'
 import { waitForSceneReady } from './helpers/wait'
 
 const FAKE_STATUS = {
@@ -78,5 +79,5 @@ test('AI Playground: training chart renders with reward history', async ({ page 
   expect(rewardText).toBe('12.50')
 
   // Visual regression on the dashboard panel (metrics + reward chart).
-  await expect(page.locator('main')).toHaveScreenshot('ai-playground.png')
+  await expectVisualScreenshot(page.locator('main'), 'ai-playground.png')
 })

@@ -53,11 +53,9 @@
       <span>轨迹</span>
       <b>{{ store.trajectoryExporter.rowCount }} 行</b>
     </div>
-    <div class="row" :title="store.cameraEnabled ? 'PiP camera active' : 'PiP camera inactive'">
+    <div class="row" :title="cameraTooltip">
       <span>摄像头</span>
-      <b :class="store.cameraEnabled ? 'ok' : ''">
-        {{ store.cameraEnabled ? `开 · ${store.cameraFrameCount} 帧` : '关' }}
-      </b>
+      <b :class="cameraClass">{{ cameraLabel }}</b>
     </div>
     <div class="row backend" :title="backendTooltip">
       <span>后端</span>
@@ -106,6 +104,31 @@ const frameMin = computed(() => (store.frameMsMin === Infinity ? 0 : store.frame
 const frameMax = computed(() => (store.frameMsMax === -Infinity ? 0 : store.frameMsMax.toFixed(1)))
 const frameAvg = computed(() => store.frameMsAvg.toFixed(1))
 const fpsClass = computed(() => (store.fps >= M1_MIN_FPS ? 'ok' : 'warn'))
+
+/**
+ * Camera readout.
+ *
+ * "开 · 0 帧" was a control that looked alive and never produced
+ * anything. The panel now distinguishes the three real states:
+ * off / on-but-no-frame-yet / on-and-rendering. The middle state
+ * means the sensor has not delivered a frame yet (no host vehicle, or
+ * the renderer is not up) — that is worth saying out loud instead of
+ * showing a permanent zero.
+ */
+const cameraLabel = computed(() => {
+  if (!store.cameraEnabled) return '关'
+  if (store.cameraFrameCount > 0) return `开 · ${store.cameraFrameCount} 帧`
+  return '开 · 等待首帧'
+})
+const cameraClass = computed(() => {
+  if (!store.cameraEnabled) return ''
+  return store.cameraFrameCount > 0 ? 'ok' : 'warn'
+})
+const cameraTooltip = computed(() => {
+  if (!store.cameraEnabled) return 'PiP camera inactive — 点工具栏的「摄像头」开启'
+  if (store.cameraFrameCount > 0) return `PiP camera active — 已渲染 ${store.cameraFrameCount} 帧`
+  return 'PiP camera 已开启但还没有帧 — 传感器尚未产出（场景需有车辆且渲染器已就绪）'
+})
 
 // controller kind label + coordinated offset list (read from worldStore).
 const controllerKindLabel = computed(() => {

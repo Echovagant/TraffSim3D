@@ -9,6 +9,7 @@
  *  - Screenshot baseline
  */
 import { test, expect } from '@playwright/test'
+import { expectVisualScreenshot } from './helpers/visual'
 import { waitForSceneReady } from './helpers/wait'
 
 const FAKE_STATUS = {
@@ -107,5 +108,5 @@ test('AI Playground: independent multi-agent renders per-agent polylines', async
   await page.locator('[data-testid="list-checkpoints-button"]').click()
   await expect(page.locator('[data-testid="ckpt-list"] li')).toHaveCount(2)
 
-  await expect(page.locator('main')).toHaveScreenshot('ai-playground-independent.png')
+  await expectVisualScreenshot(page.locator('main'), 'ai-playground-independent.png')
 })

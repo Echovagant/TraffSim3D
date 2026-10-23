@@ -5,6 +5,7 @@
  * button, verifies the list renders, and screenshots baseline.
  */
 import { test, expect } from '@playwright/test'
+import { expectVisualScreenshot } from './helpers/visual'
 import { waitForSceneReady } from './helpers/wait'
 
 // Sorted by mtime desc to match backend's list_checkpoints() ordering.
@@ -86,5 +87,5 @@ test('AI Playground: checkpoint list renders after clicking button', async ({ pa
   await expect(page.locator('[data-testid="ckpt-name"]').first()).toHaveText('ppo_step_0005000.zip')
 
   // Visual regression on the populated checkpoint list.
-  await expect(page.locator('main')).toHaveScreenshot('ai-playground-checkpoints.png')
+  await expectVisualScreenshot(page.locator('main'), 'ai-playground-checkpoints.png')
 })

@@ -57,8 +57,21 @@ const renderOnce = (): void => {
 }
 
 const startLoop = (): void => {
+  // One loop at a time — the watcher below restarts it whenever the
+  // camera is switched on, so a second start would double the frames.
+  if (rafId !== null) return
+  // Nothing to render while the camera is off. The loop is *not*
+  // started then: it would burn a frame budget on an invisible
+  // picture. The watcher restarts it when the camera comes on.
+  if (!world.cameraEnabled) return
   const tick = (): void => {
-    if (!world.cameraEnabled) return
+    // The camera can be switched off between two frames. Stop
+    // rescheduling and let the watcher start a fresh loop when it
+    // comes back on.
+    if (!world.cameraEnabled) {
+      rafId = null
+      return
+    }
     renderOnce()
     rafId = requestAnimationFrame(tick)
   }
@@ -84,6 +97,26 @@ watch([canvasRef, () => world.cameraSensor], ([canvas, cs]) => {
 onMounted(() => {
   startLoop()
 })
+
+/**
+ * Re-schedule the render loop when the camera is switched on.
+ *
+ * The camera is toggled from the toolbar's 摄像头 checkbox, which is
+ * usually *after* this component mounted. The loop used to be started
+ * once in `onMounted` only: the first frame was taken while the
+ * camera was still off, hit the `if (!world.cameraEnabled) return`
+ * early-exit and — because that exit did not schedule another frame —
+ * the loop died. `cs.render` was then called 0 times and the PiP
+ * stayed blank until the whole SPA was re-mounted.
+ */
+watch(
+  () => world.cameraEnabled,
+  (enabled) => {
+    if (enabled) startLoop()
+    else stopLoop()
+  },
+  { immediate: true },
+)
 
 onBeforeUnmount(() => {
   stopLoop()

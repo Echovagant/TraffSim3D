@@ -34,8 +34,20 @@
           :value="Speed.toKmh((entity as Vehicle).speed).toFixed(0)"
           min="0"
           max="120"
+          :disabled="speedOwnedByReplay"
+          :title="speedTitle"
+          data-testid="speed-input"
           @change="updateSpeed(Number(($event.target as HTMLInputElement).value))"
       /></label>
+      <!--
+        A pinned speed survives ticks (the store re-applies it after
+        every `tick()`), so the Inspector says so explicitly instead of
+        letting the user believe the number is a momentary nudge.
+      -->
+      <div v-if="hasSpeedOverride" class="override-row" data-testid="speed-override">
+        <span>已锁定 {{ overrideKmh }} km/h（不受信号灯约束）</span>
+        <button class="ghost" title="解除速度锁定" @click="releaseSpeed">解除</button>
+      </div>
       <label
         >Lane <b>{{ laneDisplay }}</b></label
       >
@@ -59,17 +71,18 @@
       </div>
     </div>
     <div v-else-if="selection.kind === 'light'">
+      <!--
+        The phase is **owned by the signal controller**: `tick()` runs
+        the per-light controller every frame and overwrites whatever
+        was written here. Editing it was a one-frame lie (the light
+        went back to red within ~2 s), so the field is read-only and
+        says who owns it. The toolbar's 全红 button is the supported
+        way to override the signals.
+      -->
       <label
-        >Phase
-        <select
-          :value="(entity as TrafficLight).phase"
-          @change="updatePhase(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="red">red</option>
-          <option value="yellow">yellow</option>
-          <option value="green">green</option>
-        </select>
-      </label>
+        >Phase <b class="readonly" data-testid="phase-readonly">{{ phaseLabel }}</b></label
+      >
+      <p class="hint">相位由信号控制器决定，编辑器不可直接改写。</p>
       <label
         >Axis
         <select
@@ -145,6 +158,36 @@ const onChangeLane = (dir: 'left' | 'right'): void => {
   }
 }
 
+/**
+ * The pinned speed of the selected vehicle (m/s) — `null` when the
+ * vehicle is not pinned. Read from the store on every tick so the
+ * "已锁定" badge appears / disappears with the pin.
+ */
+const speedOverrideMps = computed(() => {
+  void world.tickCount
+  if (selection.kind !== 'vehicle' || !selection.id) return null
+  return world.getVehicleSpeedOverride(selection.id)
+})
+const hasSpeedOverride = computed(() => speedOverrideMps.value !== null)
+const overrideKmh = computed(() =>
+  speedOverrideMps.value === null ? '—' : String(Math.round(Speed.toKmh(speedOverrideMps.value))),
+)
+
+/**
+ * While a policy replay is running the replay target's speed belongs
+ * to the policy (the Python contract compares that state bit-for-bit),
+ * so the field is disabled instead of silently doing nothing.
+ */
+const speedOwnedByReplay = computed(() => world.replayActive)
+
+const speedTitle = computed(() =>
+  speedOwnedByReplay.value
+    ? '重放中：速度由 policy 决定，不能改写'
+    : hasSpeedOverride.value
+      ? '锁定速度：车辆保持该速度，直到点「解除」'
+      : '设定速度（车辆将被锁定在该速度）',
+)
+
 const deselect = (): void => {
   selection.clear()
 }
@@ -170,12 +213,20 @@ const updateSpeed = (kmh: number) => {
     world.notifyChange()
   }
 }
-const updatePhase = (phase: string) => {
-  if (selection.kind === 'light' && entity.value) {
-    ;(entity.value as { phase: string }).phase = phase
+
+/** Release the speed pin — the vehicle returns to the road's limit. */
+const releaseSpeed = (): void => {
+  if (selection.kind === 'vehicle' && selection.id) {
+    world.clearVehicleSpeedOverride(selection.id)
     world.notifyChange()
   }
 }
+
+/** The phase of the selected light, as a readable label. */
+const phaseLabel = computed(() => {
+  if (selection.kind !== 'light' || !entity.value) return '—'
+  return (entity.value as TrafficLight).phase
+})
 const updateAxis = (axis: 'ns' | 'ew') => {
   if (selection.kind === 'light' && entity.value) {
     ;(entity.value as { axis: 'ns' | 'ew' }).axis = axis
@@ -245,6 +296,37 @@ const deleteSelected = () => {
 }
 .inspector .lane-actions button {
   flex: 1;
+}
+/* Speed-pin badge: the vehicle is pinned at this speed until the
+ * user releases it. */
+.inspector .override-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: rgba(180, 83, 9, 0.25);
+  border: 1px solid #b45309;
+  color: #fde68a;
+  font-size: 10px;
+}
+.inspector .override-row button {
+  padding: 1px 5px;
+  background: #1e293b;
+}
+/* Read-only value (the signal controller owns the phase). */
+.inspector .readonly {
+  color: #94a3b8;
+  font-weight: 600;
+  text-transform: none;
+}
+.inspector .hint {
+  margin: -2px 0 6px;
+  font-size: 10px;
+  opacity: 0.65;
+  line-height: 1.4;
 }
 .inspector button {
   padding: 3px 6px;

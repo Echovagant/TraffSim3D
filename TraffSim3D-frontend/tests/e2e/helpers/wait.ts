@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
+import { expectVisualSceneScreenshot } from './visual'
 
 /** 等待 SceneEditor 路由加载完毕 + WorldCanvas 的 <canvas> 元素挂载。 */
 export const waitForSceneReady = async (page: Page): Promise<void> => {
@@ -99,9 +100,12 @@ export const pauseSimulation = async (page: Page): Promise<void> => {
 /**
  * Visual-regression assertion for the 3D scene viewport. Replaces the old
  * `page.screenshot({ path })`, which wrote a PNG nobody ever compared.
+ *
+ * The comparison itself is guarded by the baseline platform — see
+ * `helpers/visual.ts` for why (the committed PNGs are Windows-only).
  */
 export const expectSceneScreenshot = async (page: Page, name: string): Promise<void> => {
-  await expect(page).toHaveScreenshot(name, { clip: SCENE_CLIP })
+  await expectVisualSceneScreenshot(page, name, SCENE_CLIP)
 }
 
 /**

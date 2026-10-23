@@ -9,6 +9,7 @@
  *  - All module cards animate in (visible after a short delay).
  */
 import { test, expect, type Page } from '@playwright/test'
+import { expectVisualScreenshot } from './helpers/visual'
 
 /**
  * Wait until the Home page's GSAP entrance animations have fully settled.
@@ -87,7 +88,7 @@ test('Home: GSAP hero text reaches final opacity after animation', async ({ page
     .evaluate((el) => window.getComputedStyle(el).opacity)
   expect(parseFloat(subOpacity)).toBeGreaterThan(0.95)
 
-  await expect(page.locator('.hero')).toHaveScreenshot('home-gsap-hero.png')
+  await expectVisualScreenshot(page.locator('.hero'), 'home-gsap-hero.png')
 })
 test('Home: SmartCity 3D card is rendered as featured', async ({ page }) => {
   await page.goto('/')
@@ -168,6 +169,6 @@ test.describe('Home: full-page baseline', () => {
       })
     })
 
-    await expect(page.locator('main')).toHaveScreenshot('home-gsap-full.png')
+    await expectVisualScreenshot(page.locator('main'), 'home-gsap-full.png')
   })
 })

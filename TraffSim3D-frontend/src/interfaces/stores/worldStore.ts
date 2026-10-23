@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, shallowRef, watch } from 'vue'
+import { ref, shallowRef, triggerRef, watch } from 'vue'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { Vehicle } from '@domain/entities/Vehicle'
 import type { TrafficLight } from '@domain/entities/TrafficLight'
@@ -47,6 +47,7 @@ import {
   CAMERA_DEFAULT_WIDTH,
   CAMERA_DEFAULT_HEIGHT,
   CAMERA_DEFAULT_FOV,
+  MAX_PHYSICS_FRAME_DT,
 } from '@shared/constants/simulation'
 import { saveScene, loadScene, clearScene } from '@application/use-cases'
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
@@ -469,8 +470,23 @@ export const useWorldStore = defineStore('world', () => {
   // entries are dropped on overflow. Cleared on hydrate/reset (loading
   // a new scene is not undoable — it's the user's explicit decision).
   const HISTORY_LIMIT = 50
-  let history: SerializedScene[] = []
-  let redoStack: SerializedScene[] = []
+  /**
+   * Undo / redo stacks.
+   *
+   * These are `shallowRef`s, NOT plain `let` arrays. The toolbar's
+   * 撤销 / 重做 buttons call `canUndo()` / `canRedo()` **inside their
+   * render function**, so the stack depth has to be a reactive
+   * dependency. With a plain array the action was real (Ctrl+Z undid
+   * the edit) but the button never repainted — the control said "you
+   * cannot undo" while the undo worked.
+   *
+   * `shallowRef` rather than `ref` because every entry is a full
+   * serialized scene: deep reactivity would proxy the whole road
+   * network on every push. The arrays are mutated in place, so every
+   * mutation site must call `triggerRef()` to notify the dependents.
+   */
+  const history = shallowRef<SerializedScene[]>([])
+  const redoStack = shallowRef<SerializedScene[]>([])
 
   /**
    * Push the current network state to the history stack. Called by
@@ -482,11 +498,13 @@ export const useWorldStore = defineStore('world', () => {
    * trail (standard undo/redo semantic).
    */
   const pushHistory = (): void => {
-    history.push(cloneScene(serializeNetwork(network.value)))
-    if (history.length > HISTORY_LIMIT) {
-      history.shift() // drop oldest
+    history.value.push(cloneScene(serializeNetwork(network.value)))
+    if (history.value.length > HISTORY_LIMIT) {
+      history.value.shift() // drop oldest
     }
-    redoStack = []
+    redoStack.value = []
+    triggerRef(history)
+    triggerRef(redoStack)
   }
 
   /**
@@ -617,7 +635,20 @@ export const useWorldStore = defineStore('world', () => {
     // simTime/tick 都用同一个值.
     // 注意: 帧率 / 帧耗时**不**用这个值 — 它们测的是真实的帧间隔,
     // 见下面的 frame-time 统计块.
-    const clampedDt = Math.max(0, Math.min(dt, 1 / 30))
+    //
+    // The upper bound used to be 1/30 s, which meant the simulation only
+    // ever advanced a 30 Hz frame's worth of time no matter how slow the
+    // render loop was: at 15 fps the world ran at half speed. The physics
+    // layer now consumes the frame's time in **fixed sub-steps**
+    // (`RapierWorld.step`), so the anti-tunnelling guarantee comes from
+    // the sub-step length instead of from the frame dt — and the frame dt
+    // can be left alone, which is what makes the simulation speed
+    // independent of the frame rate.
+    //
+    // The bound is still there, for the case where the tab was backgrounded
+    // and came back with an enormous dt: `MAX_PHYSICS_FRAME_DT` is the
+    // physics layer's own limit, and this one matches it.
+    const clampedDt = Math.max(0, Math.min(dt, MAX_PHYSICS_FRAME_DT))
     simTime += clampedDt
     tick(network.value, clampedDt, simTime, {
       rapierWorld,
@@ -636,6 +667,11 @@ export const useWorldStore = defineStore('world', () => {
       policy: policy.value,
       replayTargetId: replayActive.value ? replayTargetId.value : null,
     })
+    // Re-apply the user's speed pins. `tick()` owns the speed
+    // computation and always re-derives it from the road limit, so
+    // the pins have to be re-applied *after* it — otherwise a pin
+    // would last exactly one frame (the bug this replaces).
+    applySpeedOverrides()
     // Update LiDAR frame counter from sensorRegistry's actual scan count
     // (not per-tick). The registry tracks frames produced (throttled scans only).
     if (lidarEnabled.value) {
@@ -711,8 +747,8 @@ export const useWorldStore = defineStore('world', () => {
     // Clear any loaded RL policy so it can't drive the
     // fresh network's vehicles with stale target ids.
     clearPolicy()
-    history = []
-    redoStack = []
+    history.value = []
+    redoStack.value = []
     controllers = new Map()
     sensorRegistry.destroyAll()
     trajectoryExporter.clear()
@@ -726,6 +762,7 @@ export const useWorldStore = defineStore('world', () => {
     cameraFrameCount.value = 0
     lidarFrameCount.value = 0
     network.value = buildCrossIntersectionNetwork()
+    speedOverrides.clear()
     simTime = 0
     fixedStepScheduler.reset() // zero out the 10 Hz cadence
     // Re-register default vehicles.
@@ -818,6 +855,9 @@ export const useWorldStore = defineStore('world', () => {
 
   const removeVehicle = (id: string): void => {
     pushHistory()
+    // A pin on a deleted vehicle is meaningless — drop it, otherwise
+    // the id could be reused later and would silently re-pin.
+    speedOverrides.delete(id)
     // Unregister sensors BEFORE removing the Rapier body.
     // The body removal deletes the collider handle that the sensor
     // needs for excludeColliders, so the order is critical.
@@ -834,25 +874,92 @@ export const useWorldStore = defineStore('world', () => {
   }
 
   /**
-   * User-edited a vehicle's speed via the Inspector. Update the
-   * Rapier body's linear velocity immediately so the 3D scene
-   * reflects the change, then mutate the entity field. The entity's
-   * `targetSpeed` is NOT changed — the next tick's applyControl will
-   * re-derive linvel from `targetSpeed`, which is the road limit, so
-   * the user's edit only persists for one frame. This is a known
-   * trade-off; the inspector's purpose is **observe** + **small nudges**,
-   * not permanent speed override.
+   * Persistent, user-set speed overrides in m/s, keyed by vehicle id.
+   *
+   * The Inspector used to write `v.speed` once and stop there: the
+   * next tick's `applyControl` re-derived the speed from the road's
+   * speed limit, so the number the user typed was gone within one
+   * frame. The control looked editable but was a single-frame lie
+   * (set 90 km/h → next tick reads back 59.4).
+   *
+   * An override is a **pin**: while it is set, the vehicle keeps that
+   * speed across ticks. The pin is re-applied after every `tick()`
+   * (see `applySpeedOverrides`) because `tick()` owns the speed
+   * computation and cannot be told about a user override.
+   *
+   * Semantics of a pin (documented in the Inspector too): the pinned
+   * vehicle keeps its speed even at a red light. That is what "pin"
+   * means — the user has taken the vehicle out of the signal
+   * controller's hands. It is deliberately NOT a "cruise control
+   * setpoint", because a setpoint cannot raise the speed above the
+   * road limit, and the user asked for 90 km/h on a 30 km/h road.
+   */
+  const speedOverrides = new Map<string, number>()
+
+  /**
+   * Re-pin every vehicle the user has overridden. Called at the end of
+   * `step()`, i.e. after `tick()` has recomputed the speeds.
+   *
+   * The replay path is excluded entirely: the policy owns the replay
+   * target's speed, and the Python-side contract compares the replay
+   * state bit-for-bit (`docs/contracts/sim-snapshot.md`). Applying an
+   * override during a replay would change the world the replay runs
+   * in, so the overrides are suspended for the duration of a replay
+   * and re-applied once it stops.
+   */
+  const applySpeedOverrides = (): void => {
+    if (speedOverrides.size === 0) return
+    if (replayActive.value) return
+    for (const [id, mps] of speedOverrides) {
+      const v = network.value.vehicles[id]
+      if (!v) {
+        // The vehicle is gone (deleted / OOB cleanup) — drop the pin.
+        speedOverrides.delete(id)
+        continue
+      }
+      v.targetSpeed = mps
+      v.speed = mps
+      if (rapierWorld) {
+        rapierWorld.setVehicleSpeed(id, mps, v.heading)
+      }
+    }
+  }
+
+  /**
+   * User-edited a vehicle's speed via the Inspector.
+   *
+   * The value is stored as a **persistent pin** (see
+   * `speedOverrides`): it survives ticks until the user clears it
+   * (`clearVehicleSpeedOverride`). The Rapier body's linear velocity
+   * is updated immediately so the 3D scene reflects the change on the
+   * very next frame instead of waiting for the next `tick()`.
    */
   const setVehicleSpeed = (vehicleId: string, speedKmh: number): void => {
     const v = network.value.vehicles[vehicleId]
     if (!v) return
     pushHistory()
-    v.speed = speedKmh / 3.6 // km/h → m/s
+    const mps = Math.max(0, speedKmh) / 3.6 // km/h → m/s
+    speedOverrides.set(vehicleId, mps)
+    v.targetSpeed = mps
+    v.speed = mps
     if (rapierWorld) {
-      rapierWorld.setVehicleSpeed(vehicleId, v.speed, v.heading)
+      rapierWorld.setVehicleSpeed(vehicleId, mps, v.heading)
     }
     bumpTick()
   }
+
+  /**
+   * Release the speed pin on a vehicle: the vehicle goes back under
+   * the road's speed limit + the signal / car-following constraints.
+   */
+  const clearVehicleSpeedOverride = (vehicleId: string): void => {
+    if (!speedOverrides.delete(vehicleId)) return
+    bumpTick()
+  }
+
+  /** The pinned speed of a vehicle in m/s (null when not pinned). */
+  const getVehicleSpeedOverride = (vehicleId: string): number | null =>
+    speedOverrides.get(vehicleId) ?? null
 
   // Lane change: domain decision + state mutation.
   // Returns the same shape as `requestLaneChange` (the domain function)
@@ -921,9 +1028,53 @@ export const useWorldStore = defineStore('world', () => {
 
   // ----- persistence -----
 
+  /**
+   * Sidecar key holding the *scene metadata* (which built-in scene the
+   * saved network came from, and its human-readable label).
+   *
+   * The serialized scene document itself only holds the network —
+   * adding a field to it would bump the schema version, and the
+   * serializer is not this file's to change. A separate key keeps the
+   * scene document byte-compatible while letting a restored scene keep
+   * the label the toolbar shows.
+   */
+  const SCENE_META_KEY = 'traffsim3d:scene-meta'
+
+  interface SceneMeta {
+    kind: SceneKind
+    label: string
+  }
+
+  const writeSceneMeta = (): void => {
+    if (typeof localStorage === 'undefined') return
+    try {
+      localStorage.setItem(
+        SCENE_META_KEY,
+        JSON.stringify({ kind: currentSceneKind.value, label: currentSceneLabel.value }),
+      )
+    } catch {
+      // Metadata is best-effort: a full / disabled LocalStorage must
+      // not turn a successful scene save into a failure.
+    }
+  }
+
+  const readSceneMeta = (): SceneMeta | null => {
+    if (typeof localStorage === 'undefined') return null
+    try {
+      const raw = localStorage.getItem(SCENE_META_KEY)
+      if (!raw) return null
+      const parsed = JSON.parse(raw) as Partial<SceneMeta>
+      if (typeof parsed.kind !== 'string' || typeof parsed.label !== 'string') return null
+      return { kind: parsed.kind as SceneKind, label: parsed.label }
+    } catch {
+      return null
+    }
+  }
+
   const serialize = (): { ok: true } | { ok: false; reason: string } => {
     try {
       saveScene(network.value)
+      writeSceneMeta()
       return { ok: true }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -954,6 +1105,10 @@ export const useWorldStore = defineStore('world', () => {
     // Assign via .value so Pinia's auto-unwrap on the store
     // surfaces the new network to EntityOutline, InspectorPanel, etc.
     network.value = next
+    // The pins belong to the old network's vehicles — they must not
+    // silently apply to a different scene (or to an id that happens to
+    // repeat in the restored one).
+    speedOverrides.clear()
     // Clear controller cache + sensors + exporter — new scene has
     // different light IDs and vehicle IDs.
     controllers = new Map()
@@ -992,8 +1147,8 @@ export const useWorldStore = defineStore('world', () => {
     const result = loadScene()
     if (!result.ok) return result
     // Loading a new scene is the user's explicit decision — not undoable.
-    history = []
-    redoStack = []
+    history.value = []
+    redoStack.value = []
     return replaceNetwork(result.network)
   }
 
@@ -1020,7 +1175,51 @@ export const useWorldStore = defineStore('world', () => {
 
   const clearStorage = (): { ok: true } => {
     clearScene()
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(SCENE_META_KEY)
+      } catch {
+        // Ignore — the scene payload is already gone.
+      }
+    }
     return { ok: true }
+  }
+
+  /**
+   * Restore the saved scene — called once when the store is created,
+   * i.e. on application start.
+   *
+   * Before this, 保存 wrote the scene to LocalStorage and nothing ever
+   * read it back automatically: a page refresh silently threw the
+   * saved scene away and the user had to press 加载 to get it back.
+   * The save button looked like it had done nothing.
+   *
+   * Returns `{ restored: true }` when a scene was restored and
+   * `{ restored: false, reason }` when there was nothing to restore
+   * (or the stored payload was unusable — the default scene stays).
+   */
+  const restoreSavedScene = (): { restored: boolean; reason?: string } => {
+    if (typeof localStorage === 'undefined') return { restored: false, reason: 'no localStorage' }
+    const result = loadScene()
+    if (!result.ok) return { restored: false, reason: result.reason }
+    // Restoring is not an undoable user edit — it is the app coming
+    // back up with the state the user left behind.
+    history.value = []
+    redoStack.value = []
+    const meta = readSceneMeta()
+    if (meta) {
+      currentSceneKind.value = meta.kind
+      currentSceneLabel.value = meta.label
+    } else {
+      // Saved before the metadata sidecar existed: the provenance of
+      // the network is unknown, so it is labelled as such instead of
+      // claiming one of the built-in scenes.
+      currentSceneKind.value = 'imported'
+      currentSceneLabel.value = '已保存的场景'
+    }
+    replaceNetwork(result.network)
+    showFlashMessage('已恢复上次保存的场景', 'info')
+    return { restored: true }
   }
 
   /**
@@ -1033,8 +1232,8 @@ export const useWorldStore = defineStore('world', () => {
    */
   const switchScene = (kind: SceneKind): { ok: true } => {
     const next = buildNetworkByKind(kind)
-    history = []
-    redoStack = []
+    history.value = []
+    redoStack.value = []
     currentSceneKind.value = kind
     if (kind === 'imported') {
       // Callers must pass a label via loadNetwork() before
@@ -1055,10 +1254,12 @@ export const useWorldStore = defineStore('world', () => {
    * loadNetwork path (which removes old bodies + registers new).
    */
   const undo = (): boolean => {
-    if (history.length === 0) return false
-    const previous = history.pop()!
-    redoStack.push(cloneScene(serializeNetwork(network.value)))
-    if (redoStack.length > HISTORY_LIMIT) redoStack.shift()
+    if (history.value.length === 0) return false
+    const previous = history.value.pop()!
+    redoStack.value.push(cloneScene(serializeNetwork(network.value)))
+    if (redoStack.value.length > HISTORY_LIMIT) redoStack.value.shift()
+    triggerRef(history)
+    triggerRef(redoStack)
     const restored = sceneToNetwork(previous)
     // Use loadNetwork to re-register Rapier bodies
     loadNetwork(restored)
@@ -1069,17 +1270,25 @@ export const useWorldStore = defineStore('world', () => {
    * Redo the last undone mutation. Mirror of undo().
    */
   const redo = (): boolean => {
-    if (redoStack.length === 0) return false
-    const next = redoStack.pop()!
-    history.push(cloneScene(serializeNetwork(network.value)))
-    if (history.length > HISTORY_LIMIT) history.shift()
+    if (redoStack.value.length === 0) return false
+    const next = redoStack.value.pop()!
+    history.value.push(cloneScene(serializeNetwork(network.value)))
+    if (history.value.length > HISTORY_LIMIT) history.value.shift()
+    triggerRef(history)
+    triggerRef(redoStack)
     const restored = sceneToNetwork(next)
     loadNetwork(restored)
     return true
   }
 
-  const canUndo = (): boolean => history.length > 0
-  const canRedo = (): boolean => redoStack.length > 0
+  const canUndo = (): boolean => history.value.length > 0
+  const canRedo = (): boolean => redoStack.value.length > 0
+
+  // Restore the scene the user saved in a previous session. This runs
+  // once, when the store is created — i.e. when the application boots.
+  // It is a no-op when nothing has been saved yet, and it is placed at
+  // the very end of the setup so every function it uses is defined.
+  restoreSavedScene()
 
   return {
     network,
@@ -1174,6 +1383,11 @@ export const useWorldStore = defineStore('world', () => {
     // camera fit
     fitRequestTick,
     requestFit,
+    // Inspector surface
+    clearVehicleSpeedOverride,
+    getVehicleSpeedOverride,
+    // persistence
+    restoreSavedScene,
   }
 })
 

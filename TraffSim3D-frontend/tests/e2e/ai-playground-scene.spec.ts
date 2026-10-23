@@ -5,6 +5,7 @@
  * and that selecting 'corridor' persists in the train request body.
  */
 import { test, expect } from '@playwright/test'
+import { expectVisualScreenshot } from './helpers/visual'
 import { waitForSceneReady } from './helpers/wait'
 
 test('AI Playground: corridor scene option selectable', async ({ page }) => {
@@ -85,5 +86,5 @@ test('AI Playground: corridor scene option selectable', async ({ page }) => {
   const sceneKindVisible = await page.locator('.cap-note').isVisible()
   expect(sceneKindVisible).toBe(true)
 
-  await expect(page.locator('main')).toHaveScreenshot('ai-playground-corridor.png')
+  await expectVisualScreenshot(page.locator('main'), 'ai-playground-corridor.png')
 })

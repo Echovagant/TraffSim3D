@@ -412,7 +412,7 @@
           Checkpoint
           <select v-model="replayCkptName" data-testid="ckpt-replay-select">
             <option value="">— 选择 —</option>
-            <option v-for="c in checkpoints" :key="c.name" :value="c.name">
+            <option v-for="c in egoCheckpoints" :key="c.name" :value="c.name">
               {{ c.name }} · {{ c.size_kb }}KB
             </option>
           </select>
@@ -503,7 +503,7 @@
           信号灯 checkpoint
           <select v-model="signalCkptName" data-testid="signal-ckpt-select">
             <option value="">— 选择 —</option>
-            <option v-for="c in checkpoints" :key="c.name" :value="c.name">
+            <option v-for="c in signalCheckpoints" :key="c.name" :value="c.name">
               {{ c.name }} · {{ c.size_kb }}KB
             </option>
           </select>
@@ -524,6 +524,14 @@
         >
           清除
         </button>
+        <button
+          class="ghost"
+          :disabled="signalTraining"
+          data-testid="train-signal-policy-button"
+          @click="onTrainSignalPolicy"
+        >
+          {{ signalTraining ? '训练中…' : '训练信号灯 agent' }}
+        </button>
         <label class="ctrl">
           <input
             v-model="rlControlsSignal"
@@ -539,9 +547,12 @@
           ✓ 已加载 <code>{{ world.signalPolicy.name }}</code> ({{ world.signalPolicy.obs_dim }} obs
           / {{ world.signalPolicy.action_dim }} act · 离散)
         </template>
-        <template v-else
-          >未加载 — 训练一次信号灯 agent (python -m app.apps.rl.signal_train) 再加载。</template
-        >
+        <template v-else-if="signalCheckpoints.length > 0">
+          未加载 — 上面有 {{ signalCheckpoints.length }} 个信号灯 checkpoint,选一个再点「加载」。
+        </template>
+        <template v-else>
+          未加载 — 先点「训练信号灯 agent」跑一次训练(约 10 分钟),训练完成后点「列出 checkpoints」再加载。
+        </template>
       </p>
 
       <div class="replay-status" data-testid="signal-policy-readout">
@@ -576,6 +587,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 import { buildEvalCurve, type EvalPoint } from './trainingCurve'
+import { parseRLStatus, type RLStatusCore } from '@infrastructure/api'
 
 /** One point of the backend's evaluation series. */
 type SignalEvalPoint = EvalPoint
@@ -594,32 +606,15 @@ interface SignalSeedResult {
   eval_series?: SignalEvalPoint[]
 }
 
-interface Status {
-  running: boolean
-  /** Whether the live run is paused (the pause/resume control channel). */
-  paused?: boolean
-  step: number
-  /** The step budget the run was started with. */
-  total_steps?: number
-  episode_count: number
-  last_reward: number
-  reward_history: number[]
-  started_at_ms: number
-  finished_at_ms: number | null
-  /** The backend's own verdict on the run — how it ended, and whether it
-   *  was a dry run. `dry_run*` reasons mean no PPO ever ran. */
-  reason?: string
-  device?: string
-  device_reason?: string
-  n_agents?: number
-  independent_agents?: boolean
-  scene_kind?: string
-  latest_checkpoint?: string
-  /** 'signal' when the signal-light agent wrote this status. */
-  policy_kind?: string
-  /** Per-agent reward history (only when independent_agents=true).
-   *  Keys are stringified int agent_ids ("0", "1", ...). */
-  agent_rewards?: Record<string, number[]>
+/**
+ * The status payload.
+ *
+ * The core fields live in the API layer (`RLStatusCore`) — that is
+ * where the `/api/v1/rl/status` contract is enforced, at runtime, by
+ * `parseRLStatus()`. This interface only adds the signal-agent extras
+ * the page renders.
+ */
+interface Status extends RLStatusCore {
   /** The evaluation series — one point per evaluation. */
   signal_eval_series?: SignalEvalPoint[]
   /** The fixed 30/30 cycle per condition (train / eval / holdout). */
@@ -641,6 +636,10 @@ interface Checkpoint {
   process: string
   size_kb: number
   mtime_ms: number
+  /** Which agent the checkpoint belongs to: "ego" drives a vehicle,
+   *  "signal" commands the traffic light. The backend tags each file
+   *  by its name; an untagged entry is treated as an ego policy. */
+  policy_kind?: string
 }
 
 interface Capabilities {
@@ -686,6 +685,24 @@ const status = ref<Status>({
 
 const checkpoints = ref<Checkpoint[]>([])
 const checkpointsVisible = ref(false)
+
+/**
+ * The two agents' checkpoints, split apart.
+ *
+ * The backend lists both families side by side and tags each entry with
+ * `policy_kind`. The two pickers must not offer each other's files: the
+ * ego policy is continuous (two actions) and drives a vehicle, the
+ * signal policy is discrete (five actions) and commands the traffic
+ * light. Loading one into the other slot fails at the loader, because
+ * the action spaces do not match — so the pickers filter, and an
+ * untagged entry (an older backend) is assumed to be an ego policy.
+ */
+const egoCheckpoints = computed(() =>
+  checkpoints.value.filter((c) => (c.policy_kind ?? 'ego') === 'ego'),
+)
+const signalCheckpoints = computed(() =>
+  checkpoints.value.filter((c) => c.policy_kind === 'signal'),
+)
 
 const caps = ref<Capabilities | null>(null)
 
@@ -792,6 +809,44 @@ const signalCkptName = ref('')
 const signalPolicyLoading = ref(false)
 const signalError = ref<string | null>(null)
 const rlControlsSignal = ref(false)
+const signalTraining = ref(false)
+
+/**
+ * Train the signal agent from the browser.
+ *
+ * The signal agent is a different agent from the ego policy, so it has
+ * its own endpoint (`POST /api/v1/rl/signal/train`) — posting to
+ * `/rl/train` would spawn the ego trainer and produce a policy the
+ * light controller cannot load.
+ *
+ * The run is long (300 k steps ≈ 10 minutes on one CPU core), so the
+ * button starts it in the background and the page keeps polling the
+ * status the same way it does for the ego run. The trained policy is
+ * only listed once the run has written its checkpoint.
+ */
+const onTrainSignalPolicy = async (): Promise<void> => {
+  signalError.value = null
+  signalTraining.value = true
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/v1/rl/signal/train`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ steps: 300000, device: 'cpu', seeds: [0] }),
+    })
+    if (!r.ok) {
+      const detail = await r.text()
+      signalError.value = `启动训练失败 ${r.status}: ${detail.slice(0, 200)}`
+      showFlashMessage('信号灯训练启动失败', 'error')
+      return
+    }
+    showFlashMessage('信号灯训练已启动 — 约 10 分钟后点「列出 checkpoints」查看结果', 'info')
+  } catch (e) {
+    signalError.value = e instanceof Error ? e.message : String(e)
+    showFlashMessage('信号灯训练启动失败', 'error')
+  } finally {
+    signalTraining.value = false
+  }
+}
 
 const signalActionLabel = computed(() => world.signalPolicyDecision?.action ?? '—')
 const signalQueueNs = computed(() => world.signalPolicyDecision?.queueNs ?? '—')
@@ -1126,7 +1181,7 @@ const refreshStatus = async (): Promise<void> => {
       error.value = `status ${r.status}`
       return
     }
-    const j = (await r.json()) as Status
+    const j = parseRLStatus<Status>(await r.json())
     status.value = j
     if (j.running) {
       running.value = true

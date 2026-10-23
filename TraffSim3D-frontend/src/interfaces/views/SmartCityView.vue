@@ -6,8 +6,15 @@
 
     <!-- Three.js overlay: transparent background, vehicles + lights
          + LiDAR are drawn here. z=1 so it stacks above the basemap.
-         Pointer events pass through to Cesium for camera control. -->
-    <canvas ref="threeCanvas" data-testid="world-canvas" class="three-canvas" />
+         In "free" view mode the canvas takes pointer events so
+         OrbitControls can drive the simulation camera (the basemap
+         then follows it). -->
+    <canvas
+      ref="threeCanvas"
+      data-testid="world-canvas"
+      class="three-canvas"
+      :class="{ 'three-canvas--interactive': viewMode === 'free' }"
+    />
 
     <!-- Floating top dock (minimal toolbar — the full UI
          redesign is still to come). -->
@@ -97,14 +104,19 @@
  * Camera:
  *   - `bird`: Cesium camera at 1500m straight down (default).
  *   - `street`: Cesium camera at 1.7m, heading 0 (human eye level).
- *   - `free`: Three.js OrbitControls; Cesium camera paused at the
- *     last known position (follows Three.js via cameraSync).
+ *   - `free`: Three.js OrbitControls own the camera; the Cesium camera
+ *     is mirrored from it, so the basemap stays under the simulation.
  *
- * The full bidirectional Three.js ↔ Cesium camera sync (mouse
- * drag on the basemap drives Three.js camera) is not implemented yet —
- * the MVP is one-way: Cesium drives the position, Three.js
- * mirrors it. The render loop calls `syncThreeCameraToCesium`
- * every frame.
+ * Ownership (see `infrastructure/cesium/cameraSync.ts`): exactly one
+ * side drives the camera at a time — the sync context applies ONE
+ * direction per frame, selected by the owner. The two cameras can
+ * therefore never chase each other in a feedback loop.
+ *
+ * Geographic anchor: an imported OSM map carries its own projection
+ * origin (`originLat`/`originLon`), so the basemap is fetched around
+ * that point and the ENU frame is anchored there. Scenes without an
+ * origin (the built-in demo scenes) fall back to the default 天安门
+ * anchor — a display anchor only.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as Cesium from 'cesium'
@@ -113,17 +125,23 @@ import { useEditor } from '@interfaces/composables/useEditor'
 import { useCameraControls } from '@interfaces/composables/useCameraControls'
 import type { ThreeJSRenderer } from '@infrastructure/rendering'
 import { useWorldStore } from '@interfaces/stores/worldStore'
+import { computeNetworkBounds } from '@domain/services/networkBounds'
 import {
   createCesiumViewer,
-  DEFAULT_TANGENT_ORIGIN,
   DEFAULT_IMAGERY,
+  resolveTangentOrigin,
 } from '@infrastructure/cesium/viewer'
 import {
   loadOSMScene,
+  bboxAround,
   DEFAULT_BBOX,
   type LoadedOSMScene,
 } from '@infrastructure/cesium/loadOSMScene'
-import { syncThreeCameraToCesium } from '@infrastructure/cesium/cameraSync'
+import {
+  createCameraSync,
+  type CameraSyncContext,
+  type TangentOrigin,
+} from '@infrastructure/cesium/cameraSync'
 
 const cesiumContainer = ref<HTMLDivElement | null>(null)
 const threeCanvas = ref<HTMLCanvasElement | null>(null)
@@ -135,6 +153,22 @@ const world = useWorldStore()
 
 let cesiumViewer: Cesium.Viewer | null = null
 let syncRafId: number | null = null
+let cameraSync: CameraSyncContext | null = null
+
+// Geographic anchor of the loaded scene. An imported OSM map carries
+// its own projection origin; the built-in demo scenes have none and
+// fall back to the default 天安门 anchor.
+const sceneOrigin = world.network.origin ?? null
+const tangent: TangentOrigin = resolveTangentOrigin(sceneOrigin)
+
+// How much of the scene the bird's-eye camera has to cover, and which
+// basemap area to fetch. A demo scene keeps the historic 天安门 bbox;
+// an imported map gets a bbox around its own origin.
+const sceneBounds = computeNetworkBounds(world.network)
+const birdHeight = Math.max(1500, Math.round(sceneBounds.diagonal * 1.2))
+const osmBbox = sceneOrigin
+  ? bboxAround(sceneOrigin.lat, sceneOrigin.lon, Math.max(1500, sceneBounds.diagonal / 2))
+  : DEFAULT_BBOX
 
 // Reuse the simulation tick so the simulation keeps running.
 const { isReady, getRenderer } = useWorldSimulation(threeCanvas)
@@ -182,8 +216,8 @@ onMounted(async () => {
   // 1) Construct Cesium viewer (sync — the SDK init is fast).
   try {
     cesiumViewer = createCesiumViewer(cesiumContainer.value, {
-      center: DEFAULT_TANGENT_ORIGIN,
-      zoomLevel: 1500,
+      center: tangent,
+      zoomLevel: birdHeight,
       imagery: DEFAULT_IMAGERY,
     })
   } catch (e) {
@@ -197,7 +231,7 @@ onMounted(async () => {
   // 2) Async load OSM buildings + roads.
   status.value = { kind: 'info', text: '正在从 Overpass 加载 OSM 数据...' }
   try {
-    const loaded: LoadedOSMScene = await loadOSMScene(cesiumViewer, DEFAULT_BBOX)
+    const loaded: LoadedOSMScene = await loadOSMScene(cesiumViewer, osmBbox)
     osmStats.value = {
       roadCount: loaded.roadCount,
       buildingCount: loaded.buildingCount,
@@ -226,40 +260,48 @@ onMounted(async () => {
 watch(viewMode, (mode) => {
   if (!cesiumViewer) return
   if (mode === 'bird') {
+    // Cesium owns the camera again — hand the current view over once
+    // so the switch does not jump.
+    cameraSync?.setOwner('cesium')
     cesiumViewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(
-        DEFAULT_TANGENT_ORIGIN.lng,
-        DEFAULT_TANGENT_ORIGIN.lat,
-        1500,
-      ),
+      destination: Cesium.Cartesian3.fromDegrees(tangent.lng, tangent.lat, birdHeight),
       duration: 2,
     })
   } else if (mode === 'street') {
+    cameraSync?.setOwner('cesium')
     cesiumViewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(
-        DEFAULT_TANGENT_ORIGIN.lng,
-        DEFAULT_TANGENT_ORIGIN.lat,
-        1.7,
-      ),
+      destination: Cesium.Cartesian3.fromDegrees(tangent.lng, tangent.lat, 1.7),
       orientation: { heading: 0, pitch: 0, roll: 0 },
       duration: 2,
     })
+  } else {
+    // 'free': Three.js owns the camera (OrbitControls), the basemap
+    // follows it. Copy the current Cesium view into Three once (the
+    // handover) before the owner flips, so nothing jumps.
+    cameraSync?.setOwner('cesium')
+    cameraSync?.tick()
+    cameraSync?.setOwner('three')
   }
-  // 'free' mode is handled by OrbitControls directly (no Cesium change).
 })
 
-/** Per-frame: read Cesium camera, write to Three.js camera. */
+/** Per-frame: apply the current owner's direction (Cesium → Three, or
+ *  Three → Cesium in "free" mode). Exactly one direction runs per
+ *  frame — see the ownership note in cameraSync.ts. */
 const startCameraSync = (): void => {
   const tick = (): void => {
     if (!cesiumViewer || !rendererRef.value) {
       syncRafId = requestAnimationFrame(tick)
       return
     }
-    syncThreeCameraToCesium({
-      cesiumViewer,
-      threeCamera: rendererRef.value.getCamera(),
-      tangent: DEFAULT_TANGENT_ORIGIN,
-    })
+    if (!cameraSync) {
+      cameraSync = createCameraSync({
+        cesiumViewer,
+        threeCamera: rendererRef.value.getCamera(),
+        tangent,
+        owner: 'cesium',
+      })
+    }
+    cameraSync.tick()
     syncRafId = requestAnimationFrame(tick)
   }
   syncRafId = requestAnimationFrame(tick)
@@ -302,6 +344,12 @@ onBeforeUnmount(() => {
      interaction (drag, inspector) routes through world-space
      raycasts triggered from the editor's own handlers. */
   pointer-events: none;
+}
+/* "free" mode: the simulation camera is owned by Three.js, so the
+   canvas has to receive the pointer events (OrbitControls). */
+.three-canvas--interactive {
+  pointer-events: auto;
+  cursor: grab;
 }
 
 /* Floating top dock toolbar. */
