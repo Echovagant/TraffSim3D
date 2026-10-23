@@ -16,9 +16,15 @@
 //
 // Negative speeds are clamped to 0 — vehicles cannot drive in reverse
 // in this simulator (reverse is reserved for future parking maneuvers).
+//
+// This is the *primitive* ramp: it uses the per-type accel / decel
+// caps and nothing else. The simulation uses `rampSpeed` below, which
+// adds the "stop now" decel tier (`MAX_DECEL`) that the traffic-light
+// constraint's braking distance assumes.
 import {
   MAX_ACCEL_COMFY,
   MAX_DECEL_COMFY,
+  MAX_DECEL,
   DRIVING_SPEED_THRESHOLD,
   WAITING_SPEED_THRESHOLD,
   VEHICLE_DYN,
@@ -50,6 +56,53 @@ export const smoothAccel = (
   const maxDv = cap * dt
   if (Math.abs(dv) <= maxDv) return Math.max(0, targetSpeed)
   return Math.max(0, currentSpeed + Math.sign(dv) * maxDv)
+}
+
+/**
+ * The speed a vehicle should carry after this tick: the current speed
+ * ramped toward `targetSpeed` under the vehicle type's caps.
+ *
+ * This is the ramp the simulation uses — both the Rapier path and the
+ * physics-free fallback path. It is `smoothAccel` plus one extra tier:
+ *
+ *   - **Accelerating** → `VEHICLE_DYN[type].accel` (per type).
+ *   - **Slowing down to a non-zero target** → `VEHICLE_DYN[type].decel`
+ *     (per type, comfortable).
+ *   - **Stopping** (`targetSpeed === 0` — a red light, a stopped
+ *     leader, the end of the road) → `MAX_DECEL`, the documented
+ *     "normal stop-at-red-light decel ceiling".
+ *
+ * The stop tier is not an arbitrary choice: the traffic-light
+ * constraint computes its braking distance as `v² / (2·MAX_DECEL) +
+ * STOP_LINE_BUFFER`, i.e. it assumes the vehicle can decelerate at
+ * exactly `MAX_DECEL`. If the ramp used the comfortable per-type decel
+ * (2.5 m/s² for a car) the vehicle would need four times the distance
+ * the constraint assumed and would roll straight through the stop line.
+ * Both sides read the same constant, so they cannot drift apart.
+ *
+ * @param currentSpeed  m/s, the speed the vehicle carries now
+ * @param targetSpeed   m/s, the speed the controller asks for
+ * @param dt            seconds since the last update
+ * @param type          vehicle type (car / truck / bus)
+ */
+export const rampSpeed = (
+  currentSpeed: number,
+  targetSpeed: number,
+  dt: number,
+  type: VehicleType,
+): number => {
+  if (dt <= 0) return currentSpeed
+  const dv = targetSpeed - currentSpeed
+  if (Math.abs(dv) < 1e-6) return Math.max(0, targetSpeed)
+  if (dv > 0) {
+    const maxDv = VEHICLE_DYN[type].accel * dt
+    if (dv <= maxDv) return Math.max(0, targetSpeed)
+    return Math.max(0, currentSpeed + maxDv)
+  }
+  const decelCap = targetSpeed === 0 ? MAX_DECEL : VEHICLE_DYN[type].decel
+  const maxDv = decelCap * dt
+  if (-dv <= maxDv) return Math.max(0, targetSpeed)
+  return Math.max(0, currentSpeed - maxDv)
 }
 
 /**
@@ -163,6 +216,9 @@ export const clampTargetSpeedByType = (
  * Compute the new speed for the hand-rolled (physics-free
  * fallback) tick path. Replaces the previous `v.speed += 3.5*dt`
  * one-liner with a per-type ramp.
+ *
+ * It uses the same `rampSpeed` the Rapier path uses, so the two paths
+ * do not disagree about how a vehicle accelerates or comes to a stop.
  */
 export const handRolledStep = (vehicle: Vehicle, dt: number): number =>
-  smoothAccel(vehicle.speed, vehicle.targetSpeed, dt, vehicle.type)
+  rampSpeed(vehicle.speed, vehicle.targetSpeed, dt, vehicle.type)

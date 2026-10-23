@@ -95,6 +95,7 @@ const R = vi.hoisted(() => {
       halfExtents: { x: hx, y: hy, z: hz },
       mass: null as number | null,
       friction: null as number | null,
+      frictionCombineRule: null as number | null,
       restitution: null as number | null,
     }
     rec.setMass = (v: number) => {
@@ -103,6 +104,10 @@ const R = vi.hoisted(() => {
     }
     rec.setFriction = (v: number) => {
       rec.friction = v
+      return rec
+    }
+    rec.setFrictionCombineRule = (v: number) => {
+      rec.frictionCombineRule = v
       return rec
     }
     rec.setRestitution = (v: number) => {
@@ -222,11 +227,16 @@ vi.mock('@dimforge/rapier3d-compat', () => ({
   },
   ColliderDesc: { cuboid: R.makeColliderDesc },
   Ray: R.FakeRay,
+  // The ground's friction combine rule (see `buildGround`).
+  CoefficientCombineRule: { Average: 0, Min: 1, Multiply: 2, Max: 3 },
 }))
 
 const { RapierWorld } = await import('./RapierWorld')
 const { buildRigidBodySpec } = await import('./RapierBodySpec')
 const { DEFAULT_WORLD_CONFIG } = await import('./WorldConfig')
+const { MAX_PHYSICS_PENDING_STEPS, MAX_PHYSICS_SUB_STEPS } = await import(
+  '@shared/constants/simulation'
+)
 
 type Spec = ReturnType<typeof buildRigidBodySpec>
 
@@ -377,12 +387,22 @@ describe('RapierWorld — init()', () => {
     expect(g.desc.translation).toEqual({ x: 0, y: -DEFAULT_WORLD_CONFIG.groundThickness, z: 0 })
   })
 
-  it('ground collider is a 500 x thickness x 500 cuboid, friction 0.8, restitution 0', async () => {
+  it('ground collider is a 500 x thickness x 500 cuboid, frictionless, restitution 0', async () => {
     const w = new RapierWorld()
     await w.init()
     const d = groundColliderDesc()
     expect(d.halfExtents).toEqual({ x: 500, y: DEFAULT_WORLD_CONFIG.groundThickness, z: 500 })
-    expect(d.friction).toBe(0.8)
+    // The ground is frictionless, and it combines with `Min` so the
+    // vehicle-road contact is frictionless whatever the vehicle's own
+    // coefficient is. The vehicles are driven by *setting* their
+    // velocity (`applyControl` → `setLinvel`); a road friction force
+    // would be a second, competing longitudinal model, and it pinned
+    // the traffic in place: a vehicle ramping up from rest moved 0.4 mm
+    // per 1/60 s step, which the contact solver absorbed entirely, so
+    // the speed the step ended with was ~0 and the vehicle never moved.
+    // See `RapierWorld.buildGround`.
+    expect(d.friction).toBe(0)
+    expect(d.frictionCombineRule).toBe(1) // CoefficientCombineRule.Min
     expect(d.restitution).toBe(0.0)
     // Ground gets no explicit mass — Rapier derives it from the cuboid volume.
     expect(d.mass).toBeNull()
@@ -812,41 +832,63 @@ describe('RapierWorld — setVehicleAngularVelocity', () => {
 // ---------------------------------------------------------------------------
 
 describe('RapierWorld — step', () => {
-  it('reports fixedDt (1/60) regardless of the caller dt — one physics step per frame', async () => {
+  // The four tests below used to pin the OLD behaviour: one fixed step
+  // per rendered frame, with the accumulator growing without bound.
+  // That made the simulation speed equal to the frame rate (measured:
+  // 15.4 m travelled per wall-clock second at 60 fps, 7.5 m at 30 fps,
+  // 3.5 m at 15 fps) and made the "2× speed" control speed up the
+  // traffic lights only. `step()` now CONSUMES the accumulator — it
+  // runs `floor(accumulator / fixedDt)` sub-steps — so the assertions
+  // below describe the new (frame-rate independent) contract.
+
+  it('reports the time it actually advanced — 1/60 of sim time per 1/60 of frame time', async () => {
     const w = new RapierWorld()
     await w.init()
     expect(w.step(1 / 60).dt).toBeCloseTo(1 / 60, 12)
-    // A 30fps render frame still advances exactly one 1/60 step.
-    expect(w.step(1 / 30).dt).toBeCloseTo(1 / 60, 12)
-    // Even an absurd 5s stall stays at fixedDt (the accumulator is only
-    // bookkeeping — never runs catch-up steps).
-    expect(w.step(5).dt).toBeCloseTo(1 / 60, 12)
+    // A 30fps render frame carries two fixed steps.
+    expect(w.step(1 / 30).dt).toBeCloseTo(2 / 60, 12)
+    // A frame too short for a whole step advances nothing and keeps the
+    // remainder for the next frame.
+    expect(w.step(1 / 120).dt).toBeCloseTo(0, 12)
   })
 
-  it('advances simTime by fixedDt per step and by nothing else', async () => {
+  it('advances simTime by exactly the time it consumed', async () => {
     const w = new RapierWorld()
     await w.init()
     expect(w.step(1 / 60).simTime).toBeCloseTo(1 / 60, 12)
-    expect(w.step(1 / 30).simTime).toBeCloseTo(2 / 60, 12)
+    expect(w.step(1 / 30).simTime).toBeCloseTo(3 / 60, 12)
     expect(w.step(0).simTime).toBeCloseTo(3 / 60, 12)
   })
 
-  it('pushes fixedDt into Rapier world.timestep on every step', async () => {
+  it('pushes fixedDt into Rapier world.timestep and runs one Rapier step per sub-step', async () => {
     const w = new RapierWorld()
     await w.init()
-    w.step(1 / 30)
+    const res = w.step(1 / 30)
     expect(R.state.timestep).toBeCloseTo(1 / 60, 12)
-    expect(R.state.stepCalls).toBe(1)
+    expect(res.subSteps).toBe(2)
+    expect(R.state.stepCalls).toBe(2)
   })
 
-  it('clamps the accumulator input at 1/30 (I5 backstop)', async () => {
-    // Observable through the fact that a huge dt and a 1/30 dt both produce
-    // exactly one step and one fixedDt of simTime.
+  it('caps the catch-up after a stall (spiral-of-death guard)', async () => {
+    // An absurd dt must not turn into an unbounded catch-up: the world
+    // runs at most MAX_PHYSICS_SUB_STEPS sub-steps and drops the rest
+    // of the debt instead of repaying it later.
     const w = new RapierWorld()
     await w.init()
-    w.step(1000)
-    expect(R.state.stepCalls).toBe(1)
-    expect(w.step(1 / 30).simTime).toBeCloseTo(2 / 60, 12)
+    const res = w.step(1000)
+    expect(res.subSteps).toBe(MAX_PHYSICS_SUB_STEPS)
+    expect(R.state.stepCalls).toBe(MAX_PHYSICS_SUB_STEPS)
+    expect(res.dt).toBeCloseTo((MAX_PHYSICS_SUB_STEPS * 1) / 60, 12)
+    // The leftover is capped too — a stall cannot accumulate an
+    // unbounded debt.
+    expect(res.pendingTime).toBeLessThanOrEqual(MAX_PHYSICS_PENDING_STEPS / 60 + 1e-9)
+  })
+
+  it('consumes the accumulator across frames: 60 frames of 1/60 advance exactly one second', async () => {
+    const w = new RapierWorld()
+    await w.init()
+    for (let i = 0; i < 60; i++) w.step(1 / 60)
+    expect(w.step(0).simTime).toBeCloseTo(1, 10)
   })
 
   it('maps a started collision between two vehicles to a ContactEvent', async () => {

@@ -37,6 +37,39 @@ export const PHASE_DURATIONS = {
 /** Maximum forward acceleration in m/s² (≈ 0–100 km/h in 8s, gentle). */
 export const MAX_ACCEL = 3.5
 
+// ===== fixed-step physics (frame-rate independence) =====
+//
+// The physics world does NOT advance one fixed step per rendered frame.
+// It **consumes** the wall-clock time it is handed in fixed-size sub-steps
+// (`fixedDt`), so the distance a vehicle covers in one wall-clock second
+// is the same whether the page renders at 15, 30, 60 or 120 fps.
+//
+// The three constants below bound that consumption. They are the
+// spiral-of-death guard: a long stall (tab switch, GC pause) must not
+// turn into an unbounded catch-up that stalls the page even harder.
+
+/**
+ * Max number of fixed physics sub-steps one `step()` call may run.
+ * 8 sub-steps = 133 ms of simulation per call at the default 1/60 s
+ * `fixedDt`. Beyond this the remaining time is dropped rather than
+ * repaid, so a stall costs a little simulated time instead of freezing
+ * the page.
+ */
+export const MAX_PHYSICS_SUB_STEPS = 8
+
+/**
+ * Max wall-clock time (s) a single `step()` call may consume.
+ * 0.25 s = a 4 fps hiccup. Bounds the time jump after a tab switch.
+ */
+export const MAX_PHYSICS_FRAME_DT = 0.25
+
+/**
+ * Max leftover (unconsumed) time the physics accumulator may hold,
+ * expressed in sub-steps. Past this the debt is dropped: repaying it
+ * later would put the simulation further behind wall clock, not closer.
+ */
+export const MAX_PHYSICS_PENDING_STEPS = 4
+
 // ===== vehicle dynamics hierarchy =====
 //
 // Three-tier accel / decel model: `comfy` is what the controller aims

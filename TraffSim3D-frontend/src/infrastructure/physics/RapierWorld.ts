@@ -14,6 +14,11 @@ import { DEFAULT_WORLD_CONFIG } from './WorldConfig'
 import type { RigidBodySpec } from './RapierBodySpec'
 import { buildRigidBodySpec } from './RapierBodySpec'
 import type { World, EventQueue } from '@dimforge/rapier3d-compat/pipeline'
+import {
+  MAX_PHYSICS_FRAME_DT,
+  MAX_PHYSICS_PENDING_STEPS,
+  MAX_PHYSICS_SUB_STEPS,
+} from '@shared/constants/simulation'
 
 export interface ContactEvent {
   colliderA: string
@@ -23,9 +28,26 @@ export interface ContactEvent {
 }
 
 export interface WorldStepResult {
+  /**
+   * Simulated time (s) this call actually advanced — `subSteps * fixedDt`.
+   *
+   * It is **not** the caller's frame dt: a frame that does not carry
+   * enough time for a whole fixed sub-step advances 0 s, and a frame that
+   * carries two of them advances 2 * fixedDt. Callers that need to know
+   * how much simulated time elapsed must read this (or `simTime`), not
+   * the frame dt they passed in.
+   */
   dt: number
+  /** Number of fixed-size physics sub-steps executed by this call. */
+  subSteps: number
   contactEvents: ReadonlyArray<ContactEvent>
+  /** The physics world's own monotonic sim time (s). */
   simTime: number
+  /**
+   * Time (s) still sitting in the accumulator — not yet consumed by a
+   * sub-step. Always in [0, fixedDt) unless the pending cap kicked in.
+   */
+  pendingTime: number
 }
 
 export interface RayHit {
@@ -44,6 +66,18 @@ export interface VehicleControl {
 // 字符串键,内部维护 Map<vehicleId, colliderHandle>.
 type HandleMap = Map<string, number>
 
+/**
+ * Slack (s) added to the accumulator before it is divided by `fixedDt`.
+ *
+ * The accumulator holds a sum of binary floating-point frame dts, so a
+ * frame dt that is mathematically a multiple of `fixedDt` can land a
+ * fraction of a nanosecond below it. Without this slack such a frame
+ * would silently lose a whole sub-step — the simulation would then run
+ * measurably slow (1 lost step per 60 = 1.7%). 1e-9 s is far below any
+ * physically meaningful time and far above the float noise it absorbs.
+ */
+const FIXED_DT_EPSILON = 1e-9
+
 export class RapierWorld {
   private R: typeof import('@dimforge/rapier3d-compat') | null = null
   private world: World | null = null
@@ -55,9 +89,11 @@ export class RapierWorld {
   private cfg: WorldConfig
   private simTime = 0
   private destroyed = false
-  // Accumulator: 即使 render dt 是 1/30, 物理仍按 fixedDt=1/60
-  // 推进 (1 帧物理 step 1 次). accumulator 留着给未来的"多次 step
-  // 追上 wall-clock"用 — 默认 1 步/帧.
+  // Accumulator: the wall-clock time that has been handed to `step()`
+  // but not yet consumed by a fixed-size physics sub-step. It is
+  // **consumed**: `step()` runs `floor(accumulator / fixedDt)` sub-steps
+  // and keeps the remainder. That is what makes the simulation speed
+  // independent of the render frame rate (see `step()`).
   private accumulator = 0
 
   constructor(cfg: WorldConfig = DEFAULT_WORLD_CONFIG) {
@@ -83,8 +119,34 @@ export class RapierWorld {
     // 大地面 cuboid. 1000x1000 足够大覆盖默认 scene.
     const groundDesc = this.R.RigidBodyDesc.fixed().setTranslation(0, -this.cfg.groundThickness, 0)
     const body = this.world.createRigidBody(groundDesc)
+    // GROUND FRICTION IS ZERO — and that is deliberate.
+    //
+    // This simulator drives the vehicles by **setting** their velocity
+    // (`applyControl` → `setLinvel`); the longitudinal dynamics live in
+    // the application layer (the acceleration ramp, the car-following
+    // model, the traffic-light constraint). A friction force from the
+    // road is a *second*, competing longitudinal model — and it wins in
+    // the one case that matters: starting from rest.
+    //
+    // Measured: with the ground at friction 0.8, a vehicle that ramped
+    // up from 0 travelled 0.4 mm in a 1/60 s step, which the contact
+    // solver absorbed entirely. The speed the step ended with was
+    // ~0.000 m/s, the next frame ramped from ~0 again, and the vehicle
+    // never moved — measured across 6 vehicles: `s` frozen, speed
+    // oscillating 0.012 → 0.024 → 0.000 m/s. The ground's friction was
+    // pinning the traffic in place.
+    //
+    // The friction **combine rule** matters as much as the coefficient.
+    // Rapier combines two colliders' coefficients with `Average` by
+    // default, so a ground of 0 against a vehicle of 0.5 still yields
+    // 0.25 — enough to hold a starting vehicle in place. The ground
+    // therefore uses `Min`, which makes the vehicle-road contact
+    // frictionless (min(0, 0.5) = 0) while leaving **vehicle-to-vehicle**
+    // contacts at the average of two 0.5s, i.e. unchanged: a collision
+    // between two cars still behaves like one.
     const colliderDesc = this.R.ColliderDesc.cuboid(500, this.cfg.groundThickness, 500)
-      .setFriction(0.8)
+      .setFriction(0)
+      .setFrictionCombineRule(this.R.CoefficientCombineRule.Min)
       .setRestitution(0.0)
     this.world.createCollider(colliderDesc, body)
     // ground 不入 body map — readPose 不会问到.
@@ -351,15 +413,34 @@ export class RapierWorld {
 
   step(dt: number): WorldStepResult {
     if (!this.world || !this.eventQueue) {
-      return { dt, contactEvents: [], simTime: this.simTime }
+      return {
+        dt,
+        subSteps: 0,
+        contactEvents: [],
+        simTime: this.simTime,
+        pendingTime: this.accumulator,
+      }
     }
-    // Clamp dt (I5) — useWorldSimulation 也 clamp, 这里是兜底.
-    const clampedDt = Math.min(dt, 1 / 30)
-    this.world.timestep = this.cfg.fixedDt
+    // Clamp the frame dt — a tab switch or a GC pause must not hand the
+    // physics a multi-second jump. The sub-step size (fixedDt) is what
+    // bounds the integration error, not this clamp.
+    const clampedDt = Math.min(Math.max(dt, 0), MAX_PHYSICS_FRAME_DT)
     this.accumulator += clampedDt
-    // 1 step per frame. 多次 step 留待后续.
-    this.world.step(this.eventQueue)
-    this.simTime += this.cfg.fixedDt
+    // The epsilon keeps a frame dt that lands a hair below a multiple of
+    // fixedDt (floating point) from silently losing a whole sub-step.
+    const rawSteps = Math.floor((this.accumulator + FIXED_DT_EPSILON) / this.cfg.fixedDt)
+    const subSteps = Math.max(0, Math.min(rawSteps, MAX_PHYSICS_SUB_STEPS))
+    this.accumulator -= subSteps * this.cfg.fixedDt
+    if (this.accumulator < 0) this.accumulator = 0
+    const maxPending = MAX_PHYSICS_PENDING_STEPS * this.cfg.fixedDt
+    if (this.accumulator > maxPending) this.accumulator = maxPending
+
+    this.world.timestep = this.cfg.fixedDt
+    for (let i = 0; i < subSteps; i++) {
+      this.world.step(this.eventQueue)
+    }
+    const advanced = subSteps * this.cfg.fixedDt
+    this.simTime += advanced
     // Drain contact events
     const events: ContactEvent[] = []
     this.eventQueue.drainCollisionEvents((h1: number, h2: number, started: boolean) => {
@@ -378,7 +459,13 @@ export class RapierWorld {
         impulse: 0, // 简化为存在即触发; 严格 impulse 需要 contact force event queue.
       })
     })
-    return { dt: this.cfg.fixedDt, contactEvents: events, simTime: this.simTime }
+    return {
+      dt: advanced,
+      subSteps,
+      contactEvents: events,
+      simTime: this.simTime,
+      pendingTime: this.accumulator,
+    }
   }
 
   readPose(vehicleId: string): { position: Vec3; heading: number; speed: number } | null {

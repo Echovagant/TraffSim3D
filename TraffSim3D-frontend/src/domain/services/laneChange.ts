@@ -75,16 +75,65 @@ export const requestLaneChange = (
   return { ok: true }
 }
 
-/** P-controller: given current and target lateral offset, return the
- *  lateral linvel to apply this tick (signed m/s, clamped). */
+/**
+ * P-controller: given current and target lateral offset, return the
+ * lateral velocity to apply this tick (signed m/s, clamped).
+ *
+ * **Sign convention.** The returned value is in the convention
+ * `RapierWorld.setVehicleLateralVelocity` consumes: POSITIVE moves the
+ * vehicle to its LEFT, relative to the direction it is travelling. The
+ * lateral offsets, on the other hand, are measured from the road's
+ * centreline and are positive to the RIGHT of the road's *geometric*
+ * forward direction (start → end).
+ *
+ * Those two "lefts" do not always agree. On a forward lane the
+ * vehicle's left is the centreline's negative side; on a backward lane
+ * (which travels end → start) it is the positive side. `travelSign`
+ * (+1 forward, −1 backward — `laneForwardSign`) is the factor that
+ * reconciles them.
+ *
+ * The old implementation returned `(target − current) × gain`, i.e. it
+ * asked the vehicle to move AWAY from the target lane: with offsets
+ * right-positive and a velocity that is left-positive, the sign has to
+ * be flipped. (Together with the fact that the lateral velocity used to
+ * be applied *after* the physics step — so the next frame's
+ * `applyControl` wiped it before it could ever be integrated — the
+ * lane change was a complete no-op.)
+ *
+ * @param currentLateral m, current offset from the centreline (right +)
+ * @param targetLateral  m, wanted offset from the centreline (right +)
+ * @param steerGain      1/s, proportional gain
+ * @param maxLateralMs   m/s, cap on the lateral velocity
+ * @param travelSign     +1 forward lane, −1 backward lane
+ */
 export const steerLateralVelocity = (
   currentLateral: number,
   targetLateral: number,
   steerGain: number,
   maxLateralMs: number,
+  travelSign: 1 | -1 = 1,
 ): number => {
   const diff = targetLateral - currentLateral
-  return Math.max(-maxLateralMs, Math.min(maxLateralMs, diff * steerGain))
+  const lateral = -diff * steerGain * travelSign
+  return Math.max(-maxLateralMs, Math.min(maxLateralMs, lateral))
+}
+
+/**
+ * Progress of a lane change: 0 at the start, 1 when the target lane has
+ * been reached.
+ *
+ * The Rapier path does not use it — it integrates a real lateral
+ * velocity and measures the offset it produced. The physics-free
+ * fallback path has no lateral dynamics to integrate, so it blends the
+ * position from the current lane to the target lane over the change's
+ * nominal duration, and this helper is what makes that blend
+ * frame-rate independent (it is driven by elapsed *simulation* time,
+ * not by a per-frame increment).
+ */
+export const laneChangeProgress = (elapsedSeconds: number, durationSeconds: number): number => {
+  if (durationSeconds <= 0) return 1
+  const p = elapsedSeconds / durationSeconds
+  return Math.max(0, Math.min(1, p))
 }
 
 /** Convergence threshold (metres). */

@@ -19,6 +19,8 @@ vi.mock('@dimforge/rapier3d-compat', () => ({
   RigidBodyDesc: { dynamic: vi.fn(), fixed: vi.fn() },
   ColliderDesc: { cuboid: vi.fn() },
   Ray: vi.fn(),
+  // The ground's friction combine rule (see `RapierWorld.buildGround`).
+  CoefficientCombineRule: { Average: 0, Min: 1, Multiply: 2, Max: 3 },
 }))
 
 // Pinia in tests — use createPinia() in each test that needs it

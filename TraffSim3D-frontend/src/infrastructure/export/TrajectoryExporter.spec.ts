@@ -70,15 +70,28 @@ describe('TrajectoryExporter', () => {
 
   // ===== dirty-data filter + dt field =====
 
-  it('every row carries dt = sampleInterval', async () => {
+  it('every row carries the ACTUAL interval since that vehicle’s previous row', async () => {
+    // The `dt` column used to carry the *nominal* sample interval,
+    // which lied whenever the sampler jittered. It now carries the
+    // measured interval: the first row of a vehicle has none (0), every
+    // later row carries the real Δt to the previous row of the same
+    // vehicle. (The irregular-interval case is covered in
+    // `TrajectoryExporter.dt.spec.ts`.)
     const net = buildTestNetwork(2)
     exp.record(net, 0, 0.1)
     exp.record(net, 0.1, 0.1)
     const blob = exp.exportAsBlob({ kind: 'json', includeCrashed: true, sampleInterval: 0.1 })
     const body = JSON.parse(await blob.text())
     expect(body.rows.length).toBe(4)
+    const byVehicle = new Map<string, number[]>()
     for (const row of body.rows) {
-      expect(row.dt).toBe(0.1)
+      const list = byVehicle.get(row.vehicleId) ?? []
+      list.push(row.dt)
+      byVehicle.set(row.vehicleId, list)
+    }
+    for (const dts of byVehicle.values()) {
+      expect(dts[0]).toBe(0) // no predecessor
+      expect(dts[1]).toBeCloseTo(0.1, 12)
     }
   })
 

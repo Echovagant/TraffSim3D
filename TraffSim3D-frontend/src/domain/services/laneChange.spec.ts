@@ -7,6 +7,7 @@ import {
   requestLaneChange,
   MIN_LANE_CHANGE_SPEED,
   steerLateralVelocity,
+  laneChangeProgress,
   perpendicularOffsetAlongRoad,
 } from './laneChange'
 import { buildTestNetwork, makeTestVehicle } from '@__fixtures__/testNetwork'
@@ -60,15 +61,46 @@ describe('requestLaneChange', () => {
 })
 
 describe('steerLateralVelocity', () => {
+  // The sign convention: the returned value is what
+  // `RapierWorld.setVehicleLateralVelocity` consumes — POSITIVE moves
+  // the vehicle to its LEFT, relative to the direction it travels. The
+  // offsets are right-of-centreline positive, so the sign has to be
+  // flipped (the old implementation drove the vehicle AWAY from the
+  // target lane).
   it('clamp to ±maxLateralMs', () => {
-    // diff=10, gain=2 → 20 m/s, but maxLateralMs=4 → clamp to 4
-    expect(steerLateralVelocity(0, 10, 2.0, 4.0)).toBe(4.0)
-    // diff=-10 → -4
-    expect(steerLateralVelocity(0, -10, 2.0, 4.0)).toBe(-4.0)
+    // diff=10 (target is 10 m to the right) → the vehicle must go right
+    // → a negative (rightward) velocity, clamped to -4.
+    expect(steerLateralVelocity(0, 10, 2.0, 4.0)).toBe(-4.0)
+    // diff=-10 → the vehicle must go left → +4.
+    expect(steerLateralVelocity(0, -10, 2.0, 4.0)).toBe(4.0)
   })
   it('proportional when under cap', () => {
-    // diff=0.5, gain=2 → 1.0
-    expect(steerLateralVelocity(0, 0.5, 2.0, 4.0)).toBeCloseTo(1.0)
+    // diff=0.5 → 1.0 m/s to the right.
+    expect(steerLateralVelocity(0, 0.5, 2.0, 4.0)).toBeCloseTo(-1.0)
+  })
+  it('travelSign flips the direction on a backward lane', () => {
+    // A backward lane travels end → start, so the vehicle's left is the
+    // centreline's *positive* side: the same offset error needs the
+    // opposite velocity there.
+    const forward = steerLateralVelocity(0, 0.5, 2.0, 4.0, 1)
+    const backward = steerLateralVelocity(0, 0.5, 2.0, 4.0, -1)
+    expect(forward).toBeCloseTo(-1.0)
+    expect(backward).toBeCloseTo(1.0)
+  })
+})
+
+describe('laneChangeProgress', () => {
+  it('is 0 at the start and 1 when the change is over', () => {
+    expect(laneChangeProgress(0, 2)).toBe(0)
+    expect(laneChangeProgress(1, 2)).toBe(0.5)
+    expect(laneChangeProgress(2, 2)).toBe(1)
+  })
+  it('clamps outside the window', () => {
+    expect(laneChangeProgress(-1, 2)).toBe(0)
+    expect(laneChangeProgress(9, 2)).toBe(1)
+  })
+  it('a zero duration means "already there"', () => {
+    expect(laneChangeProgress(0, 0)).toBe(1)
   })
 })
 
