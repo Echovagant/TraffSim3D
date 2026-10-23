@@ -11,15 +11,21 @@ costs, and (per `road_graph`) A* routing so the structure is not dead code.
 
 Directional semantics
 ---------------------
-The parser emits one road per OSM way with `startNode`/`endNode`. OSM ways are
-*directed by convention* (the digitisation direction), but traffic on a
-two-way road flows both ways. `RoadGraph` therefore adds:
+The parser emits one road per OSM way, and the way's geometry is a polyline.
+`RoadGraph` turns that polyline into a *chain*: every waypoint is a node and
+every consecutive pair of waypoints is one edge. Keeping only the road's two
+endpoints (the old behaviour) shattered an imported city map into thousands
+of fragments, because the parser's intersections sit at *shared* nodes, and
+those are usually interior waypoints of a way.
 
-- a forward edge `start -> end`, and
-- a reverse edge `end -> start` for every non-`oneway` road.
+OSM ways are *directed by convention* (the digitisation direction), but
+traffic on a two-way road flows both ways. `RoadGraph` therefore adds:
 
-The parser already halves the lane count for oneway ways, so `laneCount == 1`
-is the observable signal available downstream; the graph honours that.
+- a forward edge along the chain, and
+- a reverse edge for every non-`oneway` road.
+
+The parser emits an explicit `oneway` flag; when it is absent (older
+payloads) the legacy `laneCount == 1` heuristic is used instead.
 """
 
 from __future__ import annotations
@@ -49,11 +55,15 @@ def _road(
     waypoints: list[dict] | None = None,
     level: int = 0,
     cost_override: float | None = None,
+    oneway: bool | None = None,
 ) -> dict:
     """Build a parser-shaped road dict. start/end are node *positions*.
 
     `cost_override` lets a test state an edge cost that deliberately
     disagrees with geometry — the only way to construct routing traps.
+
+    `oneway` stays `None` unless the test asks for it, so the default
+    exercises the legacy "no `oneway` field" fallback.
     """
     road = {
         "id": rid,
@@ -66,6 +76,8 @@ def _road(
     }
     if cost_override is not None:
         road["costOverride"] = cost_override
+    if oneway is not None:
+        road["oneway"] = oneway
     return road
 
 
@@ -134,6 +146,35 @@ def test_single_lane_road_is_one_way() -> None:
     assert not any(e.to_node == a for e in g.neighbors(b)), "oneway must not be reversible"
 
 
+def test_explicit_oneway_field_overrides_the_lane_heuristic() -> None:
+    """The payload's `oneway` flag wins over the legacy lane heuristic.
+
+    `lanes <= 1` used to be the only one-way signal available, so a real
+    one-way street with four lanes was read as two-way.
+    """
+    net = _network([_road("w-1", _pos(0, 0), _pos(10, 0), lanes=2, oneway=True)])
+    g = RoadGraph.from_network(net)
+    a, b = g.node_at(0, 0).id, g.node_at(10, 0).id
+    assert any(e.to_node == b for e in g.neighbors(a))
+    assert not any(e.to_node == a for e in g.neighbors(b)), "explicit oneway must not be reversible"
+
+    # ... and the other way round: an explicit two-way road stays two-way
+    # even when the lane count would have said otherwise.
+    net2 = _network([_road("w-2", _pos(0, 0), _pos(10, 0), lanes=1, oneway=False)])
+    g2 = RoadGraph.from_network(net2)
+    a2, b2 = g2.node_at(0, 0).id, g2.node_at(10, 0).id
+    assert any(e.to_node == a2 for e in g2.neighbors(b2))
+
+
+def test_missing_oneway_field_falls_back_to_the_lane_heuristic() -> None:
+    """Older payloads carry no `oneway` field; the heuristic still applies."""
+    net = _network([_road("w-1", _pos(0, 0), _pos(10, 0), lanes=1)])
+    assert "oneway" not in net["roads"][0]
+    g = RoadGraph.from_network(net)
+    a, b = g.node_at(0, 0).id, g.node_at(10, 0).id
+    assert not any(e.to_node == a for e in g.neighbors(b))
+
+
 def test_edge_carries_road_attributes() -> None:
     net = _network([_road("w-1", _pos(0, 0), _pos(10, 0), lanes=2, speed=22.2)])
     g = RoadGraph.from_network(net)
@@ -151,7 +192,12 @@ def test_edge_cost_is_road_length_in_meters() -> None:
 
 
 def test_polyline_length_uses_all_waypoints() -> None:
-    """A curved way must cost more than its straight-line endpoints."""
+    """A curved way must cost more than its straight-line endpoints.
+
+    A road is a chain of edges — one per consecutive pair of waypoints — so
+    the curved way's price is the *route* over both of its segments, not the
+    price of a single edge.
+    """
     straight = _road("w-1", _pos(0, 0), _pos(0, 30))
     curved = _road(
         "w-2",
@@ -159,13 +205,151 @@ def test_polyline_length_uses_all_waypoints() -> None:
         _pos(0, 30),
         waypoints=[_pos(0, 0), _pos(10, 10), _pos(0, 30)],
     )
-    net = _network([straight, curved])
-    g = RoadGraph.from_network(net)
-    costs = {e.road_id: e.cost for e in g.neighbors(g.node_at(0, 0).id)}
-    assert costs["w-2"] > costs["w-1"]
+    g_straight = RoadGraph.from_network(_network([straight]))
+    g_curved = RoadGraph.from_network(_network([curved]))
+    straight_cost = g_straight.shortest_path(
+        g_straight.node_at(0, 0).id, g_straight.node_at(0, 30).id
+    ).cost
+    curved_cost = g_curved.shortest_path(g_curved.node_at(0, 0).id, g_curved.node_at(0, 30).id).cost
+    assert curved_cost > straight_cost
     # The curved way detours through (10,10): hypot(10,10) + hypot(10,20)
     #   = 14.142 + 22.360 = 36.503, against 30 straight-line.
-    assert costs["w-2"] == pytest.approx(math.hypot(10, 10) + math.hypot(10, 20))
+    assert curved_cost == pytest.approx(math.hypot(10, 10) + math.hypot(10, 20))
+    # The intermediate waypoint is a node of its own.
+    assert g_curved.node_count == 3
+    assert g_curved.try_node_at(10, 10) is not None
+
+
+# --------------------------------------------------------------------------
+# Connectivity: a road is a chain of edges, not a single edge
+# --------------------------------------------------------------------------
+
+
+def _component_count(g: RoadGraph) -> int:
+    """Number of connected components, ignoring edge direction.
+
+    Direction is ignored on purpose: a one-way road still belongs to the
+    same component as the roads it joins.
+    """
+    blob = g.to_dict()["nodes"]
+    adjacency: dict[str, set[str]] = {nid: set() for nid in blob}
+    for nid, node in blob.items():
+        for edge in node["edges"]:
+            adjacency[nid].add(edge["to_node"])
+            adjacency[edge["to_node"]].add(nid)
+    seen: set[str] = set()
+    count = 0
+    for nid in blob:
+        if nid in seen:
+            continue
+        count += 1
+        stack = [nid]
+        seen.add(nid)
+        while stack:
+            for neighbour in adjacency[stack.pop()]:
+                if neighbour not in seen:
+                    seen.add(neighbour)
+                    stack.append(neighbour)
+    return count
+
+
+def _t_junction() -> dict:
+    """A T junction: a stem meeting a through road at a shared node.
+
+    The shared node is an *interior* waypoint of the through road, which is
+    exactly the case that shattered the graph when it only carried the
+    road's two endpoints.
+    """
+    return _network(
+        [
+            _road(
+                "w-stem",
+                _pos(0, 0),
+                _pos(0, -10),
+                waypoints=[_pos(0, 0), _pos(0, -5), _pos(0, -10)],
+            ),
+            _road(
+                "w-through",
+                _pos(-10, 0),
+                _pos(10, 0),
+                waypoints=[_pos(-10, 0), _pos(-5, 0), _pos(0, 0), _pos(5, 0), _pos(10, 0)],
+            ),
+        ]
+    )
+
+
+def test_t_junction_is_a_single_connected_component() -> None:
+    """One component — the roads must actually meet in the graph.
+
+    With endpoints-only nodes the junction node exists in the road list but
+    not in the graph, and the T falls apart into two fragments.
+    """
+    g = RoadGraph.from_network(_t_junction())
+    assert _component_count(g) == 1
+    # 3 stem vertices + 5 through vertices, sharing the junction vertex.
+    assert g.node_count == 7
+
+
+def test_junction_node_is_shared_by_both_roads() -> None:
+    g = RoadGraph.from_network(_t_junction())
+    junction = g.node_at(0, 0)
+    road_ids = {edge.road_id for edge in g.neighbors(junction.id)}
+    assert road_ids == {"w-stem", "w-through"}
+
+
+def test_every_waypoint_becomes_a_graph_node() -> None:
+    net = _network(
+        [
+            _road(
+                "w-1",
+                _pos(0, 0),
+                _pos(10, 0),
+                waypoints=[_pos(0, 0), _pos(4, 0), _pos(7, 0), _pos(10, 0)],
+            )
+        ]
+    )
+    g = RoadGraph.from_network(net)
+    assert g.node_count == 4
+    for x in (0, 4, 7, 10):
+        assert g.try_node_at(x, 0) is not None
+    # 3 segments, each with a forward and a reverse edge.
+    assert g.edge_count == 6
+
+
+def test_chain_edges_carry_their_own_segment_cost() -> None:
+    net = _network(
+        [
+            _road(
+                "w-1",
+                _pos(0, 0),
+                _pos(10, 0),
+                waypoints=[_pos(0, 0), _pos(3, 4), _pos(10, 0)],
+            )
+        ]
+    )
+    g = RoadGraph.from_network(net)
+    first = next(e for e in g.neighbors(g.node_at(0, 0).id) if e.to_node != g.node_at(0, 0).id)
+    assert first.cost == pytest.approx(5.0)  # the 3-4-5 first segment
+
+
+def test_cost_override_is_split_across_the_chain() -> None:
+    """The override is the road's total cost, not one edge's cost."""
+    net = _network(
+        [
+            _road(
+                "w-1",
+                _pos(0, 0),
+                _pos(10, 0),
+                waypoints=[_pos(0, 0), _pos(5, 0), _pos(10, 0)],
+                cost_override=100.0,
+            )
+        ]
+    )
+    g = RoadGraph.from_network(net)
+    path = g.shortest_path(g.node_at(0, 0).id, g.node_at(10, 0).id)
+    assert path is not None
+    assert path.cost == pytest.approx(100.0)
+    assert len(path.legs) == 2
 
 
 # --------------------------------------------------------------------------
@@ -204,12 +388,14 @@ def test_astar_routes_around_a_missing_link() -> None:
         ]
     )
     g = RoadGraph.from_network(net)
-    # Remove A<->B by making that road one-way out of B.
+    # Remove A<->B by making that road one-way out of B. The chain's
+    # direction follows the waypoints, so those have to be flipped too.
     net["roads"][0]["laneCount"] = 1
     net["roads"][0]["startNode"], net["roads"][0]["endNode"] = (
         _pos(10, 0),
         _pos(0, 0),
     )
+    net["roads"][0]["waypoints"] = [_pos(10, 0), _pos(0, 0)]
     g2 = RoadGraph.from_network(net)
     path = g2.shortest_path(g2.node_at(0, 0).id, g2.node_at(10, 0).id)
     assert path is not None
@@ -313,6 +499,52 @@ def test_astar_agrees_with_dijkstra_on_random_networks() -> None:
     # oracle actually compared a meaningful number of paths.
     assert (
         total_checked >= 100
+    ), f"only {total_checked} reachable pairs compared — oracle too weak to be meaningful"
+
+
+def test_astar_agrees_with_dijkstra_on_multi_waypoint_networks() -> None:
+    """The chain edges must not break the A*/Dijkstra oracle.
+
+    The random-network oracle above only exercises two-point roads. This
+    one uses bent roads with an intermediate waypoint, so every road
+    contributes several edges and the heuristic has to stay admissible
+    across a chain.
+    """
+    import random
+
+    rng = random.Random(20261023)
+    total_checked = 0
+    for trial in range(20):
+        pts = rng.sample([(x, y) for x in range(11) for y in range(11)], 8)
+        roads = []
+        for i, src in enumerate(pts):
+            targets = rng.sample([j for j in range(len(pts)) if j != i], rng.randint(1, 2))
+            for k, j in enumerate(targets):
+                mid = (rng.randint(0, 10), rng.randint(0, 10))
+                roads.append(
+                    _road(
+                        f"w-{i}-{k}",
+                        _pos(*src),
+                        _pos(*pts[j]),
+                        waypoints=[_pos(*src), _pos(*mid), _pos(*pts[j])],
+                        lanes=rng.choice([1, 2]),
+                    )
+                )
+        g = RoadGraph.from_network(_network(roads))
+        for _ in range(5):
+            src, dst = rng.sample(range(len(pts)), 2)
+            s_id, d_id = g.node_at(*pts[src]).id, g.node_at(*pts[dst]).id
+            a = g.shortest_path(s_id, d_id)
+            d = g.shortest_path(s_id, d_id, heuristic="zero")
+            if (a is None) != (d is None):
+                pytest.fail(f"trial {trial}: A* and Dijkstra disagree on reachability")
+            if a is not None:
+                assert a.cost == pytest.approx(
+                    d.cost
+                ), f"trial {trial}: A* cost {a.cost} != Dijkstra {d.cost}"
+                total_checked += 1
+    assert (
+        total_checked >= 30
     ), f"only {total_checked} reachable pairs compared — oracle too weak to be meaningful"
 
 

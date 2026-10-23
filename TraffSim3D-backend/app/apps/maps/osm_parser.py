@@ -1,20 +1,48 @@
-"""OSM XML -> RoadNetwork JSON parser.
+"""OSM XML / PBF -> RoadNetwork JSON parser.
 
 Returns the network shape directly aligned with the frontend
 SerializedScene (schemaVersion 6) — the frontend's own scene format.
-Used by the POST /api/v1/maps/parse-osm endpoint.
+Used by the POST /api/v1/maps/parse-osm and /parse-pbf endpoints.
 
-MVP scope:
-- XML only (PBF deferred)
-- highway tags only (buildings/relations deferred)
-- simple lat/lon -> meters projection (WGS84/WM deferred)
-- stateless (no PostGIS)
+One pipeline, two front-ends
+-----------------------------
+`parse_osm_xml` and `parse_osmpbf` differ only in how they *extract* raw
+OSM objects (ElementTree vs. a libosmium stream). Everything downstream —
+clipping, projection, way -> road conversion, intersection detection,
+traffic-signal placement, spawn-point generation — happens in one shared
+function (`_build_network`).
+
+That is not tidiness for its own sake. The two implementations used to be
+~95% copy-paste, and they had already drifted: the PBF path only looked
+for `highway=traffic_signals` on *ways*, while the XML path looked at
+*node* tags, so the very same data yielded one signal light from XML and
+zero from PBF. A single pipeline removes the possibility of that drift.
+
+Clipping happens at way level
+-----------------------------
+A bbox selects *ways*, not nodes. A way that touches the region is kept
+whole — its geometry is never cut at the region border, so an imported map
+has no road that ends in the middle of nowhere — and a way entirely
+outside is dropped whole. The default `MAX_BBOX_DEG` square around the
+projection origin keeps its memory-safety meaning: far-away ways are
+still discarded.
+
+Levels
+------
+`bridge=yes` / `tunnel=yes` ways sit on level +1 / -1. A waypoint's height
+is decided by the *node* it belongs to, not by the way that owns it: when
+a node is used by ways on different levels, the node takes the level
+closest to the ground. That is what lets a bridge or tunnel meet the
+surface road network at its endpoints instead of floating above it as an
+isolated island.
 """
 
 from __future__ import annotations
 
 import math
 import xml.etree.ElementTree as ET
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -47,63 +75,15 @@ MAX_BBOX_DEG = 0.5
 
 BBox = tuple[float, float, float, float]  # (south, west, north, east)
 
+# A spawn point is only worth emitting on a road that can hold a car and
+# has more than the single lane a one-way road ends up with.
+SPAWN_MIN_ROAD_LENGTH_M = 20.0
+SPAWN_MIN_LANES = 2
 
-def _resolve_center(
-    raw_nodes: dict[int, tuple[float, float]],
-    center: tuple[float, float] | None,
-) -> tuple[float, float]:
-    """Projection origin. Defaults to the input's centroid."""
-    if center is not None:
-        return float(center[0]), float(center[1])
-    return (
-        sum(n[0] for n in raw_nodes.values()) / len(raw_nodes),
-        sum(n[1] for n in raw_nodes.values()) / len(raw_nodes),
-    )
-
-
-def _validate_bbox(bbox: BBox) -> None:
-    south, west, north, east = bbox
-    if south > north:
-        raise ValueError(f"bbox south must be <= north, got south={south} north={north}")
-    if west > east:
-        raise ValueError(f"bbox west must be <= east, got west={west} east={east}")
-
-
-def _project_nodes(
-    raw_nodes: dict[int, tuple[float, float]],
-    center: tuple[float, float] | None = None,
-    bbox: BBox | None = None,
-) -> tuple[dict[int, _Node], float, float]:
-    """lat/lon -> world meters, dropping anything outside `bbox`.
-
-    Shared by the XML and PBF pipelines so the clip semantics cannot drift
-    apart between them. Returns `(nodes, center_lat, center_lon)`.
-    """
-    if bbox is not None:
-        _validate_bbox(bbox)
-    center_lat, center_lon = _resolve_center(raw_nodes, center)
-    cos_lat = math.cos(center_lat * math.pi / 180.0)
-
-    half = None if bbox is not None else MAX_BBOX_DEG
-    south = west = north = east = None
-    if bbox is not None:
-        south, west, north, east = bbox
-
-    nodes: dict[int, _Node] = {}
-    for nid, (lat, lon) in raw_nodes.items():
-        if half is not None:
-            # Centred square safety cap around the projection origin.
-            if abs(lat - center_lat) > half or abs(lon - center_lon) > half:
-                continue
-        else:
-            assert south is not None and west is not None
-            assert north is not None and east is not None
-            if not (south <= lat <= north and west <= lon <= east):
-                continue
-        x = (lon - center_lon) * 111000.0 * cos_lat
-        z = (lat - center_lat) * 111000.0
-        nodes[nid] = _Node(id=nid, lat=lat, lon=lon, x=x, z=z)
-    return nodes, center_lat, center_lon
+# OSM `oneway` values meaning "traffic runs along the digitisation direction".
+_ONEWAY_FORWARD = frozenset({"yes", "true", "1"})
+# OSM `oneway` values meaning "traffic runs against the digitisation direction".
+_ONEWAY_REVERSE = frozenset({"-1", "reverse"})
 
 
 @dataclass(frozen=True)
@@ -121,6 +101,423 @@ class _Node:
     z: float  # meters south of center (lat increase = z increase)
 
 
+@dataclass
+class _RawWay:
+    way_id: int
+    node_refs: list[int]
+    tags: dict[str, str]
+
+
+def _resolve_center(
+    raw_nodes: dict[int, tuple[float, float]],
+    center: tuple[float, float] | None,
+) -> tuple[float, float]:
+    """Projection origin. Defaults to the input's centroid."""
+    if center is not None:
+        return float(center[0]), float(center[1])
+    if not raw_nodes:
+        return 0.0, 0.0
+    return (
+        sum(n[0] for n in raw_nodes.values()) / len(raw_nodes),
+        sum(n[1] for n in raw_nodes.values()) / len(raw_nodes),
+    )
+
+
+def _validate_bbox(bbox: BBox) -> None:
+    south, west, north, east = bbox
+    if south > north:
+        raise ValueError(f"bbox south must be <= north, got south={south} north={north}")
+    if west > east:
+        raise ValueError(f"bbox west must be <= east, got west={west} east={east}")
+
+
+def _segment_hits_rect(
+    p0: tuple[float, float],
+    p1: tuple[float, float],
+    rect: BBox,
+) -> bool:
+    """Liang-Barsky clip test: does the segment p0->p1 touch the lat/lon rect?
+
+    Coordinates are (lon, lat); `rect` is (south, west, north, east).
+    Touching the border counts as a hit — a road running exactly along the
+    edge of the region belongs to that region.
+    """
+    south, west, north, east = rect
+    x0, y0 = p0
+    x1, y1 = p1
+    dx = x1 - x0
+    dy = y1 - y0
+    t0, t1 = 0.0, 1.0
+    for p, q in ((-dx, x0 - west), (dx, east - x0), (-dy, y0 - south), (dy, north - y0)):
+        if p == 0.0:
+            if q < 0.0:
+                return False  # parallel to this edge and outside it
+            continue
+        r = q / p
+        if p < 0.0:
+            if r > t1:
+                return False
+            t0 = max(t0, r)
+        else:
+            if r < t0:
+                return False
+            t1 = min(t1, r)
+    return True
+
+
+def _way_touches_rect(
+    nodes: dict[int, _Node],
+    refs: Sequence[int],
+    rect: BBox,
+) -> bool:
+    """Does this way touch the clip region at all?
+
+    A way counts as inside when one of its vertices is inside, or when one
+    of its segments crosses the region — the latter is what keeps a road
+    that starts outside and runs through the region from being dropped.
+    """
+    south, west, north, east = rect
+    previous: _Node | None = None
+    for ref in refs:
+        node = nodes[ref]
+        if south <= node.lat <= north and west <= node.lon <= east:
+            return True
+        if previous is not None and _segment_hits_rect(
+            (previous.lon, previous.lat), (node.lon, node.lat), rect
+        ):
+            return True
+        previous = node
+    return False
+
+
+def _way_level(tags: dict[str, str]) -> int:
+    """Vertical level of a way: +1 bridge, -1 tunnel, 0 ground."""
+    if tags.get("bridge") == "yes":
+        return 1
+    if tags.get("tunnel") == "yes":
+        return -1
+    return 0
+
+
+def _pick_level(counter: Counter) -> int:
+    """The level a shared node should sit at.
+
+    Ground wins outright, then the most frequently used level, then the
+    tunnel over the bridge (a tunnel node reaching the surface is the
+    common case; a bridge node reaching it is not).
+    """
+    return min(counter, key=lambda level: (abs(level), -counter[level], level))
+
+
+def _polyline_length(waypoints: Sequence[dict[str, Any]]) -> float:
+    total = 0.0
+    for a, b in zip(waypoints, waypoints[1:], strict=False):
+        total += math.dist(
+            (float(a.get("x", 0.0)), float(a.get("y", 0.0)), float(a.get("z", 0.0))),
+            (float(b.get("x", 0.0)), float(b.get("y", 0.0)), float(b.get("z", 0.0))),
+        )
+    return total
+
+
+def _empty_network(origin_lat: float, origin_lon: float) -> dict[str, Any]:
+    return {
+        "roads": [],
+        "intersections": [],
+        "vehicles": [],
+        "spawnPoints": [],
+        "originLat": origin_lat,
+        "originLon": origin_lon,
+    }
+
+
+def _build_spawn_points(roads: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One spawn point per road that can actually hold a car.
+
+    The shape is part of the cross-end contract:
+    `{id, roadId, laneIndex, s, occupiedBy}`, where `laneIndex` counts
+    lanes in the direction of travel and `s` is the distance along the road
+    from its start.
+    """
+    spawn_points: list[dict[str, Any]] = []
+    for road in roads:
+        if int(road.get("laneCount", 0)) < SPAWN_MIN_LANES:
+            continue
+        if _polyline_length(road["waypoints"]) < SPAWN_MIN_ROAD_LENGTH_M:
+            continue
+        road_id = str(road["id"])
+        spawn_points.append(
+            {
+                "id": f"sp-{road_id}-0",
+                "roadId": road_id,
+                "laneIndex": 0,
+                "s": 0.0,
+                "occupiedBy": None,
+            }
+        )
+    return spawn_points
+
+
+# ---------------------------------------------------------------------------
+# Extraction: format-specific, deliberately tiny.
+# ---------------------------------------------------------------------------
+
+
+def _extract_osm_xml(
+    xml_bytes: bytes,
+) -> tuple[dict[int, tuple[float, float]], list[_RawWay], set[int]]:
+    """Pull raw nodes, highway ways and traffic-signal nodes out of an OSM XML tree."""
+    root = ET.fromstring(xml_bytes)
+
+    raw_nodes: dict[int, tuple[float, float]] = {}
+    signal_node_ids: set[int] = set()
+    for element in root.iter("node"):
+        try:
+            node_id = int(element.attrib["id"])
+            lat = float(element.attrib["lat"])
+            lon = float(element.attrib["lon"])
+        except (KeyError, ValueError):
+            continue
+        raw_nodes[node_id] = (lat, lon)
+        tags = {t.attrib["k"]: t.attrib["v"] for t in element.iter("tag")}
+        # `highway=traffic_signals` is a *node* tag in OSM.
+        if tags.get("highway") == "traffic_signals":
+            signal_node_ids.add(node_id)
+
+    raw_ways: list[_RawWay] = []
+    for element in root.iter("way"):
+        tags = {t.attrib["k"]: t.attrib["v"] for t in element.iter("tag")}
+        highway = tags.get("highway")
+        if highway not in DEFAULT_HIGHWAY_TYPES and highway != "traffic_signals":
+            continue
+        try:
+            way_id = int(element.attrib["id"])
+        except (KeyError, ValueError):
+            continue
+        refs: list[int] = []
+        for nd in element.iter("nd"):
+            try:
+                refs.append(int(nd.attrib["ref"]))
+            except (KeyError, ValueError):
+                continue
+        raw_ways.append(_RawWay(way_id, refs, tags))
+
+    return raw_nodes, raw_ways, signal_node_ids
+
+
+def _extract_osm_pbf(
+    pbf_bytes: bytes,
+) -> tuple[dict[int, tuple[float, float]], list[_RawWay], set[int]]:
+    """Pull the same three things out of a PBF stream using libosmium."""
+    import osmium
+
+    class _Handler(osmium.SimpleHandler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.raw_nodes: dict[int, tuple[float, float]] = {}
+            self.raw_ways: list[_RawWay] = []
+            self.signal_node_ids: set[int] = set()
+
+        def node(self, n: osmium.osm.Node) -> None:
+            self.raw_nodes[n.id] = (n.location.lat, n.location.lon)
+            tags = {t.k: t.v for t in n.tags}
+            # `highway=traffic_signals` is a *node* tag in OSM — the PBF path
+            # used to look at ways only, and silently produced zero signals.
+            if tags.get("highway") == "traffic_signals":
+                self.signal_node_ids.add(n.id)
+
+        def way(self, w: osmium.osm.Way) -> None:
+            tags = {t.k: t.v for t in w.tags}
+            highway = tags.get("highway")
+            if highway not in DEFAULT_HIGHWAY_TYPES and highway != "traffic_signals":
+                return
+            self.raw_ways.append(_RawWay(w.id, [nd.ref for nd in w.nodes], tags))
+
+    handler = _Handler()
+    try:
+        # osmium 4.x: SimpleHandler.apply_buffer(buffer, format, locations).
+        # We pass 'pbf' explicitly so osmium doesn't need to sniff from
+        # file extension (we're passing bytes, not a path).
+        handler.apply_buffer(pbf_bytes, "pbf", locations=True)
+    except Exception as e:
+        raise ValueError(f"Invalid PBF: {e}") from e
+
+    return handler.raw_nodes, handler.raw_ways, handler.signal_node_ids
+
+
+# ---------------------------------------------------------------------------
+# Shared pipeline: raw OSM objects -> RoadNetwork.
+# ---------------------------------------------------------------------------
+
+
+def _build_network(
+    raw_nodes: dict[int, tuple[float, float]],
+    raw_ways: Sequence[_RawWay],
+    traffic_signal_node_ids: set[int],
+    bbox: BBox | None = None,
+    center: tuple[float, float] | None = None,
+    *,
+    road_id_prefix: str = "w-",
+    intersection_id_prefix: str = "i-osm-",
+) -> dict[str, Any]:
+    """The one and only way->road->intersection pipeline.
+
+    `raw_nodes`: node id -> (lat, lon)
+    `raw_ways`: ways with their node references and tags
+    `traffic_signal_node_ids`: nodes carrying `highway=traffic_signals`
+    """
+    origin_lat, origin_lon = _resolve_center(raw_nodes, center)
+    if not raw_nodes:
+        return _empty_network(origin_lat, origin_lon)
+    if bbox is not None:
+        _validate_bbox(bbox)
+
+    # ---- 1) Project every node to world meters (centered) ----
+    cos_lat = math.cos(origin_lat * math.pi / 180.0)
+    nodes: dict[int, _Node] = {
+        node_id: _Node(
+            id=node_id,
+            lat=lat,
+            lon=lon,
+            x=(lon - origin_lon) * 111000.0 * cos_lat,
+            z=(lat - origin_lat) * 111000.0,
+        )
+        for node_id, (lat, lon) in raw_nodes.items()
+    }
+
+    # ---- 2) Clip at way level: a touching way is kept whole ----
+    region: BBox = (
+        bbox
+        if bbox is not None
+        else (
+            origin_lat - MAX_BBOX_DEG,
+            origin_lon - MAX_BBOX_DEG,
+            origin_lat + MAX_BBOX_DEG,
+            origin_lon + MAX_BBOX_DEG,
+        )
+    )
+    kept: list[_RawWay] = []
+    for way in raw_ways:
+        if way.tags.get("highway") not in DEFAULT_HIGHWAY_TYPES:
+            continue
+        refs = [ref for ref in way.node_refs if ref in nodes]
+        if len(refs) < 2:
+            continue
+        if not _way_touches_rect(nodes, refs, region):
+            continue
+        kept.append(_RawWay(way.way_id, refs, way.tags))
+
+    # ---- 3) One height per node, so shared nodes really are shared ----
+    node_levels: dict[int, Counter] = {}
+    for way in kept:
+        level = _way_level(way.tags)
+        for ref in way.node_refs:
+            counter = node_levels.setdefault(ref, Counter())
+            counter[level] += 1
+    node_level = {ref: _pick_level(counter) for ref, counter in node_levels.items()}
+
+    # ---- 4) Ways -> roads ----
+    roads: list[dict[str, Any]] = []
+    for way in kept:
+        level = _way_level(way.tags)
+        oneway_value = way.tags.get("oneway", "no").strip().lower()
+        oneway = oneway_value in _ONEWAY_FORWARD or oneway_value in _ONEWAY_REVERSE
+        refs = list(way.node_refs)
+        if oneway_value in _ONEWAY_REVERSE:
+            # Traffic runs against the digitisation direction: flip the way so
+            # "forward" means the direction cars actually travel.
+            refs.reverse()
+        try:
+            lanes = max(1, int(way.tags.get("lanes", "2")))
+        except ValueError:
+            lanes = 2
+        if oneway:
+            lanes = max(1, lanes // 2)
+        waypoints = [
+            {
+                "x": nodes[ref].x,
+                "y": node_level.get(ref, level) * LEVEL_HEIGHT,
+                "z": nodes[ref].z,
+            }
+            for ref in refs
+        ]
+        roads.append(
+            {
+                "id": f"{road_id_prefix}{way.way_id}",
+                "startNode": waypoints[0],
+                "endNode": waypoints[-1],
+                "waypoints": waypoints,
+                "laneCount": lanes,
+                "oneway": oneway,
+                "speedLimit": HIGHWAY_SPEED_LIMIT[way.tags["highway"]],
+                "level": level,
+            }
+        )
+
+    # ---- 5) Traffic signals marked on a way rather than on a node ----
+    # Legacy behaviour of the PBF path, now applied to both formats.
+    signal_node_ids = set(traffic_signal_node_ids)
+    for way in raw_ways:
+        if way.tags.get("highway") == "traffic_signals" and way.node_refs:
+            signal_node_ids.add(way.node_refs[0])
+
+    # ---- 6) Intersections: OSM nodes shared by two or more ways ----
+    node_to_ways: dict[int, list[int]] = {}
+    for index, way in enumerate(kept):
+        for ref in way.node_refs:
+            bucket = node_to_ways.setdefault(ref, [])
+            if index not in bucket:
+                bucket.append(index)
+
+    intersections: list[dict[str, Any]] = []
+    inter_counter = 0
+    for ref, way_indices in node_to_ways.items():
+        if len(way_indices) < 2:
+            continue
+        node = nodes[ref]
+        height = node_level.get(ref, 0) * LEVEL_HEIGHT
+        inter_id = f"{intersection_id_prefix}{inter_counter}"
+        inter_counter += 1
+        traffic_lights: list[dict[str, Any]] = []
+        if ref in signal_node_ids:
+            # Heuristic axis: pick the first two-way pair's "primary" road.
+            primary_road = roads[way_indices[0]]
+            # axis from waypoints: EW if dx > dz, else NS.
+            dx = primary_road["endNode"]["x"] - primary_road["startNode"]["x"]
+            axis = "ew" if abs(dx) > 0.1 else "ns"
+            traffic_lights.append(
+                {
+                    "id": f"tl-{inter_counter}-{axis}",
+                    "position": {
+                        "x": node.x - 3 if axis == "ew" else node.x,
+                        "y": height,
+                        "z": node.z if axis == "ew" else node.z - 3,
+                    },
+                    "phase": "green" if axis == "ns" else "red",
+                    "phaseRemaining": 30,
+                    "cycleSeconds": 63,
+                    "axis": axis,
+                }
+            )
+        intersections.append(
+            {
+                "id": inter_id,
+                "position": {"x": node.x, "y": height, "z": node.z},
+                "trafficLights": traffic_lights,
+                "connectedRoads": [roads[i]["id"] for i in way_indices],
+                "intersectionRadius": 8,
+            }
+        )
+
+    return {
+        "roads": roads,
+        "intersections": intersections,
+        "vehicles": [],
+        "spawnPoints": _build_spawn_points(roads),
+        "originLat": origin_lat,
+        "originLon": origin_lon,
+    }
+
+
 def parse_osm_xml(
     xml_bytes: bytes,
     bbox: BBox | None = None,
@@ -135,281 +532,16 @@ def parse_osm_xml(
     interest. Omitting it keeps the historical ~55 km safety cap, so existing
     callers are unaffected.
     """
-    root = ET.fromstring(xml_bytes)
-
-    # ---- 1) Parse all nodes with lat/lon ----
-    raw_nodes: dict[int, tuple[float, float]] = {}
-    for n in root.iter("node"):
-        nid = int(n.attrib["id"])
-        try:
-            lat = float(n.attrib["lat"])
-            lon = float(n.attrib["lon"])
-        except (KeyError, ValueError):
-            continue
-        raw_nodes[nid] = (lat, lon)
-
-    if not raw_nodes:
-        return {"roads": [], "intersections": [], "vehicles": [], "spawnPoints": []}
-
-    # ---- 2) Project to world coords (meters, centered), clipped ----
-    nodes, center_lat, center_lon = _project_nodes(raw_nodes, center, bbox)
-
-    # ---- 3) Parse ways -> roads ----
-    roads: list[dict[str, Any]] = []
-    way_node_ids: list[list[int]] = []  # parallel to roads; raw node id sequence
-    traffic_signal_node_ids: set[int] = set()
-    used_node_ids: set[int] = set()
-
-    for w in root.iter("way"):
-        tags = {t.attrib["k"]: t.attrib["v"] for t in w.iter("tag")}
-        highway = tags.get("highway")
-        if highway not in DEFAULT_HIGHWAY_TYPES:
-            continue
-
-        nd_refs = [int(nd.attrib["ref"]) for nd in w.iter("nd")]
-        nd_refs = [nid for nid in nd_refs if nid in nodes]
-        if len(nd_refs) < 2:
-            continue
-
-        used_node_ids.update(nd_refs)
-        way_node_ids.append(nd_refs)
-
-        if tags.get("bridge") == "yes":
-            level = 1
-        elif tags.get("tunnel") == "yes":
-            level = -1
-        else:
-            level = 0
-
-        waypoints = [
-            {"x": nodes[nid].x, "y": level * LEVEL_HEIGHT, "z": nodes[nid].z} for nid in nd_refs
-        ]
-        a, b = waypoints[0], waypoints[-1]
-
-        # Tag-derived attributes
-        try:
-            lanes = max(1, int(tags.get("lanes", "2")))
-        except ValueError:
-            lanes = 2
-        oneway = tags.get("oneway", "no").lower() in ("yes", "true", "1")
-        if oneway:
-            lanes = max(1, lanes // 2)
-
-        speed_limit = HIGHWAY_SPEED_LIMIT[highway]
-        way_id = f"w-{w.attrib['id']}"
-        roads.append(
-            {
-                "id": way_id,
-                "startNode": a,
-                "endNode": b,
-                "waypoints": waypoints,
-                "laneCount": lanes,
-                "speedLimit": speed_limit,
-                "level": level,
-            }
-        )
-
-    # ---- 4) Traffic signal nodes -> bucket for intersection step ----
-    for n in root.iter("node"):
-        tags = {t.attrib["k"]: t.attrib["v"] for t in n.iter("tag")}
-        if tags.get("highway") == "traffic_signals":
-            try:
-                nid = int(n.attrib["id"])
-            except (KeyError, ValueError):
-                continue
-            if nid in nodes:
-                traffic_signal_node_ids.add(nid)
-
-    # ---- 5) Find intersections (shared nodes between >= 2 ways) ----
-    node_to_ways: dict[int, list[int]] = {}
-    for ridx, nids in enumerate(way_node_ids):
-        for nid in nids:
-            node_to_ways.setdefault(nid, []).append(ridx)
-
-    intersections: list[dict[str, Any]] = []
-    used_intersection_node_ids: set[int] = set()
-    inter_counter = 0
-    for nid, way_idxs in node_to_ways.items():
-        if len(way_idxs) < 2:
-            continue
-        if nid not in used_node_ids:
-            continue
-        node = nodes[nid]
-        inter_id = f"i-osm-{inter_counter}"
-        inter_counter += 1
-        traffic_lights: list[dict[str, Any]] = []
-        if nid in traffic_signal_node_ids:
-            # Heuristic axis: pick the first two-way pair's "primary" road.
-            primary_road = roads[way_idxs[0]]
-            # axis from waypoints: EW if dx > dz, else NS.
-            dx = primary_road["endNode"]["x"] - primary_road["startNode"]["x"]
-            axis = "ew" if abs(dx) > 0.1 else "ns"
-            traffic_lights.append(
-                {
-                    "id": f"tl-{inter_counter}-{axis}",
-                    "position": {
-                        "x": node.x - 3 if axis == "ew" else node.x,
-                        "y": 0.0,
-                        "z": node.z if axis == "ew" else node.z - 3,
-                    },
-                    "phase": "green" if axis == "ns" else "red",
-                    "phaseRemaining": 30,
-                    "cycleSeconds": 63,
-                    "axis": axis,
-                }
-            )
-        intersections.append(
-            {
-                "id": inter_id,
-                "position": {"x": node.x, "y": 0.0, "z": node.z},
-                "trafficLights": traffic_lights,
-                "connectedRoads": [roads[i]["id"] for i in way_idxs],
-                "intersectionRadius": 8,
-            }
-        )
-        used_intersection_node_ids.add(nid)
-
-    return {
-        "roads": roads,
-        "intersections": intersections,
-        "vehicles": [],
-        "spawnPoints": [],
-    }
-
-
-# ---------------------------------------------------------------------------
-# OSM PBF parser (.osm.pbf -> RoadNetwork).
-#
-# Uses libosmium (osmium Python bindings) for streaming PBF parsing.
-# The shared projection + way-to-road + intersection logic is the
-# same as parse_osm_xml; we extract the intermediate (raw_nodes,
-# raw_ways, traffic_signal_node_ids) from the PBF stream and feed
-# it through the same pipeline.
-# ---------------------------------------------------------------------------
-
-
-def _build_network(
-    raw_nodes: dict[int, tuple[float, float]],
-    raw_ways: list[tuple[int, list[int], dict[str, str]]],
-    traffic_signal_node_ids: set[int],
-    bbox: BBox | None = None,
-    center: tuple[float, float] | None = None,
-) -> dict[str, Any]:
-    """Shared pipeline: project + ways -> roads + intersections.
-
-    `raw_nodes`: node id -> (lat, lon)
-    `raw_ways`: list of (way_id, [node_id, ...], {tag_k: tag_v, ...})
-    `traffic_signal_node_ids`: node ids with highway=traffic_signals
-    """
-    if not raw_nodes:
-        return {"roads": [], "intersections": [], "vehicles": [], "spawnPoints": []}
-
-    # ---- 2) Project to world coords (meters, centered), clipped ----
-    nodes, center_lat, center_lon = _project_nodes(raw_nodes, center, bbox)
-
-    # ---- 3) Ways -> roads (same logic as XML pipeline) ----
-    roads: list[dict[str, Any]] = []
-    way_node_ids: list[list[int]] = []
-    used_node_ids: set[int] = set()
-
-    for way_id, nd_refs, tags in raw_ways:
-        highway = tags.get("highway")
-        if highway not in DEFAULT_HIGHWAY_TYPES:
-            continue
-        nd_refs = [nid for nid in nd_refs if nid in nodes]
-        if len(nd_refs) < 2:
-            continue
-
-        used_node_ids.update(nd_refs)
-        way_node_ids.append(nd_refs)
-
-        if tags.get("bridge") == "yes":
-            level = 1
-        elif tags.get("tunnel") == "yes":
-            level = -1
-        else:
-            level = 0
-
-        waypoints = [
-            {"x": nodes[nid].x, "y": level * LEVEL_HEIGHT, "z": nodes[nid].z} for nid in nd_refs
-        ]
-        a, b = waypoints[0], waypoints[-1]
-
-        try:
-            lanes = max(1, int(tags.get("lanes", "2")))
-        except ValueError:
-            lanes = 2
-        oneway = tags.get("oneway", "no").lower() in ("yes", "true", "1")
-        if oneway:
-            lanes = max(1, lanes // 2)
-
-        speed_limit = HIGHWAY_SPEED_LIMIT[highway]
-        road_id = f"w-pbf-{way_id}"
-        roads.append(
-            {
-                "id": road_id,
-                "startNode": a,
-                "endNode": b,
-                "waypoints": waypoints,
-                "laneCount": lanes,
-                "speedLimit": speed_limit,
-                "level": level,
-            }
-        )
-
-    # ---- 5) Find intersections (shared nodes between >= 2 ways) ----
-    node_to_ways: dict[int, list[int]] = {}
-    for ridx, nids in enumerate(way_node_ids):
-        for nid in nids:
-            node_to_ways.setdefault(nid, []).append(ridx)
-
-    intersections: list[dict[str, Any]] = []
-    used_intersection_node_ids: set[int] = set()
-    inter_counter = 0
-    for nid, way_idxs in node_to_ways.items():
-        if len(way_idxs) < 2:
-            continue
-        if nid not in used_node_ids:
-            continue
-        node = nodes[nid]
-        inter_id = f"i-pbf-{inter_counter}"
-        inter_counter += 1
-        traffic_lights: list[dict[str, Any]] = []
-        if nid in traffic_signal_node_ids:
-            primary_road = roads[way_idxs[0]]
-            dx = primary_road["endNode"]["x"] - primary_road["startNode"]["x"]
-            axis = "ew" if abs(dx) > 0.1 else "ns"
-            traffic_lights.append(
-                {
-                    "id": f"tl-{inter_counter}-{axis}",
-                    "position": {
-                        "x": node.x - 3 if axis == "ew" else node.x,
-                        "y": 0.0,
-                        "z": node.z if axis == "ew" else node.z - 3,
-                    },
-                    "phase": "green" if axis == "ns" else "red",
-                    "phaseRemaining": 30,
-                    "cycleSeconds": 63,
-                    "axis": axis,
-                }
-            )
-        intersections.append(
-            {
-                "id": inter_id,
-                "position": {"x": node.x, "y": 0.0, "z": node.z},
-                "trafficLights": traffic_lights,
-                "connectedRoads": [roads[i]["id"] for i in way_idxs],
-                "intersectionRadius": 8,
-            }
-        )
-        used_intersection_node_ids.add(nid)
-
-    return {
-        "roads": roads,
-        "intersections": intersections,
-        "vehicles": [],
-        "spawnPoints": [],
-    }
+    raw_nodes, raw_ways, signal_node_ids = _extract_osm_xml(xml_bytes)
+    return _build_network(
+        raw_nodes,
+        raw_ways,
+        signal_node_ids,
+        bbox=bbox,
+        center=center,
+        road_id_prefix="w-",
+        intersection_id_prefix="i-osm-",
+    )
 
 
 def parse_osmpbf(
@@ -420,46 +552,20 @@ def parse_osmpbf(
     """Streaming PBF parser using libosmium. Same return shape as
     parse_osm_xml — frontend's `loadNetwork` accepts either.
 
-    `bbox` / `center` behave exactly as in `parse_osm_xml`.
+    `bbox` / `center` behave exactly as in `parse_osm_xml`, and the two
+    formats run through the same pipeline, so the same logical data yields
+    the same geometry, lanes and traffic lights either way.
 
     Raises ValueError on malformed PBF (e.g. invalid magic, corrupt
     block, missing required fields).
     """
-    import osmium  # libosmium Python bindings (already in pyproject)
-
-    class _Handler(osmium.SimpleHandler):
-        def __init__(self) -> None:
-            super().__init__()
-            self.raw_nodes: dict[int, tuple[float, float]] = {}
-            self.raw_ways: list[tuple[int, list[int], dict[str, str]]] = []
-            self.traffic_signal_node_ids: set[int] = set()
-
-        def node(self, n: osmium.osm.Node) -> None:
-            self.raw_nodes[n.id] = (n.location.lat, n.location.lon)
-
-        def way(self, w: osmium.osm.Way) -> None:
-            tags = {t.k: t.v for t in w.tags}
-            self.raw_ways.append((w.id, [n.ref for n in w.nodes], tags))
-            if tags.get("highway") == "traffic_signals":
-                # The way's first node is the traffic-signal location
-                if w.nodes:
-                    self.traffic_signal_node_ids.add(w.nodes[0].ref)
-
-    handler = _Handler()
-    try:
-        # osmium 4.x: SimpleHandler.apply_buffer(buffer, format, locations).
-        # We pass 'pbf' explicitly so osmium doesn't need to sniff from
-        # file extension (we're passing bytes, not a path).
-        import osmium
-
-        handler.apply_buffer(pbf_bytes, "pbf", locations=True)
-    except Exception as e:
-        raise ValueError(f"Invalid PBF: {e}") from e
-
+    raw_nodes, raw_ways, signal_node_ids = _extract_osm_pbf(pbf_bytes)
     return _build_network(
-        handler.raw_nodes,
-        handler.raw_ways,
-        handler.traffic_signal_node_ids,
+        raw_nodes,
+        raw_ways,
+        signal_node_ids,
         bbox=bbox,
         center=center,
+        road_id_prefix="w-pbf-",
+        intersection_id_prefix="i-pbf-",
     )

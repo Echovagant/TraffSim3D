@@ -116,6 +116,90 @@ def test_v7_level_field_compatibility(sample_network: dict) -> None:
         assert isinstance(r["level"], int)
 
 
+def test_road_carries_an_explicit_oneway_flag(sample_network: dict) -> None:
+    """The `oneway` tag is emitted verbatim, not inferred from the lane count."""
+    by_id = {r["id"]: r for r in sample_network["roads"]}
+    assert by_id["w-204"]["oneway"] is True  # oneway=yes
+    assert by_id["w-201"]["oneway"] is False  # no oneway tag
+    assert by_id["w-203"]["oneway"] is False
+
+
+def test_oneway_reverse_flips_the_direction_of_travel() -> None:
+    """`oneway=-1` means traffic runs against the digitisation direction."""
+    xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+  <node id="1" lat="0.0000" lon="0.0000"/>
+  <node id="2" lat="0.0000" lon="0.0010"/>
+  <way id="10">
+    <nd ref="1"/><nd ref="2"/>
+    <tag k="highway" v="residential"/><tag k="oneway" v="-1"/>
+  </way>
+</osm>
+"""
+    net = parse_osm_xml(xml)
+    road = net["roads"][0]
+    assert road["oneway"] is True
+    assert (
+        road["waypoints"][0]["x"] > road["waypoints"][-1]["x"]
+    ), "a reversed one-way must point against the digitisation direction"
+
+
+def test_payload_carries_the_projection_origin(sample_network: dict) -> None:
+    """`originLat`/`originLon` are the centre the map was projected around."""
+    assert isinstance(sample_network["originLat"], float)
+    assert isinstance(sample_network["originLon"], float)
+    # The origin is the projection centre: re-parsing with it as the explicit
+    # centre has to reproduce the same geometry.
+    again = parse_osm_xml(
+        FIXTURE_XML.read_bytes(),
+        center=(sample_network["originLat"], sample_network["originLon"]),
+    )
+    assert [r["waypoints"] for r in again["roads"]] == [
+        r["waypoints"] for r in sample_network["roads"]
+    ]
+
+
+def test_spawn_points_reference_existing_roads(sample_network: dict) -> None:
+    """An imported map must be able to spawn vehicles."""
+    road_ids = {r["id"] for r in sample_network["roads"]}
+    spawn_points = sample_network["spawnPoints"]
+    assert spawn_points, "no spawn points were generated"
+    for sp in spawn_points:
+        assert sp["roadId"] in road_ids
+        assert sp["id"] == f"sp-{sp['roadId']}-{sp['laneIndex']}"
+        assert sp["laneIndex"] == 0
+        assert sp["s"] == 0
+        assert sp["occupiedBy"] is None
+    # One per road, no duplicate ids.
+    assert len(spawn_points) == len({sp["roadId"] for sp in spawn_points})
+
+
+def test_spawn_points_only_on_roads_that_can_hold_a_car() -> None:
+    """Too short, or too narrow, no spawn point."""
+    xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+  <node id="1" lat="0.0000" lon="0.000000"/>
+  <node id="2" lat="0.0000" lon="0.000045"/>
+  <node id="3" lat="0.0000" lon="0.000090"/>
+  <node id="4" lat="0.0010" lon="0.000000"/>
+  <node id="5" lat="0.0010" lon="0.001000"/>
+  <!-- ~10 m long: too short -->
+  <way id="10">
+    <nd ref="1"/><nd ref="2"/><nd ref="3"/>
+    <tag k="highway" v="residential"/><tag k="lanes" v="4"/>
+  </way>
+  <!-- long enough, but a single lane -->
+  <way id="11">
+    <nd ref="4"/><nd ref="5"/>
+    <tag k="highway" v="residential"/><tag k="lanes" v="1"/>
+  </way>
+</osm>
+"""
+    net = parse_osm_xml(xml)
+    assert {r["id"] for r in net["roads"]} == {"w-10", "w-11"}
+    assert net["spawnPoints"] == []
+
+
 # ---------------------------------------------------------------------------
 # PBF parser tests.
 # ---------------------------------------------------------------------------
@@ -136,6 +220,61 @@ def test_pbf_and_xml_produce_equivalent_road_counts() -> None:
     xml = parse_osm_xml(FIXTURE_XML.read_bytes())
     pbf = parse_osmpbf(_BUILD_PBF_RESULT.read_bytes())
     assert len(xml["roads"]) == len(pbf["roads"])
+
+
+# ---------------------------------------------------------------------------
+# One pipeline: XML and PBF must not drift apart.
+# ---------------------------------------------------------------------------
+
+
+def _signal_count(network: dict) -> int:
+    return sum(len(i["trafficLights"]) for i in network["intersections"])
+
+
+def _road_payload(network: dict) -> list[dict]:
+    """Road content without the id, which is prefixed per format."""
+    return [
+        {
+            "waypoints": r["waypoints"],
+            "laneCount": r["laneCount"],
+            "oneway": r["oneway"],
+            "speedLimit": r["speedLimit"],
+            "level": r["level"],
+        }
+        for r in network["roads"]
+    ]
+
+
+def test_xml_and_pbf_agree_on_roads_intersections_and_signals() -> None:
+    """Same logical data, same network — the whole point of one pipeline."""
+    xml = parse_osm_xml(FIXTURE_XML.read_bytes())
+    pbf = parse_osmpbf(_BUILD_PBF_RESULT.read_bytes())
+    assert len(xml["roads"]) == len(pbf["roads"])
+    assert len(xml["intersections"]) == len(pbf["intersections"])
+    assert _signal_count(xml) == _signal_count(pbf)
+    assert _road_payload(xml) == _road_payload(pbf)
+
+
+def test_pbf_finds_traffic_signals_from_node_tags() -> None:
+    """Regression: the PBF path used to look at way tags only.
+
+    `highway=traffic_signals` is a *node* tag in OSM, so the PBF parser
+    silently produced zero signal lights for data the XML parser turned
+    into one.
+    """
+    pbf = parse_osmpbf(_BUILD_PBF_RESULT.read_bytes())
+    xml = parse_osm_xml(FIXTURE_XML.read_bytes())
+    assert _signal_count(xml) >= 1
+    assert _signal_count(pbf) == _signal_count(xml)
+    assert _signal_count(pbf) >= 1
+
+
+def test_xml_and_pbf_agree_on_spawn_points_and_origin() -> None:
+    xml = parse_osm_xml(FIXTURE_XML.read_bytes())
+    pbf = parse_osmpbf(_BUILD_PBF_RESULT.read_bytes())
+    assert len(xml["spawnPoints"]) == len(pbf["spawnPoints"])
+    assert xml["originLat"] == pytest.approx(pbf["originLat"])
+    assert xml["originLon"] == pytest.approx(pbf["originLon"])
 
 
 def test_pbf_rejects_truncated_file() -> None:

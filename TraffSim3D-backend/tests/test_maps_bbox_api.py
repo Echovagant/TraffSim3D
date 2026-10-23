@@ -32,19 +32,23 @@ FIXTURES = Path(__file__).parent / "fixtures"
 XML_FIXTURE = FIXTURES / "sample-4way.osm"
 PBF_FIXTURE = FIXTURES / "sample-4way.osm.pbf"
 
-# Response shape the endpoints produced before bbox was wired in. Any new
-# top-level key would break callers that do `loadNetwork(body)` directly.
-HISTORICAL_KEYS = {"roads", "intersections", "vehicles", "spawnPoints"}
+# Response shape of the endpoints. `originLat`/`originLon` were added when
+# the parser started reporting the projection origin; callers that do
+# `loadNetwork(body)` directly only read `roads`/`intersections`, so extra
+# top-level keys stay harmless.
+RESPONSE_KEYS = {"roads", "intersections", "vehicles", "spawnPoints", "originLat", "originLon"}
 
-# sample-4way.osm has 4 usable roads. Nodes 1/2/6 sit at lon -0.0010/-0.0005,
-# node 8 at 0.0015 and node 9 at 0.0020. Clipping the east edge to 0.0009 drops
-# nodes 5, 8 and 9, which leaves way 204 (nodes 7, 8, 9) with a single
-# surviving node and therefore no road at all.
-XML_BBOX_CLIP = {"south": -0.01, "west": 0.0, "north": 0.01, "east": 0.0009}
+# sample-4way.osm has 4 usable roads. Node 3 (the shared centre) is at
+# lon 0.0000, node 4 at lon 0.0005, node 5 at lon 0.0010. Clipping the west
+# edge to 0.0005 drops way 201 (all of its nodes sit west of that) and keeps
+# 202/203/204 — including the part of 202 and 203 that lies west of the box.
+# That is the point: the clip works at way level, so the geometry of a kept
+# road is never cut at the border.
+XML_BBOX_CLIP = {"south": -0.01, "west": 0.0005, "north": 0.01, "east": 0.002}
 XML_ALL_ROADS = {"w-201", "w-202", "w-203", "w-204"}
-XML_CLIPPED_ROADS = {"w-201", "w-202", "w-203"}
+XML_CLIPPED_ROADS = {"w-202", "w-203", "w-204"}
 PBF_ALL_ROADS = {"w-pbf-201", "w-pbf-202", "w-pbf-203", "w-pbf-204"}
-PBF_CLIPPED_ROADS = {"w-pbf-201", "w-pbf-202", "w-pbf-203"}
+PBF_CLIPPED_ROADS = {"w-pbf-202", "w-pbf-203", "w-pbf-204"}
 
 # Three east-west roads at clearly separated latitudes so a bbox selects
 # between them unambiguously. Same fixture idea as tests/test_osm_clipping.py;
@@ -99,7 +103,7 @@ async def test_parse_osm_without_bbox_keeps_historical_response(client: AsyncCli
     r = await client.post(XML_ENDPOINT, files=_xml_upload())
     assert r.status_code == 200
     body = r.json()
-    assert set(body.keys()) == HISTORICAL_KEYS
+    assert set(body.keys()) == RESPONSE_KEYS
     assert {road["id"] for road in body["roads"]} == XML_ALL_ROADS
 
 
@@ -108,7 +112,7 @@ async def test_parse_pbf_without_bbox_keeps_historical_response(client: AsyncCli
     r = await client.post(PBF_ENDPOINT, files=_pbf_upload())
     assert r.status_code == 200
     body = r.json()
-    assert set(body.keys()) == HISTORICAL_KEYS
+    assert set(body.keys()) == RESPONSE_KEYS
     assert {road["id"] for road in body["roads"]} == PBF_ALL_ROADS
 
 
@@ -123,7 +127,7 @@ async def test_parse_osm_applies_bbox(client: AsyncClient) -> None:
     r = await client.post(XML_ENDPOINT, files=_xml_upload(), params=XML_BBOX_CLIP)
     assert r.status_code == 200
     body = r.json()
-    assert set(body.keys()) == HISTORICAL_KEYS
+    assert set(body.keys()) == RESPONSE_KEYS
     assert {road["id"] for road in body["roads"]} == XML_CLIPPED_ROADS
 
 
@@ -133,6 +137,40 @@ async def test_parse_pbf_applies_bbox(client: AsyncClient) -> None:
     assert r.status_code == 200
     body = r.json()
     assert {road["id"] for road in body["roads"]} == PBF_CLIPPED_ROADS
+
+
+@pytest.mark.asyncio
+async def test_clipped_roads_keep_their_full_geometry(client: AsyncClient) -> None:
+    """A kept road must carry the same geometry it has unclipped.
+
+    The clip works at way level, so a road that reaches into the box is
+    kept whole instead of being cut off at the border — the imported map
+    must not contain roads that end in the middle of nowhere.
+    """
+    clipped = (await client.post(XML_ENDPOINT, files=_xml_upload(), params=XML_BBOX_CLIP)).json()
+    full = (await client.post(XML_ENDPOINT, files=_xml_upload())).json()
+    kept = {road["id"]: road for road in clipped["roads"]}
+    assert kept
+    for road in full["roads"]:
+        if road["id"] in kept:
+            assert kept[road["id"]]["waypoints"] == road["waypoints"]
+            assert kept[road["id"]]["startNode"] == road["startNode"]
+            assert kept[road["id"]]["endNode"] == road["endNode"]
+
+
+@pytest.mark.asyncio
+async def test_response_carries_origin_and_spawn_points(client: AsyncClient) -> None:
+    """The payload the front-end consumes: origin + usable spawn points."""
+    r = await client.post(XML_ENDPOINT, files=_xml_upload())
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body["originLat"], float)
+    assert isinstance(body["originLon"], float)
+    road_ids = {road["id"] for road in body["roads"]}
+    assert body["spawnPoints"], "no spawn points in the response"
+    for spawn in body["spawnPoints"]:
+        assert spawn["roadId"] in road_ids
+        assert spawn["occupiedBy"] is None
 
 
 @pytest.mark.asyncio
@@ -171,7 +209,7 @@ async def test_bbox_outside_the_data_returns_an_empty_network(client: AsyncClien
     )
     assert r.status_code == 200
     body = r.json()
-    assert set(body.keys()) == HISTORICAL_KEYS
+    assert set(body.keys()) == RESPONSE_KEYS
     assert body["roads"] == []
     assert body["intersections"] == []
 

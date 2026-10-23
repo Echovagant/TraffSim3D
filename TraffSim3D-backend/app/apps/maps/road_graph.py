@@ -15,19 +15,34 @@ Nodes are derived from **projected geometry** (`x`,`y`,`z` rounded to
 intersection resolve to the same node and node ids are reproducible across
 parses of identical input.
 
+A road is a *chain*
+------------------
+The parser emits one road per OSM way, and the way's geometry is a polyline
+with as many vertices as OSM gave it. The graph used to keep only the road's
+two endpoints, which shattered an imported city map into thousands of
+fragments: the parser finds intersections at *shared* nodes, and those shared
+nodes are usually interior waypoints of a way, so the intersection existed in
+the road list but not in the graph.
+
+Every waypoint is therefore a graph node, and every consecutive pair of
+waypoints is one edge. A road with N vertices contributes N-1 edges (plus a
+reverse edge each, unless the road is one-way).
+
 Directionality
 --------------
-The parser emits one road per OSM way with `startNode`/`endNode`. OSM ways are
-directed by digitisation convention, but traffic on a two-way road flows both
-ways, so each road contributes a forward edge and — unless it is one-way — a
-reverse edge. The parser already halves lane count for oneway ways, so
-`laneCount == 1` is the observable one-way signal.
+OSM ways are directed by digitisation convention, but traffic on a two-way
+road flows both ways, so each edge contributes a forward edge and — unless
+the road is one-way — a reverse edge. The parser emits an explicit `oneway`
+flag; when that flag is missing (older payloads), the legacy `laneCount == 1`
+heuristic is used instead.
 
 Cost
 ----
 Polyline length in meters (sum of consecutive `waypoints`), not straight-line
 endpoints, so curved ways are priced honestly. A `costOverride` may replace
-that length (travel time, congestion, toll) without changing the shape.
+that length (travel time, congestion, toll) without changing the shape; it is
+split across the chain's edges in proportion to their geometric length, so
+the route's total cost is exactly the override.
 
 Heuristic admissibility
 -----------------------
@@ -73,6 +88,60 @@ def _dist(a: dict[str, Any], b: dict[str, Any]) -> float:
 
 def _polyline_length(waypoints: list[dict[str, Any]]) -> float:
     return sum(_dist(a, b) for a, b in zip(waypoints, waypoints[1:], strict=False))
+
+
+def _road_chain(road: dict[str, Any]) -> list[dict[str, Any]]:
+    """The ordered vertices of a road, with repeated positions collapsed.
+
+    Falls back to `startNode`/`endNode` for payloads that carry no polyline.
+    """
+    chain: list[dict[str, Any]] = []
+    for waypoint in road.get("waypoints") or []:
+        if not isinstance(waypoint, dict):
+            continue
+        if chain and _key(chain[-1]) == _key(waypoint):
+            continue
+        chain.append(waypoint)
+    if len(chain) < 2:
+        start, end = road.get("startNode"), road.get("endNode")
+        if not start or not end:
+            return []
+        chain = [start, end]
+    return chain
+
+
+def _road_oneway(road: dict[str, Any], lanes: int) -> bool:
+    """Explicit `oneway` wins; the lane count is only a fallback.
+
+    Older payloads (and hand-built networks) carry no `oneway` field, and
+    for those `laneCount == 1` stays the one-way signal.
+    """
+    flag = road.get("oneway")
+    if flag is None:
+        return lanes <= 1
+    return bool(flag)
+
+
+def _segment_costs(
+    chain: list[dict[str, Any]],
+    override: float | None,
+) -> list[float]:
+    """Cost of each chain segment.
+
+    Without an override the cost is the segment's geometric length. With
+    one, the override is the *total* cost of the road and is distributed
+    across the segments in proportion to their length, so a route over the
+    whole road costs exactly the override.
+    """
+    lengths = [_dist(a, b) for a, b in zip(chain, chain[1:], strict=False)]
+    if override is None:
+        return lengths
+    total = float(override)
+    total_length = sum(lengths)
+    if total_length <= 0.0:
+        share = total / len(lengths) if lengths else 0.0
+        return [share] * len(lengths)
+    return [length * total / total_length for length in lengths]
 
 
 @dataclass(frozen=True)
@@ -156,58 +225,56 @@ class RoadGraph:
             return nid
 
         for road in network.get("roads", []):
-            start, end = road.get("startNode"), road.get("endNode")
-            if not start or not end:
+            chain = _road_chain(road)
+            if len(chain) < 2:
                 continue
-            waypoints = road.get("waypoints") or [start, end]
             # `costOverride` is a test/authoring hook: it lets a caller state
             # a cost that deliberately disagrees with geometry (e.g. travel
             # time, congestion, or a toll) without lying about the shape.
-            override = road.get("costOverride")
-            geometric_cost = _polyline_length(waypoints)
-            if override is None:
-                cost = geometric_cost
-            else:
-                cost = float(override)
-                if cost < geometric_cost - 1e-9:
-                    # Cost below the straight-line distance => Euclidean
-                    # distance is no longer a lower bound on remaining cost.
-                    geometric = False
-            if cost <= 0.0:
-                # Zero-length stub would make A* spin on a 0-cost cycle.
-                continue
-
+            costs = _segment_costs(chain, road.get("costOverride"))
             lanes = int(road.get("laneCount", 2) or 2)
-            oneway = lanes <= 1
+            oneway = _road_oneway(road, lanes)
             speed = float(road.get("speedLimit", 0.0) or 0.0)
             rid = str(road.get("id", ""))
 
-            s_id = node_id_for(start)
-            e_id = node_id_for(end)
-            if s_id == e_id:
-                continue  # self-loop carries no routing information
+            # Every waypoint is a node, not just the road's two ends.
+            chain_ids = [node_id_for(waypoint) for waypoint in chain]
 
-            adjacency[s_id].append(
-                GraphEdge(
-                    road_id=rid,
-                    to_node=e_id,
-                    cost=cost,
-                    speed_limit=speed,
-                    lanes=lanes,
-                    oneway=oneway,
-                )
-            )
-            if not oneway:
-                adjacency[e_id].append(
+            for index_of, (a, b) in enumerate(zip(chain, chain[1:], strict=False)):
+                cost = costs[index_of]
+                if cost <= 0.0:
+                    # Zero-length stub would make A* spin on a 0-cost cycle.
+                    continue
+                if cost < _dist(a, b) - 1e-9:
+                    # Cost below the straight-line distance => Euclidean
+                    # distance is no longer a lower bound on remaining cost.
+                    geometric = False
+                a_id = chain_ids[index_of]
+                b_id = chain_ids[index_of + 1]
+                if a_id == b_id:
+                    continue  # self-loop carries no routing information
+
+                adjacency[a_id].append(
                     GraphEdge(
                         road_id=rid,
-                        to_node=s_id,
+                        to_node=b_id,
                         cost=cost,
                         speed_limit=speed,
                         lanes=lanes,
                         oneway=oneway,
                     )
                 )
+                if not oneway:
+                    adjacency[b_id].append(
+                        GraphEdge(
+                            road_id=rid,
+                            to_node=a_id,
+                            cost=cost,
+                            speed_limit=speed,
+                            lanes=lanes,
+                            oneway=oneway,
+                        )
+                    )
 
         frozen = {
             nid: GraphNode(id=nid, position=n.position, edges=tuple(adjacency.get(nid, ())))
