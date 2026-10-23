@@ -30,13 +30,12 @@ reload — which a save-and-exit design would require.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from . import atomic_write
 from . import paths as _paths
 
 STATE_RUNNING = "running"
@@ -88,17 +87,13 @@ def read_control() -> dict[str, Any]:
 
 
 def _write_atomic(payload: dict[str, Any]) -> None:
-    path = get_control_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(prefix=".control_", suffix=".json", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-        os.replace(tmp_path, path)
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
+    """Replace the control file atomically.
+
+    A request that raises here is a request the trainer never sees —
+    and a terminate request that never arrives is a run that never
+    stops. `atomic_write` retries the Windows file-busy race.
+    """
+    atomic_write.write_json_atomic(get_control_path(), payload, prefix=".control_")
 
 
 def request(action: str) -> dict[str, Any]:

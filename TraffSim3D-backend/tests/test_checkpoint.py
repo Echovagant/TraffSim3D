@@ -147,15 +147,24 @@ def test_list_checkpoints_reports_signal_policies(tmp_ckpt_dir: Path) -> None:
 
 
 def test_prune_all_checkpoints_prunes_signal_policies(tmp_ckpt_dir: Path) -> None:
-    """The signal family is pruned too.
+    """The signal family is pruned too — and the *newest* one survives.
 
     It used to be missed by the prune's glob, so a long signal training
     session accumulated its checkpoints without limit.
+
+    The three files are given the **same** mtime on purpose: writing
+    them in a tight loop can land inside one timestamp tick, and then
+    the order is decided by the sort alone. A prune that sorts by
+    mtime only would keep the oldest of the tied files — so the tie
+    has to be broken by the step number in the name.
     """
     sub = tmp_ckpt_dir / "pid999"
     sub.mkdir(parents=True, exist_ok=True)
     for i in range(3):
         (sub / f"signal_seed0_step_{i:07d}.zip").write_bytes(b"x")
+    same_mtime = 1_700_000_000.0
+    for i in range(3):
+        os.utime(sub / f"signal_seed0_step_{i:07d}.zip", (same_mtime, same_mtime))
 
     deleted = ckpt.prune_all_checkpoints(keep_total=1)
     assert deleted == 2

@@ -58,9 +58,14 @@ The same fallback applies here — replace `uv run python -m …` with
 `.\.venv\Scripts\python.exe -m …` when `uv` stalls.
 
 Tests use **httpx2 + ASGITransport** for in-process FastAPI testing
-(no uvicorn subprocess overhead). The full suite is **616 collected**
-(613 passed, 3 skipped) and takes roughly 4–5 minutes — the training-path
+(no uvicorn subprocess overhead). The full suite is **738 collected**
+(735 passed, 3 skipped) and takes roughly 3 minutes — the training-path
 tests spawn real PPO subprocesses, so they dominate the runtime.
+
+The scratch files stay on the project's own drive: `conftest.py` points
+`tempfile` at `TraffSim3D-backend/.data/pytest-tmp`, so neither pytest's
+`tmp_path` factories nor any `tempfile.*` call inside the suite lands on
+the system drive.
 
 ---
 

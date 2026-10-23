@@ -9,6 +9,7 @@ endpoint lists them in mtime-descending order.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +76,20 @@ def save_named_checkpoint(model: Any, name: str) -> Path:
     return path
 
 
+def _newest_first(p: Path) -> tuple[float, int, str]:
+    """Sort key: newest first, with a deterministic tie-break.
+
+    Several checkpoints can share an mtime — the timestamp resolution
+    is coarse enough that files written in the same millisecond tie —
+    and a stable sort would then keep the *oldest* of the tied files.
+    The step number in the name breaks the tie the way the timestamps
+    would have.
+    """
+    m = re.search(r"step_(\d+)\.zip$", p.name)
+    step = int(m.group(1)) if m else -1
+    return (p.stat().st_mtime, step, p.name)
+
+
 def list_checkpoints() -> list[dict[str, Any]]:
     """List all checkpoints across all per-process subdirs, newest first.
 
@@ -97,8 +112,6 @@ def list_checkpoints() -> list[dict[str, Any]]:
     ego policies — which the loader then rejects, because an ego policy
     is continuous and a signal policy must be discrete.
     """
-    import re
-
     pattern = re.compile(r"^ppo(?:_agent(\d+))?_step_\d+\.zip$")
     signal_pattern = re.compile(r"^signal_seed\d+_step_\d+\.zip$")
     if not _DEFAULT_DIR.exists():
@@ -109,7 +122,7 @@ def list_checkpoints() -> list[dict[str, Any]]:
             for p in sub.iterdir():
                 if pattern.match(p.name) or signal_pattern.match(p.name):
                     files.append(p)
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    files.sort(key=_newest_first, reverse=True)
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for p in files:
@@ -154,7 +167,7 @@ def prune_all_checkpoints(keep_total: int = CHECKPOINT_KEEP) -> int:
         if sub.is_dir():
             files.extend(sub.glob("ppo_step_*.zip"))
             files.extend(sub.glob("signal_seed*_step_*.zip"))
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    files.sort(key=_newest_first, reverse=True)
     deleted = 0
     for p in files[keep_total:]:
         try:
@@ -169,7 +182,7 @@ def _prune_old(pdir: Path, keep: int) -> int:
     """Within a per-process dir, keep the newest N checkpoints."""
     if not pdir.exists():
         return 0
-    files = sorted(pdir.glob("ppo_step_*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted(pdir.glob("ppo_step_*.zip"), key=_newest_first, reverse=True)
     deleted = 0
     for p in files[keep:]:
         try:

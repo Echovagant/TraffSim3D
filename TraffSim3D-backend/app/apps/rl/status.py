@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 # Default status file — overridable via env var for tests.
+from . import atomic_write
 from . import paths as _paths
 
 # Default no longer lands in /tmp — on Windows that path is drive-relative.
@@ -34,23 +33,14 @@ def read_status() -> dict[str, Any]:
 
 
 def write_status(d: dict[str, Any]) -> None:
-    """Atomic write — write to tmp file then rename."""
-    path = get_status_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=".status_",
-        suffix=".json",
-        dir=path.parent,
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(d, f)
-        os.replace(tmp_path, path)
-    except Exception:
-        # Best-effort cleanup of tmp
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
+    """Atomic write — write to tmp file then rename.
+
+    The rename is retried while Windows reports the destination as
+    busy: the trainer polls this file in a loop, so a write could
+    otherwise lose the race and raise — and a raised write means the
+    run stops reporting its own progress.
+    """
+    atomic_write.write_json_atomic(get_status_path(), d, prefix=".status_")
 
 
 def init_status(total_steps: int) -> None:

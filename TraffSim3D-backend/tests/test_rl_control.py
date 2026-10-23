@@ -13,6 +13,9 @@ never lost.
 from __future__ import annotations
 
 import json
+import os
+import threading
+import time
 
 import pytest
 
@@ -145,6 +148,42 @@ def test_wait_gives_up_after_timeout(control_file) -> None:
     assert calls["n"] == 5
     assert state == rl_control.STATE_PAUSED  # still paused, not a false resume
     assert epoch == 1
+
+
+# --------------------------------------------------------------------------
+# atomic write — the Windows file-busy race
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file locking only")
+def test_request_survives_a_busy_destination(control_file) -> None:
+    """A terminate request must not be lost to a reader holding the file.
+
+    On Windows `os.replace` fails with ERROR_ACCESS_DENIED while another
+    handle has the destination open. The trainer polls the control file in
+    a tight loop, so a request issued at the wrong moment used to raise
+    PermissionError — and a lost terminate request is a run that never
+    stops. The write has to wait for the reader instead of failing.
+    """
+    control_file.write_text('{"state": "running", "epoch": 0}', encoding="utf-8")
+
+    # Hold the destination open the way a polling reader would.
+    handle = open(control_file, encoding="utf-8")
+    holder = threading.Timer(0.25, handle.close)
+    holder.start()
+    try:
+        started = time.monotonic()
+        out = rl_control.request("terminate")
+        waited = time.monotonic() - started
+    finally:
+        holder.cancel()
+        handle.close()
+
+    # The wait is the point: a write that did not have to wait proves
+    # nothing about the race.
+    assert waited >= 0.2
+    assert out["state"] == rl_control.STATE_TERMINATED
+    assert json.loads(control_file.read_text(encoding="utf-8"))["state"] == "terminated"
 
 
 # --------------------------------------------------------------------------
