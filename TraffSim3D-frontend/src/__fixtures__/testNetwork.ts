@@ -70,8 +70,12 @@ export const buildTestNetwork = (
   lightOverrides: Partial<TrafficLight> = {},
 ): RoadNetwork => {
   const net = createRoadNetwork()
-  net.roads['r-ns'] = makeTestRoad('r-ns', 'ns', 2)
-  net.roads['r-ew'] = makeTestRoad('r-ew', 'ew', 2)
+  // Four lanes: 0 and 1 travel towards the junction (increasing `s`), 2 and
+  // 3 travel away from it (decreasing `s`). With only two lanes, lane 1
+  // would be a backward lane and a test could not put two vehicles on
+  // two *forward* lanes of the same road.
+  net.roads['r-ns'] = makeTestRoad('r-ns', 'ns', 4)
+  net.roads['r-ew'] = makeTestRoad('r-ew', 'ew', 4)
   net.intersections['i-1'] = makeTestIntersection('i-1', makeTestLight(lightOverrides))
   for (let k = 0; k < vehicleCount; k++) {
     net.vehicles[`v-${k + 1}`] = makeTestVehicle({

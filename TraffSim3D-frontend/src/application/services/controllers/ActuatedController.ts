@@ -10,7 +10,7 @@
 import type { TrafficLight } from '@domain/entities/TrafficLight'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { SignalAction, SignalController, SignalDecision } from '../signalController'
-import { getQueueLength, getAxisQueueLength } from '../signalController'
+import { axisRoadsForLight, getQueueLength, getAxisQueueLength } from '../signalController'
 import { LightPhase } from '@domain/value-objects/Phase'
 import {
   MAX_GREEN_SECS,
@@ -41,7 +41,7 @@ export class ActuatedController implements SignalController {
       }
     } else if (light.phase === LightPhase.Green) {
       // Mid-green: extend if there's a queue and we're below the cap.
-      const queue = getQueueLength(light, network)
+      const queue = getQueueLength(light, network, simTime)
       if (queue > 0 && light.phaseRemaining < MAX_GREEN_SECS - GREEN_EXTENSION_STEP) {
         duration = Math.min(MAX_GREEN_SECS, light.phaseRemaining + GREEN_EXTENSION_STEP)
       }
@@ -50,10 +50,15 @@ export class ActuatedController implements SignalController {
       // point holding red for cross-traffic that isn't coming).
       // 016 H4 mitigation.
       const oppositeAxis: 'ns' | 'ew' = light.axis === 'ns' ? 'ew' : 'ns'
-      const oppositeRoadId = `r-${oppositeAxis}`
-      const oppositeRoad = network.roads[oppositeRoadId]
-      if (oppositeRoad && light.phaseRemaining > MIN_RED_SECS) {
-        const oppositeQueue = getAxisQueueLength({ ...light, axis: oppositeAxis }, network)
+      const oppositeLight = { ...light, axis: oppositeAxis }
+      // The opposite approach is resolved **topologically** — the roads
+      // connected to this light's intersection whose geometry matches
+      // the opposite axis. The old lookup used the `r-${axis}` id
+      // convention, which no road of an imported OSM map carries, so
+      // this branch was unreachable on every imported map.
+      const oppositeRoads = axisRoadsForLight(oppositeLight, network)
+      if (oppositeRoads.length > 0 && light.phaseRemaining > MIN_RED_SECS) {
+        const oppositeQueue = getAxisQueueLength(oppositeLight, network, simTime)
         if (oppositeQueue === 0) {
           phase = LightPhase.Yellow
           duration = YELLOW_CLEAR_SECS

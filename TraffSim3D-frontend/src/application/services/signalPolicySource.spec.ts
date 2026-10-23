@@ -29,6 +29,11 @@ import {
 import { RLController } from './controllers/RLController'
 import { makeTestRoad, makeTestVehicle } from '@__fixtures__/testNetwork'
 import { constantSignalPolicy } from '@__fixtures__/signalPolicy'
+import {
+  buildImportedNetwork,
+  importedNsLight,
+  importedEwLight,
+} from '@__fixtures__/importedNetwork'
 
 const CYCLE_SECONDS = 63
 
@@ -259,5 +264,30 @@ describe('THE GATE — the phase decisions come from the policy, not the fixed c
     // `shorten_red` on a green: the green is cut to the minimum green time.
     const decision = driven.decide(ns, net, 0)
     expect(decision.duration).toBe(25)
+  })
+})
+
+describe('the observation on an imported OSM map', () => {
+  it('idx 0 / 1 carry the real queue lengths, not a structural 0', () => {
+    // The imported map's roads are `w-…`: the old `r-${axis}` lookup
+    // found nothing, so both queue observations were constantly 0 and
+    // the policy saw a city with no traffic at all.
+    const net = buildImportedNetwork()
+    const ns = importedNsLight(net)
+    const ew = importedEwLight(net)
+
+    const obs = buildSignalObservation(ns, net)
+    expect(obs[0]).toBeCloseTo(2 / SIGNAL_MAX_QUEUE, 10) // NS queue = 2
+    expect(obs[1]).toBeCloseTo(2 / SIGNAL_MAX_QUEUE, 10) // EW queue = 2
+  })
+
+  it('the decision readout carries the same queue lengths', () => {
+    const net = buildImportedNetwork()
+    const ns = importedNsLight(net)
+    const source = createPolicyActionSource(constantPolicy(0))
+    source.nextAction(ns, net, 0)
+    const decision = source.lastDecision
+    expect(decision?.queueNs).toBe(2)
+    expect(decision?.queueEw).toBe(2)
   })
 })

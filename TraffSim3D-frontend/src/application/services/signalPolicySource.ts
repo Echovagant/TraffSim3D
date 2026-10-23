@@ -127,13 +127,14 @@ export const findSiblingLight = (
 export const signalQueueLengths = (
   light: TrafficLight,
   network: RoadNetwork,
+  simTime?: number,
 ): { ns: number; ew: number } => {
   const sibling = findSiblingLight(light, network)
   const nsLight = light.axis === 'ns' ? light : sibling
   const ewLight = light.axis === 'ew' ? light : sibling
   return {
-    ns: nsLight !== null ? getAxisQueueLength(nsLight, network) : 0,
-    ew: ewLight !== null ? getAxisQueueLength(ewLight, network) : 0,
+    ns: nsLight !== null ? getAxisQueueLength(nsLight, network, simTime) : 0,
+    ew: ewLight !== null ? getAxisQueueLength(ewLight, network, simTime) : 0,
   }
 }
 
@@ -143,7 +144,11 @@ export const signalQueueLengths = (
  * See the module header for the index-by-index mapping against Python's
  * `SignalEnv._obs()`.
  */
-export const buildSignalObservation = (light: TrafficLight, network: RoadNetwork): number[] => {
+export const buildSignalObservation = (
+  light: TrafficLight,
+  network: RoadNetwork,
+  simTime?: number,
+): number[] => {
   const sibling = findSiblingLight(light, network)
   const nsLight = light.axis === 'ns' ? light : sibling
   const ewLight = light.axis === 'ew' ? light : sibling
@@ -151,7 +156,7 @@ export const buildSignalObservation = (light: TrafficLight, network: RoadNetwork
   const nsMayGo = nsLight !== null && MAY_GO.has(nsLight.phase)
   const ewMayGo = ewLight !== null && MAY_GO.has(ewLight.phase)
 
-  const { ns: nsQueue, ew: ewQueue } = signalQueueLengths(light, network)
+  const { ns: nsQueue, ew: ewQueue } = signalQueueLengths(light, network, simTime)
 
   // The **elapsed** fraction of the current phase — the same quantity as
   // Python's `cycle_timer / cycle_duration`.
@@ -232,11 +237,11 @@ export const createPolicyActionSource = (
       return last
     },
     nextAction: (light, network, simTime): SignalActionName | null => {
-      const observation = buildSignalObservation(light, network)
+      const observation = buildSignalObservation(light, network, simTime)
       const actionIndex = mlpForwardDiscrete(observation, weights)
       const action = SIGNAL_ACTION_NAMES[actionIndex]
       if (action === undefined) return null
-      const queues = signalQueueLengths(light, network)
+      const queues = signalQueueLengths(light, network, simTime)
       const decision: SignalPolicyDecision = {
         action,
         actionIndex,

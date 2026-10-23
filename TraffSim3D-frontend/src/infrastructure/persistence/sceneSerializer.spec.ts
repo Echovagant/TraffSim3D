@@ -110,3 +110,123 @@ describe('sceneSerializer round-trip', () => {
     }
   })
 })
+
+describe('the geographic origin round-trip', () => {
+  const ORIGIN = { lat: 22.543099, lon: 114.057868 }
+
+  it('serializes the origin of an imported map', () => {
+    const net = buildTestNetwork(0)
+    net.origin = { ...ORIGIN }
+    const scene = serializeNetwork(net)
+    expect(scene.network.origin).toBeDefined()
+    expect(scene.network.origin!.lat).toBe(ORIGIN.lat)
+    expect(scene.network.origin!.lon).toBe(ORIGIN.lon)
+  })
+
+  it('round-trips the origin field by field', () => {
+    const net = buildTestNetwork(2)
+    net.origin = { ...ORIGIN }
+    const scene = serializeNetwork(net)
+    const result = hydrateNetwork(JSON.stringify(scene))
+    expect(result.ok).toBe(true)
+    if (result.ok && result.network) {
+      expect(result.network.origin).toBeDefined()
+      expect(result.network.origin!.lat).toBe(ORIGIN.lat)
+      expect(result.network.origin!.lon).toBe(ORIGIN.lon)
+    }
+  })
+
+  it('a scene without an origin loads with origin === undefined', () => {
+    // Every scene saved before the field existed — and every synthetic
+    // (built-in) scene, which has no geographic meaning.
+    const net = buildTestNetwork(1)
+    expect(net.origin).toBeUndefined()
+    const scene = serializeNetwork(net)
+    expect(scene.network.origin).toBeUndefined()
+    expect('origin' in scene.network).toBe(false)
+
+    const result = hydrateNetwork(JSON.stringify(scene))
+    expect(result.ok).toBe(true)
+    if (result.ok && result.network) {
+      expect(result.network.origin).toBeUndefined()
+    }
+  })
+
+  it('round-trips the spawn points', () => {
+    // The spawn points are the places a vehicle can be spawned from. If
+    // the serializer drops them, a reloaded scene silently loses that
+    // ability (`tick` reads an empty map as "no spawn limits"), and the
+    // scene comes back looking intact while behaving differently.
+    const net = buildTestNetwork(1)
+    const scene = serializeNetwork(net)
+    expect(scene.network.spawnPoints).toBeDefined()
+    expect(scene.network.spawnPoints!.length).toBe(Object.keys(net.spawnPoints).length)
+
+    const result = hydrateNetwork(JSON.stringify(scene))
+    expect(result.ok).toBe(true)
+    if (result.ok && result.network) {
+      expect(Object.keys(result.network.spawnPoints).sort()).toEqual(
+        Object.keys(net.spawnPoints).sort(),
+      )
+      for (const sp of Object.values(net.spawnPoints)) {
+        const back = result.network.spawnPoints[sp.id]
+        expect(back).toBeDefined()
+        expect(back!.roadId).toBe(sp.roadId)
+        expect(back!.laneIndex).toBe(sp.laneIndex)
+        expect(back!.s).toBe(sp.s)
+        expect(back!.occupiedBy).toBe(sp.occupiedBy)
+      }
+    }
+  })
+
+  it('a hand-written legacy payload (no origin field) still loads', () => {
+    const legacyScene = {
+      schemaVersion: 6,
+      savedAtMs: 1700000000000,
+      network: {
+        roads: [
+          {
+            id: 'r-old',
+            startNode: { x: -30, y: 0, z: 0 },
+            endNode: { x: 30, y: 0, z: 0 },
+            laneCount: 2,
+            speedLimit: 20,
+            level: 0,
+          },
+        ],
+        intersections: [
+          {
+            id: 'i-old',
+            position: { x: 0, y: 0, z: 0 },
+            connectedRoads: ['r-old'],
+            trafficLights: [],
+            intersectionRadius: 8,
+          },
+        ],
+        vehicles: [],
+      },
+    }
+    const result = hydrateNetwork(legacyScene)
+    expect(result.ok).toBe(true)
+    if (result.ok && result.network) {
+      expect(result.network.origin).toBeUndefined()
+      expect(result.network.roads['r-old']).toBeDefined()
+    }
+  })
+
+  it('rejects a malformed origin instead of silently dropping it', () => {
+    const net = buildTestNetwork(0)
+    net.origin = { ...ORIGIN }
+    const scene = serializeNetwork(net)
+    ;(scene.network.origin as unknown as Record<string, unknown>).lat = 'north'
+    const result = hydrateNetwork(scene)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('invalid network origin')
+  })
+
+  it('keeps the schema version — the LocalStorage key embeds it', () => {
+    // `LocalStorageAdapter` stores under `traffsim3d:scene:v${version}`,
+    // so a version bump would orphan every saved scene of every user.
+    expect(SCENE_SCHEMA_VERSION).toBe(6)
+  })
+})

@@ -31,5 +31,12 @@ export const sceneToNetwork = (scene: SerializedScene): RoadNetwork => {
   for (const v of scene.network.vehicles) {
     network.vehicles[v.id] = v
   }
+  // The geographic anchor travels with the snapshot: an undo/redo of an
+  // imported map must not drop the anchor (the scene would drift off
+  // the real basemap).
+  const origin = scene.network.origin
+  if (origin) {
+    network.origin = { lat: origin.lat, lon: origin.lon }
+  }
   return network
 }

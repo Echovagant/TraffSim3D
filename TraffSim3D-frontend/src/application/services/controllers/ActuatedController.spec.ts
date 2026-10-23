@@ -3,6 +3,7 @@ import { ActuatedController } from './ActuatedController'
 import { makeTestLight, buildTestNetwork } from '@__fixtures__/testNetwork'
 import { LightPhase } from '@domain/value-objects/Phase'
 import { MAX_GREEN_SECS, GREEN_EXTENSION_STEP, MIN_RED_SECS } from '@shared/constants/simulation'
+import { buildImportedNetwork, importedNsLight } from '@__fixtures__/importedNetwork'
 
 describe('ActuatedController', () => {
   const c = new ActuatedController()
@@ -67,5 +68,49 @@ describe('ActuatedController', () => {
     const d = c.decide(light, net, 0)
     expect(d.phase).toBe(LightPhase.Red)
     expect(d.duration).toBe(30)
+  })
+})
+
+describe('ActuatedController on an imported OSM map', () => {
+  const c = new ActuatedController()
+
+  it('shortens red when the opposite axis of the imported map has no queue', () => {
+    // The imported map names its roads `w-…`: the old `r-${axis}`
+    // lookup found no opposite road, so this branch was unreachable
+    // and the light always burned the full red.
+    const net = buildImportedNetwork()
+    delete net.vehicles['v-osm-ew-1']
+    delete net.vehicles['v-osm-branch-1']
+
+    const light = importedNsLight(net)
+    light.phase = LightPhase.Red
+    light.phaseRemaining = 20
+
+    const d = c.decide(light, net, 0)
+    expect(d.phase).toBe(LightPhase.Yellow)
+    expect(d.actions[0]?.name).toBe('shorten_red')
+  })
+
+  it('does not shorten red when the opposite axis of the imported map has cars', () => {
+    const net = buildImportedNetwork()
+    const light = importedNsLight(net)
+    light.phase = LightPhase.Red
+    light.phaseRemaining = 20
+
+    // The two EW cars (w-102 and w-103) are queued.
+    const d = c.decide(light, net, 0)
+    expect(d.phase).toBe(LightPhase.Red)
+    expect(d.actions[0]?.name).toBe('no_op')
+  })
+
+  it('extends green when the imported map has a queue on the light axis', () => {
+    const net = buildImportedNetwork()
+    const light = importedNsLight(net)
+    light.phase = LightPhase.Green
+    light.phaseRemaining = 10
+
+    const d = c.decide(light, net, 0)
+    expect(d.phase).toBe(LightPhase.Green)
+    expect(d.duration).toBe(10 + GREEN_EXTENSION_STEP)
   })
 })

@@ -1,4 +1,5 @@
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
+import type { GeoOrigin } from '@domain/entities/RoadNetwork'
 import type { Vehicle } from '@domain/entities/Vehicle'
 import type { TrafficLight } from '@domain/entities/TrafficLight'
 import type { Intersection } from '@domain/entities/Intersection'
@@ -23,6 +24,17 @@ import { createRoadNetwork } from '@domain/entities/RoadNetwork'
 // `spawnPoints: Record<string, SpawnPoint>`. Old v5 scenes load with
 // `desiredStatus` defaulted to the vehicle's current `status` and an
 // empty `spawnPoints` map (tick treats empty as "no spawn limits").
+//
+// NOT bumped for `network.origin` (the WGS84 geographic anchor):
+// the field is optional and purely additive, so a v6 payload without it
+// loads with `origin === undefined` — exactly the behaviour of every
+// scene saved before the field existed.
+//
+// The version is also the **LocalStorage key** (`traffsim3d:scene:v6`,
+// see `LocalStorageAdapter`), so a bump would orphan every saved scene
+// of every existing user: the new key would be empty and the payload
+// under the old key would never be read again. That — not the field
+// count — is what decides the version here.
 export const SCENE_SCHEMA_VERSION = 6
 
 export interface SerializedScene {
@@ -34,6 +46,16 @@ export interface SerializedScene {
     vehicles: Vehicle[]
     /** Optional on v5 → v6+ scenes; absent on older payloads. */
     spawnPoints?: SpawnPoint[]
+    /**
+     * Geographic anchor (WGS84) of the network's local metric frame.
+     *
+     * Optional and additive: absent on every scene saved before the
+     * field existed, and absent on the synthetic (built-in) scenes,
+     * which have no geographic meaning. Those load with
+     * `origin === undefined`, so the Cesium layer falls back to its
+     * default origin — the behaviour before the field was introduced.
+     */
+    origin?: GeoOrigin
   }
 }
 
@@ -59,15 +81,55 @@ const KNOWN_PHASES = new Set<string>([
 const isLightPhase = (v: unknown): v is TrafficLight['phase'] =>
   typeof v === 'string' && KNOWN_PHASES.has(v)
 
-export const serializeNetwork = (network: RoadNetwork): SerializedScene => ({
-  schemaVersion: SCENE_SCHEMA_VERSION,
-  savedAtMs: Date.now(),
-  network: {
-    roads: Object.values(network.roads),
-    intersections: Object.values(network.intersections),
-    vehicles: Object.values(network.vehicles),
-  },
-})
+/**
+ * Read a serialized geographic anchor.
+ *
+ * `null` when the field is absent (every scene saved before the field
+ * existed) — the caller then leaves `network.origin` undefined.
+ *
+ * A **present but malformed** anchor is an error, not an absent one:
+ * silently dropping it would move an imported map off the real basemap
+ * without telling anybody, which is worse than refusing the load.
+ */
+const readOrigin = (raw: unknown): GeoOrigin | null | undefined => {
+  if (raw === undefined || raw === null) return null
+  if (typeof raw !== 'object') return undefined
+  const obj = raw as Record<string, unknown>
+  const lat = obj.lat
+  const lon = obj.lon
+  if (typeof lat !== 'number' || !Number.isFinite(lat)) return undefined
+  if (typeof lon !== 'number' || !Number.isFinite(lon)) return undefined
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return undefined
+  return { lat, lon }
+}
+
+export const serializeNetwork = (network: RoadNetwork): SerializedScene => {
+  const origin = network.origin
+  return {
+    schemaVersion: SCENE_SCHEMA_VERSION,
+    savedAtMs: Date.now(),
+    network: {
+      roads: Object.values(network.roads),
+      intersections: Object.values(network.intersections),
+      vehicles: Object.values(network.vehicles),
+      // The spawn points are part of the scene: without them a reloaded
+      // scene has no places to spawn vehicles from, and `tick` treats an
+      // empty map as "no spawn limits" — the saved scene would silently
+      // lose the ability to spawn. They are written in the same array
+      // shape `hydrateNetwork` reads back.
+      spawnPoints: Object.values(network.spawnPoints).map((sp) => ({
+        id: sp.id,
+        roadId: sp.roadId,
+        laneIndex: sp.laneIndex,
+        s: sp.s,
+        occupiedBy: sp.occupiedBy,
+      })),
+      // The anchor is copied field by field — the network keeps its own
+      // object, so a later mutation of the scene must not reach it.
+      ...(origin ? { origin: { lat: origin.lat, lon: origin.lon } } : {}),
+    },
+  }
+}
 
 export interface HydrationResult {
   ok: boolean
@@ -177,6 +239,14 @@ export const hydrateNetwork = (raw: unknown): HydrationResult => {
     }
   }
 
+  // Geographic anchor: optional. Absent (the common case — every scene
+  // saved before the field existed, and every synthetic scene) leaves
+  // `network.origin` undefined, which is exactly the old behaviour.
+  const origin = readOrigin((n as Record<string, unknown>).origin)
+  if (origin === undefined) {
+    return { ok: false, reason: 'invalid network origin' }
+  }
+
   // Build network
   const net = createRoadNetwork()
   for (const r of n.roads as Array<Road>) {
@@ -215,6 +285,12 @@ export const hydrateNetwork = (raw: unknown): HydrationResult => {
         net.spawnPoints[sp.id] = sp as never
       }
     }
+  }
+
+  // The geographic anchor (absent on scenes saved before the field
+  // existed — those keep `origin === undefined`).
+  if (origin) {
+    net.origin = { lat: origin.lat, lon: origin.lon }
   }
 
   return { ok: true, network: net }
