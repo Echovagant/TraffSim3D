@@ -19,11 +19,10 @@ training. The proof has two halves:
    ("how soon did you arrive"), the baseline is **provably optimal** and
    no reward term added to these scenes can make a policy beat it.
 
-This module pins both halves, so the numbers quoted in
-the numbers quoted in the cross-language contract are enforced by the test
-suite instead of being a one-off measurement: if the physics, the goal
-lines or the start pose change, this fails loudly and the document's
-numbers have to be rewritten.
+This module pins both halves, so the quoted numbers are enforced by the
+test suite instead of being a one-off measurement: if the physics, the
+goal lines or the start pose change, this fails loudly and the numbers
+have to be rewritten.
 
 The third test pins the *other* half of that conclusion — that the ego
 never faces a red light in these scenes, because the light's phase clock

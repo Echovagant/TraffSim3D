@@ -6,8 +6,8 @@ are two independent implementations of the same model. This test asserts
 they agree **exactly** — not within a tolerance.
 
 Why exact equality: both sides execute the same floating-point operation
-sequence (see the cross-language contract (ADR-008) §4.1 constraint 4),
-so their trajectories are bit-identical. Measured on the `cross` vector:
+sequence, so their trajectories are bit-identical. Measured on the `cross`
+vector:
 0 differences across all 58 steps of the `speed` and `x` series, and
 identical `final_z` (26.20100000000003) and `final_x` (1.467525924532092e-14).
 A tolerance would hide exactly the failure this contract exists to catch:

@@ -10,6 +10,10 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "python-multipart>=0.0.20",  # required for UploadFile endpoints
+    # certifi's bundled CA store shipped revoked emSign roots (PYSEC-2026-4320)
+    # until 2026.10.19. It arrives transitively (requests/httpx), so the floor
+    # has to be stated here — a transitive constraint alone is not installable.
+    "certifi>=2026.10.19",
     "gymnasium>=1.3.0",
     "numpy>=2.5.0",
     "pbf>=0.2.0",
