@@ -15,6 +15,7 @@
  *  - lane N-1 is the *rightmost* backward lane
  *  - the yellow centerline is between lane N/2-1 and lane N/2
  */
+import type { Intersection } from '@domain/entities/Intersection'
 import type { Road } from '@domain/entities/Road'
 import type { Position } from '@domain/value-objects/Position'
 import { ROAD_LANE_WIDTH, STOP_LINE_DISTANCE } from '@shared/constants/simulation'
@@ -144,13 +145,20 @@ export interface LanePoint {
 
 /** `radius` defaults to STOP_LINE_DISTANCE * 2 = 10 m for back-compat
  *  with the older callers (tick.ts used a hard-coded formula).
- *  When a per-intersection radius is known, callers should pass it explicitly. */
+ *  When a per-intersection radius is known, callers should pass it explicitly.
+ *
+ *  When `intersection` is given, the box is centred on the **projected**
+ *  position of that intersection on the road (see
+ *  `projectIntersectionOnRoad`) instead of the road midpoint. Without it
+ *  the historical midpoint assumption is used. */
 export const intersectionSRange = (
   road: Road,
   radius: number = STOP_LINE_DISTANCE * 2,
+  intersection?: Intersection | null,
 ): readonly [number, number] => {
   const len = roadLength(road)
-  return [Math.max(0, len / 2 - radius), Math.min(len, len / 2 + radius)] as const
+  const centerS = intersection ? intersectionCenterS(road, intersection) : len / 2
+  return [Math.max(0, centerS - radius), Math.min(len, centerS + radius)] as const
 }
 
 /** True if a vehicle at distance `s` along this road is inside the intersection box. */
@@ -158,9 +166,182 @@ export const inIntersectionBox = (
   road: Road,
   s: number,
   radius: number = STOP_LINE_DISTANCE * 2,
+  intersection?: Intersection | null,
 ): boolean => {
-  const [lo, hi] = intersectionSRange(road, radius)
+  const [lo, hi] = intersectionSRange(road, radius, intersection)
   return s >= lo && s <= hi
+}
+
+// ---------------------------------------------------------------------------
+// Intersection geometry
+// ---------------------------------------------------------------------------
+
+/**
+ * How far (m) an intersection position may sit from a connected road's
+ * centreline and still be trusted as "this intersection is on that road".
+ *
+ * A road that really carries the intersection touches it, so the
+ * perpendicular distance is ~0. A distance beyond this threshold means
+ * the intersection belongs to some other road (or the projection failed),
+ * and the caller falls back to the road midpoint instead of inventing a
+ * stop line in the wrong place.
+ */
+export const MAX_INTERSECTION_OFFSET_M = 30
+
+export interface IntersectionProjection {
+  /** Arc length of the intersection centre along the road polyline (from the start node). */
+  s: number
+  /** Perpendicular distance (m) from the intersection position to the road centreline. */
+  distance: number
+  /**
+   * `true` when `s` comes from the projection, `false` when the
+   * projection was rejected and the road midpoint was used instead.
+   */
+  projected: boolean
+}
+
+/**
+ * Project a world position onto the road **centreline**.
+ *
+ * `worldToLaneS` projects onto a *lane* — the lane's own line, offset from
+ * the centreline by `laneOffset(laneIndex)`. That is not the centreline:
+ * for a 6-lane road the outer lanes sit 8.75 m off the centre. This
+ * function therefore projects onto the polyline itself and returns both
+ * the arc length `s` (in the same space as `roadLength` / `lanePoint`) and
+ * the perpendicular distance, which the caller needs to decide whether
+ * the projection is trustworthy at all.
+ *
+ * The perpendicular distance is measured in XZ; the arc length is the 3D
+ * polyline length (so it matches `roadLength` / `lanePoint` on ramps).
+ */
+export const worldToCenterlineS = (
+  road: Road,
+  worldX: number,
+  worldZ: number,
+): { s: number; distance: number } => {
+  const wps = roadWaypoints(road)
+  const cum = roadPolylineLengths(road)
+  if (cum.length === 0 || wps.length < 2) {
+    return { s: 0, distance: Number.POSITIVE_INFINITY }
+  }
+  let bestS = 0
+  let bestPerpSq = Number.POSITIVE_INFINITY
+  for (let i = 0; i < wps.length - 1; i++) {
+    const a = wps[i]!
+    const b = wps[i + 1]!
+    const dx = b.x - a.x
+    const dz = b.z - a.z
+    const segLen3d = cum[i]! - (i === 0 ? 0 : cum[i - 1]!)
+    const flatLen = Math.sqrt(dx * dx + dz * dz)
+    if (flatLen < 1e-6) continue
+    // Parameter of the closest point on the segment, clamped to [0, 1].
+    const t = Math.max(
+      0,
+      Math.min(1, ((worldX - a.x) * dx + (worldZ - a.z) * dz) / (flatLen * flatLen)),
+    )
+    const px = a.x + dx * t
+    const pz = a.z + dz * t
+    const perpX = worldX - px
+    const perpZ = worldZ - pz
+    const perpSq = perpX * perpX + perpZ * perpZ
+    if (perpSq < bestPerpSq) {
+      bestPerpSq = perpSq
+      const segStart = i === 0 ? 0 : cum[i - 1]!
+      bestS = segStart + t * segLen3d
+    }
+  }
+  const len = roadLength(road)
+  return { s: Math.max(0, Math.min(len, bestS)), distance: Math.sqrt(bestPerpSq) }
+}
+
+/**
+ * Where an intersection sits on a road.
+ *
+ * The intersection's world position is projected onto the road's
+ * centreline; the resulting arc length `s` is the single source of truth
+ * for where the stop line and the intersection box are on that road.
+ *
+ * When the intersection is further than `MAX_INTERSECTION_OFFSET_M` from
+ * the road, the projection is rejected and the **road midpoint** is used
+ * instead (`projected: false`) — the historical assumption, kept as the
+ * degradation path so a bad projection can never move a stop line to a
+ * nonsense place.
+ */
+export const projectIntersectionOnRoad = (
+  road: Road,
+  intersection: Intersection,
+): IntersectionProjection => {
+  const len = roadLength(road)
+  if (len < 1e-6) {
+    return { s: 0, distance: Number.POSITIVE_INFINITY, projected: false }
+  }
+  const { s, distance } = worldToCenterlineS(road, intersection.position.x, intersection.position.z)
+  if (!Number.isFinite(distance) || distance > MAX_INTERSECTION_OFFSET_M) {
+    return { s: len / 2, distance, projected: false }
+  }
+  return { s, distance, projected: true }
+}
+
+/**
+ * The arc length of an intersection's centre on `road`
+ * (road midpoint when the projection is rejected).
+ */
+export const intersectionCenterS = (road: Road, intersection: Intersection): number =>
+  projectIntersectionOnRoad(road, intersection).s
+
+/**
+ * The stop line of `intersection` on `road`, for the travel direction of
+ * `laneIndex`.
+ *
+ * The stop line sits on the edge of the intersection box, **on the side
+ * the vehicle comes from**:
+ *
+ * - a forward lane (`laneIndex < laneCount / 2`) travels towards a
+ *   *larger* `s`, so it stops at `centerS - radius`;
+ * - a backward lane travels towards a *smaller* `s`, so it stops at
+ *   `centerS + radius`.
+ *
+ * Returns `null` when that stop line would fall outside the road — the
+ * intersection is not on this approach (e.g. it sits at the road's start
+ * node, so the forward lanes drive away from it and never stop there).
+ */
+export const stopLineSOnRoad = (
+  road: Road,
+  intersection: Intersection,
+  laneIndex: number,
+): number | null => {
+  const len = roadLength(road)
+  if (len < 1e-6) return null
+  const radius = Math.max(0, intersection.intersectionRadius)
+  const centerS = intersectionCenterS(road, intersection)
+  const sign = laneForwardSign(laneIndex, road.laneCount)
+  const stopS = sign === 1 ? centerS - radius : centerS + radius
+  if (stopS < 0 || stopS > len) return null
+  return stopS
+}
+
+/**
+ * Every stop line on `road`, in arc length, derived from the same
+ * projection the traffic logic uses.
+ *
+ * One line per approach of every connected intersection: the forward
+ * approach (`laneIndex 0`) and the backward approach (the last lane).
+ * Duplicates are removed — a road whose intersection sits at the road's
+ * midpoint yields one line per direction, not two.
+ */
+export const roadStopLines = (
+  road: Road,
+  intersections: readonly Intersection[],
+): readonly number[] => {
+  const lines = new Set<number>()
+  for (const intersection of intersections) {
+    if (!intersection.connectedRoads.includes(road.id)) continue
+    const forward = stopLineSOnRoad(road, intersection, 0)
+    if (forward !== null) lines.add(forward)
+    const backward = stopLineSOnRoad(road, intersection, road.laneCount - 1)
+    if (backward !== null) lines.add(backward)
+  }
+  return [...lines].sort((a, b) => a - b)
 }
 
 /**

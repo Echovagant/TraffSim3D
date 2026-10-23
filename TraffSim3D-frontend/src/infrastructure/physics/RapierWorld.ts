@@ -333,6 +333,31 @@ export class RapierWorld {
   }
 
   /**
+   * Move a body to a given **height**, keeping its horizontal position
+   * and its velocity.
+   *
+   * The physics world has a flat ground and **no geometry for the
+   * elevated roads** — a ramp or a viaduct is a polyline in the scene
+   * graph, not a collider. A vehicle driving on one therefore sinks to
+   * the ground plane, and the pose it reads back carries that height.
+   *
+   * The height of a road is known exactly (the lane geometry carries
+   * it), so the application layer owns it: it tells the body which
+   * height the road it is driving on is at. Only `y` changes — the
+   * horizontal motion and the velocity stay untouched, so this cannot
+   * disturb the vehicle's speed.
+   */
+  setVehicleHeight(vehicleId: string, y: number): void {
+    if (!this.world) return
+    const bodyHandle = this.bodies.get(vehicleId)
+    if (bodyHandle === undefined) return
+    const body = this.world.getRigidBody(bodyHandle)
+    if (!body) return
+    const t = body.translation()
+    body.setTranslation({ x: t.x, y, z: t.z }, true)
+  }
+
+  /**
    * Set a vehicle's heading (yaw) without changing position or velocity.
    * Used by OOB cleanup to re-orient the body after a respawn so that
    * the next applyControl sends the vehicle in the correct direction.

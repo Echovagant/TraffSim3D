@@ -9,10 +9,26 @@ import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
 import { createRoadMarkings } from './RoadMarkingsMesh'
 import { makeTestRoad, makePolylineRoad } from '@__fixtures__/testNetwork'
-import { STOP_LINE_DISTANCE, ROAD_LANE_WIDTH } from '@shared/constants/simulation'
+import { ROAD_LANE_WIDTH } from '@shared/constants/simulation'
+import type { Intersection } from '@domain/entities/Intersection'
 
 /** r-ns: (0,0,-30) -> (0,0,30), length 60, tangent (0,1). */
 const ns2 = makeTestRoad('r-ns', 'ns', 2)
+
+/**
+ * A junction on `roadId` at the given world position.
+ *
+ * The stop lines are painted where the junction projects onto the road
+ * (see `roadStopLines`), so the position decides where they land: a
+ * junction at the road midpoint paints them at `mid ± radius`.
+ */
+const junctionAt = (roadId: string, x: number, z: number, radius = 8): Intersection => ({
+  id: 'i-1',
+  position: { x, y: 0, z },
+  trafficLights: [],
+  connectedRoads: [roadId],
+  intersectionRadius: radius,
+})
 
 // NOTE: THREE.LineSegments extends THREE.Line, so a plain
 // `instanceof THREE.Line` filter also catches the dash/arrow segments.
@@ -38,7 +54,7 @@ const colorOf = (o: THREE.Object3D) =>
   (asMesh(o).material as THREE.LineBasicMaterial).color.getHex()
 
 describe('createRoadMarkings — 2-lane road (length 60)', () => {
-  const g = createRoadMarkings(ns2)
+  const g = createRoadMarkings(ns2, { intersections: [junctionAt('r-ns', 0, 0)] })
 
   it('emits 4 children: centerline, dividers, 2 stop lines (no arrows below 3 lanes)', () => {
     expect(g.children).toHaveLength(4)
@@ -57,7 +73,9 @@ describe('createRoadMarkings — 2-lane road (length 60)', () => {
     expect(p[2]).toBeCloseTo(-30, 6)
     expect(p[5]).toBeCloseTo(30, 6)
     // An odd lane count has no centre divider — the road is single-sided.
-    const odd = createRoadMarkings(makeTestRoad('r-ns3', 'ns', 3))
+    const odd = createRoadMarkings(makeTestRoad('r-ns3', 'ns', 3), {
+      intersections: [junctionAt('r-ns3', 0, 0)],
+    })
     expect(odd.children.some((c) => colorOf(c) === 0xfacc15)).toBe(false)
   })
 
@@ -73,19 +91,24 @@ describe('createRoadMarkings — 2-lane road (length 60)', () => {
     expect(p[5]).toBeCloseTo(-29.4, 5) // first dash is DASH = 0.6 long
   })
 
-  it('emits one white stop line per road end, inset by STOP_LINE_DISTANCE', () => {
+  it('draws one white stop line per approach, at the junction edges', () => {
     const stops = whiteLines(g)
     expect(stops).toHaveLength(2)
     const halfWidth = (ROAD_LANE_WIDTH * ns2.laneCount) / 2
-    // near end: s = 30 - 5 = 25 measured from the start -> z = -25
+    // The junction sits at the road midpoint (s = 30) with radius 8, so
+    // the lines land at s = 22 (z = -8) and s = 38 (z = +8) — the edges
+    // of the junction box, not at the road ends.
     expect(stops[0]!.geometry.attributes.position!.getX(0)).toBeCloseTo(-halfWidth, 5)
-    expect(stops[0]!.geometry.attributes.position!.getZ(0)).toBeCloseTo(-25, 5)
+    expect(stops[0]!.geometry.attributes.position!.getZ(0)).toBeCloseTo(-8, 5)
     expect(stops[0]!.geometry.attributes.position!.getY(0)).toBeCloseTo(0.03, 6)
     expect(stops[0]!.geometry.attributes.position!.getX(1)).toBeCloseTo(halfWidth, 5)
-    // far end: s = 30 + 25 = 55 -> z = 25
-    expect(stops[1]!.geometry.attributes.position!.getZ(0)).toBeCloseTo(25, 5)
-    expect(stops[1]!.geometry.attributes.position!.getZ(1)).toBeCloseTo(25, 5)
-    expect(STOP_LINE_DISTANCE).toBe(5)
+    expect(stops[1]!.geometry.attributes.position!.getZ(0)).toBeCloseTo(8, 5)
+    expect(stops[1]!.geometry.attributes.position!.getZ(1)).toBeCloseTo(8, 5)
+  })
+
+  it('paints no stop line at all on a road without a junction', () => {
+    const bare = createRoadMarkings(ns2)
+    expect(whiteLines(bare)).toHaveLength(0)
   })
 
   it('paints no lane arrows for a 2-lane road', () => {
@@ -105,7 +128,8 @@ describe('createRoadMarkings — 3-lane road', () => {
     ],
     3,
   )
-  const g = createRoadMarkings(road)
+  // The junction sits at the road midpoint (s = 30 of 60).
+  const g = createRoadMarkings(road, { intersections: [junctionAt('r-3', 0, 30)] })
 
   it('has 2 divider offsets (5.25 and 1.75) but no centerline', () => {
     expect(g.children).toHaveLength(9)
@@ -183,7 +207,7 @@ describe('createRoadMarkings — degenerate / short roads', () => {
     expect(g.children).toHaveLength(0)
   })
 
-  it('drops the stop lines when the road is shorter than twice STOP_LINE_DISTANCE', () => {
+  it('drops the stop lines when the junction box does not fit the road', () => {
     const g = createRoadMarkings(
       makePolylineRoad(
         'r-short',
@@ -193,9 +217,11 @@ describe('createRoadMarkings — degenerate / short roads', () => {
         ],
         2,
       ),
+      // The junction is at the middle of a 2 m road: both stop lines
+      // (mid ± 8) fall outside the road, so neither is painted.
+      { intersections: [junctionAt('r-short', 0, 1)] },
     )
-    // centerline + 2 dashes survive; both stop lines are rejected by the
-    // |along| > length guard (|5 - 1| = 4 > 2).
+    // centerline + 2 dashes survive; neither stop line fits the road.
     expect(g.children).toHaveLength(2)
     expect(whiteLines(g)).toHaveLength(0)
   })

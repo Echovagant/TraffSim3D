@@ -1,6 +1,7 @@
 import * as THREE from 'three'
+import type { Intersection } from '@domain/entities/Intersection'
 import type { Road } from '@domain/entities/Road'
-import { ROAD_LANE_WIDTH, STOP_LINE_DISTANCE } from '@shared/constants/simulation'
+import { ROAD_LANE_WIDTH } from '@shared/constants/simulation'
 import {
   laneOffset,
   laneForwardSign,
@@ -8,6 +9,7 @@ import {
   roadLength,
   roadPolylineLengths,
   roadRight,
+  roadStopLines,
   roadWaypoints,
   segmentAt,
 } from '@domain/services/laneGeometry'
@@ -52,14 +54,25 @@ const buildArrow = (arrowSize: number): THREE.LineSegments => {
  * Polyline-aware road markings. Centerline follows the
  * polyline (N-1 segments). Dashed dividers distribute along the
  * polyline arc length, snapping to the local segment tangent at each
- * dash. Stop lines are perpendicular to the LOCAL tangent at the
- * intersection midpoints (one per road end). Arrows are placed at
- * `s = 0.2·len` and `0.8·len`, rotated to the local tangent.
+ * dash. Stop lines are drawn where the traffic logic actually stops a
+ * vehicle — one per approach of every connected intersection, computed
+ * by the same projection (`roadStopLines` → `stopLineSOnRoad`) the tick
+ * brakes on. Arrows are placed at `s = 0.2·len` and `0.8·len`, rotated
+ * to the local tangent.
  *
  * For 2-point roads (N=2), the result is mathematically the same as
  * the older single-segment road.
  */
-export const createRoadMarkings = (road: Road): THREE.Group => {
+export interface RoadMarkingsOptions {
+  /**
+   * The network's intersections. Only the ones that list this road in
+   * `connectedRoads` contribute a stop line — the same filter the
+   * traffic logic uses.
+   */
+  intersections?: readonly Intersection[]
+}
+
+export const createRoadMarkings = (road: Road, options: RoadMarkingsOptions = {}): THREE.Group => {
   const group = new THREE.Group()
   const wps = roadWaypoints(road)
   const length = roadLength(road)
@@ -126,14 +139,13 @@ export const createRoadMarkings = (road: Road): THREE.Group => {
     group.add(new THREE.LineSegments(geom, mat))
   }
 
-  // Stop lines at the two ends of the road (intersection areas).
-  for (const sign of [-1, 1]) {
-    const along = sign * (length / 2 - STOP_LINE_DISTANCE)
-    if (Math.abs(along) > length) continue
-    const sClamped = Math.max(0, Math.min(length, length / 2 + along))
-    const fwd = roadForward(road, sClamped)
-    const rgt = roadRight(road, sClamped)
-    const cx = pointAt(road, 0, sClamped)
+  // Stop lines: one per approach of every connected intersection, at
+  // the arc length the traffic logic stops at. `roadStopLines` and the
+  // tick's `stopLineSOnRoad` read the SAME projection, so the painted
+  // line and the enforced line cannot drift apart.
+  for (const s of roadStopLines(road, options.intersections ?? [])) {
+    const rgt = roadRight(road, s)
+    const cx = pointAt(road, 0, s)
     const a = new THREE.Vector3(cx.x + rgt.ux * -halfWidth, cx.y + 0.03, cx.z + rgt.uz * -halfWidth)
     const b = new THREE.Vector3(cx.x + rgt.ux * halfWidth, cx.y + 0.03, cx.z + rgt.uz * halfWidth)
     const lineGeom = new THREE.BufferGeometry().setFromPoints([a, b])

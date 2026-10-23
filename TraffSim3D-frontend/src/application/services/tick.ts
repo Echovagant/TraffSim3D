@@ -22,19 +22,21 @@ import {
   inIntersectionBox,
   lanePoint,
   laneOffset,
+  roadForward,
   roadLength,
+  roadRight,
   laneForwardSign,
+  stopLineSOnRoad,
 } from '@domain/services/laneGeometry'
 import {
   steerLateralVelocity,
   LANE_CHANGE_CONVERGED_M,
-  laneChangeProgress,
   perpendicularOffsetAlongRoad,
 } from '@domain/services/laneChange'
 import { rampSpeed, statusFromHysteresis, safeGapGipps } from '@domain/services/vehicleDynamics'
 import { computeSteeringAngle, steeringAngleToOmega } from '@domain/services/purePursuit'
 import { pythonSpeedStep } from '@domain/services/egoKernel'
-import { tickOobCleanup } from './oobCleanup'
+import { tickOobCleanup, isOobExiting } from './oobCleanup'
 import {
   CRASH_IMPULSE_THRESHOLD,
   MAX_SPEED,
@@ -286,22 +288,18 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     v.targetSpeed = road.speedLimit
     applyTrafficLightConstraint(v, road, network, ctx)
     applyCarFollowingConstraint(v, road, network, ctx)
-    // Vehicles clamped at the road end (step 8 set speed=0) must stay
-    // stopped until a constraint release (light change, leader move).
-    // Guard runs AFTER constraints so they can't override it.
+    // NOTE: there is deliberately **no** "road end" clamp here any
+    // more. The road end used to be terminal: step 8 snapped the
+    // body back to the end point and zeroed its speed, and this
+    // clamp (which ran AFTER the constraints so they could not
+    // release it) pinned the vehicle there for good — every demo
+    // scene ran for half a minute and then stood still.
     //
-    // "The road end" depends on the direction the lane is travelled:
-    // a forward lane runs start → end (its end is s = length), a
-    // backward lane runs end → start (its end is s = 0). The old guard
-    // treated *both* ends as terminal, which pinned a vehicle that had
-    // just spawned at `s = 0` (the default spawn point) at a
-    // standstill forever — the road-start clamp and the spawn-point
-    // release rule (`s − sp.s > SPAWN_POINT_RELEASE_DISTANCE`) locked
-    // each other in place and the vehicle never drove away.
-    const len = roadLength(road)
-    if (v.speed < 0.1 && atTravelEnd(v, road)) {
-      v.targetSpeed = 0
-    }
+    // The end of a lane is now a **wrap point**: the vehicle re-enters
+    // the same lane from the other end of the road and keeps driving
+    // (see `wrappedTravelS` / `applyTravelEndWrap`). A vehicle that
+    // is stopped at the end therefore has to be held there by a real
+    // constraint — a red light or a leader — not by the geometry.
   }
 
   // 3.5. Controller → desiredStatus. We compute the
@@ -363,9 +361,29 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       const road = network.roads[v.roadId]
       if (!road) continue
       const heading = v.heading
+      // A vehicle that has left the road network is on its way out: it
+      // brakes to a stop instead of following the road's speed limit.
+      // The ramp toward 0 uses MAX_DECEL — the same deceleration a
+      // stop at a red light uses — so the departure is physical.
+      // See oobCleanup.ts.
+      const speedTarget = isOobExiting(v) ? 0 : v.targetSpeed
       const nextSpeed = isReplayDriven(ctx, v)
         ? v.targetSpeed
-        : rampSpeed(v.speed, v.targetSpeed, dt, v.type)
+        : rampSpeed(v.speed, speedTarget, dt, v.type)
+      // Put the body on its road's height **before** the step. The
+      // physics world has a flat ground and no geometry for the
+      // elevated roads, so a body that starts a step at the ground
+      // height stays there — the step's gravity pulls it down and the
+      // pose it reads back carries the ground height.
+      //
+      // The road's height is known exactly (the lane geometry carries
+      // it), so the application layer owns it. Only `y` changes: the
+      // horizontal motion and the velocity are untouched.
+      const roadY = lanePoint(road, v.laneIndex, v.s).position.y
+      if (Math.abs(v.position.y - roadY) > 0.01) {
+        v.position.y = roadY
+        ctx.rapierWorld.setVehicleHeight(v.id, roadY)
+      }
       ctx.rapierWorld.applyControl(
         v.id,
         { throttle: 1, brake: v.status === 'crashed' ? 1 : 0, steering: 0 },
@@ -410,37 +428,50 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       const vRoad = network.roads[v.roadId]
       if (vRoad) {
         const len = roadLength(vRoad)
-        // Also check if vehicle position is past the road endpoints.
-        // findNearestLane returns fallback s when vehicle is off-road,
-        // so s might be at the boundary (s=len or s=0) even though the
-        // vehicle has driven past the end.
+        // ===== travel-end wrap =====
         //
-        // `findNearestLane` clamps s into [0, len], so `s <= 0` means
-        // "exactly at the road start" and `s >= len` means "exactly at
-        // the road end". Only the END of the vehicle's *travel
-        // direction* is terminal: a forward lane ends at s = len, a
-        // backward lane at s = 0. The old guard snapped at *both*,
-        // which froze every vehicle that stood at the road start (the
-        // default spawn point) at a standstill — it zeroed the speed on
-        // every frame, and step 3's `targetSpeed = 0` clamp then kept
-        // it there for good.
-        const expectedAtS = lanePoint(vRoad, v.laneIndex, v.s)
-        const dxEnd = v.position.x - expectedAtS.position.x
-        const dzEnd = v.position.z - expectedAtS.position.z
-        const distFromExpectedSq = dxEnd * dxEnd + dzEnd * dzEnd
-        if (atTravelEnd(v, vRoad) || distFromExpectedSq > 25) {
-          // 5m threshold
-          const clampedS = Math.max(0, Math.min(len, v.s))
-          v.s = clampedS
-          const lp = lanePoint(vRoad, v.laneIndex, v.s)
-          v.position.x = lp.position.x
-          v.position.y = lp.position.y
-          v.position.z = lp.position.z
-          v.heading = lp.heading
-          v.speed = 0
-          ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
-          ctx.rapierWorld!.setVehicleHeading(v.id, lp.heading)
-          ctx.rapierWorld!.setVehicleSpeed(v.id, 0, lp.heading) // zero Rapier linvel
+        // The body has run past the end of the direction its lane is
+        // travelled (a forward lane ends at s = len, a backward lane
+        // at s = 0). It re-enters the SAME lane from the other end of
+        // the road and keeps driving — the road is a closed route for
+        // the traffic on it, which is what the physics-free fallback
+        // path has always done (`s -= len` / `s += len`).
+        //
+        // The old code parked the vehicle here: the body was snapped
+        // back to the end point, its speed was zeroed, and step 3's
+        // `targetSpeed = 0` clamp kept it there for good. Every demo
+        // scene therefore ran for half a minute and then stood still.
+        //
+        // `findNearestLane` clamps `s` into [0, len], so `s` alone
+        // cannot tell "standing at the end" from "driven past the
+        // end" — the overrun is measured from the body's world
+        // position instead (`travelEndOverrun`).
+        const wrappedS = wrappedTravelS(v, vRoad)
+        if (wrappedS !== null) {
+          applyTravelEndWrap(v, vRoad, wrappedS, ctx)
+        } else {
+          // Guard: the body is off the lane it is supposed to be on
+          // (findNearestLane could not project it, or the physics
+          // pushed it sideways). Snap it back onto the lane so
+          // rendering and physics stay in sync.
+          const expectedAtS = lanePoint(vRoad, v.laneIndex, v.s)
+          const dxEnd = v.position.x - expectedAtS.position.x
+          const dzEnd = v.position.z - expectedAtS.position.z
+          const distFromExpectedSq = dxEnd * dxEnd + dzEnd * dzEnd
+          if (distFromExpectedSq > 25) {
+            // 5m threshold
+            const clampedS = Math.max(0, Math.min(len, v.s))
+            v.s = clampedS
+            const lp = lanePoint(vRoad, v.laneIndex, v.s)
+            v.position.x = lp.position.x
+            v.position.y = lp.position.y
+            v.position.z = lp.position.z
+            v.heading = lp.heading
+            v.speed = 0
+            ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
+            ctx.rapierWorld!.setVehicleHeading(v.id, lp.heading)
+            ctx.rapierWorld!.setVehicleSpeed(v.id, 0, lp.heading) // zero Rapier linvel
+          }
         }
       }
       // Guard 2: lateral drift. Pure Pursuit can diverge when the
@@ -462,6 +493,26 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
           ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
           ctx.rapierWorld!.setVehicleHeading(v.id, expected.heading)
           ctx.rapierWorld!.setVehicleSpeed(v.id, v.speed, expected.heading)
+        }
+      }
+
+      // Guard 3: the road's height. The physics world has a flat ground
+      // and **no geometry for the elevated roads** — a ramp or a viaduct
+      // is a polyline in the scene graph, not a collider. A vehicle
+      // driving on one therefore sinks to the ground plane, and the pose
+      // it reads back carries that ground height.
+      //
+      // The road's height is known exactly (the lane geometry carries
+      // it), so the application layer owns it: the body is put at the
+      // height of the road it is on, and the entity reports that same
+      // height. Measured before this: a vehicle on the ramp reported
+      // y = 0.749 (the ground) while the road at its arc length was at
+      // y = 2.0 – 3.1 — a 1.3 – 2.4 m error that grew along the ramp.
+      if (vRoad) {
+        const roadY = lanePoint(vRoad, v.laneIndex, v.s).position.y
+        if (Math.abs(v.position.y - roadY) > 0.01) {
+          v.position.y = roadY
+          ctx.rapierWorld!.setVehicleHeight(v.id, roadY)
         }
       }
     }
@@ -530,21 +581,34 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       v.position.y = lp.position.y
       v.position.z = lp.position.z
       v.heading = lp.heading
-      // Lane change: there is no lateral dynamics to integrate on this
-      // path, so the position is blended from the current lane to the
-      // target lane over the change's nominal duration. The blend is
-      // driven by elapsed *simulation* time, so it is frame-rate
-      // independent just like the Rapier path's lateral velocity.
+      // Lane change: this path has no lateral dynamics to integrate, so
+      // the lateral offset is placed where the SAME P-controller the
+      // physics path integrates would have put it: the lateral
+      // velocity is `STEER_GAIN` × the offset error, capped at
+      // `MAX_LATERAL_MS` (see `steerLateralVelocity` and
+      // `fallbackLateralOffset`).
+      //
+      // The old code blended the position from the current lane to the
+      // target lane over a fixed duration — a *time* mix that ignored
+      // both the gain and the cap, so the physics-free path and the
+      // physics path did not describe the same manoeuvre.
       if (v.desiredLaneIndex !== null) {
-        const target = v.desiredLaneIndex
-        const targetLp = lanePoint(road, target, v.s)
-        const progress = laneChangeProgress(
-          v.laneChangeStartedAt === null ? 0 : simTime - v.laneChangeStartedAt,
-          LANE_CHANGE_DURATION_S,
-        )
-        v.position.x = lp.position.x + (targetLp.position.x - lp.position.x) * progress
-        v.position.y = lp.position.y + (targetLp.position.y - lp.position.y) * progress
-        v.position.z = lp.position.z + (targetLp.position.z - lp.position.z) * progress
+        const fromLat = laneOffset(v.laneIndex, road.laneCount)
+        const toLat = laneOffset(v.desiredLaneIndex, road.laneCount)
+        const elapsed = v.laneChangeStartedAt === null ? 0 : simTime - v.laneChangeStartedAt
+        const offset = fallbackLateralOffset(fromLat, toLat, elapsed)
+        // Place the body at that offset from the road's centreline:
+        // the lane point plus the shift along the road's right vector.
+        const right = roadRight(road, v.s)
+        const shift = offset - fromLat
+        v.position.x = lp.position.x + shift * right.ux
+        v.position.y = lp.position.y
+        v.position.z = lp.position.z + shift * right.uz
+        // The heading turns towards the target lane in proportion to
+        // how much of the lateral offset has been covered.
+        const targetLp = lanePoint(road, v.desiredLaneIndex, v.s)
+        const span = toLat - fromLat
+        const progress = span === 0 ? 1 : Math.max(0, Math.min(1, (offset - fromLat) / span))
         v.heading = lp.heading + (targetLp.heading - lp.heading) * progress
       }
     }
@@ -613,8 +677,10 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   }
 
   // 12. OOB cleanup. Vehicles that have drifted > 50m from
-  //     their (road, lane, s) geometry are respawned at s=0. Vehicles
-  //     whose road is missing (e.g. after a scene load) are hard-deleted.
+  //     their (road, lane, s) geometry are braking to a stop and are
+  //     then respawned at s=0. Vehicles whose road is missing (e.g.
+  //     after a scene load) are hard-deleted. Every entry and every
+  //     reset is recorded in the OOB event log.
   //     See the out-of-bounds cleanup design for the details.
   tickOobCleanup(
     {
@@ -625,9 +691,12 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         ctx.rapierWorld?.setVehicleHeading(id, heading)
         ctx.rapierWorld?.setVehicleSpeed(id, 0, heading)
       },
+      // The vehicle the editor is dragging is under the user's control.
+      draggingId: () => ctx.draggingId,
     },
     Object.values(network.vehicles),
     simTime,
+    dt,
   )
 }
 
@@ -639,34 +708,143 @@ const STEER_GAIN = 2.0
 const MAX_LATERAL_MS = 4.0
 /** Stuck-lane-change abort timeout (seconds). */
 const LANE_CHANGE_TIMEOUT_S = 5.0
-/**
- * Nominal duration of a lane change (seconds). Used by the
- * physics-free fallback path, which blends the position from the
- * current lane to the target lane instead of integrating a lateral
- * velocity. The Rapier path converges on its own (measured: ≈ 1.2 s
- * for a 3.5 m lane change) and does not use this.
- */
-const LANE_CHANGE_DURATION_S = 2.0
 
 /**
- * Has the vehicle reached the END of the direction its lane is
- * travelled?
+ * The lateral offset (metres from the road's centreline) the
+ * physics-free fallback path puts a vehicle at, `elapsed` seconds into
+ * a lane change that starts at `fromLat` and targets `toLat`.
+ *
+ * It is the **closed-form solution of the very same P-controller** the
+ * physics path integrates (`steerLateralVelocity` with `STEER_GAIN`
+ * and `MAX_LATERAL_MS`):
+ *
+ *   - while the offset error is bigger than `MAX_LATERAL_MS /
+ *     STEER_GAIN` (2 m), the controller is saturated and the offset
+ *     moves at the cap (`MAX_LATERAL_MS` m/s);
+ *   - below that the controller is linear and the remaining error
+ *     decays exponentially with the time constant `1 / STEER_GAIN`.
+ *
+ * The old implementation blended the position from the current lane to
+ * the target lane over a fixed duration — a *time* mix that ignored
+ * the gain and the cap, so the two paths did not describe the same
+ * manoeuvre. The closed form keeps the fallback frame-rate
+ * independent (it is a function of the elapsed simulation time) and
+ * makes it obey the same limits as the physics path.
+ */
+export const fallbackLateralOffset = (fromLat: number, toLat: number, elapsed: number): number => {
+  const error = toLat - fromLat
+  if (error === 0) return toLat
+  const t = Math.max(0, elapsed)
+  // The controller's output while it is saturated.
+  const saturatedRate = Math.sign(error) * Math.min(Math.abs(error) * STEER_GAIN, MAX_LATERAL_MS)
+  // How long it stays saturated (0 when the error is small enough that
+  // the proportional term never reaches the cap).
+  const tSaturated = Math.max(0, (Math.abs(error) - MAX_LATERAL_MS / STEER_GAIN) / MAX_LATERAL_MS)
+  if (t <= tSaturated) return fromLat + saturatedRate * t
+  // Linear phase: the remaining error decays with the time constant
+  // 1 / STEER_GAIN.
+  const errorAtSwitch = error - saturatedRate * tSaturated
+  return toLat - errorAtSwitch * Math.exp(-STEER_GAIN * (t - tSaturated))
+}
+
+// ===== travel-end wrap =====
+//
+// The end of a lane's travel direction is a **wrap point**, not a
+// parking spot: a vehicle that runs past it re-enters the same lane
+// from the other end of the road and keeps driving. The physics-free
+// fallback path has always done that (`s -= len` / `s += len`); the
+// physics path did not, and parked every vehicle at the end of the
+// road instead — so a demo scene ran for half a minute and then stood
+// still for good.
+//
+// The three helpers below are the physics-path spelling of that rule.
+
+// ---------------------------------------------------------------------------
+// Travel-end wrap
+// ---------------------------------------------------------------------------
+
+/**
+ * How far (metres) the vehicle's body has travelled **past** the end
+ * of the direction its lane is travelled.
  *
  * Forward lanes run start → end, so their end is `s = roadLength`;
- * backward lanes run end → start, so their end is `s = 0`.
+ * backward lanes run end → start, so their end is `s = 0`. The
+ * measurement is the signed distance from that end point along the
+ * lane's TRAVEL direction — positive exactly when the body has run
+ * off the end, negative while it is still short of it.
  *
- * Only that end is terminal. The road *start* is where a vehicle is
- * supposed to begin driving, and treating it as terminal pinned every
- * vehicle that spawned at `s = 0` (the default spawn point) at a
- * standstill: the stop clamp in step 3 and the spawn-point release
- * rule (`s − sp.s > SPAWN_POINT_RELEASE_DISTANCE`) locked each other in
- * place, so the vehicle never drove away and the spawn point was never
- * released.
+ * The body's world position is used rather than `v.s`, because
+ * `findNearestLane` clamps `s` into `[0, len]`: a vehicle that has
+ * driven 3 m past the end still reports `s = len`, and `s` alone
+ * cannot tell "standing at the end" from "driven past it".
  */
-const atTravelEnd = (v: Vehicle, road: Road): boolean => {
+const travelEndOverrun = (v: Vehicle, road: Road): number => {
   const len = roadLength(road)
+  if (len < 1e-6) return 0
   const sign = laneForwardSign(v.laneIndex, road.laneCount)
-  return sign === 1 ? v.s >= len - 0.01 : v.s <= 0.01
+  const endS = sign === 1 ? len : 0
+  const end = lanePoint(road, v.laneIndex, endS)
+  // `end.heading` is the lane's travel heading at the end point: the
+  // road tangent for a forward lane, the REVERSED tangent for a
+  // backward lane. Projecting the body's offset on it therefore gives
+  // the overrun for both lane directions with the same formula.
+  const ux = Math.cos(end.heading)
+  const uz = Math.sin(end.heading)
+  const dx = v.position.x - end.position.x
+  const dz = v.position.z - end.position.z
+  return dx * ux + dz * uz
+}
+
+/**
+ * The arc-length the vehicle re-enters the road at, or `null` when it
+ * has not run past the end yet.
+ *
+ * This mirrors the fallback path's `s -= len` / `s += len` exactly: a
+ * forward lane that ran `d` metres past `s = len` re-enters at
+ * `s = d`; a backward lane that ran `d` metres past `s = 0` re-enters
+ * at `s = len - d`.
+ */
+const wrappedTravelS = (v: Vehicle, road: Road): number | null => {
+  const len = roadLength(road)
+  if (len < 1e-6) return null
+  const overrun = travelEndOverrun(v, road)
+  if (overrun <= 0) return null
+  const sign = laneForwardSign(v.laneIndex, road.laneCount)
+  // A single frame can never carry the body more than a few metres
+  // past the end, but the modulo keeps the wrap well defined even if
+  // it does (an editor teleport, a huge frame dt).
+  const overshoot = overrun % len
+  return sign === 1 ? overshoot : len - overshoot
+}
+
+/**
+ * Teleport the vehicle to the other end of its lane and re-launch it.
+ *
+ * The body is moved to the **lane point** of the wrapped `s` — so it
+ * lands on the correct lateral lane offset, not on the road
+ * centreline — and is re-oriented along the lane's travel direction.
+ * A backward lane (laneIndex >= laneCount/2) runs against the road's
+ * tangent, so its heading is the reversed tangent: a vehicle that
+ * kept the road's forward heading after the wrap would drive against
+ * its own lane.
+ *
+ * The speed is preserved — the wrap is a teleport, not a stop.
+ * `setVehiclePosition` zeroes the body's linear velocity, so the
+ * speed has to be re-applied afterwards.
+ */
+const applyTravelEndWrap = (v: Vehicle, road: Road, newS: number, ctx: TickContext): void => {
+  const lp = lanePoint(road, v.laneIndex, newS)
+  const fwd = roadForward(road, newS)
+  const sign = laneForwardSign(v.laneIndex, road.laneCount)
+  const heading = Math.atan2(fwd.uz * sign, fwd.ux * sign)
+  v.s = newS
+  v.position.x = lp.position.x
+  v.position.y = lp.position.y
+  v.position.z = lp.position.z
+  v.heading = heading
+  ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
+  ctx.rapierWorld!.setVehicleHeading(v.id, heading)
+  ctx.rapierWorld!.setVehicleSpeed(v.id, v.speed, heading)
 }
 
 /**
@@ -761,7 +939,11 @@ const updateIntersectionEntry = (network: RoadNetwork, simTime: number): void =>
       i.connectedRoads.includes(road.id),
     )
     const radius = inter?.intersectionRadius ?? STOP_LINE_DISTANCE * 2
-    if (inIntersectionBox(road, v.s, radius)) {
+    // The box is centred on the intersection's **projected** position on
+    // this road (the OSM junction sits at a way endpoint, not at the road
+    // midpoint). `inter` may be undefined → the historical midpoint
+    // assumption is used.
+    if (inIntersectionBox(road, v.s, radius, inter)) {
       if (v.enteredIntersectionAt === null) {
         v.enteredIntersectionAt = simTime
       }
@@ -780,14 +962,26 @@ const applyTrafficLightConstraint = (
 ) => {
   // Replay target handles lights itself via obs.
   if (isReplayDriven(ctx, v)) return
-  const len = roadLength(road)
   for (const inter of Object.values(network.intersections)) {
     if (!inter.connectedRoads.includes(road.id)) continue
-    // Stop-line distance follows the per-intersection radius
-    // (T路口 6, corner 4) instead of the fixed STOP_LINE_DISTANCE=5.
-    // This keeps the brake-trigger window consistent with the visual
-    // stop line drawn by createRoadMarkings.
-    const stopLineS = len / 2 - inter.intersectionRadius
+    // The stop line sits on the edge of the intersection box, **on the
+    // side the vehicle approaches from**.
+    //
+    // `stopLineSOnRoad` projects the intersection position onto the
+    // road: an imported OSM junction sits at a way *endpoint*, not at
+    // the road midpoint, so the stop line has to follow the projection
+    // (the historical midpoint assumption is only the degradation
+    // fallback). The per-intersection radius (T路口 6, corner 4) keeps
+    // the brake-trigger window consistent with the visual stop line
+    // drawn by createRoadMarkings — both read the same projection.
+    //
+    // The direction flips the offset: a forward lane travels towards a
+    // LARGER `s` and stops at `centerS - radius`, a backward lane
+    // travels towards a SMALLER `s` and stops at `centerS + radius`.
+    // `null` means this approach has no stop line on this road (the
+    // intersection is not on it).
+    const stopLineS = stopLineSOnRoad(road, inter, v.laneIndex)
+    if (stopLineS === null) continue
     //
     // ===== THE RED-LIGHT RULE (stop line → commitment) =====
     //
@@ -814,10 +1008,13 @@ const applyTrafficLightConstraint = (
     // which is what a real driver does, and what the cross-road yield
     // rule is there to handle.
     //
-    // Note the boundary: `s > stopLineS` is "crossed"; a vehicle that
-    // stands exactly ON the line has not crossed it yet and is held.
-    if (v.s > stopLineS) continue
-    const distToStopLine = stopLineS - v.s
+    // Note the boundary: the remaining distance is 0 ON the line, and a
+    // vehicle that stands exactly ON the line has not crossed it yet and
+    // is held. The remaining distance is negative **after** the line,
+    // and the sign of that test flips with the travel direction.
+    const sign = laneForwardSign(v.laneIndex, road.laneCount)
+    const distToStopLine = sign === 1 ? stopLineS - v.s : v.s - stopLineS
+    if (distToStopLine < 0) continue
     // NOTE: the old code bailed out here with `distToStopLine <= 0`,
     // which released a vehicle that stood exactly ON the stop line —
     // the light stopped governing it, so it accelerated straight
@@ -876,6 +1073,10 @@ const applyCarFollowingConstraint = (
   let leader: Vehicle | null = null
   for (const other of Object.values(network.vehicles)) {
     if (other.id === v.id) continue
+    // A vehicle that is leaving the network (it has drifted off the
+    // road and is braking to a stop) is not a leader: it is not on the
+    // lane any more, so nobody behind it has to brake for it.
+    if (isOobExiting(other)) continue
     if (other.roadId !== road.id) continue
     if (other.laneIndex !== v.laneIndex) continue
     const ds = sign === 1 ? other.s - v.s : v.s - other.s

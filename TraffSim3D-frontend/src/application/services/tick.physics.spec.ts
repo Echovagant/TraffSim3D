@@ -185,11 +185,15 @@ const { spawnVehicle } = await import('./spawnVehicle')
 const { createRoadNetwork } = await import('@domain/entities/RoadNetwork')
 const { LaneId } = await import('@domain/value-objects/LaneId')
 const { LightPhase } = await import('@domain/value-objects/Phase')
-const { laneOffset, lanePoint, roadLength } = await import('@domain/services/laneGeometry')
+const { laneOffset, lanePoint, laneForwardSign, roadForward, roadLength } = await import(
+  '@domain/services/laneGeometry'
+)
 const { perpendicularOffsetAlongRoad } = await import('@domain/services/laneChange')
 const { VEHICLE_DYN } = await import('@shared/constants/simulation')
+const { buildCrossIntersectionNetwork } = await import('./defaultScene')
 import type { TickContext } from './tick'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
+import type { Road } from '@domain/entities/Road'
 import type { Vehicle } from '@domain/entities/Vehicle'
 
 // ---------------------------------------------------------------------------
@@ -248,9 +252,15 @@ const buildRoad = (opts: NetOptions = {}): RoadNetwork => {
 }
 
 /** Put a vehicle on lane 0 of the test road at arc-length `s`. */
-const addVehicle = (net: RoadNetwork, id: string, s: number, speed: number): Vehicle => {
+const addVehicle = (
+  net: RoadNetwork,
+  id: string,
+  s: number,
+  speed: number,
+  laneIndex = 0,
+): Vehicle => {
   const road = net.roads['r-1']!
-  const lp = lanePoint(road, 0, s)
+  const lp = lanePoint(road, laneIndex, s)
   const v: Vehicle = {
     id,
     type: 'car',
@@ -260,9 +270,9 @@ const addVehicle = (net: RoadNetwork, id: string, s: number, speed: number): Veh
     speed,
     targetSpeed: road.speedLimit,
     roadId: 'r-1',
-    laneIndex: 0,
+    laneIndex,
     s,
-    lane: LaneId.make('r-1', 0),
+    lane: LaneId.make('r-1', laneIndex),
     status: 'driving',
     desiredStatus: 'driving',
     enteredIntersectionAt: null,
@@ -631,5 +641,360 @@ describe('the accel / decel ramp', () => {
     // 0.5 s at MAX_DECEL = 10 m/s² → 16 − 5 = 11 m/s, not 0.
     expect(v.speed).toBeCloseTo(11, 1)
     expect(v.speed).toBeGreaterThan(5)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 6. The travel-end wrap
+// ---------------------------------------------------------------------------
+
+/** The signed travel along the lane between two samples of `s`.
+ *
+ *  A wrap — the vehicle re-entering the road from the other end —
+ *  shows up as a jump of one road length; it is unwrapped here so
+ *  the travelled distance stays continuous. */
+const sDelta = (prevS: number, s: number, len: number): { ds: number; wrapped: boolean } => {
+  const raw = s - prevS
+  if (raw < -len / 2) return { ds: raw + len, wrapped: true }
+  if (raw > len / 2) return { ds: raw - len, wrapped: true }
+  return { ds: raw, wrapped: false }
+}
+
+const normalizeAngle = (a: number): number => {
+  let r = a % (2 * Math.PI)
+  if (r > Math.PI) r -= 2 * Math.PI
+  if (r < -Math.PI) r += 2 * Math.PI
+  return r
+}
+
+/** The heading a vehicle travelling in `laneIndex` has to have at `s`:
+ *  the road tangent for a forward lane, the REVERSED tangent for a
+ *  backward lane. */
+const travelHeading = (road: Road, laneIndex: number, s: number): number => {
+  const fwd = roadForward(road, s)
+  const sign = laneForwardSign(laneIndex, road.laneCount)
+  return Math.atan2(fwd.uz * sign, fwd.ux * sign)
+}
+
+interface WrapSample {
+  s: number
+  x: number
+  z: number
+  heading: number
+  speed: number
+}
+
+describe('the travel-end wrap keeps the traffic moving', () => {
+  it('a forward-lane vehicle drives past the road end and comes back on the same lane', async () => {
+    const world = new RapierWorld()
+    await world.init()
+    const net = buildRoad()
+    const road = net.roads['r-1']!
+    const len = roadLength(road)
+    // `let`, not `const`: the vehicle is mutated by the tick loop, and a
+    // `const` binding makes TypeScript narrow its properties to `never`
+    // inside the callback (the compiler assumes the binding cannot
+    // change, so it treats every property read as unreachable).
+    let v: Vehicle = addVehicle(net, 'v-1', 10, 0)
+    world.registerVehicle(buildRigidBodySpec(v.id, v.type, v.position, v.heading))
+    const ctx = makeCtx({ rapierWorld: world })
+
+    let prevS = v.s
+    let total = 0
+    let wraps = 0
+    let lastWindow = 0 // distance travelled over the last 5 s
+    let wrapSample: WrapSample | null = null
+
+    run(net, ctx, 30, 60, (t) => {
+      const d = sDelta(prevS, v.s, len)
+      total += d.ds
+      if (d.wrapped) {
+        wraps += 1
+        if (!wrapSample) {
+          wrapSample = {
+            s: v.s,
+            x: v.position.x,
+            z: v.position.z,
+            heading: v.heading,
+            speed: v.speed,
+          }
+        }
+      }
+      if (t > 25) lastWindow += d.ds
+      prevS = v.s
+    })
+
+    // Read the sample through a thunk: TypeScript narrows a `let` that is
+    // assigned inside a callback to its value *before* the callback ran
+    // (`null` here), so a direct `wrapSample?.s` outside the callback is
+    // typed `never`. The thunk defers the read to a point where the
+    // narrowing no longer applies.
+    const sample = (): WrapSample | null => wrapSample
+    console.log(
+      `[wrap / forward] total = ${total.toFixed(2)} m | wraps = ${wraps} | ` +
+        `last 5 s = ${lastWindow.toFixed(2)} m | final s = ${v.s.toFixed(2)} | ` +
+        `final speed = ${v.speed.toFixed(2)} | re-entered at s = ${sample()?.s.toFixed(3)}`,
+    )
+
+    // It really wrapped (the old code parked it at the end instead).
+    expect(wraps).toBeGreaterThanOrEqual(1)
+    // It kept driving: more than 5 m in the last 5 s.
+    expect(lastWindow).toBeGreaterThan(5)
+    // And it is not parked at the road end.
+    expect(v.s >= len - 0.5 && v.speed < 0.1).toBe(false)
+
+    // The re-entry point is the START of the same lane (the overshoot
+    // past the end is carried over), on the lane line — not on the
+    // road centreline — and pointing along the lane.
+    const ws = wrapSample!
+    expect(ws.s).toBeLessThan(5)
+    const lp = lanePoint(road, 0, ws.s)
+    expect(Math.hypot(ws.x - lp.position.x, ws.z - lp.position.z)).toBeLessThan(0.05)
+    expect(Math.abs(normalizeAngle(ws.heading - travelHeading(road, 0, ws.s)))).toBeLessThan(0.01)
+    // The wrap is a teleport, not a stop: the speed survives it.
+    expect(ws.speed).toBeGreaterThan(5)
+  })
+
+  it('a backward-lane vehicle re-enters at the far end and keeps driving against the road tangent', async () => {
+    const world = new RapierWorld()
+    await world.init()
+    const net = buildRoad()
+    const road = net.roads['r-1']!
+    const len = roadLength(road)
+    const backLane = LANE_COUNT - 1 // >= laneCount/2 → travels end → start
+    expect(laneForwardSign(backLane, LANE_COUNT)).toBe(-1)
+    // `let` — see the note on the forward-lane case above: a `const`
+    // binding makes TypeScript narrow the vehicle's properties to
+    // `never` inside the tick callback.
+    let v: Vehicle = addVehicle(net, 'v-1', len - 10, 0, backLane)
+    world.registerVehicle(buildRigidBodySpec(v.id, v.type, v.position, v.heading))
+    const ctx = makeCtx({ rapierWorld: world })
+
+    let prevS = v.s
+    let wraps = 0
+    let wrapSample: WrapSample | null = null
+    run(net, ctx, 30, 60, () => {
+      const d = sDelta(prevS, v.s, len)
+      if (d.wrapped) {
+        wraps += 1
+        if (!wrapSample) {
+          wrapSample = {
+            s: v.s,
+            x: v.position.x,
+            z: v.position.z,
+            heading: v.heading,
+            speed: v.speed,
+          }
+        }
+      }
+      prevS = v.s
+    })
+
+    // Read the sample through a thunk: TypeScript narrows a `let` that is
+    // assigned inside a callback to its value *before* the callback ran
+    // (`null` here), so a direct `wrapSample?.s` outside the callback is
+    // typed `never`. The thunk defers the read to a point where the
+    // narrowing no longer applies.
+    const sample = (): WrapSample | null => wrapSample
+    const ws = sample()
+    console.log(
+      `[wrap / backward] wraps = ${wraps} | re-entered at s = ${ws?.s.toFixed(3)} | ` +
+        `heading = ${ws?.heading.toFixed(4)} | road heading = ` +
+        `${travelHeading(road, backLane, ws?.s ?? 0).toFixed(4)} | ` +
+        `final s = ${v.s.toFixed(2)} | final speed = ${v.speed.toFixed(2)}`,
+    )
+
+    expect(wraps).toBeGreaterThanOrEqual(1)
+    expect(ws).not.toBeNull()
+    const w = ws!
+    // A backward lane re-enters at the FAR end of the road (s = len),
+    // not at s = 0 — otherwise it would drive against its own lane.
+    expect(w.s).toBeGreaterThan(len - 5)
+    // The heading follows the lane (the reversed tangent), not the road.
+    expect(Math.abs(normalizeAngle(w.heading - travelHeading(road, backLane, w.s)))).toBeLessThan(
+      0.01,
+    )
+    const roadHeading = Math.atan2(roadForward(road, w.s).uz, roadForward(road, w.s).ux)
+    expect(Math.abs(normalizeAngle(w.heading - roadHeading))).toBeGreaterThan(3.0)
+    // It landed on the lane line, not on the centreline.
+    const lp = lanePoint(road, backLane, w.s)
+    expect(Math.hypot(w.x - lp.position.x, w.z - lp.position.z)).toBeLessThan(0.05)
+    // And it keeps driving: `s` goes DOWN (towards s = 0) after the wrap.
+    expect(v.s).toBeLessThan(w.s)
+    expect(v.speed).toBeGreaterThan(1)
+  })
+
+  it('the traffic light still holds a wrapped vehicle at the stop line', async () => {
+    const world = new RapierWorld()
+    await world.init()
+    const net = buildRoad({ redLight: true })
+    const road = net.roads['r-1']!
+    const len = roadLength(road)
+    const light = net.intersections['i-1']!.trafficLights[0]!
+    const stopLineS = len / 2 - 8
+    const v = addVehicle(net, 'v-1', 10, 0)
+    world.registerVehicle(buildRigidBodySpec(v.id, v.type, v.position, v.heading))
+    const ctx = makeCtx({ rapierWorld: world })
+
+    // Phase 1 — green: the vehicle drives to the end of the road and
+    // wraps back to the start.
+    light.phase = LightPhase.Green
+    light.phaseRemaining = 999
+    const dt = 1 / 60
+    let simTime = 0
+    let prevS = v.s
+    let wrapped = false
+    while (simTime < 60 && !wrapped) {
+      simTime += dt
+      tick(net, dt, simTime, ctx)
+      const d = sDelta(prevS, v.s, len)
+      prevS = v.s
+      if (d.wrapped) wrapped = true
+    }
+    expect(wrapped).toBe(true)
+    expect(v.s).toBeLessThan(5)
+
+    // Phase 2 — red: the wrapped vehicle must stop at the stop line
+    // instead of running through the intersection.
+    light.phase = LightPhase.Red
+    light.phaseRemaining = 999
+    run(net, ctx, 25, 60)
+
+    console.log(
+      `[wrap / red light] after the wrap: s = ${v.s.toFixed(2)} (stop line at ${stopLineS}) | ` +
+        `speed = ${v.speed.toFixed(2)}`,
+    )
+    expect(v.s).toBeLessThan(stopLineS)
+    expect(v.speed).toBeLessThan(0.5)
+    // It stopped AT the stop line, not somewhere far before it.
+    expect(v.s).toBeGreaterThan(stopLineS - 8)
+  })
+
+  it('the physics path and the fallback path wrap identically', async () => {
+    const measure = async (withPhysics: boolean) => {
+      const world = new RapierWorld()
+      if (withPhysics) await world.init()
+      const net = buildRoad()
+      const road = net.roads['r-1']!
+      const len = roadLength(road)
+      const v = addVehicle(net, 'v-1', 10, 0)
+      if (withPhysics) {
+        world.registerVehicle(buildRigidBodySpec(v.id, v.type, v.position, v.heading))
+      }
+      const ctx = makeCtx({ rapierWorld: withPhysics ? world : null })
+
+      let prevS = v.s
+      let total = 0
+      let wraps = 0
+      let firstWrap: { total: number; s: number } | null = null
+      run(net, ctx, 30, 60, () => {
+        const d = sDelta(prevS, v.s, len)
+        total += d.ds
+        if (d.wrapped) {
+          wraps += 1
+          if (!firstWrap) firstWrap = { total, s: v.s }
+        }
+        prevS = v.s
+      })
+      return { total, wraps, firstWrap: firstWrap!, len }
+    }
+
+    const physics = await measure(true)
+    const fallback = await measure(false)
+
+    console.log(
+      `[wrap / both paths] physics: total = ${physics.total.toFixed(2)} m, ` +
+        `wraps = ${physics.wraps}, first re-entry s = ${physics.firstWrap.s.toFixed(3)} | ` +
+        `fallback: total = ${fallback.total.toFixed(2)} m, wraps = ${fallback.wraps}, ` +
+        `first re-entry s = ${fallback.firstWrap.s.toFixed(3)}`,
+    )
+
+    // Both paths wrap.
+    expect(physics.wraps).toBeGreaterThanOrEqual(1)
+    expect(fallback.wraps).toBeGreaterThanOrEqual(1)
+    // Both re-enter at the same place (the overshoot past the end).
+    expect(Math.abs(physics.firstWrap.s - fallback.firstWrap.s)).toBeLessThan(1)
+    // And they travel the same distance.
+    expect(Math.abs(physics.total - fallback.total)).toBeLessThan(3)
+    expect(physics.firstWrap.total).toBeCloseTo(fallback.firstWrap.total, 0)
+  })
+
+  it('the built-in cross scene keeps moving (the reported bug)', async () => {
+    const world = new RapierWorld()
+    await world.init()
+    const net = buildCrossIntersectionNetwork()
+    const ctx = makeCtx({ rapierWorld: world })
+    const vehicles = Object.values(net.vehicles)
+    for (const v of vehicles) {
+      world.registerVehicle(buildRigidBodySpec(v.id, v.type, v.position, v.heading))
+    }
+
+    // Per-vehicle travel bookkeeping (unwrapped) + the road length of
+    // each vehicle's road. The distance is absolute: a backward lane
+    // travels with a DECREASING `s`, a forward lane with an
+    // increasing one.
+    const prev = new Map<string, number>()
+    const total = new Map<string, number>()
+    for (const v of vehicles) {
+      prev.set(v.id, v.s)
+      total.set(v.id, 0)
+    }
+    const windowDistance = new Map<string, number>()
+    for (const v of vehicles) windowDistance.set(v.id, 0)
+
+    let simTime = 0
+    const dt = 1 / 60
+    const frames = 60 * 90 // 90 s of simulation
+    for (let i = 0; i < frames; i++) {
+      simTime += dt
+      tick(net, dt, simTime, ctx)
+      for (const v of Object.values(net.vehicles)) {
+        const road = net.roads[v.roadId]
+        if (!road) continue
+        const len = roadLength(road)
+        const d = sDelta(prev.get(v.id) ?? v.s, v.s, len)
+        prev.set(v.id, v.s)
+        const moved = Math.abs(d.ds)
+        total.set(v.id, (total.get(v.id) ?? 0) + moved)
+        if (simTime > 60) windowDistance.set(v.id, (windowDistance.get(v.id) ?? 0) + moved)
+      }
+    }
+
+    const fleet = Object.values(net.vehicles)
+    const travelled = fleet.map((v) => ({
+      id: v.id,
+      roadId: v.roadId,
+      total: total.get(v.id) ?? 0,
+      last30s: windowDistance.get(v.id) ?? 0,
+      s: v.s,
+      speed: v.speed,
+      status: v.status,
+      len: roadLength(net.roads[v.roadId]!),
+    }))
+
+    console.log(
+      '[cross scene] 90 s:',
+      travelled
+        .map(
+          (t) =>
+            `${t.id} total=${t.total.toFixed(1)} m (last 30 s: ${t.last30s.toFixed(1)} m, ` +
+            `s=${t.s.toFixed(1)}/${t.len}, v=${t.speed.toFixed(1)}, ${t.status})`,
+        )
+        .join(' | '),
+    )
+
+    // Every vehicle drove a long way — none of them is parked at the
+    // end of its road.
+    for (const t of travelled) {
+      expect(t.total, `${t.id} total`).toBeGreaterThan(50)
+      const parkedAtEnd = (t.s >= t.len - 0.5 || t.s <= 0.5) && t.speed < 0.1
+      expect(parkedAtEnd, `${t.id} parked at the road end`).toBe(false)
+      // The teleport must not trigger a crash — a crashed vehicle
+      // stops for good, which is the old freeze all over again.
+      expect(t.status, `${t.id} status`).not.toBe('crashed')
+    }
+    // The fleet is still moving in the last 30 s of the run.
+    const moving = travelled.filter((t) => t.last30s > 5)
+    expect(moving.length).toBeGreaterThanOrEqual(Math.ceil(fleet.length / 2))
   })
 })

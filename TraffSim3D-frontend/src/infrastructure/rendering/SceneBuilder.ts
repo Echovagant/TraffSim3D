@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { Intersection } from '@domain/entities/Intersection'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { TrafficLight } from '@domain/entities/TrafficLight'
 import type { Road } from '@domain/entities/Road'
@@ -70,10 +71,12 @@ const disposeRoadNode = (node: RoadNode): void => {
   }
 }
 
-const buildRoadNode = (road: Road): RoadNode => {
+const buildRoadNode = (road: Road, intersections: readonly Intersection[]): RoadNode => {
   const group = new THREE.Group()
   group.add(createRoadMesh(road))
-  group.add(createRoadMarkings(road))
+  // The intersections go along so the painted stop lines land where the
+  // traffic logic stops a vehicle (same projection, same source).
+  group.add(createRoadMarkings(road, { intersections }))
   return { group }
 }
 
@@ -130,8 +133,9 @@ export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): Bui
   // Smart-city mode skips Three.js road meshes because
   // Cesium draws roads from real OSM data (GeoJsonDataSource).
   if (mode === 'flat') {
+    const intersections = Object.values(network.intersections)
     for (const road of Object.values(network.roads)) {
-      const node = buildRoadNode(road)
+      const node = buildRoadNode(road, intersections)
       root.add(node.group)
       roadNodes.set(road.id, node)
     }
