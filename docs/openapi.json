@@ -629,6 +629,51 @@
         }
       }
     },
+    "/api/v1/rl/validate-network": {
+      "post": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Validate Network",
+        "description": "Check that a custom road network can actually be simulated.\n\nThe frontend can draw an imported OSM map but the RL trainer only knew\nabout the hardcoded `cross` / `corridor` scenes. This endpoint closes\nthat gap: it builds the network graph, runs one step of the\nnetwork-level sim core, and reports what came out.\n\nThe network core is the **24-dimension** one (`network_sim_core`), not\nthe 14-dimension contract core (`sim_core`) — the two are independent\nand this endpoint only ever touches the former.\n\nErrors:\n  - 400: the network is empty, malformed, or the sim core cannot run it\n  - 422: the sim core ran but produced an invalid observation",
+        "operationId": "validate_network_api_v1_rl_validate_network_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateNetworkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Validate Network Api V1 Rl Validate Network Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/rl/training-config": {
       "get": {
         "tags": [
@@ -844,6 +889,18 @@
         },
         "type": "object",
         "title": "TrainRequest"
+      },
+      "ValidateNetworkRequest": {
+        "properties": {
+          "network": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Network"
+          }
+        },
+        "type": "object",
+        "title": "ValidateNetworkRequest",
+        "description": "A custom road network submitted by the scene editor or the map importer.\n\n`network` is the serialized-network shape the frontend already uses\n(`{roads, intersections, vehicles, spawnPoints?}`) — the same JSON the\nOSM parser produces."
       },
       "ValidationError": {
         "properties": {

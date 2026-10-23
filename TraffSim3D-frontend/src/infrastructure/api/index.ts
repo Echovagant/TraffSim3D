@@ -13,6 +13,12 @@ export { createBackendService } from './backendService'
 export type { BackendService, HealthResponse, PingResponse } from './backendService'
 export { createRLWeightsClient, RL_WEIGHTS_TIMEOUT_MS } from './rlWeightsClient'
 export type { CheckpointWeightsResponse, RLWeightsClient } from './rlWeightsClient'
+export {
+  VALIDATE_NETWORK_PATH,
+  VALIDATE_NETWORK_TIMEOUT_MS,
+  createRLTrainingClient,
+} from './rlTrainingClient'
+export type { NetworkPayload, RLTrainingClient, ValidateResult } from './rlTrainingClient'
 export { parseRLStatus, RLStatusContractError } from './rlStatus'
 export type { RLStatusCore } from './rlStatus'
 // Types generated from the backend's committed OpenAPI schema
@@ -55,6 +61,7 @@ export type {
 import { createHttpClient } from './httpClient'
 import { createBackendService } from './backendService'
 import { createRLWeightsClient } from './rlWeightsClient'
+import { createRLTrainingClient } from './rlTrainingClient'
 
 // Versioned API surface (proxied to FastAPI at /api/v1/*).
 export const defaultHttp = createHttpClient()
@@ -64,3 +71,5 @@ export const metaHttp = createHttpClient('')
 export const defaultBackend = createBackendService(defaultHttp, metaHttp)
 // Default RL weights client — same /api/v1 prefix as the rest.
 export const defaultRLWeights = createRLWeightsClient(defaultHttp)
+// Default RL training bridge client (POSTs the scene network to the backend).
+export const defaultRLTraining = createRLTrainingClient()

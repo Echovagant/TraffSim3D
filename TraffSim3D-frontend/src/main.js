@@ -13,6 +13,17 @@ import router from '@interfaces/router'
 // any child component's onMounted can immediately use the plugin.
 gsap.registerPlugin(ScrollTrigger)
 
+window.addEventListener('unhandledrejection', (event) => {
+  const err = event.reason
+  const msg = err instanceof Error ? err.message : String(err)
+  console.error('[unhandledrejection]', msg, err)
+})
+
+window.addEventListener('error', (event) => {
+  const msg = event.message || 'Unknown error'
+  console.error('[global error]', msg, event.filename, event.lineno)
+})
+
 const app = createApp(App)
 
 app.use(createPinia())

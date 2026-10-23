@@ -48,6 +48,11 @@ export interface TrainRequest {
   curriculum?: boolean
 }
 
+/** `ValidateNetworkRequest` — from the OpenAPI `components.schemas`. */
+export interface ValidateNetworkRequest {
+  network?: Record<string, unknown>
+}
+
 /** `ValidationError` — from the OpenAPI `components.schemas`. */
 export interface ValidationError {
   loc: Array<string | number>
@@ -102,6 +107,9 @@ export type PathsApiV1RlCheckpointsDeleteResponse = Record<string, unknown>
 /** `GET /api/v1/rl/scenes` → 200 */
 export type PathsApiV1RlScenesGetResponse = Record<string, unknown>
 
+/** `POST /api/v1/rl/validate-network` → 200 */
+export type PathsApiV1RlValidateNetworkPostResponse = Record<string, unknown>
+
 /** `GET /api/v1/rl/training-config` → 200 */
 export type PathsApiV1RlTrainingConfigGetResponse = Record<string, unknown>
 
@@ -131,6 +139,7 @@ export interface OpenApiPaths {
   "/api/v1/rl/train/terminate": { post: PathsApiV1RlTrainTerminatePostResponse }
   "/api/v1/rl/checkpoints": { get: PathsApiV1RlCheckpointsGetResponse; delete: PathsApiV1RlCheckpointsDeleteResponse }
   "/api/v1/rl/scenes": { get: PathsApiV1RlScenesGetResponse }
+  "/api/v1/rl/validate-network": { post: PathsApiV1RlValidateNetworkPostResponse }
   "/api/v1/rl/training-config": { get: PathsApiV1RlTrainingConfigGetResponse }
   "/api/v1/rl/checkpoints/{name}/weights": { get: PathsApiV1RlCheckpointsNameWeightsGetResponse }
   "/health": { get: PathsHealthGetResponse }

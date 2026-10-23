@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -292,6 +293,70 @@ async def prune_checkpoints() -> dict[str, Any]:
 async def list_scenes() -> dict[str, Any]:
     """List supported sim scene kinds."""
     return {"scenes": ["cross", "corridor", "t_junction", "roundabout", "cross_signalled"]}
+
+
+class ValidateNetworkRequest(BaseModel):
+    """A custom road network submitted by the scene editor or the map importer.
+
+    `network` is the serialized-network shape the frontend already uses
+    (`{roads, intersections, vehicles, spawnPoints?}`) — the same JSON the
+    OSM parser produces.
+    """
+
+    network: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/rl/validate-network", tags=["rl"])
+async def validate_network(req: ValidateNetworkRequest) -> dict[str, Any]:
+    """Check that a custom road network can actually be simulated.
+
+    The frontend can draw an imported OSM map but the RL trainer only knew
+    about the hardcoded `cross` / `corridor` scenes. This endpoint closes
+    that gap: it builds the network graph, runs one step of the
+    network-level sim core, and reports what came out.
+
+    The network core is the **24-dimension** one (`network_sim_core`), not
+    the 14-dimension contract core (`sim_core`) — the two are independent
+    and this endpoint only ever touches the former.
+
+    Errors:
+      - 400: the network is empty, malformed, or the sim core cannot run it
+      - 422: the sim core ran but produced an invalid observation
+    """
+    from app.apps.rl.network_graph import build_network_graph
+    from app.apps.rl.network_sim_core import OBS_DIM_NETWORK, NetworkSimCore
+
+    network = req.network or {}
+    roads = network.get("roads") or []
+    if not roads:
+        raise HTTPException(status_code=400, detail="network has no roads")
+
+    try:
+        graph = build_network_graph(network)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"invalid network: {exc}") from exc
+
+    if not graph.segments:
+        raise HTTPException(status_code=400, detail="network has no usable road segments")
+
+    try:
+        core = NetworkSimCore(graph)
+        obs = core.reset(seed=0)
+        obs, _reward, _terminated, _truncated, _info = core.step((0.0, 0.0))
+    except (KeyError, TypeError, ValueError, IndexError) as exc:
+        raise HTTPException(
+            status_code=400, detail=f"network could not be simulated: {exc}"
+        ) from exc
+
+    if len(obs) != OBS_DIM_NETWORK or not all(math.isfinite(float(v)) for v in obs):
+        raise HTTPException(status_code=422, detail="simulation produced an invalid observation")
+
+    return {
+        "ok": True,
+        "obs_dim": int(OBS_DIM_NETWORK),
+        "n_roads": len(graph.segments),
+        "n_intersections": len(graph.real_intersections),
+    }
 
 
 @router.get("/rl/training-config", tags=["rl"])

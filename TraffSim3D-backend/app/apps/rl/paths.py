@@ -74,3 +74,13 @@ def status_file() -> Path:
 def control_file() -> Path:
     """pause / resume / terminate requests the trainer polls."""
     return Path(os.environ.get("TRAFFIC_PPO_CONTROL") or data_root() / "training_control.json")
+
+
+def trajectories_dir() -> Path:
+    """Where RL trajectory CSVs are written (per-process subdirectories).
+
+    Same reasoning as the three paths above: the output must be anchored to
+    the backend root, never to a system temp directory. `TRAFFSIM_TRAJECTORY_DIR`
+    overrides it when a caller wants the CSVs somewhere else.
+    """
+    return Path(os.environ.get("TRAFFSIM_TRAJECTORY_DIR") or data_root() / "trajectories")
