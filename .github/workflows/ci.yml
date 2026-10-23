@@ -12,10 +12,12 @@
 #   frontend  vitest (+ coverage) + vue-tsc + eslint + prettier + openapi types
 #   contract  Python sim  <->  TypeScript goldens   (the important one)
 #   e2e       Playwright against a live frontend + backend (BLOCKING)
+#   e2e-real  ONE real PPO training run, end to end  (the second BLOCKING one)
 #
 # Read the comment above the `contract` job before changing anything: it is
 # the one that protects the model. Read the comment above `e2e` before
-# changing that job.
+# changing that job, and the comment above `e2e-real` before changing that
+# one: it is the only place in CI where the real RL engine ever runs.
 
 name: CI
 
@@ -82,11 +84,11 @@ jobs:
         # `--cov-fail-under=70` is what turns the documented 70% threshold
         # into an actual gate: on its own `--cov=app` only *reports* the
         # number, so coverage could decay silently. Measured locally on
-        # 2026-10-21: 90%.
+        # 2026-10-24: 89.27%.
         run: python -m pytest --cov=app --cov-fail-under=70 -q
 
       - name: ruff
-        # The repository deliberately keeps 7 ruff findings. Each one is
+        # The repository deliberately keeps 6 ruff findings. Each one is
         # waived individually below — nothing is blanket-ignored, and no
         # finding is deleted to make the linter quiet:
         #
@@ -98,7 +100,6 @@ jobs:
         #   geojson/geojson2osm.py    UP009 — UTF-8 coding declaration.
         #                             UP015 — redundant "r" file mode.
         #                             F841  — unused local `node`.
-        #   tests/test_road_graph.py F841  — unused local `g`.
         #
         # Note that ruff's per-file-ignores need the fully-qualified
         # "path:rule" form for every single rule: the shorthand
@@ -109,8 +110,7 @@ jobs:
             --per-file-ignores="app/apps/rl/sim_core.py:N806" \
             --per-file-ignores="geojson/geojson2osm.py:UP009" \
             --per-file-ignores="geojson/geojson2osm.py:UP015" \
-            --per-file-ignores="geojson/geojson2osm.py:F841" \
-            --per-file-ignores="tests/test_road_graph.py:F841"
+            --per-file-ignores="geojson/geojson2osm.py:F841"
 
       - name: black
         # `--extend-exclude`, never `--exclude`: `black --exclude` REPLACES
@@ -392,8 +392,151 @@ jobs:
           # talks to it without stubbing. That spec is opt-in (it starts
           # a real PPO run and would leave the shared training status
           # behind for every later spec), so it skips itself here —
-          # `E2E_REAL_TRAINING` is deliberately not set in CI. The
+          # `E2E_REAL_TRAINING` is deliberately not set in THIS job. The
           # variable is still passed so the skip reason names the right
           # backend instead of the default :8000.
+          #
+          # The real run is not untested: the dedicated `e2e-real` job
+          # below runs exactly that spec, on its own ports and its own
+          # backend, so it can never contaminate this suite.
           E2E_BACKEND_URL: 'http://localhost:8001'
         run: npx playwright test --config=playwright.ci.config.ts
+
+  e2e-real:
+    name: E2E — real PPO training (blocking)
+    runs-on: ubuntu-latest
+    # ------------------------------------------------------------------
+    # THIS JOB IS A GATE, AND IT IS THE ONLY PLACE THE REAL RL PIPELINE
+    # RUNS IN CI.
+    #
+    # `ai-playground-real.spec.ts` is opt-in (`E2E_REAL_TRAINING=1`) and
+    # the default `e2e` job skips it on purpose: a real PPO run rewrites
+    # the shared training-status document, so every spec that runs after
+    # it would read a status that belongs to that run. That is exactly
+    # how `ai-playground-scene.spec.ts` once clicked a training button
+    # the page had already disabled.
+    #
+    # The price of that decision was that NOTHING exercised the real
+    # path: browser -> FastAPI -> SB3 PPO -> status -> UI. It could
+    # break silently and the pipeline would stay green. This job closes
+    # that hole:
+    #
+    #   - its own backend on :8011 and its own frontend on :5191, so it
+    #     can neither collide with the `e2e` job's :8001 / :5188 nor
+    #     contaminate the default suite's shared state,
+    #   - its own RL data directory, so the run starts from a clean
+    #     status document. A leftover status would let the spec pass
+    #     without a run ever having happened.
+    #   - the backend installed WITH the `rl` extra, so
+    #     stable-baselines3 + torch are really present. Without them the
+    #     trainer silently falls back to dry-run (a fabricated reward
+    #     curve) and the "real" run proves nothing.
+    #   - a setup step that ASSERTS `sb3_available` and fails the job
+    #     when it is false, plus a spec that fails instead of skipping.
+    #     A skipped real-training test looks exactly like a passing one
+    #     in a CI report, so both the job and the spec refuse to skip.
+    #
+    # Budget: ONE 200-step PPO run. Measured on a developer machine
+    # (CPU): the trainer reaches its first reward at ~9 s and finishes at
+    # ~13 s. A hosted runner is slower, so the spec allows 4 min for the
+    # run to complete; the job allows 25 min in total, most of which is
+    # the torch install.
+    # ------------------------------------------------------------------
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: TraffSim3D-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: TraffSim3D-backend/pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: TraffSim3D-frontend/package-lock.json
+
+      - name: Install the backend (with the rl extra — SB3 + torch)
+        # The `rl` extra is the whole point of this job: without
+        # stable-baselines3 the trainer degrades to dry-run and the run
+        # produces a fake curve. Same mirror-first / pypi.org-fallback
+        # pattern the other backend jobs use.
+        working-directory: TraffSim3D-backend
+        run: |
+          python -m pip install -e ".[rl]" \
+            || python -m pip install -e ".[rl]" --index-url https://pypi.org/simple
+
+      - name: Install the frontend
+        run: npm ci
+
+      - name: Install the Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Start the backend on :8011
+        # A dedicated RL data directory keeps this job's status document
+        # and checkpoints away from everything else, and guarantees the
+        # run starts from a clean slate.
+        working-directory: TraffSim3D-backend
+        env:
+          TRAFFIC_RL_DATA_DIR: ${{ github.workspace }}/TraffSim3D-backend/.data/rl-real-e2e
+        run: |
+          nohup python -m uvicorn app.main:app --port 8011 > /tmp/uvicorn-real.log 2>&1 &
+          echo "uvicorn started (pid $!)"
+
+      - name: Wait for the backend and assert stable-baselines3 is installed
+        # The capabilities endpoint imports torch on the first call, which
+        # takes far longer than a plain /health probe — so the wait loop
+        # asks for capabilities, not /health, and allows a generous
+        # budget for the cold import.
+        #
+        # This step FAILS the job when SB3 is missing. It must: a job
+        # that quietly skipped the real run would be worse than no job.
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8011/api/v1/rl/capabilities > /tmp/rl-caps.json 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          if [ ! -s /tmp/rl-caps.json ]; then
+            echo "backend did not answer /api/v1/rl/capabilities within 120s"
+            cat /tmp/uvicorn-real.log || true
+            exit 1
+          fi
+          cat /tmp/rl-caps.json
+          python -c "import json,sys;c=json.load(open('/tmp/rl-caps.json'));print('sb3_available =',c['sb3_available'],'| torch =',c['torch_version'],'| cuda =',c['cuda_available']);sys.exit(0 if c['sb3_available'] else 'stable-baselines3 is NOT installed -> the real-training run would silently degrade to dry-run')"
+
+      - name: Run the real PPO training e2e
+        # E2E_REAL_TRAINING=1 is the spec's opt-in gate; the npm script
+        # sets it too, but it is spelled out here so the job reads on its
+        # own.
+        #
+        # VITE_BACKEND_URL points at the FRONTEND's own origin on
+        # purpose. The backend's CORS allow-list covers :5173, :4173 and
+        # :5188 — not :5191 — so a cross-origin call from the page on
+        # :5191 to the backend on :8011 is refused by the browser (no
+        # Access-Control-Allow-Origin header), and the page can then
+        # neither read /rl/status nor POST /rl/train. Pointing
+        # VITE_BACKEND_URL at the page's own origin makes those calls
+        # same-origin, and the vite dev proxy (VITE_BACKEND_PORT)
+        # forwards /api to the backend on :8011. That is also the
+        # production topology: one origin serves the app and the API.
+        #
+        # The spec itself talks to the backend directly (Node, no CORS)
+        # through E2E_BACKEND_URL.
+        env:
+          E2E_REAL_TRAINING: '1'
+          E2E_FRONTEND_PORT: '5191'
+          E2E_BACKEND_URL: 'http://localhost:8011'
+          VITE_BACKEND_PORT: '8011'
+          VITE_BACKEND_URL: 'http://localhost:5191'
+          # The hosted runners have no GPU; pin the device so the job is
+          # deterministic on any runner image.
+          E2E_REAL_DEVICE: 'cpu'
+          E2E_REAL_STEPS: '200'
+        run: npm run test:e2e:real
