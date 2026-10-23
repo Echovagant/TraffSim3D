@@ -28,7 +28,7 @@
           API 文档: FastAPI 自动生成的 OpenAPI schema (<code>docs/openapi.json</code>) +
           部署与用户指南。
         </li>
-        <li>测试覆盖率 ≥ 70% — 已达成: 前端 77.61% / 后端 87%。</li>
+        <li>测试覆盖率 ≥ 70% — 已达成: 前端 89.95% / 后端 89.27%。</li>
       </ul>
 
       <h2>当前状态</h2>

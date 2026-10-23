@@ -463,14 +463,37 @@ npm run lint            # ESLint（会自动修复）
 ### 10.3 CI（自动门禁）
 
 仓库自 2026-10-21 起有 CI：[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)，
-每次 push / PR 自动跑四个 job：
+每次 push / PR 自动跑五个 job：
 
 | job | 内容 | 阻塞合并 |
 |---|---|---|
 | `backend` | `pytest --cov=app --cov-fail-under=70` + `ruff` + `black --check` | ✅ |
 | `frontend` | `npm run test:coverage`（含 70% 覆盖率阈值）+ `vue-tsc` + `eslint` + `prettier --check` | ✅ |
 | `contract` | 后端契约测试 **+** `npm run contract:check` | ✅ |
-| `e2e` | Playwright 全量 | ⚠️ 暂时不阻塞（见下） |
+| `e2e` | Playwright 全量 | ✅ |
+| `e2e-real` | **一次真实的 PPO 训练**（浏览器 → FastAPI → SB3 → 状态 → UI） | ✅ |
+
+**`e2e` job 是阻塞门** —— 这一点曾经不是。它原本带 `continue-on-error: true`，
+结果是浏览器侧的回归对流水线完全不可见：用例照跑、输出照读，红叉不挡任何
+东西。现在有两处改成能在 Linux runner 上也站得住：
+
+1. **视觉回归基线是在 Windows + Chromium 1228（headless, SwiftShader）上录的**，
+   Linux runner 的 Chromium 版本与字体光栅化都不同，像素比对**预期**会不一致。
+   这件事现在**在 spec 内部**处理：`tests/e2e/helpers/visual.ts` 在非录制
+   平台上跳过像素比对（并打上可见标注），而那些 spec 里的**行为断言照跑照挡**。
+   实测容差 `maxDiffPixelRatio: 0.005` 是推导出来的，**不许为了让它过而调大** ——
+   调大也会盖住真正的渲染回归，而那正是这些基线存在的意义。
+2. **`perf-gate.spec.ts` 曾经断言 `avg >= 30 FPS`**，那在软件光栅下不可达。
+   它现在只断言**可结论的部分**（仿真在推进、读数有限、没有塌到硬下限以下），
+   并把 30 FPS 目标作为**报告项**。所以它可以当门。
+
+**`e2e-real` job 是唯一真跑 RL 引擎的地方。** `ai-playground-real.spec.ts`
+默认被跳过（它会重写共享的训练状态文档，排在它后面的用例会读到那份状态），
+所以默认套件里没有任何用例碰真实训练链路 —— 那条路径可以悄悄坏掉而流水线一直绿。
+这个 job 用自己的端口（后端 8011 / 前端 5191）和自己的 RL 数据目录跑那一个用例，
+并且**前置条件不满足时直接失败而不是跳过**：setup 步骤断言
+`sb3_available === true`，spec 内部后端不可达 / SB3 缺失 / 训练没启动 / 训练没跑完
+一律抛错。
 
 **`contract` job 必须同时跑那两步**，缺一不可：
 

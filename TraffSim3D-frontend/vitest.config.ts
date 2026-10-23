@@ -49,8 +49,8 @@ export default defineConfig({
       // fail. Without a threshold, `npm run test:coverage` merely *reports*
       // the number and coverage could decay silently. The backend already
       // gates on `pytest --cov=app --cov-fail-under=70`; this makes the
-      // frontend side symmetric. Measured 2026-10-21: 82.17% statements /
-      // 85.79% branches / 81.79% functions.
+      // frontend side symmetric. Measured 2026-10-24: 89.95% statements /
+      // 86.52% branches / 89.23% functions / 89.95% lines.
       thresholds: {
         statements: 70,
         branches: 70,
