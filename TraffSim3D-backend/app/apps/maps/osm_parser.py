@@ -29,12 +29,30 @@ still discarded.
 
 Levels
 ------
-`bridge=yes` / `tunnel=yes` ways sit on level +1 / -1. A waypoint's height
-is decided by the *node* it belongs to, not by the way that owns it: when
-a node is used by ways on different levels, the node takes the level
-closest to the ground. That is what lets a bridge or tunnel meet the
-surface road network at its endpoints instead of floating above it as an
-isolated island.
+A way's vertical level is its OSM `layer` tag: `layer=1` is one level
+above the ground, `layer=-1` one below, `layer=0` is the ground. The
+value is taken verbatim — it is an integer level, not a boolean
+"above/below" flag, and real data uses `layer=2` for a viaduct that
+crosses another viaduct and `layer=-3` for a deep underpass.
+
+When a way carries no `layer` tag, the level falls back to the
+convention every renderer implements: a bridge sits one level up
+(`bridge=yes` and friends), a tunnel one level down (`tunnel=yes`).
+
+A waypoint's height is decided by the *node* it belongs to, not by the
+way that owns it: when a node is used by ways on different levels, the
+node takes the level closest to the ground. That is what lets a bridge
+or tunnel meet the surface road network at its endpoints instead of
+floating above it as an isolated island.
+
+Direction
+---------
+`oneway` is read from the tag, and `oneway=-1` flips the way so that
+"forward" is the direction cars actually travel. A `junction=roundabout`
+way is one-way even when it carries no `oneway` tag — OSM *implies*
+`oneway=yes` for it — and OSM draws roundabout ring ways in the
+direction of traffic flow, so the digitisation direction already is the
+travel direction and must not be flipped.
 """
 
 from __future__ import annotations
@@ -64,7 +82,11 @@ HIGHWAY_SPEED_LIMIT: dict[str, float] = {
 }
 DEFAULT_HIGHWAY_TYPES = frozenset(HIGHWAY_SPEED_LIMIT.keys())
 
-# Meters per level step — must match frontend LEVEL_HEIGHT in simulation constants.
+# Meters per level step. One `level` step is this many metres, so an OSM
+# `layer=2` lands 8 m above the ground and `layer=-3` lands 12 m below it.
+# The *step* (not the number of levels) is what has to match the frontend's
+# LEVEL_HEIGHT; the frontend has no shared constant for it — only a local
+# literal in its demo scene — so the two are kept in step by hand.
 LEVEL_HEIGHT = 4.0
 
 # Default clip half-extent in degrees (~55 km at mid-latitudes).
@@ -84,6 +106,25 @@ SPAWN_MIN_LANES = 2
 _ONEWAY_FORWARD = frozenset({"yes", "true", "1"})
 # OSM `oneway` values meaning "traffic runs against the digitisation direction".
 _ONEWAY_REVERSE = frozenset({"-1", "reverse"})
+
+# Tag values that mean "yes" / "no" for tags that are not bare booleans.
+_TAG_TRUE = frozenset({"yes", "true", "1"})
+_TAG_FALSE = frozenset({"no", "false", "0"})
+
+# `junction` values that describe a one-way circulating ring.
+#
+# `junction=roundabout` *implies* `oneway=yes` (OSM wiki,
+# Tag:junction=roundabout: "|implies=* oneway=yes"), and its ways "must be
+# drawn in the direction of traffic flow" — so the digitisation direction
+# already IS the travel direction and must not be flipped.
+#
+# `junction=circular` (a rotary) *requires* an explicit `oneway` tag; without
+# one the ring is one-way too, and an explicit `oneway=no` is honoured
+# because bi-directional circular junctions do exist.
+#
+# `junction=mini_roundabout` is not an OSM value (a mini roundabout is
+# `highway=mini_roundabout`), but it appears in the wild and means the same.
+_IMPLICIT_ONEWAY_JUNCTIONS = frozenset({"roundabout", "circular", "mini_roundabout"})
 
 
 @dataclass(frozen=True)
@@ -190,13 +231,98 @@ def _way_touches_rect(
     return False
 
 
+def _parse_layer(tags: dict[str, str]) -> int | None:
+    """The `layer` tag as an integer, or None when it is absent/unusable.
+
+    `layer` is OSM's vertical-ordering tag. The OSM wiki keeps it in the
+    range -5..5 and says "all ways without an explicit value are assumed to
+    have layer 0"; it also notes that "many map rendering and Quality
+    Assurance services assume that bridges and tunnels are at layers +1 and
+    -1 respectively". Both rules are implemented here — the tag first, the
+    bridge/tunnel convention as the fallback.
+    """
+    raw = tags.get("layer")
+    if raw is None:
+        return None
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return None
+
+
+def _is_bridge(tags: dict[str, str]) -> bool:
+    """Is this way a bridge?
+
+    `bridge=yes` is the common form, but `bridge=viaduct` (and `movable`,
+    `proposed`, …) are bridges too — only an explicit negation
+    (`bridge=no`) means "not a bridge". A `bridge` value that is not
+    `yes` used to be ignored entirely, which left every viaduct on the
+    ground.
+    """
+    value = tags.get("bridge")
+    if value is None:
+        return False
+    return value.strip().lower() not in _TAG_FALSE
+
+
+def _is_tunnel(tags: dict[str, str]) -> bool:
+    """Is this way a tunnel?
+
+    Only `tunnel=yes` (and its synonyms). `tunnel=building_passage` is a
+    cut through a building and `tunnel=culvert` is a short drain
+    crossing — neither moves the road to another level. When such a way
+    really is below ground it carries `layer=-1`, which `_way_level`
+    reads first.
+    """
+    value = tags.get("tunnel")
+    if value is None:
+        return False
+    return value.strip().lower() in _TAG_TRUE
+
+
 def _way_level(tags: dict[str, str]) -> int:
-    """Vertical level of a way: +1 bridge, -1 tunnel, 0 ground."""
-    if tags.get("bridge") == "yes":
+    """Vertical level of a way: the `layer` tag, else the bridge/tunnel default.
+
+    `layer` is authoritative when present — it is an integer level, so
+    `layer=2` is two levels up, not "somewhere above the ground". Only
+    when the way has no usable `layer` tag do the bridge/tunnel defaults
+    apply: a bridge one level up, a tunnel one level down, ground
+    otherwise.
+    """
+    layer = _parse_layer(tags)
+    if layer is not None:
+        return layer
+    if _is_bridge(tags):
         return 1
-    if tags.get("tunnel") == "yes":
+    if _is_tunnel(tags):
         return -1
     return 0
+
+
+def _oneway_direction(tags: dict[str, str]) -> str:
+    """Which way traffic runs: "forward", "reverse" or "both".
+
+    An explicit `oneway` tag always wins — including `oneway=no`, because
+    the OSM wiki states that bi-directional circular junctions exist and
+    "should be tagged with `oneway=no`".
+
+    Only when the tag is absent does the implicit junction rule apply: a
+    `junction=roundabout` / `circular` ring is one-way. The direction is
+    "forward" because OSM draws roundabout ring ways in the direction of
+    traffic flow.
+    """
+    raw = tags.get("oneway")
+    if raw is None:
+        junction = tags.get("junction", "").strip().lower()
+        if junction in _IMPLICIT_ONEWAY_JUNCTIONS:
+            return "forward"
+        return "both"
+    value = raw.strip().lower()
+    if value in _ONEWAY_FORWARD:
+        return "forward"
+    if value in _ONEWAY_REVERSE:
+        return "reverse"
+    return "both"
 
 
 def _pick_level(counter: Counter) -> int:
@@ -419,10 +545,10 @@ def _build_network(
     roads: list[dict[str, Any]] = []
     for way in kept:
         level = _way_level(way.tags)
-        oneway_value = way.tags.get("oneway", "no").strip().lower()
-        oneway = oneway_value in _ONEWAY_FORWARD or oneway_value in _ONEWAY_REVERSE
+        direction = _oneway_direction(way.tags)
+        oneway = direction != "both"
         refs = list(way.node_refs)
-        if oneway_value in _ONEWAY_REVERSE:
+        if direction == "reverse":
             # Traffic runs against the digitisation direction: flip the way so
             # "forward" means the direction cars actually travel.
             refs.reverse()
