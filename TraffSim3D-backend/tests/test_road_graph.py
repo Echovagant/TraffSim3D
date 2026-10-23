@@ -387,7 +387,7 @@ def test_astar_routes_around_a_missing_link() -> None:
             _road("w-cd", _pos(0, 10), _pos(10, 10)),
         ]
     )
-    g = RoadGraph.from_network(net)
+    # The graph is rebuilt below, after the one-way road is set up.
     # Remove A<->B by making that road one-way out of B. The chain's
     # direction follows the waypoints, so those have to be flipped too.
     net["roads"][0]["laneCount"] = 1

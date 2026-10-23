@@ -60,8 +60,7 @@ TraffSim3D-frontend/playwright.local.config.ts
 TraffSim3D-frontend/playwright.ci.config.ts
 
 # Cross-language contract test snapshots.
-# The Python side regenerates its own on every run; the TS side's goldens
-# are committed so the backend suite can run the full contract standalone.
+# The Python side regenerates its own on every run; the TS side's goldens# are committed so the backend suite can run the full contract standalone.
 TraffSim3D-backend/tests/contract/snapshots/python_*.json
 
 # Overpass response cache (large JSON files regenerated
@@ -111,3 +110,10 @@ docs/
 .env.*.local
 *.pem
 *.key
+
+# Scratch space for in-progress edits (backups, before/after copies).
+# The project's scratch files live on D: — see the project's working
+# notes — but a stray directory in the repo root must never be committed
+# by accident.
+.tmp/
+tmp/
