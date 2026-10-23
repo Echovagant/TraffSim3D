@@ -411,6 +411,51 @@
         }
       }
     },
+    "/api/v1/rl/signal/train": {
+      "post": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Train Signal",
+        "description": "Start a traffic-signal training run (subprocess) and return immediately.\n\nThe run writes the same status document the ego trainer writes, so\n`GET /rl/status` reports its progress the same way; the status\ncarries `policy_kind = \"signal\"` to tell the two agents apart.",
+        "operationId": "train_signal_api_v1_rl_signal_train_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignalTrainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Train Signal Api V1 Rl Signal Train Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/rl/capabilities": {
       "get": {
         "tags": [
@@ -616,7 +661,7 @@
           "rl"
         ],
         "summary": "Get Checkpoint Weights",
-        "description": "Export a saved PPO checkpoint as JSON-serializable weights.\n\nThe frontend uses this to instantiate an in-browser MlpPolicy for\nreplay (see `src/infrastructure/rl/mlpInference.ts`). Returns the\npolicy `state_dict()` flattened to nested lists + architecture\nmetadata (`obs_dim`, `action_dim`, `hidden_sizes`).\n\nErrors:\n  - 404: checkpoint file not found\n  - 503: SB3 / torch not installed (run `uv sync --extra rl`)",
+        "description": "Export a saved PPO checkpoint as JSON-serializable weights.\n\nThe frontend uses this to instantiate an in-browser MlpPolicy for\nreplay (see `src/infrastructure/rl/mlpInference.ts`). Returns the\npolicy `state_dict()` flattened to nested lists + architecture\nmetadata (`obs_dim`, `action_dim`, `hidden_sizes`).\n\nDeliberately a **sync** endpoint: the export loads a PPO checkpoint\n(cold: seconds), and FastAPI runs sync endpoints in the threadpool.\nAs an `async def` it would block the whole event loop for the\nduration of the load, stalling every other request.\n\nThe export itself is memoised per checkpoint file by\n`app.apps.rl.weights.export_weights`, so only the first request per\ncheckpoint pays the load cost.\n\nErrors:\n  - 404: checkpoint file not found\n  - 503: SB3 / torch not installed (run `uv sync --extra rl`)",
         "operationId": "get_checkpoint_weights_api_v1_rl_checkpoints__name__weights_get",
         "parameters": [
           {
@@ -725,6 +770,35 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "SignalTrainRequest": {
+        "properties": {
+          "steps": {
+            "type": "integer",
+            "title": "Steps",
+            "default": 300000
+          },
+          "device": {
+            "type": "string",
+            "title": "Device",
+            "default": "cpu"
+          },
+          "seeds": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Seeds"
+          },
+          "save_every": {
+            "type": "integer",
+            "title": "Save Every",
+            "default": 10000
+          }
+        },
+        "type": "object",
+        "title": "SignalTrainRequest",
+        "description": "A request to train the traffic-signal policy.\n\nThe signal agent is a *different* agent from the ego policy: it\ncommands the traffic light (discrete, five actions) instead of\ndriving a vehicle (continuous, two actions), and it learns on its\nown environment. It therefore needs its own endpoint — posting a\nsignal request to `/rl/train` would spawn the ego trainer and\nproduce a policy the browser cannot load into the light controller."
+      },
       "TrainRequest": {
         "properties": {
           "steps": {
@@ -735,7 +809,7 @@
           "dry_run": {
             "type": "boolean",
             "title": "Dry Run",
-            "default": true
+            "default": false
           },
           "device": {
             "type": "string",

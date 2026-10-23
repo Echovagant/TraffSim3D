@@ -8,14 +8,14 @@
 #
 # Jobs
 # -----
-#   backend   pytest (+ coverage gate) + ruff + black
-#   frontend  vitest (+ coverage) + vue-tsc + eslint + prettier
+#   backend   pytest (+ coverage gate) + ruff + black + openapi drift gate
+#   frontend  vitest (+ coverage) + vue-tsc + eslint + prettier + openapi types
 #   contract  Python sim  <->  TypeScript goldens   (the important one)
-#   e2e       Playwright against a live frontend + backend (NON-BLOCKING)
+#   e2e       Playwright against a live frontend + backend (BLOCKING)
 #
 # Read the comment above the `contract` job before changing anything: it is
 # the one that protects the model. Read the comment above `e2e` before
-# making that job blocking.
+# changing that job.
 
 name: CI
 
@@ -120,6 +120,19 @@ jobs:
         # because .venv is gitignored.
         run: python -m black --check . --extend-exclude 'app/apps/rl/sim_core.py'
 
+      - name: OpenAPI schema is in step with the app
+        # `docs/openapi.json` is the committed snapshot of the FastAPI
+        # schema. `--check` regenerates it in memory and fails when the
+        # file on disk differs — so an endpoint change that forgot to
+        # re-export the schema is caught here instead of silently
+        # shipping a stale API document (and stale generated TS types).
+        #
+        # The comparison is byte-exact, which is why `docs/openapi.json`
+        # is pinned to LF in `.gitattributes`: git's CRLF checkout on
+        # Windows would otherwise make the check fail on a pristine
+        # clone even when nothing drifted.
+        run: python scripts/export_openapi.py --check
+
   frontend:
     name: Frontend — vitest / vue-tsc / eslint / prettier
     runs-on: ubuntu-latest
@@ -153,6 +166,13 @@ jobs:
 
       - name: Format check
         run: npx prettier --check .
+
+      - name: Generated OpenAPI types are up to date
+        # The frontend's API types are generated from `docs/openapi.json`.
+        # This check fails when the generated file drifted from the
+        # committed schema, so a backend endpoint change cannot leave
+        # the frontend silently out of sync.
+        run: npm run api:types:check
 
   contract:
     name: Contract — Python sim ⇄ TypeScript goldens
@@ -215,37 +235,47 @@ jobs:
         run: npm run contract:check
 
   e2e:
-    name: E2E — Playwright (non-blocking)
+    name: E2E — Playwright (blocking)
     runs-on: ubuntu-latest
     # ------------------------------------------------------------------
-    # THIS JOB IS NOT A GATE YET, AND THAT IS A DELIBERATE, TEMPORARY STATE.
+    # THIS JOB IS A GATE.
     #
-    # The repository's 25 visual-regression baselines in `e2e-output/baseline/`
-    # were recorded on **Windows + Chromium 1228 (headless, SwiftShader)**.
-    # A Linux runner has a different Chromium build and a different font
-    # rasterisation, so the pixel comparisons are expected to differ even
-    # though nothing regressed. The measured tolerance
-    # (`maxDiffPixelRatio: 0.005`) is derived from real runs on the
-    # recording platform and MUST NOT be raised to paper over this: doing
-    # so would also hide genuine rendering regressions, which is the entire
-    # purpose of those baselines.
+    # It used to carry `continue-on-error: true`, which made every
+    # browser-side regression invisible to the pipeline: the specs ran,
+    # the output was readable, and the red X did not block anything.
     #
-    # So the honest options are (a) exclude the visual specs, (b) widen the
-    # tolerance, or (c) mark the job non-blocking. This file takes (c):
-    # `continue-on-error: true` keeps the job VISIBLE and its output
-    # READABLE — the specs still run, they are not silently dropped — while
-    # the red X does not block the pipeline.
+    # Two things made it non-blocking, and only one of them still holds:
     #
-    # This job becomes blocking (drop `continue-on-error`) once the
-    # baselines have been re-recorded on Linux, i.e. once a Linux runner
-    # exists to re-record them. Until then it is a smoke test, not a gate.
+    #   1. The visual-regression baselines in `e2e-output/baseline/`
+    #      were recorded on **Windows + Chromium 1228 (headless,
+    #      SwiftShader)**. A Linux runner has a different Chromium build
+    #      and a different font rasterisation, so the pixel comparisons
+    #      differ even when nothing regressed. The measured tolerance
+    #      (`maxDiffPixelRatio: 0.005`) is derived from real runs on
+    #      the recording platform and MUST NOT be raised to paper over
+    #      this — doing so would also hide genuine rendering
+    #      regressions, which is the entire purpose of those baselines.
     #
-    # Note that `perf-gate.spec.ts` is a *measurement*, not a
-    # comparison: it needs >= 30 FPS under software rasterisation, which
-    # depends on the runner's CPU. That is a second reason this job cannot
-    # gate the build yet.
+    #      This is now handled *inside the specs* rather than by
+    #      downgrading the whole job: `tests/e2e/helpers/visual.ts`
+    #      skips the pixel comparison on any platform other than the
+    #      one the baselines were recorded on, with a visible
+    #      annotation. Everything else in those specs (the behaviour
+    #      assertions) still runs and still gates. Re-recording the
+    #      baselines on Linux would make the pixel comparisons
+    #      comparable again.
+    #
+    #   2. `perf-gate.spec.ts` used to assert `avg >= 30 FPS`, which
+    #      is unreachable under software rasterisation. It now asserts
+    #      only what is conclusive (the sim advances, the readings are
+    #      finite, the page has not collapsed below a hard floor) and
+    #      *reports* the 30 FPS target. So it can gate.
+    #
+    # The frontend runs on 5188 and the backend on 8001 (see the env
+    # block) — 5173 is never used here, because it is the project's
+    # default vite port and is often taken by another project on a
+    # developer machine.
     # ------------------------------------------------------------------
-    continue-on-error: true
     defaults:
       run:
         working-directory: TraffSim3D-frontend
@@ -358,4 +388,10 @@ jobs:
           # accepted by the browser.
           VITE_BACKEND_PORT: '8001'
           VITE_BACKEND_URL: 'http://localhost:8001'
+          # The only spec that talks to a REAL backend reads its base URL
+          # from here. It used to hard-code :8000, which made it skip
+          # itself in CI (the backend runs on :8001 there) — so the one
+          # spec that exercised the real pipeline was never run by the
+          # pipeline.
+          E2E_BACKEND_URL: 'http://localhost:8001'
         run: npx playwright test --config=playwright.ci.config.ts

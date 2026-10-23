@@ -1,6 +1,32 @@
 import { defineConfig } from '@playwright/test'
 
 /**
+ * The frontend port the suite runs against.
+ *
+ * 5173 is vite's default port and it is regularly taken by ANOTHER
+ * project on a developer machine. With `reuseExistingServer: true`
+ * Playwright then silently reuses that foreign server and the whole
+ * suite runs against the wrong application — the symptom is a set of
+ * instant failures and one-minute timeouts that look exactly like
+ * broken code.
+ *
+ * So:
+ *   - the port is configurable (`E2E_FRONTEND_PORT`),
+ *   - vite is started with `--strictPort` so it never drifts to the
+ *     next free port (Playwright would then wait for a port nobody
+ *     serves),
+ *   - the server is NOT reused by default: a busy port fails the run
+ *     loudly instead of testing somebody else's app. Set
+ *     `E2E_REUSE_SERVER=1` to opt back into reusing a running server.
+ *
+ * CI does not use this file's port at all: it generates
+ * `playwright.ci.config.ts`, which moves the frontend to :5188 and the
+ * backend stays on :8001.
+ */
+const FRONTEND_PORT = Number(process.env.E2E_FRONTEND_PORT ?? 5173)
+const REUSE_EXISTING_SERVER = process.env.E2E_REUSE_SERVER === '1'
+
+/**
  * Playwright e2e + screenshot baseline.
  *
  * Test directory: ./tests/e2e
@@ -59,16 +85,16 @@ export default defineConfig({
     },
   },
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: `http://localhost:${FRONTEND_PORT}`,
     headless: true,
     viewport: { width: 1280, height: 800 },
     deviceScaleFactor: 1,
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: true,
+    command: `npm run dev -- --port ${FRONTEND_PORT} --strictPort`,
+    url: `http://localhost:${FRONTEND_PORT}`,
+    reuseExistingServer: REUSE_EXISTING_SERVER,
     timeout: 60_000,
   },
 })

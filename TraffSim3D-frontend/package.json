@@ -25,7 +25,9 @@
     "format:check": "prettier --check .",
     "contract:gen": "vite-node --config vite.contract.config.ts scripts/generate-contract-snapshots.ts",
     "contract:check": "vite-node --config vite.contract.config.ts scripts/generate-contract-snapshots.ts --check",
-    "test:contract": "vite-node --config vite.contract.config.ts scripts/generate-contract-snapshots.ts --check"
+    "test:contract": "vite-node --config vite.contract.config.ts scripts/generate-contract-snapshots.ts --check",
+    "api:types": "vite-node --config vite.contract.config.ts scripts/generate-openapi-types.ts",
+    "api:types:check": "vite-node --config vite.contract.config.ts scripts/generate-openapi-types.ts --check"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.14.0",
@@ -34,7 +36,7 @@
     "pinia": "^3.0.3",
     "postprocessing": "^6.37.8",
     "three": "^0.180.0",
-    "vue": "^3.5.18",
+    "vue": "^3.5.44",
     "vue-router": "^4.5.1"
   },
   "devDependencies": {

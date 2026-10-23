@@ -98,11 +98,12 @@ const main = async () => {
 
   // 帧率的**真实**来源：rAF 的实际回调节奏。
   //
-  // ⚠ 为什么不直接读 `store.fps`：`worldStore.step()` 用的是
-  //   `clampedDt = max(0, min(dt, 1/30))`（见 worldStore.ts:572）——
-  //   dt 被**钳在 33.3 ms**，于是 `fps = frameCount / ΣclampedDt`
-  //   在结构上**永远不可能低于 30**。拿它当性能读数，测出的是钳位下限，
-  //   不是真实帧率。⇒ 这里改用 rAF 回调间隔自己算帧率。
+  // ⚠ 为什么不直接读 `store.fps`：历史上 `worldStore.step()` 用的是
+  //   `clampedDt = max(0, min(dt, 1/30))`（dt 钳在 33.3 ms），于是
+  //   `fps = frameCount / ΣclampedDt` 在结构上**永远不可能低于 30** ——
+  //   拿它当性能读数，测出的是钳位下限而不是真实帧率。
+  // （该指标已改为按墙钟帧间隔统计；这里仍独立用 rAF 测量，作为**交叉验证**：
+  //   两套独立算法给出的数应当一致。）
   const samples = await page.evaluate(
     async ([durationMs, intervalMs]) => {
       const out = []
@@ -158,8 +159,14 @@ const main = async () => {
 
   // --- 两组读数，都要报 ---------------------------------------------------
   // (a) 真帧率：rAF 相邻回调间隔的倒数（不受 store 的 dt 钳位影响）
-  // (b) store 读数：DebugPanel 展示的那个 `fps`（**有 30 FPS 的结构性下限**，
-  //     因为 worldStore 把 dt 钳在 1/30 ⇒ 它测不出「比 30 更差」）
+  // (b) store 读数：DebugPanel 展示的那个 `fps`
+  //
+  // ⚠ 平均帧率有两种算法，**差得很远**，必须说清用的是哪一种：
+  //   - 「瞬时帧率的算术平均」= mean(1000/Δ)  ⇒ **偏大**（Jensen：同样的平均
+  //     间隔下，平均倒数 > 倒数的平均；快的帧把均值拉上去）。
+  //   - 「时间加权帧率」= 总帧数 / 总耗时 = 1000 / 平均间隔 ⇒ **偏小**，是
+  //     稳态帧率的正确估计。
+  // 本报告的**主指标是时间加权的那一个**。
   const deltas = samples.frameDeltas.filter((d) => d > 0)
   const trueFps = deltas.map((d) => 1000 / d)
   const fpsValues = samples.samples.map((s) => s.fps).slice(2)
@@ -170,13 +177,15 @@ const main = async () => {
     avg: Number((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2)),
   })
 
+  const deltaStats = stat(deltas)
+  // 时间加权帧率：总帧数 / 总时长。
+  const timeWeightedFps = 1000 / deltaStats.avg
   const trueStats = stat(trueFps)
   const storeStats = stat(fpsValues)
   const frameAvg = samples.samples.reduce((a, s) => a + s.frameMsAvg, 0) / samples.samples.length
-  const deltaStats = stat(deltas)
-  const min = trueStats.min
-  const max = trueStats.max
-  const avg = trueStats.avg
+  const min = deltaStats.min > 0 ? 1000 / deltaStats.max : 0
+  const max = 1000 / deltaStats.min
+  const avg = Number(timeWeightedFps.toFixed(2))
 
   const report = {
     requestedVehicles: VEHICLES,
@@ -198,23 +207,29 @@ const main = async () => {
     },
     sampledAt: new Date().toISOString(),
     stats: {
-      min,
-      max,
+      min: Number(min.toFixed(1)),
+      max: Number(max.toFixed(1)),
       avg: Number(avg.toFixed(2)),
+      avgMethod: 'time-weighted (1000 / mean frame interval) — the sustained rate',
       frameMsAvg: Number(frameAvg.toFixed(2)),
     },
     trueFrameTiming: {
       note:
         'rAF callback interval (ms) and the FPS it implies. This is the ' +
-        'UNCLAMPED measurement — it can go below 30, which store.fps cannot.',
+        'UNCLAMPED measurement — it can go below 30.',
       deltaMs: deltaStats,
       fps: trueStats,
+      fpsAvgMethod:
+        'fps.avg is the arithmetic mean of the INSTANTANEOUS rates (1000/delta). ' +
+        'It reads HIGHER than the sustained rate because fast frames dominate ' +
+        'the mean. stats.avg (time-weighted) is the number to quote.',
+      timeWeightedFps: Number(timeWeightedFps.toFixed(2)),
     },
     storeReportedFps: {
       note:
-        'The DebugPanel `fps` readout. worldStore.step() clamps dt to 1/30 s, ' +
-        'so this value has a STRUCTURAL floor of 30 FPS and cannot report a ' +
-        'slower frame rate. Use trueFrameTiming for the real number.',
+        'The DebugPanel `fps` readout, measured over 500 ms wall-clock windows. ' +
+        'This is an independent estimate of the same thing the rAF timing ' +
+        'measures — the two agreeing is the cross-check that the reading is real.',
       ...storeStats,
     },
     samples: samples.samples,
@@ -225,9 +240,9 @@ const main = async () => {
   fs.writeFileSync(outFile, JSON.stringify(report, null, 2), 'utf-8')
   console.log(
     `[perf] renderer=${renderer} vehicles=${added.vehicles} ` +
-      `TRUE fps min/avg/max=${min}/${avg.toFixed(1)}/${max} ` +
-      `frameDelta=${deltaStats.avg.toFixed(1)}ms ` +
-      `storeFps=${storeStats.avg} load=${loadPct}% -> ${outFile}`,
+      `sustained=${avg.toFixed(1)} FPS (min ${min.toFixed(1)} / max ${max.toFixed(1)}) ` +
+      `frameDelta=${deltaStats.avg.toFixed(1)}ms storeFps=${storeStats.avg} ` +
+      `load=${loadPct}% -> ${outFile}`,
   )
 }
 

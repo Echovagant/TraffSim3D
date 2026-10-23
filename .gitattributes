@@ -3,3 +3,11 @@
 # (core.autocrlf=true) would otherwise make every golden look stale on a
 # pristine clone. Pinning them to LF keeps the on-disk form canonical.
 TraffSim3D-backend/tests/contract/snapshots/*.json text eol=lf
+
+# `docs/openapi.json` is compared byte-for-byte by
+# `scripts/export_openapi.py --check` (the CI gate that keeps the
+# committed schema in step with the FastAPI app). The script always
+# writes LF, so a CRLF checkout on Windows would make the check fail
+# on a pristine clone even when nothing drifted. Pin it to LF, same
+# reasoning as the contract goldens above.
+docs/openapi.json text eol=lf
