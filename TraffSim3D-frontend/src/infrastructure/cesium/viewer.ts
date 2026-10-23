@@ -15,10 +15,16 @@
 
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
+import type { GeoOrigin } from '@domain/entities/RoadNetwork'
+import type { TangentOrigin } from './cameraSync'
 
 export interface CesiumSceneOptions {
-  /** World-space center (WGS84). Default: Tiananmen Square (116.3976, 39.9055). */
-  center: { lng: number; lat: number }
+  /**
+   * World-space center (WGS84). Defaults to the payload's projection
+   * origin when the scene carries one, else to `DEFAULT_TANGENT_ORIGIN`
+   * (天安门广场中央) — see `resolveTangentOrigin`.
+   */
+  center?: TangentOrigin
   /** Initial camera height in meters (default 1500m = bird's-eye). */
   zoomLevel: number
   /** Tile service — defaults to Gaode (国内访问稳定, 无 token). */
@@ -93,8 +99,9 @@ export const createCesiumViewer = (
   // Default Cesium camera orientation when destination is specified
   // without `orientation` is pitch=-90° (straight down), heading=0
   // (north), roll=0. Matches the user's prior project behaviour.
+  const center = opts.center ?? DEFAULT_TANGENT_ORIGIN
   viewer.camera.flyTo({
-    destination: Cesium.Cartesian3.fromDegrees(opts.center.lng, opts.center.lat, opts.zoomLevel),
+    destination: Cesium.Cartesian3.fromDegrees(center.lng, center.lat, opts.zoomLevel),
     duration: 2,
   })
 
@@ -103,5 +110,29 @@ export const createCesiumViewer = (
 
 /** Default Tangent origin for ENU projection (天安门广场中央).
  *  All Three.js world coordinates are computed relative to this
- *  point via `eastNorthUpToFixedFrame` inverse. */
+ *  point via `eastNorthUpToFixedFrame` inverse.
+ *
+ *  This is a **fallback**: it only applies to scenes without a
+ *  geographic anchor (the built-in demo scenes, or an OSM payload that
+ *  carries no `originLat`/`originLon`). An imported map always uses
+ *  its own projection origin. */
 export const DEFAULT_TANGENT_ORIGIN = { lng: 116.3976, lat: 39.9055 }
+
+/**
+ * Resolve the ENU tangent origin of a scene.
+ *
+ * - A scene with a geographic anchor (an imported OSM map carries the
+ *   payload's `originLat`/`originLon`) uses it — that is what makes the
+ *   simulation and the basemap describe the same place.
+ * - A scene without one (demo scenes, or an OSM payload that predates
+ *   the origin fields) falls back to `DEFAULT_TANGENT_ORIGIN`
+ *   (天安门广场中央). The fallback is a *display* anchor only: the
+ *   simulation still runs, it is just not pinned to a real place.
+ */
+export const resolveTangentOrigin = (origin?: GeoOrigin | null): TangentOrigin => {
+  if (!origin) return DEFAULT_TANGENT_ORIGIN
+  const { lat, lon } = origin
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return DEFAULT_TANGENT_ORIGIN
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return DEFAULT_TANGENT_ORIGIN
+  return { lng: lon, lat }
+}

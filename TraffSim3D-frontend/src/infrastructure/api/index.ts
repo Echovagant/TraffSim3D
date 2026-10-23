@@ -13,6 +13,19 @@ export { createBackendService } from './backendService'
 export type { BackendService, HealthResponse, PingResponse } from './backendService'
 export { createRLWeightsClient, RL_WEIGHTS_TIMEOUT_MS } from './rlWeightsClient'
 export type { CheckpointWeightsResponse, RLWeightsClient } from './rlWeightsClient'
+export { parseRLStatus, RLStatusContractError } from './rlStatus'
+export type { RLStatusCore } from './rlStatus'
+// Types generated from the backend's committed OpenAPI schema
+// (`docs/openapi.json`). Regenerate with `npm run api:types`.
+export type {
+  OpenApiPaths,
+  ResponseOf,
+  PathsApiV1PingGetResponse,
+  PathsApiV1RlStatusGetResponse,
+  PathsApiV1RlCapabilitiesGetResponse,
+  PathsHealthGetResponse,
+  TrainRequest,
+} from './generated/openapi'
 export {
   OSM_DEFAULT_CLIP_DEG,
   OSM_UNSPECIFIED_CLIP_NOTE,
@@ -22,6 +35,22 @@ export {
   withOsmBBoxQuery,
 } from './osmImportClient'
 export type { OsmBBox } from './osmImportClient'
+
+export {
+  OSM_METERS_PER_DEGREE_LAT,
+  OSM_PAYLOAD_NORTH_IS_POSITIVE_Z,
+  deriveSpawnPoints,
+  normalizeOsmPayload,
+  readOsmOrigin,
+  spawnImportedVehicles,
+} from './osmNetworkAdapter'
+export type {
+  DeriveSpawnPointsOptions,
+  NormalizedOsmNetwork,
+  OsmNetworkPayload,
+  OsmPayloadStats,
+  SpawnImportedVehiclesOptions,
+} from './osmNetworkAdapter'
 
 import { createHttpClient } from './httpClient'
 import { createBackendService } from './backendService'

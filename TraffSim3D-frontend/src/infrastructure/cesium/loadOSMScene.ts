@@ -16,6 +16,7 @@
 // users get consistent output regardless of which surface they use.
 
 import * as Cesium from 'cesium'
+import { OSM_METERS_PER_DEGREE_LAT } from '@infrastructure/api/osmNetworkAdapter'
 
 export interface Bbox {
   /** South-west corner (lat, lng). */
@@ -295,4 +296,29 @@ export const DEFAULT_BBOX: Bbox = {
   west: 116.38,
   north: 39.925,
   east: 116.42,
+}
+
+/**
+ * Build a bbox (in degrees) around a geographic origin, sized in metres.
+ *
+ * Used to load the basemap of an *imported* city: the imported OSM
+ * network carries its own projection origin (`originLat`/`originLon`),
+ * so the basemap has to be fetched around that point instead of the
+ * hard-coded 天安门 area.
+ *
+ * The metre→degree conversion mirrors the backend's flat projection
+ * (`osm_parser.py::_project_nodes`): 111000 m per degree of latitude,
+ * the same factor scaled by cos(latitude) for longitude.
+ */
+export const bboxAround = (lat: number, lon: number, halfMeters: number): Bbox => {
+  const half = Math.max(1, halfMeters)
+  const halfLat = half / OSM_METERS_PER_DEGREE_LAT
+  const cosLat = Math.max(0.05, Math.cos((lat * Math.PI) / 180))
+  const halfLon = half / (OSM_METERS_PER_DEGREE_LAT * cosLat)
+  return {
+    south: lat - halfLat,
+    west: lon - halfLon,
+    north: lat + halfLat,
+    east: lon + halfLon,
+  }
 }

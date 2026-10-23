@@ -167,13 +167,25 @@ import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
 import {
   OSM_UNSPECIFIED_CLIP_NOTE,
   describeOsmClip,
+  normalizeOsmPayload,
+  spawnImportedVehicles,
   validateOsmBBox,
   withOsmBBoxQuery,
   type OsmBBox,
 } from '@infrastructure/api'
+import { createRoadNetworkFrom } from '@domain/entities/RoadNetwork'
+import type { Road } from '@domain/entities/Road'
+import type { Intersection } from '@domain/entities/Intersection'
 
 const router = useRouter()
 const world = useWorldStore()
+
+/**
+ * How many vehicles an imported OSM city starts with. The demo scenes
+ * ship 6–8 cars; an imported district gets the same order of magnitude so
+ * the scene reads as traffic rather than as an empty road network.
+ */
+const IMPORT_VEHICLE_COUNT = 8
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const file = ref<File | null>(null)
@@ -376,25 +388,38 @@ const onUpload = async (): Promise<void> => {
       showFlashMessage('OSM 上传失败', 'error')
       return
     }
-    const network = (await r.json()) as {
-      roads: unknown[]
-      intersections: { trafficLights: unknown[] }[]
-    }
+    const payload = (await r.json()) as unknown
+    // The backend answers with ARRAYS (roads / intersections / vehicles /
+    // spawnPoints) while the frontend network is record-shaped and looked
+    // up by id. Normalizing here is what makes `network.road('w-201')`
+    // work — the previous "assign the payload as-is" path keyed the
+    // records by array index ("0", "1", …) and every id lookup missed.
+    const normalized = normalizeOsmPayload(payload)
+    const network = normalized.network
+    // An imported city with zero cars is not a simulation. The spawn
+    // path is the same one the editor toolbar uses; when the payload
+    // carries no spawn points the adapter derives them from the roads.
+    const spawned = spawnImportedVehicles(network, IMPORT_VEHICLE_COUNT)
     // Pass the source filename so the toolbar can show
     // "📂 福田.osm" instead of the generic scene-kind dropdown.
     // The second arg sets `currentSceneKind = 'imported'` and
     // bumps the camera fit tick (via replaceNetwork).
-    world.loadNetwork(network as never, file.value.name)
+    world.loadNetwork(network, file.value.name)
     lastResult.value = {
       ok: true,
       message: `✓ 解析成功 — 已载入 SceneLab`,
       stats: {
-        roads: network.roads.length,
-        intersections: network.intersections.length,
-        lights: network.intersections.reduce((sum, i) => sum + i.trafficLights.length, 0),
+        roads: normalized.stats.roads,
+        intersections: normalized.stats.intersections,
+        lights: normalized.stats.lights,
       },
     }
-    showFlashMessage(`OSM 导入完成: ${network.roads.length} 条道路`, 'info')
+    showFlashMessage(
+      spawned > 0
+        ? `OSM 导入完成: ${normalized.stats.roads} 条道路 · ${spawned} 辆车`
+        : `OSM 导入完成: ${normalized.stats.roads} 条道路 · 没有可用出生点`,
+      'info',
+    )
     // Navigate to scene editor to visualize.
     setTimeout(() => router.push('/scene-editor'), 800)
   } catch (e) {
@@ -409,89 +434,97 @@ const onUpload = async (): Promise<void> => {
 /**
  * Load a hard-coded sample fixture directly into the world.
  * Useful when the backend isn't running (e.g. e2e stubbed via page.route).
+ *
+ * The fixture is already expressed in the app's world frame (north = -Z),
+ * so it bypasses the OSM payload adapter (which exists to convert the
+ * backend's north-positive-Z projection). It is a layout preview and
+ * deliberately ships no vehicles — the "generate vehicles" button uses
+ * the same back-compat lane scan as any legacy scene.
  */
 const loadFixture = (): void => {
   // Minimal 4-way network with 1 bridge. Matches the backend fixture
   // semantics; rendered directly so the user can preview without
   // backend.
-  const network = {
-    roads: [
-      {
-        id: 'w-1',
-        startNode: { x: 0, y: 0, z: -100 },
-        endNode: { x: 0, y: 0, z: 100 },
-        waypoints: [
-          { x: 0, y: 0, z: -100 },
-          { x: 0, y: 0, z: 0 },
-          { x: 0, y: 0, z: 100 },
-        ],
-        laneCount: 4,
-        speedLimit: 16.67,
-        level: 0,
-      },
-      {
-        id: 'w-2',
-        startNode: { x: -100, y: 0, z: 0 },
-        endNode: { x: 0, y: 0, z: 0 },
-        waypoints: [
-          { x: -100, y: 0, z: 0 },
-          { x: 0, y: 0, z: 0 },
-        ],
-        laneCount: 4,
-        speedLimit: 16.67,
-        level: 0,
-      },
-      {
-        id: 'w-3',
-        startNode: { x: 0, y: 0, z: 0 },
-        endNode: { x: 100, y: 4, z: 0 },
-        waypoints: [
-          { x: 0, y: 0, z: 0 },
-          { x: 20, y: 0.8, z: 0 },
-          { x: 40, y: 1.6, z: 0 },
-          { x: 60, y: 2.4, z: 0 },
-          { x: 80, y: 3.2, z: 0 },
-          { x: 100, y: 4, z: 0 },
-        ],
-        laneCount: 4,
-        speedLimit: 13.89,
-        level: 1,
-      },
-      {
-        id: 'w-4',
-        startNode: { x: 100, y: 4, z: 0 },
-        endNode: { x: 200, y: 4, z: 0 },
-        waypoints: [
-          { x: 100, y: 4, z: 0 },
-          { x: 200, y: 4, z: 0 },
-        ],
-        laneCount: 4,
-        speedLimit: 13.89,
-        level: 1,
-      },
-    ],
-    intersections: [
-      {
-        id: 'i-1',
-        position: { x: 0, y: 0, z: 0 },
-        trafficLights: [
-          {
-            id: 'tl-1',
-            position: { x: -3, y: 0, z: 0 },
-            phase: 'green',
-            phaseRemaining: 30,
-            cycleSeconds: 63,
-            axis: 'ns',
-          },
-        ],
-        connectedRoads: ['w-1', 'w-2', 'w-3'],
-        intersectionRadius: 8,
-      },
-    ],
-    vehicles: [],
-    spawnPoints: [],
+  const roads: Record<string, Road> = {
+    'w-1': {
+      id: 'w-1',
+      startNode: { x: 0, y: 0, z: -100 },
+      endNode: { x: 0, y: 0, z: 100 },
+      waypoints: [
+        { x: 0, y: 0, z: -100 },
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 100 },
+      ],
+      laneCount: 4,
+      speedLimit: 16.67,
+      level: 0,
+    },
+    'w-2': {
+      id: 'w-2',
+      startNode: { x: -100, y: 0, z: 0 },
+      endNode: { x: 0, y: 0, z: 0 },
+      waypoints: [
+        { x: -100, y: 0, z: 0 },
+        { x: 0, y: 0, z: 0 },
+      ],
+      laneCount: 4,
+      speedLimit: 16.67,
+      level: 0,
+    },
+    'w-3': {
+      id: 'w-3',
+      startNode: { x: 0, y: 0, z: 0 },
+      endNode: { x: 100, y: 4, z: 0 },
+      waypoints: [
+        { x: 0, y: 0, z: 0 },
+        { x: 20, y: 0.8, z: 0 },
+        { x: 40, y: 1.6, z: 0 },
+        { x: 60, y: 2.4, z: 0 },
+        { x: 80, y: 3.2, z: 0 },
+        { x: 100, y: 4, z: 0 },
+      ],
+      laneCount: 4,
+      speedLimit: 13.89,
+      level: 1,
+    },
+    'w-4': {
+      id: 'w-4',
+      startNode: { x: 100, y: 4, z: 0 },
+      endNode: { x: 200, y: 4, z: 0 },
+      waypoints: [
+        { x: 100, y: 4, z: 0 },
+        { x: 200, y: 4, z: 0 },
+      ],
+      laneCount: 4,
+      speedLimit: 13.89,
+      level: 1,
+    },
   }
-  world.loadNetwork(network as never)
+  const intersections: Record<string, Intersection> = {
+    'i-1': {
+      id: 'i-1',
+      position: { x: 0, y: 0, z: 0 },
+      trafficLights: [
+        {
+          id: 'tl-1',
+          position: { x: -3, y: 0, z: 0 },
+          phase: 'green',
+          phaseRemaining: 30,
+          cycleSeconds: 63,
+          axis: 'ns',
+        },
+      ],
+      connectedRoads: ['w-1', 'w-2', 'w-3'],
+      intersectionRadius: 8,
+    },
+  }
+  const network = createRoadNetworkFrom({
+    roads,
+    intersections,
+    vehicles: {},
+    spawnPoints: {},
+  })
+  world.loadNetwork(network)
   showFlashMessage('OSM 示例载入完成 (4 道路 + 1 高架桥)', 'info')
   setTimeout(() => router.push('/scene-editor'), 600)
 }
