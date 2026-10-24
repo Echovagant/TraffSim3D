@@ -523,7 +523,7 @@ recomputed golden against the committed file).
 | `LOOKAHEAD_DISTANCE` | **caught** | **caught** | was blind — now caught by the `steer_*` vectors (a 25 % change moves the trajectory by 1.2–2.0 m) |
 | `MAX_STEER` | **caught** | **caught** | was blind — now caught by the `steer_*` vectors (a 25 % change moves the trajectory by 1.4 m) |
 | `EGO_WHEELBASE` | **caught** | **caught** | was blind — now caught by the `steer_*` vectors (a 25 % change moves the trajectory by 0.6–1.5 m) |
-| `INTERSECTION_RADIUS` | **blind** | **blind** | **no** |
+| `INTERSECTION_RADIUS` | **partially covered** — it surfaces only through the red-light run window: at 14 / 15 m exactly **2** goldens move (`ts_cross_signalled_red_light`: `final_step` 34 → 20, `final_z` −7.85 → −13.71; `ts_red_light_axis_disagreement`: `final_step` 30 → 20). A change that does not shift *when* the ego runs a red light stays invisible. | same | **no** — it was listed as blind; re-measured 2026-10-24 while fixing the junction geometry |
 | `ROUNDABOUT_RADIUS` | **blind** | **blind** | **no** |
 | `NPC_SPEED` | **blind** | **blind** | **no** |
 | `ROAD_HALF_WIDTH` | **caught** — the golden's `road_rules` block carries the TS side's copy and the Python side compares it item by item | **caught** (same block) | **no** (it did not exist before the `road_rules` block) |
@@ -531,6 +531,36 @@ recomputed golden against the committed file).
 | **traffic-light phase duration** (`TrafficLight.cycle_duration` / `PYTHON_SIM.LIGHT_CYCLE_SECONDS`) | **partially covered** — caught when the first flip lands inside the *sampled* window (≤ 25.0 s); a drift of 30 → 26 s is **not** caught | same | **no** (was fully blind) |
 | **a scene's own light schedule** (the start phase + the cycle length) | **caught** — the golden's `scene_light` block carries the TS side's copy and the Python side compares it item by item | **caught** (same block) | **no** (it did not exist before the `scene_light` block) |
 | **the browser's Rapier path** (`purePursuit.ts` + `tick.ts` + `RapierWorld.ts`) | **not comparable** — it is a *physics* path, not the hand-rolled kinematics this contract compares | **not comparable** (same) | **no** — this gap is what let the Pure Pursuit alpha sign bug survive in the browser while the training sim was fixed (2026-10-22) |
+
+> **The product's junction radius is a different quantity from the training sim's box**
+> (measured 2026-10-24, while fixing the cross-scene collision).
+> The browser sizes every junction box from the lane model it actually has:
+> **the crossing road's half-width + a clearance**, where the clearance is the
+> longest vehicle's half-length — because the stop rule acts on the vehicle's
+> *centre*, so a queued vehicle's nose may legitimately overhang by half a
+> vehicle. The training sim has **no lane model** (its road is
+> `ROAD_HALF_WIDTH = 3.5` wide and its NPCs sit at ±3.5 m), so its 8 m box
+> already contains the whole carriageway and the overhang cannot happen
+> there. The two numbers are therefore allowed to differ: the contract
+> compares the **training sim's** box, and the browser's per-scene radii are
+> the product's own geometry. Changing the training sim's box to 14 m was
+> measured and rejected — it moves 10 training-sim reward baselines and
+> pushes the `red_light_axis_disagreement` vector off its 10-step sample grid.
+
+> **The product's junction radius is a different quantity from the training sim's box**
+> (measured 2026-10-24, while fixing the cross-scene collision).
+> The browser sizes every junction box from the lane model it actually has:
+> **the crossing road's half-width + a clearance**, where the clearance is the
+> longest vehicle's half-length — because the stop rule acts on the vehicle's
+> *centre*, so a queued vehicle's nose may legitimately overhang by half a
+> vehicle. The training sim has **no lane model** (its road is
+> `ROAD_HALF_WIDTH = 3.5` wide and its NPCs sit at ±3.5 m), so its 8 m box
+> already contains the whole carriageway and the overhang cannot happen
+> there. The two numbers are therefore allowed to differ: the contract
+> compares the **training sim's** box, and the browser's per-scene radii are
+> the product's own geometry. Changing the training sim's box to 14 m was
+> measured and rejected — it moves 10 training-sim reward baselines and
+> pushes the `red_light_axis_disagreement` vector off its 10-step sample grid.
 
 ### The browser's Rapier path — covered by a different mechanism, and how that failed once
 
