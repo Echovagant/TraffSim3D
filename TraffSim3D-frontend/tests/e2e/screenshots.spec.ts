@@ -3,12 +3,7 @@
  * in a single test for fast review.
  */
 import { test } from '@playwright/test'
-import {
-  waitForSceneReady,
-  switchScene,
-  expectSceneScreenshot,
-  pauseSimulation,
-} from './helpers/wait'
+import { waitForSceneReady, expectSceneScreenshot } from './helpers/wait'
 import { freezeScene } from './helpers/freezeScene'
 
 test('batch: all built-in scenes in one run', async ({ page }) => {
@@ -19,26 +14,17 @@ test('batch: all built-in scenes in one run', async ({ page }) => {
   test.setTimeout(180_000)
   for (const kind of ['cross', 't', 'loop', 'elevated', 'corridor'] as const) {
     await waitForSceneReady(page)
-    // The loop and the elevated scene changed — their junction boxes grew,
-    // because the rule's clearance now applies to EVERY junction (the
-    // corners and the ramp end included). Their captures are therefore
-    // **frozen** and re-recorded: a live frame drifts by ~1 % between runs
-    // (the vehicles move), which is above the 0.5 % tolerance.
+    // Every scene is captured **frozen** — the convention
+    // `helpers/wait.ts` prescribes for every scene screenshot. A live
+    // frame drifts by ~1 % between runs (the vehicles move), which is
+    // above the 0.5 % tolerance; the cross and the T junction used to
+    // be captured live and were therefore a latent flake (the helper
+    // records one such failure: "failed once at ratio 0.01, then passed
+    // twice").
     //
-    // The corridor keeps the pause it always had; the cross and the T
-    // junction are untouched.
-    if (kind === 'loop' || kind === 'elevated') {
-      await freezeScene(page, kind)
-    } else {
-      await switchScene(page, kind)
-      // The corridor's junction box grew (6 m -> 11.5 m: the box has to
-      // contain the crossing carriageway), so its stop lines and its
-      // vehicles' start positions moved. Its capture is **frozen** — the
-      // convention `helpers/wait.ts` prescribes for every scene screenshot
-      // — because a live frame drifts by ~1 % between runs, which is above
-      // the 0.5 % tolerance.
-      if (kind === 'corridor') await pauseSimulation(page)
-    }
+    // Freezing rebuilds the scene, so the captured frame is the scene as
+    // it was **authored** — the same frame on every run.
+    await freezeScene(page, kind)
     await expectSceneScreenshot(page, `scene-${kind}.png`)
   }
 })

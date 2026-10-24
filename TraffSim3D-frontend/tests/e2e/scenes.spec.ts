@@ -5,23 +5,25 @@
  * The 'elevated' scene (高架桥) is covered here too.
  */
 import { test } from '@playwright/test'
-import {
-  waitForSceneReady,
-  switchScene,
-  expectSceneScreenshot,
-  pauseSimulation,
-} from './helpers/wait'
+import { waitForSceneReady, expectSceneScreenshot } from './helpers/wait'
 import { freezeScene } from './helpers/freezeScene'
 
 test.describe('Scene switch screenshots', () => {
   test('cross intersection scene', async ({ page }) => {
     await waitForSceneReady(page)
+    // Frozen, like every other scene capture: a live frame drifts by ~1 %
+    // between runs (the vehicles move), which is above the 0.5 % tolerance.
+    // The cross scene used to be captured live and was therefore a latent
+    // flake — `helpers/wait.ts` records one such failure ("failed once at
+    // ratio 0.01, then passed twice"). The freeze is the convention the
+    // helper prescribes for every scene screenshot.
+    await freezeScene(page, 'cross')
     await expectSceneScreenshot(page, 'cross-scene.png')
   })
 
   test('T junction scene', async ({ page }) => {
     await waitForSceneReady(page)
-    await switchScene(page, 't')
+    await freezeScene(page, 't')
     await expectSceneScreenshot(page, 't-scene.png')
   })
 
@@ -47,14 +49,13 @@ test.describe('Scene switch screenshots', () => {
 
   test('multi-intersection corridor scene', async ({ page }) => {
     await waitForSceneReady(page)
-    await switchScene(page, 'corridor')
     // The corridor's junction box grew (6 m -> 11.5 m: the box has to
     // contain the crossing carriageway), so its stop lines and its
     // vehicles' start positions moved. The capture is **frozen** — the
     // convention `helpers/wait.ts` prescribes for every scene screenshot
     // — because a live frame drifts by ~1 % between runs (the vehicles
     // move), which is above the 0.5 % tolerance.
-    await pauseSimulation(page)
+    await freezeScene(page, 'corridor')
     await expectSceneScreenshot(page, 'corridor-scene.png')
   })
 })
