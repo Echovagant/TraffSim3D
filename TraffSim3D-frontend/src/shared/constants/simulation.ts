@@ -196,9 +196,11 @@ export const STOP_LINE_DISTANCE = 5.0
  * the crossing carriageway. The cross scene's box is therefore
  * 10.5 + 4.5 = 15 m.
  *
- * This is the **product's** junction geometry (the per-scene
- * `intersectionRadius` in `defaultScene.ts`). It is NOT the training
- * sim's box: `app/apps/rl/sim_core.py` `INTERSECTION_RADIUS = 8.0` is
+ * This is the **product's** junction geometry (the per-intersection
+ * `intersectionRadius`, sized by the rule in
+ * `@domain/services/junctionRadius` — the built-in scenes and the
+ * imported maps both go through it). It is NOT the training sim's box:
+ * `app/apps/rl/sim_core.py` `INTERSECTION_RADIUS = 8.0` is
  * the contract's constant and mirrors `PYTHON_SIM.INTERSECTION_RADIUS` —
  * the training sim has no lane model, so its 8 m box already contains its
  * whole (7 m wide) carriageway and needs no clearance.
@@ -453,8 +455,9 @@ export const PYTHON_SIM = {
    * an 8 m box already contains the whole carriageway. The defect this
    * number was raised for — a queued vehicle's nose overhanging the
    * crossing road's outer lane — is a property of the **product's** lane
-   * model, and it is fixed there (`defaultScene.ts` → the per-scene
-   * `intersectionRadius`, sized by `INTERSECTION_CLEARANCE_M`).
+   * model, and it is fixed there (`@domain/services/junctionRadius` →
+   * the per-intersection `intersectionRadius`, sized by
+   * `INTERSECTION_CLEARANCE_M`).
    *
    * The contract compares the two copies of THIS number, so they stay in
    * lockstep; the product's per-scene radii are a different quantity and

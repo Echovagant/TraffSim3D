@@ -11,8 +11,10 @@
 
 import { describe, it, expect } from 'vitest'
 import { spawnVehicle } from '@application/services/spawnVehicle'
+import { buildCrossIntersectionNetwork } from '@application/services/defaultScene'
 import { tick, type TickContext } from '@application/services/tick'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
+import { INTERSECTION_CLEARANCE_M, ROAD_LANE_WIDTH } from '@shared/constants/simulation'
 import { deriveSpawnPoints, normalizeOsmPayload, spawnImportedVehicles } from './osmNetworkAdapter'
 
 /** Minimal tick context — no physics, no controllers: the hand-rolled
@@ -126,6 +128,8 @@ describe('normalizeOsmPayload — record keys come from the entity ids', () => {
     expect(stats.lights).toBe(1)
     expect(stats.spawnPoints).toBe(1)
     expect(stats.dropped).toBe(0)
+    // The payload's radius (8) disagrees with the derived one (11.5).
+    expect(stats.radiusMismatches).toBe(1)
   })
 })
 
@@ -361,6 +365,80 @@ describe('the imported map is a simulation input (not only a rendering)', () => 
       i.connectedRoads.includes(road.id),
     )
     expect(inter).toBeDefined()
-    expect(inter!.intersectionRadius).toBe(8)
+    // The radius is **derived** from the lane model, not read from the
+    // payload: the widest connected road (w-201, 4 lanes) has a 7 m
+    // half-width, plus the 4.5 m nose-overhang clearance -> 11.5 m.
+    // The payload still says 8 (the old hard-coded value) — the payload
+    // is a cross-check, not the source of truth.
+    expect(inter!.intersectionRadius).toBe(11.5)
+  })
+})
+
+describe('normalizeOsmPayload — the junction radius is derived, not taken from the payload', () => {
+  it("sizes the box from the widest connected road's half-width plus the clearance", () => {
+    const { network } = normalizeOsmPayload(BACKEND_PAYLOAD)
+    const inter = network.intersection('i-osm-0')!
+    // w-201 has 4 lanes (half-width 7 m), w-202 has 2 (3.5 m) -> the
+    // widest decides.
+    expect(inter.intersectionRadius).toBe((4 * ROAD_LANE_WIDTH) / 2 + INTERSECTION_CLEARANCE_M)
+  })
+
+  it('ignores a stale radius in the payload', () => {
+    // The payload claims 8 m (what the old parser hard-coded). The
+    // frontend derives 11.5 m and reports the disagreement.
+    const { network, stats } = normalizeOsmPayload(BACKEND_PAYLOAD)
+    expect(network.intersection('i-osm-0')!.intersectionRadius).toBe(11.5)
+    expect(stats.radiusMismatches).toBe(1)
+  })
+
+  it('reports no mismatch when the payload agrees with the derived radius', () => {
+    const { stats } = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      intersections: [{ ...BACKEND_PAYLOAD.intersections[0]!, intersectionRadius: 11.5 }],
+    })
+    expect(stats.radiusMismatches).toBe(0)
+  })
+
+  it('derives the radius even when the payload carries none', () => {
+    const { intersectionRadius: _omitted, ...withoutRadius } = BACKEND_PAYLOAD.intersections[0]!
+    const { network, stats } = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      intersections: [withoutRadius],
+    })
+    expect(network.intersection('i-osm-0')!.intersectionRadius).toBe(11.5)
+    // No radius in the payload is not a disagreement — there was nothing
+    // to disagree with.
+    expect(stats.radiusMismatches).toBe(0)
+  })
+
+  it('falls back to the default lane count for a junction with no known road', () => {
+    const { network } = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      intersections: [
+        {
+          ...BACKEND_PAYLOAD.intersections[0]!,
+          connectedRoads: ['w-does-not-exist'],
+        },
+      ],
+    })
+    // The 2-lane default road (the same lane count the adapter assumes
+    // for a road without one) -> 3.5 m half-width + 4.5 m clearance.
+    expect(network.intersection('i-osm-0')!.intersectionRadius).toBe(
+      (2 * ROAD_LANE_WIDTH) / 2 + INTERSECTION_CLEARANCE_M,
+    )
+  })
+
+  it('gives an imported junction the same radius the built-in scenes give it', () => {
+    // The whole point of the derivation: an imported junction and a
+    // built-in one are sized by the SAME rule, so the imported map's
+    // stop lines and the built-in scenes' cannot drift apart.
+    const sixLanes = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      roads: [{ ...BACKEND_PAYLOAD.roads[0]!, laneCount: 6 }, BACKEND_PAYLOAD.roads[1]!],
+    }).network.intersection('i-osm-0')!
+    const cross = buildCrossIntersectionNetwork()
+    const builtIn = Object.values(cross.intersections)[0]!
+    expect(sixLanes.intersectionRadius).toBe(builtIn.intersectionRadius)
+    expect(sixLanes.intersectionRadius).toBe(15)
   })
 })

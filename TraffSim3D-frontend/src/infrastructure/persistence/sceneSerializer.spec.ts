@@ -7,6 +7,7 @@ import {
   SCENE_SCHEMA_VERSION,
 } from '@infrastructure/persistence'
 import { buildTestNetwork } from '@__fixtures__/testNetwork'
+import { stopLineSOnRoad } from '@domain/services/laneGeometry'
 
 describe('sceneSerializer round-trip', () => {
   it('cloneScene produces a deep-independent copy', () => {
@@ -107,6 +108,51 @@ describe('sceneSerializer round-trip', () => {
       // added as required at the type level, so code sites that
       // construct Intersection must always set it (the testNetwork
       // fixture / defaultScene factories do).
+    }
+  })
+
+  it('derives the missing junction radius of a v4 scene instead of leaving it undefined', () => {
+    // A v4 scene carries no `intersectionRadius`. It used to load as
+    // `undefined`, and the stop line is computed from that value
+    // (`Math.max(0, undefined)` → NaN) — so the traffic-light constraint
+    // compared against NaN and **never fired**: cars in an old scene ran
+    // red lights. The radius is now derived from the lane model of the
+    // roads the junction connects.
+    const v4Scene = {
+      schemaVersion: 4,
+      savedAtMs: 1700000000000,
+      network: {
+        roads: [
+          {
+            id: 'r-old',
+            startNode: { x: -30, y: 0, z: 0 },
+            endNode: { x: 30, y: 0, z: 0 },
+            laneCount: 2,
+            speedLimit: 20,
+          },
+        ],
+        intersections: [
+          {
+            id: 'i-old',
+            position: { x: 0, y: 0, z: 0 },
+            connectedRoads: ['r-old'],
+            trafficLights: [],
+          },
+        ],
+        vehicles: [],
+      },
+    }
+    const result = hydrateNetwork(v4Scene)
+    expect(result.ok).toBe(true)
+    if (result.ok && result.network) {
+      const intersection = result.network.intersections['i-old']!
+      // 2 lanes → half-width 3.5 m, plus the 4.5 m nose-overhang
+      // clearance → 8 m.
+      expect(intersection.intersectionRadius).toBe(8)
+      // The symptom the missing radius caused: the stop line has to be
+      // a real number, or the traffic light never stops anyone.
+      const stopS = stopLineSOnRoad(result.network.roads['r-old']!, intersection, 0)
+      expect(Number.isFinite(stopS)).toBe(true)
     }
   })
 })

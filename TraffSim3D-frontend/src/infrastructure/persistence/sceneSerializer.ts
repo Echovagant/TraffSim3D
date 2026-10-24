@@ -6,6 +6,7 @@ import type { Intersection } from '@domain/entities/Intersection'
 import type { Road } from '@domain/entities/Road'
 import { LightPhase } from '@domain/value-objects/Phase'
 import { createRoadNetwork } from '@domain/entities/RoadNetwork'
+import { junctionRadiusForRoads } from '@domain/services/junctionRadius'
 
 // Bumped to v3: Vehicle gained `enteredIntersectionAt`
 // (simulation-time when the car first crossed into an intersection box;
@@ -18,7 +19,8 @@ import { createRoadNetwork } from '@domain/entities/RoadNetwork'
 // (polyline support). Intersection gained `intersectionRadius: number`.
 // v5 scenes are direct supersets of v4 — old v4 scenes load transparently
 // with `waypoints === undefined` (geometry helpers fall back to straight
-// 2-point roads) and `intersectionRadius` defaults to 8 in code.
+// 2-point roads) and their missing `intersectionRadius` is derived from
+// the lane model on load (see `hydrateNetwork`).
 // Bumped to v6: Vehicle gained `desiredStatus: VehicleStatus`
 // (intent-based state for the bug-2 hysteresis). RoadNetwork gained
 // `spawnPoints: Record<string, SpawnPoint>`. Old v5 scenes load with
@@ -163,8 +165,11 @@ const migrateScene = (d: unknown): SerializedScene | null => {
     case 4:
       // v4 → v5. Road gains optional waypoints, Intersection
       // gains intersectionRadius. Old v4 scenes load as-is — geometry
-      // helpers fall back to straight 2-point roads, intersection box
-      // uses the per-intersection radius (default 8 in code).
+      // helpers fall back to straight 2-point roads, and the junction
+      // box's radius is derived from the lane model on load (a v4 scene
+      // has no radius of its own; it used to load as `undefined`, which
+      // made the stop line NaN and the traffic light never stopped
+      // anyone).
       return { ...obj, schemaVersion: SCENE_SCHEMA_VERSION } as SerializedScene
     case 5:
       // v5 → v6. Vehicle gains desiredStatus (defaults to
@@ -259,7 +264,28 @@ export const hydrateNetwork = (raw: unknown): HydrationResult => {
     }
     net.roads[r.id] = r
   }
-  for (const i of n.intersections as Array<SerializedIntersection>) net.intersections[i.id] = i
+  for (const i of n.intersections as Array<SerializedIntersection>) {
+    // A scene saved before v5 carries no `intersectionRadius` at all.
+    // It used to load as `undefined`, and the stop line is computed from
+    // that value (`Math.max(0, undefined)` → NaN), so the traffic-light
+    // constraint compared against NaN and **never fired** — cars in an
+    // old scene ran red lights.
+    //
+    // The radius is now derived from the lane model of the roads the
+    // junction connects — the same rule the built-in scenes and the
+    // imported maps use (`@domain/services/junctionRadius`). `queueable`
+    // is true: the front-end paints a stop line on every junction's box
+    // edge and the cross-road yield rule can stop a vehicle in front of
+    // any of them, lit or not.
+    const raw = i as unknown as Record<string, unknown>
+    if (typeof raw.intersectionRadius !== 'number' || !Number.isFinite(raw.intersectionRadius)) {
+      const laneCounts = i.connectedRoads
+        .map((roadId) => net.roads[roadId]?.laneCount)
+        .filter((count): count is number => typeof count === 'number')
+      raw.intersectionRadius = junctionRadiusForRoads(laneCounts, true)
+    }
+    net.intersections[i.id] = i
+  }
   for (const v of n.vehicles as Array<Vehicle>) {
     // v5 → v6 migration. Old scenes don't have desiredStatus;
     // default it to the vehicle's current status so the hysteresis

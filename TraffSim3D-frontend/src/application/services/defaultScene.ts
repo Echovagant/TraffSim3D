@@ -12,27 +12,16 @@ import {
   roadLength,
   stopLineSOnRoad,
 } from '@domain/services/laneGeometry'
-import {
-  DEFAULT_CYCLE_SECONDS,
-  INTERSECTION_CLEARANCE_M,
-  ROAD_LANE_WIDTH,
-} from '@shared/constants/simulation'
+import { cornerRadius, junctionRadius } from '@domain/services/junctionRadius'
+import { DEFAULT_CYCLE_SECONDS } from '@shared/constants/simulation'
 
 const NS_GREEN = DEFAULT_CYCLE_SECONDS * (30 / 63) // ~30s
 const EW_GREEN = NS_GREEN
 
-/**
- * The radius of a junction box that has to hold the carriageway of a road
- * with `laneCount` lanes — plus the clearance that keeps a queued vehicle's
- * nose out of it (see `INTERSECTION_CLEARANCE_M`).
- *
- * A junction WITHOUT a traffic light cannot hold a queue (there is no stop
- * line to queue at), so it only needs the containment part.
- */
-const junctionRadius = (laneCount: number, signalised: boolean): number => {
-  const halfWidth = (laneCount * ROAD_LANE_WIDTH) / 2
-  return signalised ? halfWidth + INTERSECTION_CLEARANCE_M : halfWidth
-}
+// The junction-box radius rule lives in `@domain/services/junctionRadius`
+// — the ONE place that defines it. The imported maps go through the same
+// rule (`infrastructure/api/osmNetworkAdapter.ts`), so a built-in scene
+// and an imported junction are sized by the same geometry.
 
 /**
  * The arc length a default vehicle starts at: `margin` metres upstream of
@@ -413,8 +402,9 @@ export const buildRectangularLoopNetwork = (): RoadNetwork => {
       connectedRoads: [`r-loop-${i}`, `r-loop-${(i + 3) % 4}`],
       // 2 lanes x 3.5 m = 7 m wide -> half-width 3.5 m. The corner has no
       // traffic light, so no queue can form and no nose can overhang: the
-      // box only has to hold the carriageway, and 4 m does that.
-      intersectionRadius: 4,
+      // box only has to hold the carriageway and the car **in the turn**
+      // (see `cornerRadius` -> `CORNER_TURN_ENVELOPE_M`): 3.5 + 0.5 = 4 m.
+      intersectionRadius: cornerRadius(2),
     }
     net.intersections[id] = inter
   }

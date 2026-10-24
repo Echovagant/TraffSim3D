@@ -16,9 +16,11 @@
 // `sp.occupiedBy = nextId`; tick clears it once the vehicle has
 // driven past SPAWN_POINT_RELEASE_DISTANCE along the lane.
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
+import type { Intersection } from '@domain/entities/Intersection'
+import type { Road } from '@domain/entities/Road'
 import type { Vehicle, VehicleType } from '@domain/entities/Vehicle'
 import { LaneId } from '@domain/value-objects/LaneId'
-import { lanePoint, roadLength, roadStopLines } from '@domain/services/laneGeometry'
+import { intersectionSRange, lanePoint, roadLength } from '@domain/services/laneGeometry'
 
 const DEFAULT_COLORS: Record<VehicleType, string> = {
   car: '#3a86ff',
@@ -100,6 +102,30 @@ const isSpotFree = (
 }
 
 /**
+ * The arc-length ranges of every junction box on `road` — the stretches a
+ * spawn position has to stay out of.
+ *
+ * A box is centred on the junction's projection onto the road and reaches
+ * `intersectionRadius` in both directions (`laneGeometry.ts` →
+ * `intersectionSRange`), so the range is exactly the interval the traffic
+ * logic calls "inside the intersection" (`inIntersectionBox`).
+ *
+ * A junction that does not list this road in `connectedRoads` is not on
+ * it, so it contributes no range — the same filter the traffic logic uses.
+ */
+const junctionBoxesOnRoad = (
+  road: Road,
+  intersections: readonly Intersection[],
+): ReadonlyArray<readonly [number, number]> => {
+  const boxes: Array<readonly [number, number]> = []
+  for (const inter of intersections) {
+    if (!inter.connectedRoads.includes(road.id)) continue
+    boxes.push(intersectionSRange(road, inter.intersectionRadius, inter))
+  }
+  return boxes
+}
+
+/**
  * Enumerate all (road, lane) pairs on the network and return the ones
  * that have a free window of at least `minGap` along the lane. A lane
  * is "full" if every position is within `minGap` of an existing
@@ -121,20 +147,23 @@ const findFreeLanes = (network: RoadNetwork, minGap: number): SpawnCandidate[] =
     for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
       const len = roadLength(road)
       if (len < minGap * 2) continue // road too short for the gap
-      // Sample positions: avoid the intersection area.
+      // Sample positions: avoid the junction boxes.
       //
       // The junction is **not** at the road's midpoint — on an imported
-      // OSM map it sits at a way endpoint, and the stop line follows the
+      // OSM map it sits at a way endpoint, and the box follows the
       // projection of that junction onto the road. The same source the
       // tick uses to place the stop line is used here, so a vehicle is
       // never spawned inside the area the light governs.
       //
-      // `roadStopLines` returns the arc length of every stop line on this
-      // road; a road without a junction yields an empty list, and the
-      // midpoint is not used as a stand-in (there is no intersection to
-      // avoid in that case).
-      const stopLines = roadStopLines(road, intersections)
-      const stopZone = 5 // matches STOP_LINE_DISTANCE
+      // The box is excluded **as a whole**, not as a zone around the
+      // stop line: the stop line sits on the box's edge, so the box
+      // reaches `radius` past it. The old hard-coded 5 m zone around the
+      // line therefore did NOT keep a car out of the junction — a car
+      // 5 m past the line was still inside the box, and the occupancy
+      // rule would treat it as traffic that had already entered the
+      // junction. With the lane-model radii (11.5 m and 15 m) the box is
+      // deeper still, so the zone has to be the box itself.
+      const junctionBoxes = junctionBoxesOnRoad(road, intersections)
       const margin = 1
       const minS = margin
       const maxS = len - margin
@@ -144,8 +173,8 @@ const findFreeLanes = (network: RoadNetwork, minGap: number): SpawnCandidate[] =
       let foundInLane: SpawnCandidate | null = null
       for (let t = 0; t < trials; t++) {
         const s = minS + Math.random() * (maxS - minS)
-        // Avoid the intersection area (around each stop line).
-        if (stopLines.some((stopS) => Math.abs(s - stopS) < stopZone)) continue
+        // Avoid the junction area (the whole box).
+        if (junctionBoxes.some(([lo, hi]) => s >= lo && s <= hi)) continue
         const c: SpawnCandidate = { roadId: road.id, laneIndex, s }
         if (isSpotFree(network, c, minGap)) {
           foundInLane = c

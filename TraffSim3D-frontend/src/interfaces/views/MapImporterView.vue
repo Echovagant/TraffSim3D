@@ -174,6 +174,7 @@ import {
   type OsmBBox,
 } from '@infrastructure/api'
 import { createRoadNetworkFrom } from '@domain/entities/RoadNetwork'
+import { junctionRadius } from '@domain/services/junctionRadius'
 import type { Road } from '@domain/entities/Road'
 import type { Intersection } from '@domain/entities/Intersection'
 
@@ -515,7 +516,10 @@ const loadFixture = (): void => {
         },
       ],
       connectedRoads: ['w-1', 'w-2', 'w-3'],
-      intersectionRadius: 8,
+      // The example's roads are 4-lane (half-width 7 m), and this junction
+      // has a traffic light, so the rule gives 7 + 4.5 = 11.5 m — the same
+      // number the built-in scenes and the imported maps derive.
+      intersectionRadius: junctionRadius(4, true),
     },
   }
   const network = createRoadNetworkFrom({

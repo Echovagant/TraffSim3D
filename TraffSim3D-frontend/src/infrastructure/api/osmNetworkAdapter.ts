@@ -49,6 +49,23 @@
 // from the roads, a missing origin means "no geographic anchor" (the
 // Cesium layer then falls back to its default origin).
 //
+// ## The junction box
+//
+// The payload carries an `intersectionRadius` per intersection, and the
+// adapter **does not trust it**: the radius is derived from the roads the
+// junction connects (`@domain/services/junctionRadius` — the same rule
+// the built-in scenes use). The payload's value is kept as a cross-check
+// and reported in `stats.radiusMismatches`.
+//
+// The reason is that the two numbers have to be the same number: the
+// backend places the spawn points and sizes the junction boxes against
+// it, and the frontend puts the stop line on the box's edge. Two
+// independent answers would put the car in one place and the stop line in
+// another. The backend derives the same number from the same lane model
+// (`app/apps/maps/osm_parser.py` → `junction_radius`), and a
+// cross-check over the real Shenzhen OSM extract (7991 junctions)
+// proved the two agree on every one of them.
+//
 // ## Layering
 //
 // `spawnImportedVehicles` calls the existing `spawnVehicle` use case
@@ -68,6 +85,7 @@ import {
 import type { SpawnPoint } from '@domain/entities/SpawnPoint'
 import type { TrafficLight } from '@domain/entities/TrafficLight'
 import type { Vehicle, VehicleStatus, VehicleType } from '@domain/entities/Vehicle'
+import { junctionRadiusForRoads } from '@domain/services/junctionRadius'
 import { LaneId } from '@domain/value-objects/LaneId'
 import { LightPhase } from '@domain/value-objects/Phase'
 import type { Position } from '@domain/value-objects/Position'
@@ -89,13 +107,20 @@ export const OSM_METERS_PER_DEGREE_LAT = 111000
 
 const DEFAULT_LANE_COUNT = 2
 const DEFAULT_SPEED_LIMIT = 13.89
-const DEFAULT_INTERSECTION_RADIUS = 8
 const DEFAULT_LIGHT_CYCLE_SECONDS = 63
 const DEFAULT_LIGHT_PHASE_REMAINING = 30
 const DEFAULT_AXIS: TrafficLight['axis'] = 'ns'
 const VEHICLE_TYPES: readonly VehicleType[] = ['car', 'truck', 'bus']
 const VEHICLE_STATUSES: readonly VehicleStatus[] = ['driving', 'waiting', 'crashed']
 const KNOWN_PHASES: ReadonlySet<string> = new Set<string>(Object.values(LightPhase))
+
+/**
+ * How far two radii may differ before the payload's value counts as a
+ * disagreement with the derived one (metres). The two sides compute the
+ * same number from the same lane model, so this only catches a real
+ * divergence, not a rounding artefact.
+ */
+const RADIUS_EPSILON = 1e-6
 
 /** The raw shape the backend answers with (all fields optional on purpose). */
 export interface OsmNetworkPayload {
@@ -118,6 +143,18 @@ export interface OsmPayloadStats {
   dropped: number
   /** Spawn points the frontend derived because the payload had none. */
   derivedSpawnPoints: number
+  /**
+   * Intersections whose **payload** radius disagreed with the radius the
+   * frontend derived from the same roads' lane counts.
+   *
+   * The frontend derives the radius itself (the rule lives in
+   * `@domain/services/junctionRadius`), so the payload's value is a
+   * cross-check: a non-zero count means the backend and the frontend
+   * disagree about the junction geometry — the stop line and the
+   * intersection-occupancy rule would then be sized differently on the
+   * two sides.
+   */
+  radiusMismatches: number
 }
 
 export interface NormalizedOsmNetwork {
@@ -234,7 +271,32 @@ const normalizeTrafficLight = (raw: unknown, fallbackId: string): TrafficLight |
   }
 }
 
-const normalizeIntersection = (raw: unknown, index: number): Intersection | null => {
+/**
+ * One normalized intersection plus what the payload claimed about it.
+ */
+interface NormalizedIntersection {
+  intersection: Intersection
+  /** The radius the payload carried, or `null` when it carried none. */
+  payloadRadius: number | null
+  /** `true` when the payload's radius differs from the derived one. */
+  radiusMismatch: boolean
+}
+
+/**
+ * Normalize one intersection of the payload.
+ *
+ * The radius is **derived**, not read: the payload's `intersectionRadius`
+ * is a cross-check, not the source of truth. The rule is the same one the
+ * built-in scenes use (`@domain/services/junctionRadius`), so an imported
+ * junction and a built-in one are sized by the same geometry — the
+ * backend derives the same number from the same lane model
+ * (`app/apps/maps/osm_parser.py` → `junction_radius`), and the cross-check
+ * script proves the two agree on the real Shenzhen extract.
+ */
+const normalizeIntersection = (
+  raw: unknown,
+  laneCountOf: (roadId: string) => number | undefined,
+): NormalizedIntersection | null => {
   if (!isRecord(raw)) return null
   const id = readId(raw.id)
   if (id === null) return null
@@ -245,12 +307,38 @@ const normalizeIntersection = (raw: unknown, index: number): Intersection | null
   const connectedRoads = Array.isArray(raw.connectedRoads)
     ? raw.connectedRoads.filter((roadId): roadId is string => typeof roadId === 'string')
     : []
+  // The lane model of the roads this junction connects — the widest one
+  // decides the half-width of the box.
+  const laneCounts = connectedRoads
+    .map((roadId) => laneCountOf(roadId))
+    .filter((count): count is number => count !== undefined)
+  // Every imported junction can hold a queue: the frontend paints a stop
+  // line on **every** junction's box edge (`roadStopLines` does not look
+  // at the traffic lights), and the cross-road yield rule
+  // (`tick.ts` → `applyCrossRoadYield`) can stop a vehicle in front of any
+  // of them, lit or not. The parser's own traffic lights are no proxy for
+  // that — it only attaches one to the OSM nodes tagged
+  // `highway=traffic_signals` (51 of the 7991 junctions in the Shenzhen
+  // extract).
+  //
+  // A junction whose roads the payload did not carry falls back to the
+  // default lane count — the same 2-lane road the old hard-coded 8 m
+  // default assumed, but derived by the rule instead of asserted.
+  const radius = junctionRadiusForRoads(
+    laneCounts.length > 0 ? laneCounts : [DEFAULT_LANE_COUNT],
+    true,
+  )
+  const payloadRadius = finiteNumber(raw.intersectionRadius)
   return {
-    id,
-    position: toAppFrame(readPosition(raw.position)),
-    trafficLights,
-    connectedRoads,
-    intersectionRadius: num(raw.intersectionRadius, DEFAULT_INTERSECTION_RADIUS),
+    intersection: {
+      id,
+      position: toAppFrame(readPosition(raw.position)),
+      trafficLights,
+      connectedRoads,
+      intersectionRadius: radius,
+    },
+    payloadRadius,
+    radiusMismatch: payloadRadius !== null && Math.abs(payloadRadius - radius) > RADIUS_EPSILON,
   }
 }
 
@@ -342,13 +430,18 @@ export const normalizeOsmPayload = (payload: unknown): NormalizedOsmNetwork => {
   // ---- intersections ----
   const intersections: Record<string, Intersection> = {}
   const rawIntersections = Array.isArray(source.intersections) ? source.intersections : []
-  for (const [index, raw] of rawIntersections.entries()) {
-    const intersection = normalizeIntersection(raw, index)
-    if (!intersection) {
+  let radiusMismatches = 0
+  for (const raw of rawIntersections) {
+    const normalized = normalizeIntersection(raw, (roadId) => roads[roadId]?.laneCount)
+    if (!normalized) {
       dropped += 1
       continue
     }
-    intersections[intersection.id] = intersection
+    // The payload's radius is a cross-check only (the frontend derives the
+    // radius from the lane model). A mismatch means the backend and the
+    // frontend disagree about the junction geometry — worth reporting.
+    if (normalized.radiusMismatch) radiusMismatches += 1
+    intersections[normalized.intersection.id] = normalized.intersection
   }
 
   // ---- vehicles ----
@@ -409,6 +502,7 @@ export const normalizeOsmPayload = (payload: unknown): NormalizedOsmNetwork => {
       spawnPoints: Object.keys(network.spawnPoints).length,
       dropped,
       derivedSpawnPoints,
+      radiusMismatches,
     },
   }
 }
