@@ -54,6 +54,7 @@ const {
   buildRectangularLoopNetwork,
   buildElevatedScene,
   buildCorridorScene,
+  buildGridNetwork,
 } = await import('./defaultScene')
 const { stopLineSOnRoad, laneForwardSign, roadLength } = await import(
   '@domain/services/laneGeometry'
@@ -76,6 +77,7 @@ const SCENES: Array<{ name: string; build: () => RoadNetwork }> = [
   { name: 'loop', build: buildRectangularLoopNetwork },
   { name: 'elevated', build: buildElevatedScene },
   { name: 'corridor', build: buildCorridorScene },
+  { name: 'grid', build: buildGridNetwork },
 ]
 
 /** A junction's half-width requirement: the widest road it connects. */

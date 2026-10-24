@@ -10,6 +10,7 @@ import {
   buildRectangularLoopNetwork,
   buildElevatedScene,
   buildCorridorScene,
+  buildGridNetwork,
 } from '@application/services/defaultScene'
 import { tick, type SignalContext } from '@application/services/tick'
 import {
@@ -69,12 +70,13 @@ export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const
  * Scene-selector enum. The toolbar dropdown binds to this.
  * 'elevated' (高架桥 — Y-axis ramps + level tagging).
  * 'corridor' (多路口走廊 — 2-intersection corridor demo).
+ * 'grid' (5×5 网格 — 25 signalised junctions, 40 segments).
  * 'imported' (any OSM/PBF file loaded via MapImporter —
  *   shown in the toolbar as a read-only label with the source file name
  *   instead of the dropdown, since there's no factory to "switch back to").
  * Adding a new scene = add a factory + an entry here.
  */
-export type SceneKind = 'cross' | 't' | 'loop' | 'elevated' | 'corridor' | 'imported'
+export type SceneKind = 'cross' | 't' | 'loop' | 'elevated' | 'corridor' | 'grid' | 'imported'
 
 const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
   switch (kind) {
@@ -88,6 +90,8 @@ const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
       return buildElevatedScene()
     case 'corridor':
       return buildCorridorScene()
+    case 'grid':
+      return buildGridNetwork()
     case 'imported':
       // switchScene should never be called with 'imported'
       // (the toolbar hides the dropdown for imported scenes). If a
@@ -111,6 +115,8 @@ const sceneLabelForKind = (kind: SceneKind): string => {
       return '高架桥'
     case 'corridor':
       return '多路口走廊'
+    case 'grid':
+      return '5×5 网格'
     case 'imported':
       return '已导入'
   }

@@ -7,12 +7,12 @@ import { waitForSceneReady, expectSceneScreenshot } from './helpers/wait'
 import { freezeScene } from './helpers/freezeScene'
 
 test('batch: all built-in scenes in one run', async ({ page }) => {
-  // Five scenes in one test, and each scene now performs a real pixel
+  // Six scenes in one test, and each scene now performs a real pixel
   // comparison rather than just writing a file. At the 30s default this was
   // killed partway through, which left scene-loop / scene-elevated baselines
-  // un-recorded at their old dimensions. 180s covers all five comparisons.
+  // un-recorded at their old dimensions. 180s covers all six comparisons.
   test.setTimeout(180_000)
-  for (const kind of ['cross', 't', 'loop', 'elevated', 'corridor'] as const) {
+  for (const kind of ['cross', 't', 'loop', 'elevated', 'corridor', 'grid'] as const) {
     await waitForSceneReady(page)
     // Every scene is captured **frozen** — the convention
     // `helpers/wait.ts` prescribes for every scene screenshot. A live

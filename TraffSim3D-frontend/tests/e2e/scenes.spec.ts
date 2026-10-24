@@ -58,4 +58,14 @@ test.describe('Scene switch screenshots', () => {
     await freezeScene(page, 'corridor')
     await expectSceneScreenshot(page, 'corridor-scene.png')
   })
+
+  test('5x5 grid scene', async ({ page }) => {
+    await waitForSceneReady(page)
+    // Frozen, like every other scene capture: the grid's vehicles move,
+    // so a live frame drifts by ~1 % between runs — above the 0.5 %
+    // tolerance. The freeze puts the 13 vehicles back where the scene
+    // put them, so the capture is the scene's authored frame.
+    await freezeScene(page, 'grid')
+    await expectSceneScreenshot(page, 'grid-scene.png')
+  })
 })

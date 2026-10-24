@@ -54,6 +54,7 @@
                 <option value="t">T 型路口 (t)</option>
                 <option value="loop">矩形环 (loop)</option>
                 <option value="elevated">高架桥 (elevated)</option>
+                <option value="grid">5×5 网格 (grid)</option>
                 <option v-if="world.currentSceneKind === 'imported'" value="imported" disabled>
                   已导入 ({{ world.currentSceneLabel }})
                 </option>

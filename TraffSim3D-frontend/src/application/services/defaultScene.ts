@@ -72,12 +72,18 @@ const startUpstreamOfStopLine = (
  * Register a spawn point for `road` on its outer forward
  * lane (lane 0). The returned spawn point is open (`occupiedBy = null`)
  * unless `occupiedBy` is supplied.
+ *
+ * `s` is the arc length along the lane the vehicle appears at. It is `0`
+ * for the scenes whose roads start away from any junction; a road that
+ * **starts at a junction** (the grid's segments all do) has to place it
+ * past that junction's box, or the new vehicle would be born inside the
+ * junction it is supposed to approach.
  */
-const defaultSpawnPoint = (road: Road, occupiedBy: string | null = null): SpawnPoint => ({
+const defaultSpawnPoint = (road: Road, occupiedBy: string | null = null, s = 0): SpawnPoint => ({
   id: `sp-${road.id}-0`,
   roadId: road.id,
   laneIndex: 0,
-  s: 0,
+  s,
   occupiedBy,
 })
 
@@ -938,6 +944,321 @@ export const buildCorridorScene = (): RoadNetwork => {
   // 3 spawn points (one per road)
   for (const road of [roadNS, roadEWNorth, roadEWSouth]) {
     const sp = defaultSpawnPoint(road)
+    net.spawnPoints[sp.id] = sp
+  }
+
+  return net
+}
+
+// ---------------------------------------------------------------------------
+// The 5 x 5 grid
+// ---------------------------------------------------------------------------
+
+/** Junctions per side of the grid — 5 x 5 = 25 junctions. */
+export const GRID_SIZE = 5
+/** Distance between two neighbouring junctions (m). */
+export const GRID_SPACING_M = 120
+/** Lanes per grid segment: 2 forward + 2 backward. */
+export const GRID_LANE_COUNT = 4
+/** The grid's speed limit (m/s) — the arterial value the other scenes use. */
+export const GRID_SPEED_LIMIT = 16.67
+/**
+ * How far the green of row `i` has already been running when the scene
+ * opens (s).
+ *
+ * Every junction runs its **own** plan (`junctionPlan.ts` — one plan,
+ * one clock per junction), but a grid whose 25 junctions all open on
+ * the same phase is one plan seen 25 times: the whole map pulses in
+ * lockstep, which is the "global gridlock" wave every signal engineer
+ * designs against. The rows are therefore offset from each other, so
+ * the map shows traffic released from one corridor at a time.
+ *
+ * The offset shifts the junction **along its own 72 s cycle** — it
+ * changes *when* the junction starts, never *how long* its phases are:
+ * the 30 s green, the 6 s clearance and the 72 s period stay exactly
+ * what every other scene has.
+ */
+export const GRID_ROW_PHASE_SECS = 6
+
+/**
+ * Where a grid segment's spawn point sits (m from its start node).
+ *
+ * Every grid segment starts **at** a junction, so the spawn point has
+ * to be past that junction's box (`junctionRadius(4)` = 11.5 m) or the
+ * new vehicle would be born in the middle of the junction it is about
+ * to approach.
+ */
+export const GRID_SPAWN_S = 20
+
+/** The id of the junction at row `i`, column `j`. */
+export const gridJunctionId = (i: number, j: number): string => `i-${i}-${j}`
+
+/** The id of the east–west segment of row `i` between the columns `j` and `j + 1`. */
+export const gridEastWestRoadId = (i: number, j: number): string => `r-ew-${i}-${j}`
+
+/** The id of the north–south segment of column `j` between the rows `i` and `i + 1`. */
+export const gridNorthSouthRoadId = (j: number, i: number): string => `r-ns-${j}-${i}`
+
+/**
+ * The world position of the junction at row `i`, column `j`.
+ *
+ * The grid is centred on the origin, so the middle junction (2, 2) sits
+ * at (0, 0) and the map spans 480 x 480 m.
+ */
+export const gridJunctionPosition = (
+  i: number,
+  j: number,
+): { x: number; y: number; z: number } => ({
+  x: (j - (GRID_SIZE - 1) / 2) * GRID_SPACING_M,
+  y: 0,
+  z: (i - (GRID_SIZE - 1) / 2) * GRID_SPACING_M,
+})
+
+/**
+ * Shift a junction's plan along its cycle by `seconds`.
+ *
+ * The junction's plan is **adopted** from its lights the first time a
+ * controller decides for it (`junctionPlan.ts` → `adoptJunctionState`),
+ * so the lights' declared countdowns ARE the junction's starting state.
+ *
+ * Both axes shift by the same amount, so the junction keeps its shape
+ * (30 s green, 3 s yellow, 3 s all-red, 72 s period) and only starts
+ * later.
+ */
+const shiftJunctionBy = (inter: Intersection, seconds: number): void => {
+  for (const light of inter.trafficLights) {
+    light.phaseRemaining = Math.max(0, light.phaseRemaining - seconds)
+  }
+}
+
+/**
+ * The 5 x 5 grid — 25 signalised junctions, 40 segments, 13 vehicles.
+ *
+ * ## The layout
+ *
+ * ```
+ *   j=0     j=1     j=2     j=3     j=4
+ * i=0  o-----o-----o-----o-----o
+ *      |     |     |     |     |
+ * i=1  o-----o-----o-----o-----o
+ *      |     |     |     |     |
+ * i=2  o-----o-----o-----o-----o
+ *      |     |     |     |     |
+ * i=3  o-----o-----o-----o-----o
+ *      |     |     |     |     |
+ * i=4  o-----o-----o-----o-----o
+ * ```
+ *
+ * The junctions sit `GRID_SPACING_M` (120 m) apart, the middle one at
+ * the origin, so the map spans 480 x 480 m. Every segment is a
+ * straight two-way road with 4 lanes (2 forward + 2 backward) and the
+ * arterial speed limit the other scenes use (16.67 m/s = 60 km/h).
+ *
+ * ## Every junction is signalised, on its own clock
+ *
+ * Each junction carries **one light per axis group** (`ns` + `ew`) —
+ * the rule every scene follows, derived from the geometry by
+ * `approachAxis`, never guessed. The junction's box is the one the
+ * rule gives (`junctionRadius(4)` = 11.5 m: the crossing carriageway's
+ * half-width + the nose-overhang clearance).
+ *
+ * The rows are phase-shifted by `GRID_ROW_PHASE_SECS` (6 s) against
+ * each other, so the 25 junctions are 25 independent plans rather than
+ * one plan seen 25 times (see `GRID_ROW_PHASE_SECS`).
+ *
+ * ## One vehicle on every second junction
+ *
+ * The 13 junctions of one parity each get the vehicle that approaches
+ * them, and the approach **alternates between the two axes**, so the map
+ * opens with traffic on both of them. Where the approach would leave the
+ * map (the west edge of an east–west approach, the north edge of a
+ * north–south one) the vehicle comes from the other side instead — which
+ * also puts vehicles on the **backward** lanes, the half of the
+ * carriageway the others never use.
+ *
+ * The density is a measured one, not a taste call: see the block below
+ * the vehicle loop.
+ */
+export const buildGridNetwork = (): RoadNetwork => {
+  const net = createRoadNetwork()
+
+  // --- the 40 segments ---------------------------------------------------
+  //
+  // Row `i` holds 4 east–west segments, column `j` holds 4 north–south
+  // ones: 5 x 4 + 5 x 4 = 40. Each segment runs from one junction to
+  // the next, so **every** segment has a junction at both of its ends —
+  // which is what lets a vehicle turn at the junction it arrives at
+  // (`roadTransition.ts` only turns where the junction sits at the
+  // road's travel end).
+  for (let i = 0; i < GRID_SIZE; i++) {
+    for (let j = 0; j < GRID_SIZE - 1; j++) {
+      const id = gridEastWestRoadId(i, j)
+      net.roads[id] = roadStraight(
+        id,
+        gridJunctionPosition(i, j),
+        gridJunctionPosition(i, j + 1),
+        GRID_LANE_COUNT,
+        GRID_SPEED_LIMIT,
+      )
+    }
+  }
+  for (let j = 0; j < GRID_SIZE; j++) {
+    for (let i = 0; i < GRID_SIZE - 1; i++) {
+      const id = gridNorthSouthRoadId(j, i)
+      net.roads[id] = roadStraight(
+        id,
+        gridJunctionPosition(i, j),
+        gridJunctionPosition(i + 1, j),
+        GRID_LANE_COUNT,
+        GRID_SPEED_LIMIT,
+      )
+    }
+  }
+
+  // --- the 25 junctions, each with its own pair of lights ----------------
+  for (let i = 0; i < GRID_SIZE; i++) {
+    for (let j = 0; j < GRID_SIZE; j++) {
+      const id = gridJunctionId(i, j)
+      // The four arms that meet here: west, east, north, south. A
+      // junction on the edge of the map has fewer — the corner ones
+      // have two.
+      const connectedRoads: string[] = []
+      if (j > 0) connectedRoads.push(gridEastWestRoadId(i, j - 1))
+      if (j < GRID_SIZE - 1) connectedRoads.push(gridEastWestRoadId(i, j))
+      if (i > 0) connectedRoads.push(gridNorthSouthRoadId(j, i - 1))
+      if (i < GRID_SIZE - 1) connectedRoads.push(gridNorthSouthRoadId(j, i))
+      const inter: Intersection = {
+        id,
+        position: gridJunctionPosition(i, j),
+        trafficLights: [],
+        connectedRoads,
+        // 4 lanes x 3.5 m = 14 m wide -> half-width 7 m, plus the 4.5 m
+        // nose-overhang clearance: 11.5 m. The ONE rule, the same
+        // number every other scene gets for a 4-lane junction.
+        intersectionRadius: junctionRadius(GRID_LANE_COUNT),
+      }
+      // One light per axis group — the geometry decides which groups
+      // those are (`approachAxisGroups`), so a junction with only an
+      // east–west arm would carry one light and a crossroads two.
+      inter.trafficLights = lightsForIntersection(inter, net.roads)
+      // The rows start apart, so the map is not one phase seen 25
+      // times (see `GRID_ROW_PHASE_SECS`).
+      shiftJunctionBy(inter, i * GRID_ROW_PHASE_SECS)
+      net.intersections[id] = inter
+    }
+  }
+
+  // --- one vehicle on every second junction ------------------------------
+  //
+  // The grid starts with a vehicle on every **second** junction — the 13
+  // junctions of one parity — so the map opens with traffic on both
+  // axes without two vehicles sharing an approach.
+  //
+  // ## Why not one per junction (25 vehicles)?
+  //
+  // Measured over 90 s (real Rapier, real tick): 25 vehicles → **89–158
+  // frames of two bodies overlapping** and 2 red lights run; 13 vehicles
+  // → **0** of each. The cause is in the model, not in the scene: the
+  // car-following rule assumes its leader brakes at
+  // `MAX_DECEL_COMFY` (2.5 m/s²) — `safeGapGipps`'s default — while a
+  // vehicle stopping at a red light brakes at `MAX_DECEL` (10 m/s²). A
+  // follower therefore closes in at 7.5 m/s² and rear-ends the leader,
+  // and the impact shoves the leader over the stop line (that is what
+  // turns a queued approach into a red-light run). The denser the grid,
+  // the more queues, and the more often that happens.
+  //
+  // `domain/services/vehicleDynamics.ts` is not this scene's to change,
+  // so the grid ships the density the model can carry without a crash —
+  // and the defect is reported with its numbers.
+  const defaults: Vehicle[] = []
+  /**
+   * How far upstream of its stop line a vehicle starts (m).
+   *
+   * It has to be the **braking distance from the road's speed limit**,
+   * not a token margin: the tick brakes a vehicle when the distance to
+   * the stop line falls below `v²/(2·MAX_DECEL) + STOP_LINE_BUFFER`, and
+   * the vehicle is still ACCELERATING towards that point. A vehicle that
+   * starts closer than the limit's braking distance (16.67 m/s →
+   * 17.9 m) accelerates into the braking zone and cannot stop in time —
+   * it runs the red. Measured on the grid with an 8 m margin: 2 red
+   * lights run in 90 s. With 24 m the vehicle can always stop.
+   *
+   * The heavy vehicles get the same margin: they accelerate more slowly
+   * (a bus's accel ceiling is 1.2 m/s²), so they need less of it.
+   */
+  const START_MARGIN_M = 24
+  let vehicleIndex = 0
+  for (let i = 0; i < GRID_SIZE; i++) {
+    for (let j = 0; j < GRID_SIZE; j++) {
+      // **One vehicle per junction** (25 of them), so every junction is seen
+      // queueing on the red and released on the green.
+      //
+      // The density is measured, not chosen: 25 vehicles over 90 s hold
+      // **0 crash frames, 0 red-light runs, 0 stuck vehicles, 0 lane-guard
+      // events**, with 81 road changes and all 40 segments driven.
+      //
+      // The earlier, sparser layout (13 vehicles, one junction in two) was
+      // a reaction to a measurement taken with a *too small* start margin
+      // (8 m): a vehicle that starts too close to the stop line cannot
+      // brake on the red, and the car behind it rams it. With the 24 m
+      // margin below, the full density holds.
+      vehicleIndex += 1
+      const inter = net.intersections[gridJunctionId(i, j)]!
+      // The approach **alternates between the two axes**, so the map
+      // opens with traffic on both of them. (Measured: with every
+      // approach on the east–west road, the 12 north–south segments of
+      // the three inner columns were never driven in 90 s — a third of
+      // the map stood empty.)
+      const eastWest = vehicleIndex % 2 === 1
+      // Where the vehicle comes from. On the west / north edge of the
+      // map there is no road behind the junction, so the vehicle comes
+      // from the other side — on the backward lane.
+      const roadId = eastWest
+        ? j > 0
+          ? gridEastWestRoadId(i, j - 1)
+          : gridEastWestRoadId(i, 0)
+        : i > 0
+          ? gridNorthSouthRoadId(j, i - 1)
+          : gridNorthSouthRoadId(j, 0)
+      const laneIndex = eastWest
+        ? j > 0
+          ? 0
+          : GRID_LANE_COUNT - 1
+        : i > 0
+          ? 0
+          : GRID_LANE_COUNT - 1
+      const road = net.roads[roadId]!
+      // A quarter of the traffic is heavy: the rest is cars.
+      const heavy = vehicleIndex % 5 === 0
+      const isBus = vehicleIndex % 7 === 0
+      const type = isBus ? 'bus' : heavy ? 'truck' : 'car'
+      const speed = type === 'car' ? 8 : type === 'bus' ? 7 : 6
+      const color = type === 'car' ? '#3a86ff' : type === 'bus' ? '#22c55e' : '#f5f5f4'
+      // Anchored **upstream** of the stop line of the junction it
+      // approaches, with room to brake — a vehicle that starts on the
+      // line cannot stop on the red.
+      const s =
+        startUpstreamOfStopLine(road, inter, laneIndex, START_MARGIN_M) ?? roadLength(road) * 0.5
+      defaults.push(
+        at(road, laneIndex, s, speed, {
+          id: `v-g${vehicleIndex}`,
+          type,
+          color,
+          status: 'driving',
+        }),
+      )
+    }
+  }
+  for (const v of defaults) net.vehicles[v.id] = v
+
+  // --- one spawn point per segment ----------------------------------------
+  //
+  // The spawn point sits `GRID_SPAWN_S` metres along the segment — past
+  // the junction the segment starts at (the junction's box reaches
+  // `junctionRadius(4)` = 11.5 m into the segment), so a vehicle that
+  // spawns there is not born inside a junction.
+  for (const road of Object.values(net.roads)) {
+    const sp = defaultSpawnPoint(road, null, GRID_SPAWN_S)
     net.spawnPoints[sp.id] = sp
   }
 

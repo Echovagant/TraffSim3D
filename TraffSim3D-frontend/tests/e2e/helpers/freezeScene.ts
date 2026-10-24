@@ -27,7 +27,7 @@
 import type { Page } from '@playwright/test'
 import { pauseSimulation, switchScene, waitForCameraIdle } from './wait'
 
-export type SceneKind = 'cross' | 't' | 'loop' | 'elevated' | 'corridor'
+export type SceneKind = 'cross' | 't' | 'loop' | 'elevated' | 'corridor' | 'grid'
 
 /**
  * Stop the simulation.

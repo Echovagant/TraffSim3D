@@ -77,6 +77,7 @@
         <option value="loop">矩形环</option>
         <option value="elevated">高架桥</option>
         <option value="corridor">多路口走廊</option>
+        <option value="grid">5×5 网格</option>
       </select>
       <span
         v-else
@@ -240,6 +241,8 @@ const sceneLabel = (k: SceneKind): string => {
       return '高架桥'
     case 'corridor':
       return '多路口走廊'
+    case 'grid':
+      return '5×5 网格'
   }
   return k // fallback for imported scenes
 }

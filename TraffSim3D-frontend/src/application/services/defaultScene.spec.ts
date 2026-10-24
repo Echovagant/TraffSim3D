@@ -17,6 +17,9 @@ import {
   buildRectangularLoopNetwork,
   buildElevatedScene,
   buildCorridorScene,
+  buildGridNetwork,
+  gridJunctionId,
+  GRID_SIZE,
 } from './defaultScene'
 import { CORNER_TURN_ENVELOPE_M } from '@domain/services/junctionRadius'
 import { approachAxisGroups } from '@domain/services/approachAxis'
@@ -200,6 +203,7 @@ const SCENES: Array<{ name: string; build: () => RoadNetwork }> = [
   { name: 'loop', build: buildRectangularLoopNetwork },
   { name: 'elevated', build: buildElevatedScene },
   { name: 'corridor', build: buildCorridorScene },
+  { name: 'grid', build: buildGridNetwork },
 ]
 
 describe('every built-in scene follows the one junction-box rule', () => {
@@ -245,6 +249,14 @@ describe('every built-in scene follows the one junction-box rule', () => {
       },
       elevated: { 'i-low': ruleRadius(4), 'i-high-start': ruleRadius(4) },
       corridor: { 'i-north': ruleRadius(4), 'i-south': ruleRadius(4) },
+      // The grid's 25 junctions are all 4-lane crossroads (the corner
+      // ones have two arms, not three, but the box is still sized by the
+      // carriageway they share).
+      grid: Object.fromEntries(
+        Array.from({ length: GRID_SIZE }, (_, i) =>
+          Array.from({ length: GRID_SIZE }, (_, j) => [gridJunctionId(i, j), ruleRadius(4)]),
+        ).flat(),
+      ),
     }
     for (const { name, build } of SCENES) {
       const net = build()
