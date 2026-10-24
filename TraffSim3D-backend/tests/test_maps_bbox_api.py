@@ -11,7 +11,8 @@ These tests pin the contract at the API boundary:
   historical shape (parallel e2e work depends on it);
 * supplying a bbox must actually change the parsed network — otherwise the
   endpoint is silently ignoring it, which is the failure mode this file
-  exists to catch;
+  exists to catch. The bbox bounds the *geometry*: the roads that reach into
+  the region are cut where they leave it, so nothing of them lies outside;
 * a malformed bbox must be rejected as a *request* error (422), not turned
   into a 500 by the parser's ValueError falling into the generic handler.
 
@@ -21,6 +22,7 @@ against the two fixtures, not guessed.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -41,14 +43,30 @@ RESPONSE_KEYS = {"roads", "intersections", "vehicles", "spawnPoints", "originLat
 # sample-4way.osm has 4 usable roads. Node 3 (the shared centre) is at
 # lon 0.0000, node 4 at lon 0.0005, node 5 at lon 0.0010. Clipping the west
 # edge to 0.0005 drops way 201 (all of its nodes sit west of that) and keeps
-# 202/203/204 — including the part of 202 and 203 that lies west of the box.
-# That is the point: the clip works at way level, so the geometry of a kept
-# road is never cut at the border.
+# 202/203/204 — each of them cut where it leaves the region: 202 and 203
+# lose their western arm, 204 is cut on its first segment. That is the
+# point: the clip works on the geometry, so a kept road ends on the border
+# of the requested area instead of reaching far past it.
 XML_BBOX_CLIP = {"south": -0.01, "west": 0.0005, "north": 0.01, "east": 0.002}
 XML_ALL_ROADS = {"w-201", "w-202", "w-203", "w-204"}
 XML_CLIPPED_ROADS = {"w-202", "w-203", "w-204"}
 PBF_ALL_ROADS = {"w-pbf-201", "w-pbf-202", "w-pbf-203", "w-pbf-204"}
 PBF_CLIPPED_ROADS = {"w-pbf-202", "w-pbf-203", "w-pbf-204"}
+
+
+def _projected_region(body: dict, bbox: dict) -> tuple[float, float, float, float]:
+    """The bbox as a rectangle in the response's own projection."""
+    south, west, north, east = (bbox["south"], bbox["west"], bbox["north"], bbox["east"])
+    origin_lat = float(body["originLat"])
+    origin_lon = float(body["originLon"])
+    cos_lat = math.cos(origin_lat * math.pi / 180.0)
+    return (
+        (west - origin_lon) * 111000.0 * cos_lat,
+        (south - origin_lat) * 111000.0,
+        (east - origin_lon) * 111000.0 * cos_lat,
+        (north - origin_lat) * 111000.0,
+    )
+
 
 # Three east-west roads at clearly separated latitudes so a bbox selects
 # between them unambiguously. Same fixture idea as tests/test_osm_clipping.py;
@@ -140,22 +158,29 @@ async def test_parse_pbf_applies_bbox(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_clipped_roads_keep_their_full_geometry(client: AsyncClient) -> None:
-    """A kept road must carry the same geometry it has unclipped.
+async def test_clipped_roads_are_cut_at_the_border(client: AsyncClient) -> None:
+    """A road that reaches into the box ends where it leaves it.
 
-    The clip works at way level, so a road that reaches into the box is
-    kept whole instead of being cut off at the border — the imported map
-    must not contain roads that end in the middle of nowhere.
+    The clip works on the geometry: every kept road is cut at the border of
+    the requested region, and no waypoint of it lies outside. The old
+    way-level rule kept such a road whole, which stretched the network past
+    the area the caller asked for — the reason a 2.2 km request used to
+    come back as a 7.9 km map.
     """
     clipped = (await client.post(XML_ENDPOINT, files=_xml_upload(), params=XML_BBOX_CLIP)).json()
     full = (await client.post(XML_ENDPOINT, files=_xml_upload())).json()
     kept = {road["id"]: road for road in clipped["roads"]}
     assert kept
+    # Every kept road was cut: its geometry differs from the unclipped one.
     for road in full["roads"]:
         if road["id"] in kept:
-            assert kept[road["id"]]["waypoints"] == road["waypoints"]
-            assert kept[road["id"]]["startNode"] == road["startNode"]
-            assert kept[road["id"]]["endNode"] == road["endNode"]
+            assert kept[road["id"]]["waypoints"] != road["waypoints"]
+    # And every waypoint of every kept road lies inside the region.
+    xmin, zmin, xmax, zmax = _projected_region(clipped, XML_BBOX_CLIP)
+    for road in clipped["roads"]:
+        for wp in road["waypoints"]:
+            assert xmin - 1e-6 <= wp["x"] <= xmax + 1e-6
+            assert zmin - 1e-6 <= wp["z"] <= zmax + 1e-6
 
 
 @pytest.mark.asyncio

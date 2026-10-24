@@ -18,14 +18,23 @@ for `highway=traffic_signals` on *ways*, while the XML path looked at
 *node* tags, so the very same data yielded one signal light from XML and
 zero from PBF. A single pipeline removes the possibility of that drift.
 
-Clipping happens at way level
------------------------------
-A bbox selects *ways*, not nodes. A way that touches the region is kept
-whole — its geometry is never cut at the region border, so an imported map
-has no road that ends in the middle of nowhere — and a way entirely
-outside is dropped whole. The default `MAX_BBOX_DEG` square around the
-projection origin keeps its memory-safety meaning: far-away ways are
-still discarded.
+Clipping happens on the geometry
+------------------------------
+A bbox selects an *area*, and the geometry inside it is cut at the
+border. A way that crosses the region is cut where it leaves it; a way
+that enters the region, leaves it and comes back becomes **two** roads.
+The cut points are interpolated on the border and inherit the height of
+the nearest original node; they are not OSM nodes, so the border itself
+never becomes a junction — only a node shared by two surviving ways does.
+
+The rule used to be the opposite: a way that touched the region was kept
+*whole*. That made the promise the UI makes (「只加载仿真区域」) untrue. On
+the Shenzhen extract, a 2.2 km request came back with a 7.9 km network,
+because one arterial way that merely touched the region stretched the
+whole map — and a camera framing 7.9 km puts a 4.2 m car at 0.2 px.
+
+The default `MAX_BBOX_DEG` square around the projection origin goes
+through the same path, so the memory-safety cap is a real area bound.
 
 Levels
 ------
@@ -131,6 +140,10 @@ LEVEL_HEIGHT = 4.0
 # This is a *memory-safety* cap for oversized `.osm` files, NOT simulation-area
 # clipping: 55 km is orders of magnitude larger than any scene this project
 # simulates. Pass an explicit `bbox` to actually clip to an area of interest.
+#
+# The cap goes through the same geometric clip as an explicit bbox, so it is
+# a real area bound: a way that reaches out of the cap is cut at the cap's
+# border rather than kept whole.
 MAX_BBOX_DEG = 0.5
 
 BBox = tuple[float, float, float, float]  # (south, west, north, east)
@@ -245,63 +258,152 @@ def _validate_bbox(bbox: BBox) -> None:
         raise ValueError(f"bbox west must be <= east, got west={west} east={east}")
 
 
-def _segment_hits_rect(
+# ---------------------------------------------------------------------------
+# Geometric clipping: the region as a rectangle in projected world meters.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Vertex:
+    """One point of a way's polyline.
+
+    `node_ref` is the OSM node the point came from, or None for a point
+    the clip interpolated on the region border. `level_ref` is always an
+    original node: the one whose height this point inherits.
+    """
+
+    x: float
+    z: float
+    node_ref: int | None
+    level_ref: int
+
+
+@dataclass
+class _Candidate:
+    """A way that survived the clip, with the runs of geometry it kept."""
+
+    way: _RawWay
+    direction: str
+    runs: list[list[_Vertex]]
+
+
+def _region_rect(
+    region: BBox,
+    origin_lat: float,
+    origin_lon: float,
+    cos_lat: float,
+) -> tuple[float, float, float, float]:
+    """The clip region as an axis-aligned rectangle in projected meters.
+
+    `(xmin, zmin, xmax, zmax)`, using the very projection the nodes use
+    (`x = (lon - originLon) * 111000 * cos(originLat)`,
+    `z = (lat - originLat) * 111000`), so the rectangle in degrees maps
+    onto exactly this rectangle in meters.
+    """
+    south, west, north, east = region
+    return (
+        (west - origin_lon) * 111000.0 * cos_lat,
+        (south - origin_lat) * 111000.0,
+        (east - origin_lon) * 111000.0 * cos_lat,
+        (north - origin_lat) * 111000.0,
+    )
+
+
+def _clip_segment(
     p0: tuple[float, float],
     p1: tuple[float, float],
-    rect: BBox,
-) -> bool:
-    """Liang-Barsky clip test: does the segment p0->p1 touch the lat/lon rect?
+    rect: tuple[float, float, float, float],
+) -> tuple[float, float] | None:
+    """Liang-Barsky: the parameter interval of the part of p0->p1 in the rect.
 
-    Coordinates are (lon, lat); `rect` is (south, west, north, east).
-    Touching the border counts as a hit — a road running exactly along the
-    edge of the region belongs to that region.
+    Returns `(t0, t1)`, the clipped part running from `p0 + t0*(p1-p0)`
+    to `p0 + t1*(p1-p0)`, or None when the segment does not meet the
+    rectangle. A segment that only *touches* the rectangle (`t0 == t1`)
+    has no length in it and does not survive: a road may not be a point.
     """
-    south, west, north, east = rect
-    x0, y0 = p0
-    x1, y1 = p1
+    x0, z0 = p0
+    x1, z1 = p1
+    xmin, zmin, xmax, zmax = rect
     dx = x1 - x0
-    dy = y1 - y0
+    dz = z1 - z0
     t0, t1 = 0.0, 1.0
-    for p, q in ((-dx, x0 - west), (dx, east - x0), (-dy, y0 - south), (dy, north - y0)):
+    for p, q in ((-dx, x0 - xmin), (dx, xmax - x0), (-dz, z0 - zmin), (dz, zmax - z0)):
         if p == 0.0:
             if q < 0.0:
-                return False  # parallel to this edge and outside it
+                return None  # parallel to this edge and outside it
             continue
         r = q / p
         if p < 0.0:
             if r > t1:
-                return False
+                return None
             t0 = max(t0, r)
         else:
             if r < t0:
-                return False
+                return None
             t1 = min(t1, r)
-    return True
+    if t1 <= t0:
+        return None
+    return t0, t1
 
 
-def _way_touches_rect(
-    nodes: dict[int, _Node],
-    refs: Sequence[int],
-    rect: BBox,
-) -> bool:
-    """Does this way touch the clip region at all?
+def _interpolate(a: _Vertex, b: _Vertex, t: float) -> _Vertex:
+    """The point at parameter `t` on the segment a->b.
 
-    A way counts as inside when one of its vertices is inside, or when one
-    of its segments crosses the region — the latter is what keeps a road
-    that starts outside and runs through the region from being dropped.
+    `t = 0` and `t = 1` return the endpoints **unchanged**, so a way that
+    lies entirely inside the region keeps exactly the geometry it had
+    unclipped. An interpolated point inherits the height of the nearest
+    original node and carries no node id of its own — it is not an OSM
+    node, so it must never become a junction.
     """
-    south, west, north, east = rect
-    previous: _Node | None = None
-    for ref in refs:
-        node = nodes[ref]
-        if south <= node.lat <= north and west <= node.lon <= east:
-            return True
-        if previous is not None and _segment_hits_rect(
-            (previous.lon, previous.lat), (node.lon, node.lat), rect
-        ):
-            return True
-        previous = node
-    return False
+    if t <= 0.0:
+        return a
+    if t >= 1.0:
+        return b
+    return _Vertex(
+        x=a.x + (b.x - a.x) * t,
+        z=a.z + (b.z - a.z) * t,
+        node_ref=None,
+        level_ref=a.level_ref if t <= 0.5 else b.level_ref,
+    )
+
+
+def _clip_polyline(
+    vertices: Sequence[_Vertex],
+    rect: tuple[float, float, float, float],
+) -> list[list[_Vertex]]:
+    """The parts of a polyline that lie inside the rectangle.
+
+    Every segment is clipped on its own, and the clipped pieces are
+    chained back into maximal contiguous runs. Two pieces belong to the
+    same run only when the polyline **stayed** inside the region between
+    them: a way that enters the region, leaves it and comes back yields
+    two runs — and therefore two roads.
+    """
+    runs: list[list[_Vertex]] = []
+    current: list[_Vertex] = []
+    continuous = False  # the polyline was still inside at the last vertex
+    for index in range(len(vertices) - 1):
+        a = vertices[index]
+        b = vertices[index + 1]
+        clipped = _clip_segment((a.x, a.z), (b.x, b.z), rect)
+        if clipped is None:
+            if len(current) >= 2:
+                runs.append(current)
+            current = []
+            continuous = False
+            continue
+        t0, t1 = clipped
+        if current and continuous and t0 == 0.0:
+            # The two pieces share a vertex: the polyline never left.
+            current.append(_interpolate(a, b, t1))
+        else:
+            if len(current) >= 2:
+                runs.append(current)
+            current = [_interpolate(a, b, t0), _interpolate(a, b, t1)]
+        continuous = t1 == 1.0
+    if len(current) >= 2:
+        runs.append(current)
+    return runs
 
 
 def _parse_layer(tags: dict[str, str]) -> int | None:
@@ -848,7 +950,7 @@ def _build_network(
         for node_id, (lat, lon) in raw_nodes.items()
     }
 
-    # ---- 2) Clip at way level: a touching way is kept whole ----
+    # ---- 2) The region: in degrees, and as a rectangle in world meters ----
     region: BBox = (
         bbox
         if bbox is not None
@@ -859,78 +961,114 @@ def _build_network(
             origin_lon + MAX_BBOX_DEG,
         )
     )
-    kept: list[_RawWay] = []
+    rect = _region_rect(region, origin_lat, origin_lon, cos_lat)
+    if rect[2] <= rect[0] or rect[3] <= rect[1]:
+        # The region has no area. A zero-extent box is a line, not a place,
+        # so nothing survives it — that is the honest answer, not a way
+        # kept whole.
+        return _empty_network(origin_lat, origin_lon)
+
+    # ---- 3) Ways -> the runs of geometry that lie inside the region ----
+    candidates: list[_Candidate] = []
     for way in raw_ways:
         if way.tags.get("highway") not in DEFAULT_HIGHWAY_TYPES:
             continue
         refs = [ref for ref in way.node_refs if ref in nodes]
         if len(refs) < 2:
             continue
-        if not _way_touches_rect(nodes, refs, region):
+        # The travel direction is decided *before* the clip, so the pieces
+        # come out in the order cars actually travel them.
+        direction = _oneway_direction(way.tags)
+        if direction == "reverse":
+            # Traffic runs against the digitisation direction: flip the way
+            # so that "forward" means the direction cars actually travel.
+            refs.reverse()
+        vertices = [_Vertex(nodes[ref].x, nodes[ref].z, ref, ref) for ref in refs]
+        runs = _clip_polyline(vertices, rect)
+        if not runs:
             continue
-        kept.append(_RawWay(way.way_id, refs, way.tags))
+        candidates.append(_Candidate(way=way, direction=direction, runs=runs))
 
-    # ---- 3) One height per node, so shared nodes really are shared ----
+    # ---- 4) One height per node, so shared nodes really are shared ----
     node_levels: dict[int, Counter] = {}
-    for way in kept:
-        level = _way_level(way.tags)
-        for ref in way.node_refs:
-            counter = node_levels.setdefault(ref, Counter())
-            counter[level] += 1
+    for candidate in candidates:
+        level = _way_level(candidate.way.tags)
+        for run in candidate.runs:
+            for vertex in run:
+                if vertex.node_ref is None:
+                    # A cut point on the border is not an OSM node; it
+                    # inherits the height of its nearest original node.
+                    continue
+                counter = node_levels.setdefault(vertex.node_ref, Counter())
+                counter[level] += 1
     node_level = {ref: _pick_level(counter) for ref, counter in node_levels.items()}
 
-    # ---- 4) Ways -> roads ----
+    # ---- 5) Ways -> roads (one road per surviving run) ----
     roads: list[dict[str, Any]] = []
-    for way in kept:
+    road_runs: list[list[_Vertex]] = []
+    road_candidates: list[int] = []
+    for candidate_index, candidate in enumerate(candidates):
+        way = candidate.way
         level = _way_level(way.tags)
-        direction = _oneway_direction(way.tags)
-        oneway = direction != "both"
-        refs = list(way.node_refs)
-        if direction == "reverse":
-            # Traffic runs against the digitisation direction: flip the way so
-            # "forward" means the direction cars actually travel.
-            refs.reverse()
+        oneway = candidate.direction != "both"
         try:
             lanes = max(1, int(way.tags.get("lanes", "2")))
         except ValueError:
             lanes = 2
         if oneway:
             lanes = max(1, lanes // 2)
-        waypoints = [
-            {
-                "x": nodes[ref].x,
-                "y": node_level.get(ref, level) * LEVEL_HEIGHT,
-                "z": nodes[ref].z,
-            }
-            for ref in refs
-        ]
-        roads.append(
-            {
-                "id": f"{road_id_prefix}{way.way_id}",
-                "startNode": waypoints[0],
-                "endNode": waypoints[-1],
-                "waypoints": waypoints,
-                "laneCount": lanes,
-                "oneway": oneway,
-                "speedLimit": HIGHWAY_SPEED_LIMIT[way.tags["highway"]],
-                "level": level,
-            }
-        )
+        base_id = f"{road_id_prefix}{way.way_id}"
+        for run_index, run in enumerate(candidate.runs):
+            # A way that survives as one run keeps its plain id; a way that
+            # was cut into several runs numbers them in travel order.
+            road_id = base_id if run_index == 0 else f"{base_id}-{run_index + 1}"
+            waypoints = [
+                {
+                    "x": vertex.x,
+                    "y": node_level.get(vertex.level_ref, level) * LEVEL_HEIGHT,
+                    "z": vertex.z,
+                }
+                for vertex in run
+            ]
+            roads.append(
+                {
+                    "id": road_id,
+                    "startNode": waypoints[0],
+                    "endNode": waypoints[-1],
+                    "waypoints": waypoints,
+                    "laneCount": lanes,
+                    "oneway": oneway,
+                    "speedLimit": HIGHWAY_SPEED_LIMIT[way.tags["highway"]],
+                    "level": level,
+                }
+            )
+            road_runs.append(run)
+            road_candidates.append(candidate_index)
 
-    # ---- 5) Traffic signals marked on a way rather than on a node ----
+    # ---- 6) Traffic signals marked on a way rather than on a node ----
     # Legacy behaviour of the PBF path, now applied to both formats.
     signal_node_ids = set(traffic_signal_node_ids)
     for way in raw_ways:
         if way.tags.get("highway") == "traffic_signals" and way.node_refs:
             signal_node_ids.add(way.node_refs[0])
 
-    # ---- 6) Intersections: OSM nodes shared by two or more ways ----
+    # ---- 7) Intersections: OSM nodes shared by two or more ways ----
     node_to_ways: dict[int, list[int]] = {}
-    for index, way in enumerate(kept):
-        for ref in way.node_refs:
-            bucket = node_to_ways.setdefault(ref, [])
-            if index not in bucket:
-                bucket.append(index)
+    node_to_roads: dict[int, list[int]] = {}
+    for road_index, run in enumerate(road_runs):
+        candidate_index = road_candidates[road_index]
+        for vertex in run:
+            ref = vertex.node_ref
+            if ref is None:
+                # A cut point on the region border is shared by nobody: it
+                # is not an OSM node, so the border never becomes a junction.
+                continue
+            ways_bucket = node_to_ways.setdefault(ref, [])
+            if candidate_index not in ways_bucket:
+                ways_bucket.append(candidate_index)
+            roads_bucket = node_to_roads.setdefault(ref, [])
+            if road_index not in roads_bucket:
+                roads_bucket.append(road_index)
 
     intersections: list[dict[str, Any]] = []
     inter_counter = 0
@@ -941,10 +1079,11 @@ def _build_network(
         height = node_level.get(ref, 0) * LEVEL_HEIGHT
         inter_id = f"{intersection_id_prefix}{inter_counter}"
         inter_counter += 1
+        connected_road_indices = node_to_roads[ref]
         traffic_lights: list[dict[str, Any]] = []
         if ref in signal_node_ids:
             # Heuristic axis: pick the first two-way pair's "primary" road.
-            primary_road = roads[way_indices[0]]
+            primary_road = roads[connected_road_indices[0]]
             # axis from waypoints: EW if dx > dz, else NS.
             dx = primary_road["endNode"]["x"] - primary_road["startNode"]["x"]
             axis = "ew" if abs(dx) > 0.1 else "ns"
@@ -967,7 +1106,7 @@ def _build_network(
                 "id": inter_id,
                 "position": {"x": node.x, "y": height, "z": node.z},
                 "trafficLights": traffic_lights,
-                "connectedRoads": [roads[i]["id"] for i in way_indices],
+                "connectedRoads": [roads[i]["id"] for i in connected_road_indices],
                 # Sized by the lane model, not by a fixed number: the box
                 # has to hold the carriageway of the roads it crosses, and
                 # leave room for a queued vehicle's nose. The old
@@ -984,7 +1123,7 @@ def _build_network(
                 # `highway=traffic_signals` (51 of the 7991 junctions in
                 # the Shenzhen extract).
                 "intersectionRadius": junction_radius(
-                    [int(roads[i].get("laneCount", 1)) for i in way_indices],
+                    [int(roads[i].get("laneCount", 1)) for i in connected_road_indices],
                 ),
             }
         )
@@ -1010,8 +1149,9 @@ def parse_osm_xml(
     wrapper) so the frontend can call `loadNetwork(parsed)` directly.
 
     `bbox` (south, west, north, east) in degrees clips the map to an area of
-    interest. Omitting it keeps the historical ~55 km safety cap, so existing
-    callers are unaffected.
+    interest. The geometry is cut at the border: a way that crosses the
+    region ends where it leaves it. Omitting `bbox` keeps the historical
+    ~55 km safety cap, which is clipped the same way.
     """
     raw_nodes, raw_ways, signal_node_ids = _extract_osm_xml(xml_bytes)
     return _build_network(

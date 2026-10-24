@@ -9,16 +9,37 @@ simulated.
 Clipping now takes an explicit bbox (degrees). The safety cap remains as the
 default so an un-cropped call keeps behaving exactly as before.
 
-The clip works at *way* level: a way that touches the region is kept whole
-(its geometry is never cut at the border, so no road ends in the middle of
-the region) and a way entirely outside is dropped whole.
+The clip works on the **geometry**: a way that crosses the region is cut
+where it leaves it, so both of its endpoints sit on the border, and a way
+that lies entirely outside is dropped. A cut point is not an OSM node, so
+the border never becomes a junction — only a node shared by two surviving
+ways does.
 """
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from app.apps.maps import osm_parser as p
+
+
+def _projected_region(
+    net: dict, bbox: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    """The bbox as a rectangle in the network's own projection."""
+    south, west, north, east = bbox
+    origin_lat = float(net["originLat"])
+    origin_lon = float(net["originLon"])
+    cos_lat = math.cos(origin_lat * math.pi / 180.0)
+    return (
+        (west - origin_lon) * 111000.0 * cos_lat,
+        (south - origin_lat) * 111000.0,
+        (east - origin_lon) * 111000.0 * cos_lat,
+        (north - origin_lat) * 111000.0,
+    )
+
 
 # Three east-west roads at clearly separated latitudes, so a bbox can select
 # between them unambiguously (no shared boundary nodes):
@@ -64,15 +85,40 @@ def test_explicit_bbox_can_return_an_empty_network() -> None:
     assert net["intersections"] == []
 
 
-def test_bbox_zero_extent_keeps_a_touching_way_whole() -> None:
-    """A degenerate box still clips at way level.
+def test_bbox_zero_extent_keeps_nothing() -> None:
+    """A box with no area contains no road.
 
-    The western way starts exactly on the box's corner, so it touches the
-    region and is kept — whole, not cut at the corner.
+    The old expectation was the opposite: a way that merely *touched* the
+    region was kept **whole**, so a zero-extent box still returned it. That
+    is gone — the clip works on the geometry now, and a zero-extent box is a
+    line, not an area. A line has no length inside the region either, so
+    nothing survives it.
+
+    The box here is a single point (south == north, west == east).
+    """
+    net = p.parse_osm_xml(GRID_XML, bbox=(0.0, 0.0, 0.0, 0.0))
+    assert net["roads"] == []
+    assert net["intersections"] == []
+    assert net["spawnPoints"] == []
+
+
+def test_a_tiny_region_keeps_only_the_stub_inside_it() -> None:
+    """A region of (almost) no size still cuts the geometry.
+
+    The western way starts on the box's corner, so it survives — but only
+    as the stub between the corner and the border. Under the old way-level
+    rule the whole 1.1 km way was returned; now the road is 0.1 mm long.
     """
     net = p.parse_osm_xml(GRID_XML, bbox=(-1e-9, -1e-9, 1e-9, 1e-9))
     assert {r["id"] for r in net["roads"]} == {"w-10"}
-    assert len(net["roads"][0]["waypoints"]) == 2
+    road = net["roads"][0]
+    assert len(road["waypoints"]) == 2
+    xmin, zmin, xmax, zmax = _projected_region(net, (-1e-9, -1e-9, 1e-9, 1e-9))
+    extent = max(wp["x"] for wp in road["waypoints"]) - min(wp["x"] for wp in road["waypoints"])
+    assert 0.0 < extent <= (xmax - xmin) + 1e-9
+    for wp in road["waypoints"]:
+        assert xmin - 1e-9 <= wp["x"] <= xmax + 1e-9
+        assert zmin - 1e-9 <= wp["z"] <= zmax + 1e-9
 
 
 def test_bbox_bounds_are_validated() -> None:
@@ -96,39 +142,51 @@ def test_bbox_signature_is_south_west_north_east() -> None:
 
 
 def test_bbox_west_east_edges_are_honoured() -> None:
-    """Longitudinal clipping keeps the roads that reach into the box.
+    """Longitudinal clipping cuts the road at the eastern edge.
 
     w-10 runs from lon 0.00 to lon 0.01 and therefore crosses the eastern
-    edge at 0.005: it belongs to the region and is kept — with its full
-    geometry, not cut off at the border.
+    edge at 0.005: it belongs to the region, and it is cut where it leaves
+    it. The road ends *on* the border — it does not reach past it.
     """
     net = p.parse_osm_xml(GRID_XML, bbox=(-0.01, -0.01, 0.01, 0.005))
     assert {r["id"] for r in net["roads"]} == {"w-10"}
-    assert len(net["roads"][0]["waypoints"]) == 2
+    road = net["roads"][0]
+    assert len(road["waypoints"]) == 2
+    _xmin, _zmin, xmax, _zmax = _projected_region(net, (-0.01, -0.01, 0.01, 0.005))
+    assert road["waypoints"][-1]["x"] == pytest.approx(xmax, abs=1e-6)
+    # The unclipped road reaches much further east — it was cut.
+    full = p.parse_osm_xml(GRID_XML)
+    full_road = next(r for r in full["roads"] if r["id"] == "w-10")
+    assert road["waypoints"] != full_road["waypoints"]
 
 
 def test_way_entirely_outside_the_bbox_is_dropped() -> None:
-    """A road that never reaches the region is dropped whole."""
+    """A road that never reaches the region does not survive it."""
     net = p.parse_osm_xml(GRID_XML, bbox=(-0.01, -0.01, 0.01, 0.005))
     ids = {r["id"] for r in net["roads"]}
     assert "w-11" not in ids  # lat 0.05, north of the box
     assert "w-12" not in ids  # lat 0.09, north of the box
 
 
-def test_clipped_roads_keep_their_full_geometry() -> None:
-    """A clipped road must carry exactly the geometry it has unclipped.
+def test_a_clipped_road_is_cut_at_the_border() -> None:
+    """A clipped road carries the geometry it has *inside* the box.
 
     Node-level clipping dropped the waypoints outside the box, so a road
-    used to end in the middle of the region — a dead end with nothing
-    attached to it.
+    ended in the middle of the region — a dead end with nothing attached to
+    it. Way-level clipping kept the whole road, which stretched the network
+    past the requested area. The cut at the border satisfies both: the road
+    ends on the border, and nothing of it lies outside.
     """
-    clipped = p.parse_osm_xml(GRID_XML, bbox=BBOX_SOUTH_ONLY)
+    bbox = (-0.01, -0.01, 0.01, 0.005)
+    net = p.parse_osm_xml(GRID_XML, bbox=bbox)
     full = p.parse_osm_xml(GRID_XML)
-    clipped_road = next(r for r in clipped["roads"] if r["id"] == "w-10")
+    road = next(r for r in net["roads"] if r["id"] == "w-10")
     full_road = next(r for r in full["roads"] if r["id"] == "w-10")
-    assert clipped_road["waypoints"] == full_road["waypoints"]
-    assert clipped_road["startNode"] == full_road["startNode"]
-    assert clipped_road["endNode"] == full_road["endNode"]
+    assert road["waypoints"] != full_road["waypoints"]
+    xmin, zmin, xmax, zmax = _projected_region(net, bbox)
+    for wp in road["waypoints"]:
+        assert xmin - 1e-6 <= wp["x"] <= xmax + 1e-6
+        assert zmin - 1e-6 <= wp["z"] <= zmax + 1e-6
 
 
 def test_parse_osm_xml_accepts_explicit_center() -> None:
