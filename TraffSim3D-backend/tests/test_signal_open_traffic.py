@@ -248,7 +248,53 @@ def test_the_arrivals_follow_the_demand() -> None:
                 arrivals += 1
     # 2 NS lanes x 60 s / 12 s + 2 EW lanes x 60 s / 9 s = 23.3, minus the
     # arrivals whose headway lands on the step boundary: 20.
+    #
+    # The band pins the **unit** as well as the number: the demand is per
+    # **lane** (`TrafficCondition`: "how many vehicles arrive per hour per
+    # lane on each axis"), so a per-axis reading would deliver about 12
+    # arrivals in 60 s and fall out of the band. The field's name
+    # (`ns_arrivals_per_hour`, with no `_per_lane` suffix, unlike
+    # `ns_vehicles_per_lane`) is what makes that reading look natural —
+    # measured 2026-10-25: EW lane 6 arrivals (400/h expected 6.67), NS
+    # lane 4 arrivals (300/h expected 5.0).
     assert 18 <= arrivals <= 24, f"the arrivals do not follow the demand: {arrivals}"
+
+
+def test_the_queue_disperses_at_the_shipped_demand() -> None:
+    """The open model's precondition: the demand stays **below** the
+    saturation flow rate, so the queue disperses instead of growing for
+    ever.
+
+    Measured over 240 s (the longest training horizon) with the TRAIN
+    condition and the fixed cycle: the NS axis's queue is empty 59 % of
+    the steps and the EW axis's 38 % — the saw-tooth of a working
+    signal (the queue builds during the red and disperses during the
+    green). A demand above the saturation rate would keep the queue
+    non-empty for the whole episode, and the model's whole point (an
+    unbounded price for starving an axis) would be measured on a world
+    that is jammed rather than on a world that can serve.
+    """
+    steps = 2400
+    env = SignalEnv(max_steps=steps)
+    env.reset(seed=0)
+    empty_ns = 0
+    empty_ew = 0
+    for _ in range(steps):
+        obs, _reward, _terminated, _truncated, _info = env.step(NO_OP)
+        if obs[0] == 0:
+            empty_ns += 1
+        if obs[1] == 0:
+            empty_ew += 1
+    # The bounds are loose on purpose: they separate "the queue disperses"
+    # from "the queue only ever grows", and nothing else.
+    assert empty_ns / steps > 0.35, (
+        f"the NS queue never disperses — it is empty in only "
+        f"{empty_ns / steps * 100:.1f} % of the episode"
+    )
+    assert empty_ew / steps > 0.20, (
+        f"the EW queue never disperses — it is empty in only "
+        f"{empty_ew / steps * 100:.1f} % of the episode"
+    )
 
 
 def test_the_vehicles_leave_the_world_instead_of_cycling_back() -> None:
