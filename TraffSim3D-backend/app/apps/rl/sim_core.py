@@ -31,22 +31,49 @@ EW_HALF = 30.0          # EW road same
 # frontend: `TraffSim3D-frontend/src/shared/constants/simulation.ts`
 # `PYTHON_SIM.INTERSECTION_RADIUS`).
 #
-# It is NOT the browser's junction box, and it does not have to be: this
-# sim has no lane model at all. Its road is `ROAD_HALF_WIDTH` (3.5 m) wide
-# and its NPCs sit at +/- 3.5 m from the centreline, so an 8 m box already
-# contains the whole carriageway - the defect this number was raised for
-# (a queued vehicle's nose overhanging the crossing road's outer lane)
-# cannot happen here. It is the *product's* per-scene radii
-# (`TraffSim3D-frontend/src/application/services/defaultScene.ts`) that
-# carry that fix, and they are sized from the lane model this sim does
-# not have.
+# ## It is a different quantity from the browser's junction box
 #
-# The value is pinned by the training sim's measured baselines (the
-# reward numbers in `tests/test_rl_signal_train.py`,
-# `tests/test_signal_conflict.py` and `tests/test_signal_open_traffic.py`
-# all move with it) and by the contract's `red_light_axis_disagreement`
-# vector, whose red-light termination has to land on a 10-step sample
-# boundary - that only happens at ~8.2 m or ~13.9 m.
+# The browser sizes every junction box from the lane model it has:
+# **the crossing road's half-width + the nose-overhang clearance**
+# (`TraffSim3D-frontend/src/domain/services/junctionRadius.ts` ->
+# `halfWidth + INTERSECTION_CLEARANCE_M`, 4.5 m). The clearance exists
+# because the stop rule acts on the vehicle's **CENTRE**, so a vehicle
+# waiting at the line may legitimately overhang by up to half its length.
+#
+# **That argument does not apply here**, because this sim's vehicles are
+# POINTS: the `Vehicle` dataclass carries no length (nor a width), the
+# collision test is centre-to-centre (`COLLISION_DISTANCE`), the queue
+# gap is centre-to-centre (`MIN_GAP`), and both the stop rule and the
+# occupancy test read the vehicle's centre. There is no nose to
+# overhang, so the clearance term does not exist on this side - and the
+# 8 m box here is a **measured margin over the carriageway**
+# (`ROAD_HALF_WIDTH` = 3.5 m), not a derived value.
+#
+# `ROAD_HALF_WIDTH` + the browser's `INTERSECTION_CLEARANCE_M` happens to
+# equal 8.0 m, but that is an **arithmetic coincidence**, not a shared
+# rule: the 4.5 m term is the browser's nose-overhang allowance and has
+# no geometric meaning in a point model. Importing the clearance
+# constant here would "unify" two different quantities and re-couple
+# this number to the product's lane model.
+#
+# ## What pins it
+#
+# - the **training baselines**: the reward numbers in
+#   `tests/test_rl_signal_train.py`, `tests/test_signal_conflict.py`
+#   and `tests/test_signal_open_traffic.py` all move with it;
+# - the **contract's sample grid**: the `red_light_axis_disagreement`
+#   vector's red-light termination has to land on a 10-step sample
+#   boundary, and the committed golden pins it to step 30. Measured
+#   (2026-10-24, bisection on the radius): above the carriageway floor
+#   (3.5 m) that termination lands on the grid only for a radius in
+#   (7.852, 8.541] m (step 30), (13.712, 14.172] m (step 20) or
+#   (17.274, 17.504] m (step 10) - 8.0 m is in the first window. The
+#   other two would keep the grid but still move the committed golden
+#   (`final_step` 30 -> 20), and 15 m leaves the grid altogether
+#   (step 18).
+#
+# `tests/test_rl_junction_radius.py` pins the value, the floor and the
+# premise this comment rests on.
 INTERSECTION_RADIUS = 8.0
 ROUNDABOUT_RADIUS = 10.0  # roundabout circle radius [m]
 SPEED_LIMIT = 16.67     # m/s (60 km/h)

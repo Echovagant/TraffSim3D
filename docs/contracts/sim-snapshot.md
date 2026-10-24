@@ -523,7 +523,7 @@ recomputed golden against the committed file).
 | `LOOKAHEAD_DISTANCE` | **caught** | **caught** | was blind — now caught by the `steer_*` vectors (a 25 % change moves the trajectory by 1.2–2.0 m) |
 | `MAX_STEER` | **caught** | **caught** | was blind — now caught by the `steer_*` vectors (a 25 % change moves the trajectory by 1.4 m) |
 | `EGO_WHEELBASE` | **caught** | **caught** | was blind — now caught by the `steer_*` vectors (a 25 % change moves the trajectory by 0.6–1.5 m) |
-| `INTERSECTION_RADIUS` | **partially covered** — it surfaces only through the red-light run window: at 14 / 15 m exactly **2** goldens move (`ts_cross_signalled_red_light`: `final_step` 34 → 20, `final_z` −7.85 → −13.71; `ts_red_light_axis_disagreement`: `final_step` 30 → 20). A change that does not shift *when* the ego runs a red light stays invisible. | same | **no** — it was listed as blind; re-measured 2026-10-24 while fixing the junction geometry |
+| `INTERSECTION_RADIUS` | **partially covered** — it surfaces only through the red-light run window: at 14 / 15 m exactly **2** goldens move (`ts_cross_signalled_red_light`: `final_step` 34 → 20, `final_z` −7.85 → −13.71; `ts_red_light_axis_disagreement`: `final_step` 30 → 20). A change that does not shift *when* the ego runs a red light stays invisible. **The value is a literal, not a derived one** — it is the training sim's own box, a *different quantity* from the product's per-scene radii (see the note below) — and it is pinned by the training reward baselines (measured 2026-10-24: **10** test failures at 14.0 m) and by the `red_light_axis_disagreement` vector's 10-step sample grid (measured: above the 3.5 m carriageway floor the termination lands on a sample step only for a radius in (7.852, 8.541] / (13.712, 14.172] / (17.274, 17.504] m). | same | **no** — it was listed as blind; re-measured 2026-10-24 while fixing the junction geometry |
 | `ROUNDABOUT_RADIUS` | **blind** | **blind** | **no** |
 | `NPC_SPEED` | **blind** | **blind** | **no** |
 | `ROAD_HALF_WIDTH` | **caught** — the golden's `road_rules` block carries the TS side's copy and the Python side compares it item by item | **caught** (same block) | **no** (it did not exist before the `road_rules` block) |
@@ -533,34 +533,48 @@ recomputed golden against the committed file).
 | **the browser's Rapier path** (`purePursuit.ts` + `tick.ts` + `RapierWorld.ts`) | **not comparable** — it is a *physics* path, not the hand-rolled kinematics this contract compares | **not comparable** (same) | **no** — this gap is what let the Pure Pursuit alpha sign bug survive in the browser while the training sim was fixed (2026-10-22) |
 
 > **The product's junction radius is a different quantity from the training sim's box**
-> (measured 2026-10-24, while fixing the cross-scene collision).
+> (measured 2026-10-24, while fixing the cross-scene collision; the two numbers
+> were settled on the same day).
 > The browser sizes every junction box from the lane model it actually has:
 > **the crossing road's half-width + a clearance**, where the clearance is the
 > longest vehicle's half-length — because the stop rule acts on the vehicle's
 > *centre*, so a queued vehicle's nose may legitimately overhang by half a
-> vehicle. The training sim has **no lane model** (its road is
-> `ROAD_HALF_WIDTH = 3.5` wide and its NPCs sit at ±3.5 m), so its 8 m box
-> already contains the whole carriageway and the overhang cannot happen
-> there. The two numbers are therefore allowed to differ: the contract
-> compares the **training sim's** box, and the browser's per-scene radii are
-> the product's own geometry. Changing the training sim's box to 14 m was
-> measured and rejected — it moves 10 training-sim reward baselines and
-> pushes the `red_light_axis_disagreement` vector off its 10-step sample grid.
-
-> **The product's junction radius is a different quantity from the training sim's box**
-> (measured 2026-10-24, while fixing the cross-scene collision).
-> The browser sizes every junction box from the lane model it actually has:
-> **the crossing road's half-width + a clearance**, where the clearance is the
-> longest vehicle's half-length — because the stop rule acts on the vehicle's
-> *centre*, so a queued vehicle's nose may legitimately overhang by half a
-> vehicle. The training sim has **no lane model** (its road is
-> `ROAD_HALF_WIDTH = 3.5` wide and its NPCs sit at ±3.5 m), so its 8 m box
-> already contains the whole carriageway and the overhang cannot happen
-> there. The two numbers are therefore allowed to differ: the contract
-> compares the **training sim's** box, and the browser's per-scene radii are
-> the product's own geometry. Changing the training sim's box to 14 m was
-> measured and rejected — it moves 10 training-sim reward baselines and
-> pushes the `red_light_axis_disagreement` vector off its 10-step sample grid.
+> vehicle. The cross scene's 6 lanes give 10.5 + 4.5 = **15.0 m**.
+>
+> The training sim has **no lane model** (its road is `ROAD_HALF_WIDTH = 3.5`
+> wide and its NPCs sit at ±3.5 m), and the point that settles it — **its
+> vehicles are POINTS**: the `Vehicle` dataclass carries no length, the
+> collision test is centre-to-centre (`COLLISION_DISTANCE`), the queue gap is
+> centre-to-centre (`MIN_GAP`), and the stop rule and the occupancy test both
+> read the vehicle's *centre*. A point vehicle has no nose to overhang, so the
+> clearance term **does not exist** on this side: the training sim's 8 m box
+> is a **measured margin over the carriageway**, not a derived value.
+> `ROAD_HALF_WIDTH + 4.5 == 8.0` is an **arithmetic coincidence**, not a
+> shared rule — the 4.5 m term is the browser's nose-overhang allowance and
+> has no geometric meaning in a point model. The two numbers are therefore
+> allowed to differ: the contract compares the **training sim's** box, and
+> the browser's per-scene radii are the product's own geometry.
+>
+> **What pins the training sim's 8.0 m** (both measured 2026-10-24):
+> - the **training reward baselines** — the reward numbers in
+>   `tests/test_rl_signal_train.py`, `tests/test_signal_conflict.py` and
+>   `tests/test_signal_open_traffic.py` all move with it: at 14.0 m, **10**
+>   tests fail (4 in `test_rl_signal_train.py`, 3 in `test_signal_conflict.py`,
+>   2 in `test_signal_open_traffic.py`, plus the radius value assertion in
+>   `test_ego_signalled_scene.py`);
+> - the **contract's sample grid** — the `red_light_axis_disagreement`
+>   vector's red-light termination has to land on a 10-step sample step.
+>   Measured by bisection on the radius: above the carriageway floor
+>   (3.5 m) that happens only for a radius in **(7.852, 8.541] m** (step
+>   30 — the committed golden's), **(13.712, 14.172] m** (step 20) or
+>   **(17.274, 17.504] m** (step 10). The two upper windows keep the
+>   grid but still **move the committed golden** (`final_step` 30 → 20),
+>   which the contract forbids; 15 m leaves the grid altogether (step 18).
+>   A radius above 15.555 m also breaks the contract's own gate, which
+>   asserts that the vector's ego **starts outside** the box.
+>
+> `tests/test_rl_junction_radius.py` pins the value, the floor, the grid
+> window and the premise (the point vehicles) this rests on.
 
 ### The browser's Rapier path — covered by a different mechanism, and how that failed once
 
