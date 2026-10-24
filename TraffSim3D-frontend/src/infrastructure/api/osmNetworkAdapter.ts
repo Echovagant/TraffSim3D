@@ -567,6 +567,39 @@ export interface SpawnImportedVehiclesOptions {
 }
 
 /**
+ * How many vehicles an imported OSM city starts with.
+ *
+ * The built-in demo scenes ship 6–8 cars, but an imported district has
+ * hundreds of roads. Eight cars on a 400-road district occupy 2 % of the
+ * network, and because each car drives its own stretch of road, they
+ * never even meet: the scene reads as an empty city rather than as
+ * traffic.
+ *
+ * So the count scales with the road count — roughly one car per
+ * `ROADS_PER_IMPORT_VEHICLE` roads — and is clamped to
+ * `[MIN_IMPORT_VEHICLES, MAX_IMPORT_VEHICLES]`. The upper bound is a
+ * simulation cost, not a taste call: every car is a Rapier rigid body
+ * plus a lane, and the heaviest built-in scene measures 12 vehicles.
+ */
+export const MIN_IMPORT_VEHICLES = 8
+export const MAX_IMPORT_VEHICLES = 40
+/** Roads per vehicle at the start of an import. */
+export const ROADS_PER_IMPORT_VEHICLE = 13
+
+/**
+ * The number of vehicles an import of `roadCount` roads should start
+ * with.
+ *
+ * A 400-road district gets ~30 cars; a 20-road hamlet still gets the 8
+ * minimum; a province-scale extract is capped at 40.
+ */
+export const importVehicleCountFor = (roadCount: number): number => {
+  if (!Number.isFinite(roadCount) || roadCount <= 0) return MIN_IMPORT_VEHICLES
+  const scaled = Math.round(roadCount / ROADS_PER_IMPORT_VEHICLE)
+  return Math.min(MAX_IMPORT_VEHICLES, Math.max(MIN_IMPORT_VEHICLES, scaled))
+}
+
+/**
  * Spawn vehicles into an imported network via the existing
  * `spawnVehicle` use case.
  *

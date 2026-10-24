@@ -15,7 +15,14 @@ import { buildCrossIntersectionNetwork } from '@application/services/defaultScen
 import { tick, type TickContext } from '@application/services/tick'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import { INTERSECTION_CLEARANCE_M, ROAD_LANE_WIDTH } from '@shared/constants/simulation'
-import { deriveSpawnPoints, normalizeOsmPayload, spawnImportedVehicles } from './osmNetworkAdapter'
+import {
+  MAX_IMPORT_VEHICLES,
+  MIN_IMPORT_VEHICLES,
+  deriveSpawnPoints,
+  importVehicleCountFor,
+  normalizeOsmPayload,
+  spawnImportedVehicles,
+} from './osmNetworkAdapter'
 
 /** Minimal tick context — no physics, no controllers: the hand-rolled
  *  signal cycle still runs, which is what the imported lights feed. */
@@ -338,6 +345,38 @@ describe('normalizeOsmPayload — the spawn point arc length', () => {
     const { network } = normalizeOsmPayload(withoutSpawnPoints)
     expect(spawnImportedVehicles(network, 1)).toBe(1)
     expect(network.vehicles['v-1']!.s).toBe(0)
+  })
+})
+
+describe('the vehicle count of an import follows the size of the network', () => {
+  it('scales with the road count', () => {
+    // ~13 roads per car, floored at the demo-scene minimum of 8.
+    expect(importVehicleCountFor(13)).toBe(MIN_IMPORT_VEHICLES)
+    expect(importVehicleCountFor(130)).toBe(10)
+    expect(importVehicleCountFor(390)).toBe(30)
+  })
+
+  it('never drops below the demo-scene minimum', () => {
+    expect(importVehicleCountFor(1)).toBe(MIN_IMPORT_VEHICLES)
+    expect(importVehicleCountFor(0)).toBe(MIN_IMPORT_VEHICLES)
+    expect(importVehicleCountFor(-5)).toBe(MIN_IMPORT_VEHICLES)
+    expect(importVehicleCountFor(Number.NaN)).toBe(MIN_IMPORT_VEHICLES)
+  })
+
+  it('never exceeds the simulation ceiling', () => {
+    // A province-scale extract must not put 500 rigid bodies in the world.
+    expect(importVehicleCountFor(13 * 1000)).toBe(MAX_IMPORT_VEHICLES)
+    expect(importVehicleCountFor(7_320)).toBe(MAX_IMPORT_VEHICLES)
+    expect(MAX_IMPORT_VEHICLES).toBe(40)
+  })
+
+  it('a district-sized import gets enough cars to look like traffic', () => {
+    // The regression this locks: a 391-road district used to start with
+    // 8 cars (2 % of the network), and because each car drives its own
+    // stretch of road they never met.
+    const count = importVehicleCountFor(391)
+    expect(count).toBeGreaterThanOrEqual(24)
+    expect(count).toBeLessThanOrEqual(40)
   })
 })
 

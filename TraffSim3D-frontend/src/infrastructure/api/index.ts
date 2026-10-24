@@ -43,9 +43,13 @@ export {
 export type { OsmBBox } from './osmImportClient'
 
 export {
+  MAX_IMPORT_VEHICLES,
+  MIN_IMPORT_VEHICLES,
   OSM_METERS_PER_DEGREE_LAT,
   OSM_PAYLOAD_NORTH_IS_POSITIVE_Z,
+  ROADS_PER_IMPORT_VEHICLE,
   deriveSpawnPoints,
+  importVehicleCountFor,
   normalizeOsmPayload,
   readOsmOrigin,
   spawnImportedVehicles,

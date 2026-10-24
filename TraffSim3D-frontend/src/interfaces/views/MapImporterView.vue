@@ -167,6 +167,7 @@ import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
 import {
   OSM_UNSPECIFIED_CLIP_NOTE,
   describeOsmClip,
+  importVehicleCountFor,
   normalizeOsmPayload,
   spawnImportedVehicles,
   validateOsmBBox,
@@ -182,11 +183,15 @@ const router = useRouter()
 const world = useWorldStore()
 
 /**
- * How many vehicles an imported OSM city starts with. The demo scenes
- * ship 6–8 cars; an imported district gets the same order of magnitude so
- * the scene reads as traffic rather than as an empty road network.
+ * How many vehicles an imported OSM city starts with.
+ *
+ * The count scales with the size of the imported network (see
+ * `importVehicleCountFor`): the built-in scenes ship 6–8 cars, but a
+ * district has hundreds of roads, and eight cars on four hundred roads
+ * never meet each other — the scene reads as an empty road network
+ * rather than as traffic.
  */
-const IMPORT_VEHICLE_COUNT = 8
+const importVehicleCount = (roadCount: number): number => importVehicleCountFor(roadCount)
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const file = ref<File | null>(null)
@@ -400,7 +405,11 @@ const onUpload = async (): Promise<void> => {
     // An imported city with zero cars is not a simulation. The spawn
     // path is the same one the editor toolbar uses; when the payload
     // carries no spawn points the adapter derives them from the roads.
-    const spawned = spawnImportedVehicles(network, IMPORT_VEHICLE_COUNT)
+    // The count follows the size of the imported network.
+    const spawned = spawnImportedVehicles(
+      network,
+      importVehicleCount(Object.keys(network.roads).length),
+    )
     // Pass the source filename so the toolbar can show
     // "📂 福田.osm" instead of the generic scene-kind dropdown.
     // The second arg sets `currentSceneKind = 'imported'` and
