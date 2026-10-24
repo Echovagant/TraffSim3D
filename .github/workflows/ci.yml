@@ -85,7 +85,33 @@ jobs:
         # into an actual gate: on its own `--cov=app` only *reports* the
         # number, so coverage could decay silently. Measured locally on
         # 2026-10-24: 89.27%.
-        run: python -m pytest --cov=app --cov-fail-under=70 -q
+        #
+        # The output is teed to a file and, when the run fails, the failing
+        # test names are re-published as **workflow annotations**. A hosted
+        # runner's job log is only readable with admin rights, but the
+        # check-run annotations are public — so without this a red backend
+        # job says only "Process completed with exit code 1" and the
+        # failing tests have to be guessed at.
+        run: |
+          # `set +e` around the pipeline: the exit code is captured by
+          # hand below, so errexit (and pipefail, if it is ever turned on)
+          # must not abort the step before the diagnosis is published.
+          set +e
+          python -m pytest --cov=app --cov-fail-under=70 -q -ra 2>&1 | tee /tmp/pytest.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          emit() { local l="${1:0:400}"; echo "::${2}::${l//\%/%25}"; }
+          if [ "$STATUS" -ne 0 ]; then
+            emit "pytest failed (exit $STATUS) — the failing tests are named below" error
+            grep -E '^(FAILED|ERROR) ' /tmp/pytest.log | head -10 | while IFS= read -r line; do
+              emit "$line" error
+            done
+            emit "--- the tail of the pytest output follows as warnings ---" error
+            tail -25 /tmp/pytest.log | while IFS= read -r line; do
+              emit "$line" warning
+            done
+          fi
+          exit "$STATUS"
 
       - name: ruff
         # The repository deliberately keeps 6 ruff findings. Each one is
@@ -411,7 +437,22 @@ jobs:
             fi
             sleep 2
           done
-          npx playwright test --config=playwright.ci.config.ts
+          set +e
+          npx playwright test --config=playwright.ci.config.ts --reporter=list 2>&1 | tee /tmp/playwright.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          emit() { local l="${1:0:400}"; echo "::${2}::${l//\%/%25}"; }
+          if [ "$STATUS" -ne 0 ]; then
+            emit "the Playwright suite failed (exit $STATUS) — the failing specs are named below" error
+            grep -E '^[[:space:]]+[0-9]+\) |^[[:space:]]+(Error|Timeout|expect\()' /tmp/playwright.log | head -12 | while IFS= read -r line; do
+              emit "$line" error
+            done
+            emit "--- the tail of the Playwright output follows as warnings ---" error
+            tail -30 /tmp/playwright.log | while IFS= read -r line; do
+              emit "$line" warning
+            done
+          fi
+          exit "$STATUS"
 
   e2e-real:
     name: E2E — real PPO training (blocking)
@@ -538,17 +579,37 @@ jobs:
           #
           # This FAILS the job when SB3 is missing. It must: a job that
           # quietly skipped the real run would be worse than no job.
-          for i in $(seq 1 60); do
+          emit() { local l="${1:0:400}"; echo "::${2}::${l//\%/%25}"; }
+          # 90 x 2 s = 180 s. The capabilities endpoint imports torch on the
+          # first call, and on a hosted runner that cold import (2 GB of
+          # packages, cold page cache) can outlast the old 120 s budget —
+          # the job as a whole allows 25 min, so there is room to wait
+          # longer rather than to fail a backend that was merely slow.
+          for i in $(seq 1 90); do
             if curl -fsS http://localhost:8011/api/v1/rl/capabilities > /tmp/rl-caps.json 2>/dev/null; then
               break
             fi
             sleep 2
           done
           if [ ! -s /tmp/rl-caps.json ]; then
-            echo "backend did not answer /api/v1/rl/capabilities within 120s"
-            cat /tmp/uvicorn-real.log || true
+            echo "backend did not answer /api/v1/rl/capabilities within 180s"
+            emit "the backend never answered /api/v1/rl/capabilities within 180s" error
+            emit "--- the uvicorn log follows as warnings ---" error
+            tail -40 /tmp/uvicorn-real.log 2>/dev/null | while IFS= read -r line; do
+              emit "$line" warning
+            done
             exit 1
           fi
           cat /tmp/rl-caps.json
           python -c "import json,sys;c=json.load(open('/tmp/rl-caps.json'));print('sb3_available =',c['sb3_available'],'| torch =',c['torch_version'],'| cuda =',c['cuda_available']);sys.exit(0 if c['sb3_available'] else 'stable-baselines3 is NOT installed -> the real-training run would silently degrade to dry-run')"
-          npm run test:e2e:real
+          set +e
+          npm run test:e2e:real 2>&1 | tee /tmp/playwright-real.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            emit "the real-PPO e2e failed (exit $STATUS) — the details follow" error
+            tail -40 /tmp/playwright-real.log | while IFS= read -r line; do
+              emit "$line" warning
+            done
+          fi
+          exit "$STATUS"
