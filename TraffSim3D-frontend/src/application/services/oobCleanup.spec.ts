@@ -25,11 +25,15 @@ import {
   getOobEvents,
   clearOobEvents,
   subscribeOobEvents,
+  recordLaneGuard,
   OOB_EXIT_MAX_DISTANCE_M,
   OOB_EXIT_MAX_SECONDS,
   type TickOobDeps,
 } from './oobCleanup'
+import { tick, type TickContext } from './tick'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
+import type { Vehicle } from '@domain/entities/Vehicle'
+import type { RapierWorld } from '@infrastructure/physics'
 
 describe('tickOobCleanup', () => {
   let net: RoadNetwork
@@ -299,5 +303,261 @@ describe('tickOobCleanup', () => {
     expect(other.s).toBe(20)
     expect(respawned).not.toContain('v-other')
     expect(lost.speed).toBeLessThan(12)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The lane guards of the physics path
+// ---------------------------------------------------------------------------
+//
+// The physics path (tick.ts) has two guards that put a vehicle back onto
+// its lane when it has drifted off it:
+//
+//   - the 5 m guard: the body was more than 5 m from its expected lane
+//     point → snapped onto that point, speed zeroed;
+//   - the lateral-drift guard (15 m): pulled back onto the lane, speed
+//     clamped.
+//
+// They used to be **silent**: the car blinked back onto the road with no
+// explanation and no record. The out-of-bounds exit phase never got a
+// chance to announce the common case either, because the 5 m guard fires
+// first — a vehicle pushed 80 m sideways produced ZERO events.
+//
+// What is pinned here:
+//   1. Both guards record an event with the right kind, the distance it
+//      was off its lane, and the speed it was carrying.
+//   2. The behaviour of the guards themselves is unchanged — the vehicle
+//      is still put back on its lane, at the same speed handling.
+//   3. A vehicle that is on its lane records nothing (no event spam).
+
+/**
+ * A minimal physics double for the tick's guard path.
+ *
+ * It holds one body per vehicle and hands its pose back to the tick.
+ * `pushOffLane` moves a body sideways so the tick's guard sees it.
+ */
+interface GuardBody {
+  x: number
+  z: number
+  heading: number
+  vx: number
+  vz: number
+}
+
+const makeGuardWorld = (bodies: Map<string, GuardBody>): RapierWorld => {
+  const world = {
+    applyControl: (id: string, _control: unknown, targetSpeed: number, heading: number): void => {
+      const b = bodies.get(id)
+      if (!b) return
+      b.vx = Math.max(0, targetSpeed) * Math.cos(heading)
+      b.vz = Math.max(0, targetSpeed) * Math.sin(heading)
+    },
+    setVehicleSpeed: (id: string, speed: number, heading: number): void => {
+      const b = bodies.get(id)
+      if (!b) return
+      b.vx = Math.max(0, speed) * Math.cos(heading)
+      b.vz = Math.max(0, speed) * Math.sin(heading)
+    },
+    setVehicleLateralVelocity: (): void => {},
+    setVehicleAngularVelocity: (): void => {},
+    setVehiclePosition: (id: string, position: { x: number; y: number; z: number }): void => {
+      const b = bodies.get(id)
+      if (!b) return
+      b.x = position.x
+      b.z = position.z
+      b.vx = 0
+      b.vz = 0
+    },
+    setVehicleHeading: (id: string, heading: number): void => {
+      const b = bodies.get(id)
+      if (!b) return
+      b.heading = heading
+    },
+    setVehicleHeight: (): void => {},
+    readPose: (id: string) => {
+      const b = bodies.get(id)
+      if (!b) return null
+      return {
+        position: { x: b.x, y: 0, z: b.z },
+        heading: b.heading,
+        speed: Math.hypot(b.vx, b.vz),
+      }
+    },
+    step: (dt: number) => {
+      for (const b of bodies.values()) {
+        b.x += b.vx * dt
+        b.z += b.vz * dt
+      }
+      return { contactEvents: [] }
+    },
+  }
+  return world as unknown as RapierWorld
+}
+
+const makeGuardCtx = (rapierWorld: RapierWorld | null): TickContext => ({
+  rapierWorld,
+  signal: null,
+  trajectoryExporter: null,
+  sensorRegistry: null,
+  lidarEnabled: false,
+  getHostPose: () => null,
+  fixedStepScheduler: null,
+  draggingId: null,
+  removeVehicle: () => {},
+  policy: null,
+  replayTargetId: null,
+})
+
+describe('the lane guards of the physics path', () => {
+  let net: RoadNetwork
+  let bodies: Map<string, GuardBody>
+  let world: RapierWorld
+
+  beforeEach(() => {
+    net = buildTestNetwork(0)
+    bodies = new Map()
+    world = makeGuardWorld(bodies)
+    clearOobEvents()
+  })
+
+  /**
+   * Put a vehicle on lane 0 of `r-ns` and register its body, so the tick
+   * has a pose to read.
+   */
+  const addVehicle = (id: string, s: number, speed: number): Vehicle => {
+    const road = net.roads['r-ns']!
+    const lp = lanePoint(road, 0, s)
+    const v = makeTestVehicle({
+      id,
+      roadId: 'r-ns',
+      laneIndex: 0,
+      s,
+      speed,
+      spawnedAt: -10,
+    })
+    v.position = { x: lp.position.x, y: 0, z: lp.position.z }
+    v.heading = lp.heading
+    net.vehicles[id] = v
+    bodies.set(id, {
+      x: lp.position.x,
+      z: lp.position.z,
+      heading: lp.heading,
+      vx: 0,
+      vz: 0,
+    })
+    return v
+  }
+
+  it('records the 5 m guard: the vehicle is put back on its lane, and the event says so', () => {
+    const v = addVehicle('v-1', 10, 12)
+    const body = bodies.get('v-1')!
+    // Push it 8 m sideways — past the 5 m guard's threshold.
+    body.x += 8
+
+    tick(net, 1 / 60, 1.0, makeGuardCtx(world))
+
+    const guard = getOobEvents().find((e) => e.kind === 'lane-guard')
+    expect(guard).toBeDefined()
+    expect(guard!.vehicleId).toBe('v-1')
+    expect(guard!.distance).toBeCloseTo(8, 1)
+    // The speed it was carrying when the guard fired — NOT the 0 the
+    // guard left it with (that is what makes the event diagnosable).
+    expect(guard!.speed).toBeGreaterThan(0)
+    expect(guard!.reason).toContain('snapped back onto its lane')
+
+    // The behaviour is unchanged: the vehicle is back on its lane, at
+    // zero speed (that is what the guard has always done).
+    const lp = lanePoint(net.roads['r-ns']!, 0, v.s)
+    expect(v.position.x).toBeCloseTo(lp.position.x, 6)
+    expect(v.position.z).toBeCloseTo(lp.position.z, 6)
+    expect(v.speed).toBe(0)
+  })
+
+  it('records a guard event however far the vehicle was pushed off its lane', () => {
+    // 80 m sideways — the case that used to produce ZERO events.
+    const v = addVehicle('v-1', 10, 12)
+    bodies.get('v-1')!.x += 80
+
+    tick(net, 1 / 60, 1.0, makeGuardCtx(world))
+
+    const guards = getOobEvents().filter(
+      (e) => e.kind === 'lane-guard' || e.kind === 'lateral-guard',
+    )
+    expect(guards).toHaveLength(1)
+    console.log(
+      '[lane guard] event log after an 80 m sideways push:',
+      JSON.stringify(getOobEvents()),
+    )
+    // Whichever guard fired, it reports the truth: how far off the lane
+    // the vehicle was, and the speed it was carrying.
+    expect(guards[0]!.distance).toBeCloseTo(80, 1)
+    expect(guards[0]!.speed).toBeGreaterThan(0)
+    // And the vehicle is back on its lane.
+    const lp = lanePoint(net.roads['r-ns']!, 0, v.s)
+    expect(v.position.x).toBeCloseTo(lp.position.x, 6)
+  })
+
+  it('records ONE event per excursion, not one per frame', () => {
+    // The guard puts the vehicle back on its lane, so the next frame it
+    // is on the lane and the guard does not fire again. (A per-frame
+    // event would drown the log — it keeps 64 entries — and would make
+    // the panel's "last reason" meaningless.)
+    addVehicle('v-1', 10, 12)
+    bodies.get('v-1')!.x += 80
+
+    for (let i = 0; i < 30; i++) {
+      tick(net, 1 / 60, 1.0 + (i + 1) / 60, makeGuardCtx(world))
+    }
+
+    expect(getOobEvents().filter((e) => e.kind === 'lane-guard')).toHaveLength(1)
+  })
+
+  it('records the lateral-drift guard with the right kind, distance and speed', () => {
+    // The lateral-drift guard is **not reachable through the tick today**:
+    // both guards measure against the same reference point
+    // (`lanePoint(vRoad, v.laneIndex, v.s)`) and the 5 m guard is the
+    // stricter one, so it snaps the vehicle back first and leaves the
+    // lateral guard a distance of exactly 0. The recording path is
+    // therefore pinned directly — the guard is wired up, and it will
+    // report the moment the shadowing is lifted.
+    recordLaneGuard({
+      kind: 'lateral-guard',
+      vehicleId: 'v-9',
+      simTime: 4.5,
+      distance: 17.5,
+      speed: 9.25,
+      reason:
+        'pulled back onto its lane — it had drifted 17.5 m sideways at 9.2 m/s, and its speed was clamped',
+    })
+
+    const guard = getOobEvents().find((e) => e.kind === 'lateral-guard')
+    expect(guard).toBeDefined()
+    expect(guard!.vehicleId).toBe('v-9')
+    expect(guard!.simTime).toBeCloseTo(4.5, 6)
+    expect(guard!.distance).toBeCloseTo(17.5, 6)
+    expect(guard!.speed).toBeCloseTo(9.25, 6)
+    expect(guard!.reason).toContain('pulled back onto its lane')
+  })
+
+  it('records nothing for a vehicle that is on its lane', () => {
+    addVehicle('v-1', 10, 12)
+
+    tick(net, 1 / 60, 1.0, makeGuardCtx(world))
+
+    expect(getOobEvents().filter((e) => e.kind === 'lane-guard')).toHaveLength(0)
+    expect(getOobEvents().filter((e) => e.kind === 'lateral-guard')).toHaveLength(0)
+  })
+
+  it('the recorded event reaches the subscribers (the UI panel)', () => {
+    const seen: string[] = []
+    const unsubscribe = subscribeOobEvents((e) => seen.push(`${e.kind}:${e.vehicleId}`))
+    const v = addVehicle('v-1', 10, 12)
+    bodies.get('v-1')!.x += 8
+
+    tick(net, 1 / 60, 1.0, makeGuardCtx(world))
+    unsubscribe()
+
+    expect(seen).toContain('lane-guard:v-1')
+    expect(v.speed).toBe(0)
   })
 })

@@ -33,6 +33,12 @@
 // vehicle the editor is currently dragging is under the user's
 // control, not the simulation's — it must not be teleported away
 // while the user is still moving it.
+//
+// The module is also the event log of the **lane guards** (the physics
+// path's two "put the car back on its lane" corrections). They used to
+// be silent — the car blinked back onto the road with no record — so
+// they announce themselves through the same log and the same
+// subscribers as the exit phase.
 
 import type { Vehicle } from '@domain/entities/Vehicle'
 import type { Road } from '@domain/entities/Road'
@@ -48,7 +54,22 @@ export const OOB_EXIT_MAX_SECONDS = 3
 /** How far a leaving vehicle may roll out of the network (m). */
 export const OOB_EXIT_MAX_DISTANCE_M = 25
 
-export type OobEventKind = 'exit-start' | 'reset' | 'orphan-removed'
+/**
+ * The kinds of event this log carries.
+ *
+ * - `exit-start` / `reset` / `orphan-removed` — the out-of-bounds exit
+ *   phase (the vehicle left the network).
+ * - `lane-guard` / `lateral-guard` — the **lane guards** of the physics
+ *   path: the vehicle was put back onto its lane because it had drifted
+ *   off it. These used to happen silently (the car blinked back onto the
+ *   road with no explanation), so they are recorded here too.
+ */
+export type OobEventKind =
+  | 'exit-start'
+  | 'reset'
+  | 'orphan-removed'
+  | 'lane-guard'
+  | 'lateral-guard'
 
 /** Why the exit phase ended. */
 export type OobResetReason = 'stopped' | 'distance' | 'timeout'
@@ -97,6 +118,43 @@ export const subscribeOobEvents = (listener: (event: OobEvent) => void): (() => 
   return () => {
     listeners.delete(listener)
   }
+}
+
+/**
+ * Record a **lane guard**: the physics path found a vehicle off its
+ * lane and put it back.
+ *
+ * These are the two guards in `tick.ts`:
+ *
+ *   - `lane-guard` — the body was more than 5 m from its expected lane
+ *     point. It was snapped onto that point and its speed was zeroed.
+ *   - `lateral-guard` — the body had drifted more than
+ *     `LATERAL_DRIFT_THRESHOLD_M` sideways. It was pulled back onto
+ *     the lane and its speed was clamped.
+ *
+ * They used to happen **silently**: the car blinked back onto the road
+ * and the observer never learned why. Since the 5 m guard fires before
+ * the out-of-bounds exit phase ever gets a chance, the exit-phase
+ * announcement never covered the common case — so the guards announce
+ * themselves here, through the same log and the same subscribers.
+ *
+ * `distance` is how far off the lane the vehicle was (m) and `speed` is
+ * the speed it carried at that moment (m/s) — both measured **before**
+ * the guard corrected them, because that is what makes the event
+ * diagnosable.
+ */
+export const recordLaneGuard = (event: {
+  kind: 'lane-guard' | 'lateral-guard'
+  vehicleId: string
+  simTime: number
+  /** Metres the vehicle was off its lane geometry when the guard fired. */
+  distance: number
+  /** Speed (m/s) the vehicle carried when the guard fired. */
+  speed: number
+  /** Human-readable reason. */
+  reason: string
+}): void => {
+  emit(event)
 }
 
 /**

@@ -36,7 +36,7 @@ import {
 import { rampSpeed, statusFromHysteresis, safeGapGipps } from '@domain/services/vehicleDynamics'
 import { computeSteeringAngle, steeringAngleToOmega } from '@domain/services/purePursuit'
 import { pythonSpeedStep } from '@domain/services/egoKernel'
-import { tickOobCleanup, isOobExiting } from './oobCleanup'
+import { tickOobCleanup, isOobExiting, recordLaneGuard } from './oobCleanup'
 import {
   CRASH_IMPULSE_THRESHOLD,
   MAX_SPEED,
@@ -460,6 +460,16 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
           const distFromExpectedSq = dxEnd * dxEnd + dzEnd * dzEnd
           if (distFromExpectedSq > 25) {
             // 5m threshold
+            //
+            // This guard used to be **silent**: the car was teleported
+            // back onto its lane with its speed zeroed and nobody was
+            // told. The out-of-bounds exit phase never gets a chance to
+            // announce this case — this guard fires first (it is the
+            // stricter one), so the common "pushed sideways off the
+            // lane" case produced NO event at all. The snap is recorded
+            // now, through the same event log as the exit phase.
+            const offLaneM = Math.sqrt(distFromExpectedSq)
+            const speedAtGuard = v.speed
             const clampedS = Math.max(0, Math.min(len, v.s))
             v.s = clampedS
             const lp = lanePoint(vRoad, v.laneIndex, v.s)
@@ -471,6 +481,14 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
             ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
             ctx.rapierWorld!.setVehicleHeading(v.id, lp.heading)
             ctx.rapierWorld!.setVehicleSpeed(v.id, 0, lp.heading) // zero Rapier linvel
+            recordLaneGuard({
+              kind: 'lane-guard',
+              vehicleId: v.id,
+              simTime,
+              distance: offLaneM,
+              speed: speedAtGuard,
+              reason: `snapped back onto its lane — it was ${offLaneM.toFixed(1)} m off its lane point at ${speedAtGuard.toFixed(1)} m/s, and its speed was zeroed`,
+            })
           }
         }
       }
@@ -485,6 +503,11 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         const dx = v.position.x - expected.position.x
         const dz = v.position.z - expected.position.z
         if (dx * dx + dz * dz > LATERAL_DRIFT_THRESHOLD_M * LATERAL_DRIFT_THRESHOLD_M) {
+          // Recorded for the same reason as the 5 m guard above: a
+          // silent teleport back onto the lane is indistinguishable
+          // from a glitch to whoever watches the scene.
+          const offLaneM = Math.sqrt(dx * dx + dz * dz)
+          const speedAtGuard = v.speed
           v.position.x = expected.position.x
           v.position.y = expected.position.y
           v.position.z = expected.position.z
@@ -493,6 +516,14 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
           ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
           ctx.rapierWorld!.setVehicleHeading(v.id, expected.heading)
           ctx.rapierWorld!.setVehicleSpeed(v.id, v.speed, expected.heading)
+          recordLaneGuard({
+            kind: 'lateral-guard',
+            vehicleId: v.id,
+            simTime,
+            distance: offLaneM,
+            speed: speedAtGuard,
+            reason: `pulled back onto its lane — it had drifted ${offLaneM.toFixed(1)} m sideways at ${speedAtGuard.toFixed(1)} m/s, and its speed was clamped`,
+          })
         }
       }
 

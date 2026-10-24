@@ -15,7 +15,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import SimulationLabView from './SimulationLabView.vue'
 import { useWorldStore } from '@interfaces/stores/worldStore'
-import { tickOobCleanup, clearOobEvents } from '@application/services/oobCleanup'
+import { tickOobCleanup, clearOobEvents, recordLaneGuard } from '@application/services/oobCleanup'
 import { buildTestNetwork } from '@__fixtures__/testNetwork'
 
 const stubs = {
@@ -132,6 +132,57 @@ describe('SimulationLabView — the trajectory panel shows the loss', () => {
     expect(readout.text()).toContain('驶离中')
     // The reason is available (tooltip), not just the label.
     expect(readout.attributes('title')).toContain('left the network')
+    view.unmount()
+  })
+
+  it('shows the lane guards — a car put back on its lane is not a silent blink', async () => {
+    const view = mountView()
+
+    recordLaneGuard({
+      kind: 'lane-guard',
+      vehicleId: 'v-guard',
+      simTime: 3,
+      distance: 8.5,
+      speed: 12.4,
+      reason:
+        'snapped back onto its lane — it was 8.5 m off its lane point at 12.4 m/s, and its speed was zeroed',
+    })
+    await view.vm.$nextTick()
+
+    const readout = view.get('[data-testid="oob-event"]')
+    console.log(
+      '[trajectory] lane-guard readout:',
+      readout.text(),
+      '|',
+      readout.attributes('title'),
+    )
+    // The label names the kind…
+    expect(readout.text()).toContain('车道归位')
+    expect(readout.text()).toContain('v-guard')
+    // …and the tooltip carries the diagnosis: how far off, how fast.
+    expect(readout.attributes('title')).toContain('8.5 m')
+    expect(readout.attributes('title')).toContain('12.4 m/s')
+    view.unmount()
+  })
+
+  it('shows the lateral-drift guard under its own label', async () => {
+    const view = mountView()
+
+    recordLaneGuard({
+      kind: 'lateral-guard',
+      vehicleId: 'v-drift',
+      simTime: 4,
+      distance: 17.5,
+      speed: 9.25,
+      reason:
+        'pulled back onto its lane — it had drifted 17.5 m sideways at 9.2 m/s, and its speed was clamped',
+    })
+    await view.vm.$nextTick()
+
+    const readout = view.get('[data-testid="oob-event"]')
+    expect(readout.text()).toContain('横向纠偏')
+    expect(readout.text()).toContain('v-drift')
+    expect(readout.attributes('title')).toContain('17.5 m')
     view.unmount()
   })
 })

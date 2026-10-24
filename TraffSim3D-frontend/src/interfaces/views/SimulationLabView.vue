@@ -86,7 +86,10 @@
             <div class="stat" title="每个渲染帧 +1；store 变更通知也会 +1">
               <span>仿真 tick</span><b data-testid="sim-tick">{{ world.tickCount }}</b>
             </div>
-            <div class="stat" title="车偏离车道后会被刹停并放回路口起点 — 这里记录最近一次的原因">
+            <div
+              class="stat"
+              title="车偏离车道后会被拉回车道或放回路口起点 — 这里记录最近一次的原因"
+            >
               <span>越界处理</span
               ><b data-testid="oob-event" :title="oobEventDetail">{{ oobEventLabel }}</b>
             </div>
@@ -319,6 +322,12 @@ const OOB_EVENT_LABELS: Record<OobEvent['kind'], string> = {
   'exit-start': '驶离中',
   reset: '已复位',
   'orphan-removed': '已移除',
+  // The physics path's lane guards: the car was put back onto its lane
+  // because it had drifted off it. They are recorded in the same log as
+  // the exit phase, so the panel shows *why* a car suddenly reappeared
+  // on the road.
+  'lane-guard': '车道归位',
+  'lateral-guard': '横向纠偏',
 }
 const oobEventLabel = computed(() =>
   lastOobEvent.value
