@@ -58,6 +58,38 @@ describe('requestLaneChange', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toBe('gap-too-small')
   })
+
+  it('reject a change into the phantom backward half of a one-way road', () => {
+    // A one-way road with two lanes (the shape an imported OSM one-way
+    // street has: the backend halves the lane count of a one-way way).
+    // Lane 1 is the backward half — there is no oncoming carriageway to
+    // cross into, so the change is refused.
+    const net = buildTestNetwork(0)
+    net.roads['r-ns'] = { ...net.roads['r-ns']!, laneCount: 2, oneway: true }
+    const v = makeTestVehicle({ speed: MIN_LANE_CHANGE_SPEED + 1, laneIndex: 0 })
+    net.vehicles['v-1'] = v
+    const r = requestLaneChange(v, 'left', net, 0)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('not-drivable-lane')
+  })
+
+  it('a change between two forward lanes of a one-way road is allowed', () => {
+    const net = buildTestNetwork(0)
+    net.roads['r-ns'] = { ...net.roads['r-ns']!, laneCount: 4, oneway: true }
+    const v = makeTestVehicle({ speed: MIN_LANE_CHANGE_SPEED + 1, laneIndex: 0 })
+    net.vehicles['v-1'] = v
+    const r = requestLaneChange(v, 'left', net, 0)
+    expect(r.ok).toBe(true)
+  })
+
+  it('the same change on a two-way road is allowed', () => {
+    const net = buildTestNetwork(0)
+    net.roads['r-ns'] = { ...net.roads['r-ns']!, laneCount: 2 }
+    const v = makeTestVehicle({ speed: MIN_LANE_CHANGE_SPEED + 1, laneIndex: 0 })
+    net.vehicles['v-1'] = v
+    const r = requestLaneChange(v, 'left', net, 0)
+    expect(r.ok).toBe(true)
+  })
 })
 
 describe('steerLateralVelocity', () => {

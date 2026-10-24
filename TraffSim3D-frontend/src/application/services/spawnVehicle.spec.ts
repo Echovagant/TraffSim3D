@@ -138,3 +138,85 @@ describe('spawnVehicle — the legacy fallback never spawns inside a junction bo
     }
   })
 })
+
+/**
+ * A vehicle must never START against the flow of a one-way street.
+ *
+ * A one-way road's backward lanes are the phantom half of a two-way
+ * road — the backend halves the lane count of a one-way way, so the
+ * model still draws a backward half that has no oncoming carriageway
+ * behind it.
+ */
+describe('spawnVehicle — never on the wrong-way side of a one-way road', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** A two-lane one-way road. Lane 0 travels start→end, lane 1 against. */
+  const onewayRoad = (id: string, x: number): Road => ({
+    id,
+    startNode: { x, y: 0, z: 0 },
+    endNode: { x: x + 100, y: 0, z: 0 },
+    laneCount: 2,
+    speedLimit: 20,
+    level: 0,
+    oneway: true,
+  })
+
+  it('skips a spawn point on the backward lane of a one-way road', () => {
+    const net = createRoadNetwork()
+    net.roads['r-ow'] = onewayRoad('r-ow', 0)
+    net.roads['r-ok'] = onewayRoad('r-ok', 0)
+    net.roads['r-ok'] = {
+      ...net.roads['r-ok']!,
+      startNode: { x: 0, y: 0, z: 200 },
+      endNode: { x: 100, y: 0, z: 200 },
+    }
+    // The first spawn point is the illegal one — it must be passed over.
+    net.spawnPoints['sp-bad'] = {
+      id: 'sp-bad',
+      roadId: 'r-ow',
+      laneIndex: 1,
+      s: 20,
+      occupiedBy: null,
+    }
+    net.spawnPoints['sp-good'] = {
+      id: 'sp-good',
+      roadId: 'r-ok',
+      laneIndex: 0,
+      s: 20,
+      occupiedBy: null,
+    }
+    const r = spawnVehicle(net, 'v-99')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.vehicle.roadId).toBe('r-ok')
+    expect(r.vehicle.laneIndex).toBe(0)
+  })
+
+  it('the legacy fallback never picks the backward lane of a one-way road', () => {
+    const net = createRoadNetwork()
+    net.roads['r-ow'] = onewayRoad('r-ow', 0)
+    // A junction box in the middle of the road: lane 0's sampled
+    // positions all land inside it, so lane 0 yields no candidate and
+    // the scan moves on to lane 1 — the phantom half.
+    net.intersections['i-1'] = {
+      id: 'i-1',
+      position: { x: 50, y: 0, z: 0 },
+      trafficLights: [],
+      connectedRoads: ['r-ow'],
+      intersectionRadius: 15,
+    }
+    const spy = vi.spyOn(Math, 'random')
+    spy.mockReturnValueOnce(0.9) // the vehicle type roll
+    for (let i = 0; i < 6; i++) spy.mockReturnValueOnce(0.5) // lane 0 -> s = 50, inside the box
+    for (let i = 0; i < 6; i++) spy.mockReturnValueOnce(0.1) // lane 1 -> s = 10.8, free
+    spy.mockReturnValue(0.1)
+
+    const r = spawnVehicle(net, 'v-99')
+    // Lane 0 is unusable and lane 1 may not be driven on — so there is
+    // nowhere legal to start.
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('traffic density full')
+  })
+})

@@ -11,6 +11,7 @@ import type { Vehicle } from '@domain/entities/Vehicle'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { Road } from '@domain/entities/Road'
 import { roadForward, roadLength } from '@domain/services/laneGeometry'
+import { isDrivableLane } from '@domain/services/oneway'
 import { MIN_GAP } from '@shared/constants/simulation'
 
 export type LaneChangeDirection = 'left' | 'right'
@@ -25,6 +26,7 @@ export type LaneChangeRejectReason =
   | 'too-slow'
   | 'no-target-lane'
   | 'gap-too-small'
+  | 'not-drivable-lane'
 
 /** m/s. Below this the merge is unsafe (rear-end risk). */
 export const MIN_LANE_CHANGE_SPEED = 5.0
@@ -60,6 +62,14 @@ export const requestLaneChange = (
   const targetLane = v.laneIndex + (direction === 'left' ? 1 : -1)
   if (targetLane < 0 || targetLane >= road.laneCount) {
     return { ok: false, reason: 'no-target-lane' }
+  }
+  // A one-way road's backward lanes are the phantom half of a two-way
+  // road: there is no oncoming carriageway on the other side of the
+  // centre line, so crossing into one would put the vehicle against the
+  // flow. The rule lives in `oneway.ts` — the single home of the
+  // one-way rule.
+  if (!isDrivableLane(road, targetLane)) {
+    return { ok: false, reason: 'not-drivable-lane' }
   }
   // Gap check: any non-self vehicle in the target lane on the same
   // road must be at least MIN_GAP ahead AND behind. (O(N) over

@@ -21,6 +21,7 @@ import type { Road } from '@domain/entities/Road'
 import type { Vehicle, VehicleType } from '@domain/entities/Vehicle'
 import { LaneId } from '@domain/value-objects/LaneId'
 import { intersectionSRange, lanePoint, roadLength } from '@domain/services/laneGeometry'
+import { isDrivableLane } from '@domain/services/oneway'
 
 const DEFAULT_COLORS: Record<VehicleType, string> = {
   car: '#3a86ff',
@@ -82,6 +83,9 @@ interface SpawnCandidate {
  * because `s` is the only lane-frame handle we have at spawn time —
  * the new body doesn't exist in Rapier yet, so `readPose()` would
  * return `null`.
+ *
+ * It also answers "may a car start HERE at all": a spawn point on a
+ * lane that may not be driven on is not free.
  */
 const isSpotFree = (
   network: RoadNetwork,
@@ -92,6 +96,16 @@ const isSpotFree = (
   const cp = lanePoint(road, candidate.laneIndex, candidate.s)
   const cx = cp.position.x
   const cz = cp.position.z
+  // A one-way road's backward lanes are the phantom half of a two-way
+  // road: there is no oncoming carriageway behind the centre line, so
+  // a car must never start there. The rule lives in `oneway.ts` — the
+  // single home of the one-way rule.
+  //
+  // The check sits after the lane point is resolved on purpose: a spawn
+  // point whose road does not exist is a malformed scene, and resolving
+  // the lane point is what fails loudly on it — the import path refuses
+  // to quietly spawn a car onto nothing.
+  if (!isDrivableLane(road, candidate.laneIndex)) return false
   for (const other of Object.values(network.vehicles)) {
     const dx = other.position.x - cx
     const dz = other.position.z - cz
@@ -145,6 +159,10 @@ const findFreeLanes = (network: RoadNetwork, minGap: number): SpawnCandidate[] =
   for (const road of Object.values(network.roads)) {
     if (road.laneCount === 0) continue
     for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
+      // A one-way road's backward lanes are the phantom half of a
+      // two-way road — a car started there drives against the flow. The
+      // rule lives in `oneway.ts`, the single home of the one-way rule.
+      if (!isDrivableLane(road, laneIndex)) continue
       const len = roadLength(road)
       if (len < minGap * 2) continue // road too short for the gap
       // Sample positions: avoid the junction boxes.
@@ -192,6 +210,10 @@ const findFreeLanes = (network: RoadNetwork, minGap: number): SpawnCandidate[] =
  * by an existing vehicle (e.g. a still-spawning one), reject this
  * spawn point and try the next one. Returns `null` if every spawn
  * point is either occupied or blocked.
+ *
+ * A spawn point on a lane that may not be driven on — the phantom
+ * backward half of a one-way road — is not free either: a car must
+ * never start against the flow. `isSpotFree` is what decides that.
  */
 const pickFreeSpawnPoint = (network: RoadNetwork, minGap: number): SpawnCandidate | null => {
   for (const sp of Object.values(network.spawnPoints)) {

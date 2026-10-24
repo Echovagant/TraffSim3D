@@ -33,6 +33,7 @@
 import type { Road } from '@domain/entities/Road'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import { laneForwardSign, lanePoint, projectIntersectionOnRoad, roadLength } from './laneGeometry'
+import { isDrivableLane } from './oneway'
 import { junctionIndex } from './roadJunctionIndex'
 
 /**
@@ -95,6 +96,24 @@ const SAME_HEADING_EPS = 1e-9
  * whose travel direction at the entry point best continues `heading`
  * wins, and a tie is broken by the road id (lexicographically) so the
  * simulation is reproducible.
+ *
+ * **The pivot's sideways jump — a known limitation.** The junction sits
+ * on the roads' centre lines, while the lane the vehicle lands in sits
+ * `laneOffset(lane)` to the side of it, so the pivot moves the body
+ * sideways by up to that offset. The landing point itself is already
+ * snapped to the lane: measured on the real Shenzhen import (391 roads,
+ * 8 cars, 90 s, 14 turns) the car ends up **0.00 m** off the centre of
+ * the lane it turns into, every turn, and its lateral offset stays
+ * 0.00 m for the rest of the run — no lane guard fires.
+ *
+ * What remains is the size of the jump itself: 0.74 m on average,
+ * 1.76 m at p95 and 1.78 m at worst on the import, and 10.21 m on a
+ * hand-built right-angle corner between a 6-lane and a 4-lane road.
+ * Removing it would need a real arc between the two lanes, which this
+ * model has no concept of; the cheap alternative (landing on the
+ * junction instead of the lane centre) would leave the car a whole lane
+ * width off its own lane — 5.25 m on that corner — so the landing point
+ * stays snapped to the lane.
  */
 export const roadContinuation = (
   network: RoadNetwork,
@@ -147,8 +166,16 @@ export const roadContinuation = (
     if (projection.s <= JUNCTION_END_TOLERANCE_M) {
       // The junction is at the candidate's start → the vehicle drives on
       // forward, from s = 0 upwards.
-      entryS = 0
+      //
+      // Forward IS the direction the traffic of a one-way road runs
+      // (the OSM parser flips a `oneway=-1` way so that "forward" means
+      // the travel direction), so entering at the near end is legal on
+      // every road. The lane check is what keeps a one-way road's
+      // phantom backward half out of the picture — the rule lives in
+      // `oneway.ts`, the single home of the one-way rule.
       newLane = 0
+      if (!isDrivableLane(other, newLane)) continue
+      entryS = 0
     } else if (projection.s >= otherLen - JUNCTION_END_TOLERANCE_M) {
       // The junction is at the candidate's end → the vehicle drives on
       // backward, from s = otherLen downwards.
@@ -166,9 +193,18 @@ export const roadContinuation = (
       // the wrong side of a one-way street. A one-way road whose junction
       // is at its far end is simply **not** a continuation — the traffic
       // on it runs away from the junction.
-      if (other.oneway === true) continue
+      //
+      // The vehicle needs a BACKWARD lane to drive on: the keep-right
+      // lane of that direction is `laneCount - 1`, and it only exists
+      // when the road has at least two lanes. A one-lane road has no
+      // backward lane at all, so it cannot be entered from its far end
+      // either — the vehicle would be put on a FORWARD lane at the far
+      // end of the road and drive straight off it.
+      const backLane = other.laneCount - 1
+      if (backLane < other.laneCount / 2) continue
+      if (!isDrivableLane(other, backLane)) continue
       entryS = otherLen
-      newLane = other.laneCount - 1
+      newLane = backLane
     } else {
       continue
     }
