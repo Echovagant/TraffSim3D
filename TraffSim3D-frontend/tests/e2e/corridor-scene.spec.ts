@@ -4,7 +4,12 @@
  * and screenshots the visualization.
  */
 import { test, expect } from '@playwright/test'
-import { waitForSceneReady, switchScene, expectSceneScreenshot } from './helpers/wait'
+import {
+  waitForSceneReady,
+  switchScene,
+  expectSceneScreenshot,
+  pauseSimulation,
+} from './helpers/wait'
 
 test('corridor scene: 6 vehicles load on the 2-intersection line graph', async ({ page }) => {
   await waitForSceneReady(page)
@@ -52,5 +57,15 @@ test('corridor scene: 6 vehicles load on the 2-intersection line graph', async (
   // Visual regression. Distinct name from scenes.spec.ts's `corridor-scene.png`:
   // this test captures much later (it waits for all 6 vehicles to spawn), so the
   // two captures are different scenes-in-time and must not share one baseline.
+  //
+  // The simulation is frozen before the capture, like `camera-fit.spec.ts`
+  // does. Without that, the frame shows wherever the vehicles happened to be
+  // after the scene switch — and how far they got depends on the wall-clock
+  // time the switch took. That made this baseline timing-dependent: the
+  // physics fix raised the vehicle speed ceiling from 10 m/s to the road
+  // limit, so the same jitter moved the cars ~1.67x further and the capture
+  // drifted past the 0.5% tolerance. Freezing the frame is what
+  // `helpers/wait.ts` prescribes for every scene screenshot.
+  await pauseSimulation(page)
   await expectSceneScreenshot(page, 'corridor-scene-topology.png')
 })
