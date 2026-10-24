@@ -27,6 +27,26 @@ import numpy as np
 # Geometry constants (match frontend @shared/constants/simulation where applicable)
 NS_HALF = 30.0          # NS road extends 60u total (-30 .. +30)
 EW_HALF = 30.0          # EW road same
+# The junction box of the **training sim's** `cross` scene (mirrored in the
+# frontend: `TraffSim3D-frontend/src/shared/constants/simulation.ts`
+# `PYTHON_SIM.INTERSECTION_RADIUS`).
+#
+# It is NOT the browser's junction box, and it does not have to be: this
+# sim has no lane model at all. Its road is `ROAD_HALF_WIDTH` (3.5 m) wide
+# and its NPCs sit at +/- 3.5 m from the centreline, so an 8 m box already
+# contains the whole carriageway - the defect this number was raised for
+# (a queued vehicle's nose overhanging the crossing road's outer lane)
+# cannot happen here. It is the *product's* per-scene radii
+# (`TraffSim3D-frontend/src/application/services/defaultScene.ts`) that
+# carry that fix, and they are sized from the lane model this sim does
+# not have.
+#
+# The value is pinned by the training sim's measured baselines (the
+# reward numbers in `tests/test_rl_signal_train.py`,
+# `tests/test_signal_conflict.py` and `tests/test_signal_open_traffic.py`
+# all move with it) and by the contract's `red_light_axis_disagreement`
+# vector, whose red-light termination has to land on a 10-step sample
+# boundary - that only happens at ~8.2 m or ~13.9 m.
 INTERSECTION_RADIUS = 8.0
 ROUNDABOUT_RADIUS = 10.0  # roundabout circle radius [m]
 SPEED_LIMIT = 16.67     # m/s (60 km/h)

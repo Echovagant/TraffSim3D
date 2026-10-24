@@ -6,11 +6,60 @@ import type { Intersection } from '@domain/entities/Intersection'
 import type { Road } from '@domain/entities/Road'
 import { LightPhase } from '@domain/value-objects/Phase'
 import { LaneId } from '@domain/value-objects/LaneId'
-import { lanePoint, roadLength } from '@domain/services/laneGeometry'
-import { DEFAULT_CYCLE_SECONDS } from '@shared/constants/simulation'
+import {
+  lanePoint,
+  laneForwardSign,
+  roadLength,
+  stopLineSOnRoad,
+} from '@domain/services/laneGeometry'
+import {
+  DEFAULT_CYCLE_SECONDS,
+  INTERSECTION_CLEARANCE_M,
+  ROAD_LANE_WIDTH,
+} from '@shared/constants/simulation'
 
 const NS_GREEN = DEFAULT_CYCLE_SECONDS * (30 / 63) // ~30s
 const EW_GREEN = NS_GREEN
+
+/**
+ * The radius of a junction box that has to hold the carriageway of a road
+ * with `laneCount` lanes — plus the clearance that keeps a queued vehicle's
+ * nose out of it (see `INTERSECTION_CLEARANCE_M`).
+ *
+ * A junction WITHOUT a traffic light cannot hold a queue (there is no stop
+ * line to queue at), so it only needs the containment part.
+ */
+const junctionRadius = (laneCount: number, signalised: boolean): number => {
+  const halfWidth = (laneCount * ROAD_LANE_WIDTH) / 2
+  return signalised ? halfWidth + INTERSECTION_CLEARANCE_M : halfWidth
+}
+
+/**
+ * The arc length a default vehicle starts at: `margin` metres upstream of
+ * the stop line of its lane, so that it can still stop on the red instead
+ * of running it.
+ *
+ * The default vehicles used to sit at fixed fractions of the road, which
+ * silently coupled the scene to the junction's radius: with a wider box the
+ * stop line moves back, and a vehicle that started a metre in front of the
+ * new line could no longer stop on the red — it ran the light and drove
+ * into the junction. Anchoring the start to the stop line keeps the scene
+ * self-consistent for any radius.
+ *
+ * `null` means the approach has no stop line on this road (the junction is
+ * not on it) — the caller keeps its own placement in that case.
+ */
+const startUpstreamOfStopLine = (
+  road: Road,
+  intersection: Intersection,
+  laneIndex: number,
+  margin: number,
+): number | null => {
+  const stopS = stopLineSOnRoad(road, intersection, laneIndex)
+  if (stopS === null) return null
+  const sign = laneForwardSign(laneIndex, road.laneCount)
+  return sign === 1 ? stopS - margin : stopS + margin
+}
 
 /**
  * Register a spawn point for `road` on its outer forward
@@ -137,25 +186,100 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
     position: { x: 0, y: 0, z: 0 },
     trafficLights: [lightNS, lightEW],
     connectedRoads: ['r-ns', 'r-ew'],
-    intersectionRadius: 8,
+    // 6 lanes x 3.5 m = 21 m wide -> half-width 10.5 m, plus the
+    // 4.5 m clearance (see `INTERSECTION_CLEARANCE_M`): 15 m.
+    //
+    // The box used to be 8 m, which was narrower than the crossing
+    // carriageway: the outer lanes were never inside the box, and a
+    // vehicle queued at the stop line stopped with its NOSE 0.7 m inside
+    // the crossing road's outermost lane — where the crossing traffic
+    // drove into it.
+    intersectionRadius: junctionRadius(6, true),
   }
   net.intersections[intersection.id] = intersection
 
   // 6 default vehicles: one per OUTER lane of each direction.
+  //
+  // They start `margin` metres upstream of their stop line, so that they
+  // can still stop on the red instead of running it (the stop line moved
+  // back with the wider box).
   const nsLen = roadLength(roadNS)
   const ewLen = roadLength(roadEW)
+  const CAR_MARGIN_M = 7
+  const HEAVY_MARGIN_M = 6
   const defaults: Vehicle[] = [
-    at(roadNS, 0, nsLen * 0.25, 8, { id: 'v-1', type: 'car', color: '#3a86ff', status: 'driving' }),
-    at(roadNS, 5, nsLen * 0.75, 8, { id: 'v-2', type: 'car', color: '#ef4444', status: 'driving' }),
-    at(roadEW, 0, ewLen * 0.25, 8, { id: 'v-3', type: 'car', color: '#22c55e', status: 'driving' }),
-    at(roadEW, 5, ewLen * 0.75, 8, { id: 'v-4', type: 'car', color: '#fbbf24', status: 'driving' }),
-    at(roadNS, 1, nsLen * 0.15, 6, {
-      id: 'v-5',
-      type: 'truck',
-      color: '#f5f5f4',
-      status: 'driving',
-    }),
-    at(roadEW, 1, ewLen * 0.15, 6, { id: 'v-6', type: 'bus', color: '#22c55e', status: 'driving' }),
+    at(
+      roadNS,
+      0,
+      startUpstreamOfStopLine(roadNS, intersection, 0, CAR_MARGIN_M) ?? nsLen * 0.25,
+      8,
+      {
+        id: 'v-1',
+        type: 'car',
+        color: '#3a86ff',
+        status: 'driving',
+      },
+    ),
+    at(
+      roadNS,
+      5,
+      startUpstreamOfStopLine(roadNS, intersection, 5, CAR_MARGIN_M) ?? nsLen * 0.75,
+      8,
+      {
+        id: 'v-2',
+        type: 'car',
+        color: '#ef4444',
+        status: 'driving',
+      },
+    ),
+    at(
+      roadEW,
+      0,
+      startUpstreamOfStopLine(roadEW, intersection, 0, CAR_MARGIN_M) ?? ewLen * 0.25,
+      8,
+      {
+        id: 'v-3',
+        type: 'car',
+        color: '#22c55e',
+        status: 'driving',
+      },
+    ),
+    at(
+      roadEW,
+      5,
+      startUpstreamOfStopLine(roadEW, intersection, 5, CAR_MARGIN_M) ?? ewLen * 0.75,
+      8,
+      {
+        id: 'v-4',
+        type: 'car',
+        color: '#fbbf24',
+        status: 'driving',
+      },
+    ),
+    at(
+      roadNS,
+      1,
+      startUpstreamOfStopLine(roadNS, intersection, 1, HEAVY_MARGIN_M) ?? nsLen * 0.15,
+      6,
+      {
+        id: 'v-5',
+        type: 'truck',
+        color: '#f5f5f4',
+        status: 'driving',
+      },
+    ),
+    at(
+      roadEW,
+      1,
+      startUpstreamOfStopLine(roadEW, intersection, 1, HEAVY_MARGIN_M) ?? ewLen * 0.15,
+      6,
+      {
+        id: 'v-6',
+        type: 'bus',
+        color: '#22c55e',
+        status: 'driving',
+      },
+    ),
   ]
   for (const v of defaults) net.vehicles[v.id] = v
   // Register one open spawn point per road. Default vehicles
@@ -216,7 +340,10 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
     position: { x: 0, y: 0, z: 0 },
     trafficLights: [lightNS, lightEW],
     connectedRoads: ['r-ew', 'r-n', 'r-s'], // 3-way
-    intersectionRadius: 6,
+    // 4 lanes x 3.5 m = 14 m wide -> half-width 7 m, plus the 4.5 m
+    // clearance: 11.5 m. The box used to be 6 m — narrower than the
+    // crossing carriageway, so the outer lanes were never inside it.
+    intersectionRadius: junctionRadius(4, true),
   }
   net.intersections[intersectionT.id] = intersectionT
 
@@ -284,6 +411,9 @@ export const buildRectangularLoopNetwork = (): RoadNetwork => {
       position: a,
       trafficLights: [],
       connectedRoads: [`r-loop-${i}`, `r-loop-${(i + 3) % 4}`],
+      // 2 lanes x 3.5 m = 7 m wide -> half-width 3.5 m. The corner has no
+      // traffic light, so no queue can form and no nose can overhang: the
+      // box only has to hold the carriageway, and 4 m does that.
       intersectionRadius: 4,
     }
     net.intersections[id] = inter
@@ -421,7 +551,10 @@ export const buildElevatedScene = (): RoadNetwork => {
       },
     ],
     connectedRoads: ['r-ns', 'r-ew-low'],
-    intersectionRadius: 6,
+    // 4 lanes x 3.5 m = 14 m wide -> half-width 7 m, plus the 4.5 m
+    // clearance: 11.5 m (the box used to be 6 m — narrower than the
+    // crossing carriageway).
+    intersectionRadius: junctionRadius(4, true),
   }
   net.intersections[intersectionLow.id] = intersectionLow
 
@@ -433,28 +566,41 @@ export const buildElevatedScene = (): RoadNetwork => {
     position: { x: RAMP_END_X, y: LEVEL_HEIGHT, z: 0 },
     trafficLights: [],
     connectedRoads: ['r-ramp', 'r-ew-high'],
-    intersectionRadius: 4,
+    // The ramp's end is a **through** point, not a junction: no traffic
+    // light, so no queue can form and no nose can overhang. The box only
+    // has to hold the carriageway: 4 lanes x 3.5 m = 14 m -> half-width
+    // 7 m (the box used to be 4 m, narrower than the road).
+    intersectionRadius: junctionRadius(4, false),
   }
   net.intersections[intersectionHighStart.id] = intersectionHighStart
 
   // 4 辆默认车: 1 在 NS 南半, 1 在 EW 西段, 1 在 ramp 中, 1 在高架东段
+  //
+  // The two ground-level vehicles start upstream of the (now further back)
+  // stop line, so that they can still stop on the red.
   const nsLen = roadLength(roadNS)
   const ewLowLen = roadLength(roadEWLow)
   const rampLen = roadLength(roadRamp)
   const ewHighLen = roadLength(roadEWHigh)
   const defaults: Vehicle[] = [
-    at(roadNS, 0, nsLen * 0.25, 8, {
+    at(roadNS, 0, startUpstreamOfStopLine(roadNS, intersectionLow, 0, 7) ?? nsLen * 0.25, 8, {
       id: 'v-e1',
       type: 'car',
       color: '#3a86ff',
       status: 'driving',
     }),
-    at(roadEWLow, 0, ewLowLen * 0.6, 7, {
-      id: 'v-e2',
-      type: 'car',
-      color: '#22c55e',
-      status: 'driving',
-    }),
+    at(
+      roadEWLow,
+      0,
+      startUpstreamOfStopLine(roadEWLow, intersectionLow, 0, 7) ?? ewLowLen * 0.6,
+      7,
+      {
+        id: 'v-e2',
+        type: 'car',
+        color: '#22c55e',
+        status: 'driving',
+      },
+    ),
     at(roadRamp, 0, rampLen * 0.5, 6, {
       id: 'v-e3',
       type: 'truck',
@@ -562,7 +708,10 @@ export const buildCorridorScene = (): RoadNetwork => {
       },
     ],
     connectedRoads: ['r-ns-corridor', 'r-ew-north'],
-    intersectionRadius: 6,
+    // 4 lanes x 3.5 m = 14 m wide -> half-width 7 m, plus the 4.5 m
+    // clearance: 11.5 m (the box used to be 6 m — narrower than the
+    // crossing carriageway, so the outer lanes were never inside it).
+    intersectionRadius: junctionRadius(4, true),
   }
   net.intersections[intersectionNorth.id] = intersectionNorth
 
@@ -589,11 +738,15 @@ export const buildCorridorScene = (): RoadNetwork => {
       },
     ],
     connectedRoads: ['r-ns-corridor', 'r-ew-south'],
-    intersectionRadius: 6,
+    intersectionRadius: junctionRadius(4, true),
   }
   net.intersections[intersectionSouth.id] = intersectionSouth
 
   // 6 default vehicles spread across 4 road segments (OOB 教训: 拉开距离)
+  //
+  // `v-c3` starts upstream of the south junction's stop line — the wider
+  // junction box moved that line back, and a vehicle that started past it
+  // would have been inside the junction from the first frame.
   const nsLen = roadLength(roadNS)
   const ewLen = roadLength(roadEWNorth)
   const defaults: Vehicle[] = [
@@ -609,7 +762,7 @@ export const buildCorridorScene = (): RoadNetwork => {
       color: '#fbbf24',
       status: 'driving',
     }),
-    at(roadNS, 0, nsLen * 0.85, 7, {
+    at(roadNS, 0, startUpstreamOfStopLine(roadNS, intersectionSouth, 0, 7) ?? nsLen * 0.85, 7, {
       id: 'v-c3',
       type: 'bus',
       color: '#22c55e',
@@ -621,18 +774,30 @@ export const buildCorridorScene = (): RoadNetwork => {
       color: '#ef4444',
       status: 'driving',
     }),
-    at(roadEWSouth, 0, ewLen * 0.3, 8, {
-      id: 'v-c5',
-      type: 'car',
-      color: '#a78bfa',
-      status: 'driving',
-    }),
-    at(roadEWNorth, 0, ewLen * 0.4, 6, {
-      id: 'v-c6',
-      type: 'truck',
-      color: '#f5f5f4',
-      status: 'driving',
-    }),
+    at(
+      roadEWSouth,
+      0,
+      startUpstreamOfStopLine(roadEWSouth, intersectionSouth, 0, 7) ?? ewLen * 0.3,
+      8,
+      {
+        id: 'v-c5',
+        type: 'car',
+        color: '#a78bfa',
+        status: 'driving',
+      },
+    ),
+    at(
+      roadEWNorth,
+      0,
+      startUpstreamOfStopLine(roadEWNorth, intersectionNorth, 0, 7) ?? ewLen * 0.4,
+      6,
+      {
+        id: 'v-c6',
+        type: 'truck',
+        color: '#f5f5f4',
+        status: 'driving',
+      },
+    ),
   ]
   for (const v of defaults) net.vehicles[v.id] = v
 

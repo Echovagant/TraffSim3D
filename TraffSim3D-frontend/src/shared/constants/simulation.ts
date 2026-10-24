@@ -172,6 +172,39 @@ export const MAX_SPEED = 35 // m/s ≈ 126 km/h
 /** Stop line offset from intersection center, in world units along the road. */
 export const STOP_LINE_DISTANCE = 5.0
 /**
+ * The clearance an intersection box keeps **beyond** the half-width of the
+ * road it crosses (metres).
+ *
+ * The box has to do two jobs, and both of them are geometric:
+ *
+ * 1. **Contain the crossing carriageway.** The occupancy rule ("is this
+ *    vehicle in the intersection?") tests the box, so a box narrower than
+ *    the crossing road can never see a vehicle in the crossing road's
+ *    outer lanes. The cross scene's roads are 6 lanes wide (21 m, half-width
+ *    10.5 m) and its box used to be 8 m — the outer lanes were outside the
+ *    box entirely.
+ * 2. **Keep a queued vehicle's NOSE out of the crossing carriageway.** The
+ *    stop line sits on the box edge and the stop rule is enforced on the
+ *    vehicle's **centre** (`distToStopLine` in `tick.ts`), so a queued
+ *    vehicle's nose reaches past the stop line by up to
+ *    (half its length - the braking margin) — measured on the cross scene:
+ *    a 9 m bus stopped with its nose 0.94 m past the line, a car with its
+ *    nose 2.85 m past it.
+ *
+ * 4.5 m is the **longest vehicle's half-length** (the 9 m bus), so even a
+ * vehicle whose centre stops exactly ON the stop line keeps its nose out of
+ * the crossing carriageway. The cross scene's box is therefore
+ * 10.5 + 4.5 = 15 m.
+ *
+ * This is the **product's** junction geometry (the per-scene
+ * `intersectionRadius` in `defaultScene.ts`). It is NOT the training
+ * sim's box: `app/apps/rl/sim_core.py` `INTERSECTION_RADIUS = 8.0` is
+ * the contract's constant and mirrors `PYTHON_SIM.INTERSECTION_RADIUS` —
+ * the training sim has no lane model, so its 8 m box already contains its
+ * whole (7 m wide) carriageway and needs no clearance.
+ */
+export const INTERSECTION_CLEARANCE_M = 4.5
+/**
  * How early the traffic-light brake kicks in, on top of the physical
  * braking distance `v²/(2a)`. Models the "I saw the light and
  * started slowing well before I had to" human behaviour, and gives a
@@ -409,7 +442,24 @@ export const PYTHON_SIM = {
   NS_HALF: 30.0,
   /** Python: `EW_HALF = 30.0` */
   EW_HALF: 30.0,
-  /** Python: `INTERSECTION_RADIUS = 8.0` */
+  /**
+   * Python: `INTERSECTION_RADIUS = 8.0`
+   *
+   * The junction box of the **training sim's** `cross` scene — the box
+   * the contract compares, NOT the browser's junction box.
+   *
+   * The training sim has no lane model: its road is `ROAD_HALF_WIDTH`
+   * (3.5 m) wide and its NPCs sit at +/- 3.5 m from the centreline, so
+   * an 8 m box already contains the whole carriageway. The defect this
+   * number was raised for — a queued vehicle's nose overhanging the
+   * crossing road's outer lane — is a property of the **product's** lane
+   * model, and it is fixed there (`defaultScene.ts` → the per-scene
+   * `intersectionRadius`, sized by `INTERSECTION_CLEARANCE_M`).
+   *
+   * The contract compares the two copies of THIS number, so they stay in
+   * lockstep; the product's per-scene radii are a different quantity and
+   * are never compared.
+   */
   INTERSECTION_RADIUS: 8.0,
   /** Python: `ROUNDABOUT_RADIUS = 10.0` */
   ROUNDABOUT_RADIUS: 10.0,

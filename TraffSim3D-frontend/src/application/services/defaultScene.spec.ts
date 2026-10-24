@@ -22,7 +22,11 @@ describe('buildCrossIntersectionNetwork', () => {
     expect(Object.keys(net.vehicles).length).toBe(6)
     const inter = Object.values(net.intersections)[0]!
     expect(inter.connectedRoads.length).toBe(2)
-    expect(inter.intersectionRadius).toBe(8)
+    // 6 lanes x 3.5 m = 21 m wide -> half-width 10.5 m, plus the 4.5 m
+    // clearance: 15 m. The box has to hold the crossing carriageway, and
+    // its edge (the stop line) has to keep a queued vehicle's nose out of
+    // it. See `INTERSECTION_CLEARANCE_M`.
+    expect(inter.intersectionRadius).toBe(15)
   })
 })
 
@@ -34,7 +38,9 @@ describe('buildTJunctionNetwork', () => {
     expect(Object.keys(net.vehicles).length).toBe(4)
     const inter = Object.values(net.intersections)[0]!
     expect(inter.connectedRoads.length).toBe(3)
-    expect(inter.intersectionRadius).toBe(6)
+    // 4 lanes x 3.5 m = 14 m wide -> half-width 7 m, plus the 4.5 m
+    // clearance: 11.5 m.
+    expect(inter.intersectionRadius).toBe(11.5)
   })
 })
 

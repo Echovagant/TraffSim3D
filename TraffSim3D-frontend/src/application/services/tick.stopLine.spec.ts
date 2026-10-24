@@ -158,7 +158,11 @@ describe('the built-in cross scene keeps its numbers', () => {
     const [lo, hi] = intersectionSRange(road, radius, inter)
     expect(lo).toBe(roadLength(road) / 2 - radius)
     expect(hi).toBe(roadLength(road) / 2 + radius)
-    expect([lo, hi]).toEqual([22, 38])
+    // The cross scene's box is 15 m: the crossing road's half-width
+    // (6 lanes x 3.5 m = 21 m -> 10.5 m) plus the 4.5 m clearance that
+    // keeps a queued vehicle's nose out of the crossing carriageway. It
+    // used to be 8 m — narrower than the crossing carriageway.
+    expect([lo, hi]).toEqual([15, 45])
   })
 
   it('holds a forward-lane vehicle at the very same place as before', () => {
