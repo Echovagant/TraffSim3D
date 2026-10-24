@@ -25,8 +25,7 @@
 //
 //   - every junction box CONTAINS the carriageway of every road it
 //     connects: `radius >= laneCount * ROAD_LANE_WIDTH / 2`;
-//   - every **signalised** junction (one that can hold a queue, because
-//     it has a stop line to queue at) adds the clearance on top:
+//   - every junction adds the clearance on top:
 //     `radius >= halfWidth + INTERSECTION_CLEARANCE_M`;
 //   - every default vehicle starts UPSTREAM of its stop line, with
 //     enough room to brake — a vehicle that starts on the line cannot
@@ -104,10 +103,14 @@ describe('junction geometry', () => {
         }
       })
 
-      it('every signalised junction adds the nose-overhang clearance', () => {
+      it('every junction adds the nose-overhang clearance', () => {
         const net = build()
+        // **Every** junction, not just the ones with a traffic light: the
+        // front-end paints a stop line on every junction's box edge and
+        // the cross-road yield rule can stop a vehicle in front of any of
+        // them, so a queue — and therefore a nose overhang — can form
+        // anywhere. The rule has no "signalised" branch any more.
         for (const inter of Object.values(net.intersections)) {
-          if (inter.trafficLights.length === 0) continue // no stop line -> no queue
           const half = halfWidthOf(net, inter)
           expect(inter.intersectionRadius).toBeGreaterThanOrEqual(half + INTERSECTION_CLEARANCE_M)
         }
