@@ -207,24 +207,48 @@ def test_the_two_axes_carry_an_unbalanced_demand(condition) -> None:
 def test_the_arrivals_follow_the_demand() -> None:
     """The spawner must deliver the condition's arrival rate.
 
-    Measured over 600 steps (60 s) on the TRAIN condition: the EW axis
-    gets 400 vehicles/hour => 6.7 arrivals in 60 s, and the NS axis 300
-    vehicles/hour => 5 arrivals. The count is the *arrivals*, so it is
-    measured by how many vehicles the model holds that never crossed.
+    Measured over 600 steps (60 s) on the TRAIN condition. The spawner
+    gives **every lane** its own headway (`3600 / arrivals_per_hour`),
+    and the cross scene has two lanes per axis, so 60 s delivers
+
+        NS: 2 lanes x 60 s / 12 s = 10
+        EW: 2 lanes x 60 s /  9 s = 13
+
+    minus the arrivals whose headway lands on the last step's boundary:
+    20.
+
+    ## Why the arrivals are counted through a held reference
+
+    The count used to be "an npc whose ``id()`` was not in the previous
+    step's set and not among the ids ever seen". ``id()`` is a **memory
+    address**: once an npc is garbage collected, a later npc can be
+    allocated at the same address — and the arrival was then silently
+    missed. The count therefore depended on the allocator's mood: the
+    same code with the same seed measured 11, 12, 12, 11 and 13
+    arrivals on five consecutive runs, and the assertion band (9..14) had
+    been fitted to that **undercount**. Under memory pressure the count
+    fell below 9 and the test failed for no reason at all.
+
+    Holding a reference to every arrival keeps its address alive, so it
+    cannot be recycled, and the count becomes exact.
     """
     env = SignalEnv(max_steps=600)
     env.reset(seed=0)
     arrivals = 0
     seen: set[int] = set()
+    # Keeps the arrivals alive so their `id()` cannot be recycled.
+    held: list[object] = []
     for _ in range(600):
         before = {id(npc) for npc in env.core.npcs}
         env.step(NO_OP)
         for npc in env.core.npcs:
             if id(npc) not in before and id(npc) not in seen:
                 seen.add(id(npc))
+                held.append(npc)
                 arrivals += 1
-    # 60 s x (300 + 400)/3600 veh/h = 11.7 arrivals on the two axes.
-    assert 9 <= arrivals <= 14, f"the arrivals do not follow the demand: {arrivals}"
+    # 2 NS lanes x 60 s / 12 s + 2 EW lanes x 60 s / 9 s = 23.3, minus the
+    # arrivals whose headway lands on the step boundary: 20.
+    assert 18 <= arrivals <= 24, f"the arrivals do not follow the demand: {arrivals}"
 
 
 def test_the_vehicles_leave_the_world_instead_of_cycling_back() -> None:
