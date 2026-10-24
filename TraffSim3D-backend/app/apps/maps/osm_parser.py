@@ -624,6 +624,140 @@ def _project_intersection_on_road(
     return s, True
 
 
+def _polyline_tangent(
+    waypoints: Sequence[dict[str, Any]],
+    s: float,
+) -> tuple[float, float] | None:
+    """The unit tangent (in XZ) at arc length `s` along the polyline.
+
+    The backend twin of the frontend's `roadForward`
+    (`TraffSim3D-frontend/src/domain/services/laneGeometry.ts`): the
+    segment that contains `s` is found by the same cumulative-length rule,
+    and the tangent is that segment's direction.
+
+    `None` when the polyline is degenerate — a zero-length segment at `s`,
+    or no segment at all. The caller then falls back to the road's extent.
+    """
+    cumulative = _polyline_cumulative_lengths(waypoints)
+    if not cumulative or len(waypoints) < 2:
+        return None
+    total = cumulative[-1]
+    s_clamped = max(0.0, min(total, s))
+    index = len(cumulative) - 1
+    for i, cum in enumerate(cumulative):
+        if s_clamped <= cum:
+            index = i
+            break
+    seg_start = cumulative[index - 1] if index > 0 else 0.0
+    seg_len_3d = cumulative[index] - seg_start
+    if seg_len_3d < 1e-6:
+        return None
+    a = waypoints[index]
+    b = waypoints[index + 1]
+    dx = float(b.get("x", 0.0)) - float(a.get("x", 0.0))
+    dz = float(b.get("z", 0.0)) - float(a.get("z", 0.0))
+    return dx / seg_len_3d, dz / seg_len_3d
+
+
+def _road_polyline_axis(road: dict[str, Any]) -> str:
+    """The axis of a road's **whole extent** — `ns` or `ew`.
+
+    The backend twin of the frontend's `roadPolylineAxis`
+    (`TraffSim3D-frontend/src/domain/services/approachAxis.ts`): the
+    distance the road travels along X is compared with the distance it
+    travels along Z (the per-segment |dx| / |dz| are summed, so a curved
+    road is judged by its real extent and not by its end-to-end chord).
+    """
+    waypoints = road.get("waypoints") or []
+    if len(waypoints) >= 2:
+        points = list(waypoints)
+    else:
+        points = [road.get("startNode") or {}, road.get("endNode") or {}]
+    dx = 0.0
+    dz = 0.0
+    for a, b in zip(points, points[1:], strict=False):
+        dx += abs(float(b.get("x", 0.0)) - float(a.get("x", 0.0)))
+        dz += abs(float(b.get("z", 0.0)) - float(a.get("z", 0.0)))
+    return "ns" if dz > dx else "ew"
+
+
+def _approach_axis(road: dict[str, Any], intersection: dict[str, Any]) -> str:
+    """The axis of the road's **travel direction at the junction**.
+
+    The backend twin of the frontend's `approachAxis`
+    (`TraffSim3D-frontend/src/domain/services/approachAxis.ts`).
+
+    The tangent is taken where the junction projects onto the road's
+    polyline; the axis is `ns` when that tangent runs more along Z than
+    along X. That is the direction the traffic travels **at the junction**,
+    which is what a traffic light governs.
+
+    When the projection is rejected — the junction is further than
+    `MAX_INTERSECTION_OFFSET_M` from the road, so it is not really on it
+    — the road's **whole extent** decides the axis, exactly like the
+    frontend does.
+    """
+    s, projected = _project_intersection_on_road(road, intersection)
+    if not projected:
+        return _road_polyline_axis(road)
+    tangent = _polyline_tangent(road.get("waypoints") or [], s)
+    if tangent is None:
+        return _road_polyline_axis(road)
+    ux, uz = tangent
+    if abs(ux) < 1e-9 and abs(uz) < 1e-9:
+        return _road_polyline_axis(road)
+    return "ns" if abs(uz) > abs(ux) else "ew"
+
+
+def _build_traffic_lights(
+    *,
+    light_index: int,
+    position: dict[str, float],
+    roads: Sequence[dict[str, Any]],
+    connected_road_indices: Sequence[int],
+) -> list[dict[str, Any]]:
+    """The lights of a signalised junction — **one per axis group**.
+
+    A junction's approaches are grouped by the axis they approach on
+    (`_approach_axis`): the north and south arms of a crossroads are one
+    group, the east and west arms the other. Each group gets its **own**
+    light, and the two groups are driven in opposition.
+
+    The junction used to carry **at most one** light, whose axis was a
+    guess about the junction's **first** road (the end-to-end delta of
+    that road). On the Shenzhen extract that produced 51 lights — every
+    one of them `ew` — and left the perpendicular approach governed by
+    nothing at all: the signals were decorative.
+
+    The ids keep the old shape (`tl-<n>-<axis>`), so an id that already
+    existed keeps existing; the second axis group of a junction gets the
+    id of its own axis.
+    """
+    intersection = {"position": position}
+    axes: list[str] = []
+    for index in connected_road_indices:
+        axis = _approach_axis(roads[index], intersection)
+        if axis not in axes:
+            axes.append(axis)
+    lights: list[dict[str, Any]] = []
+    for axis in axes:
+        lights.append(
+            {
+                "id": f"tl-{light_index}-{axis}",
+                "position": {
+                    "x": position["x"] - 3 if axis == "ew" else position["x"],
+                    "y": position["y"],
+                    "z": position["z"] if axis == "ew" else position["z"] - 3,
+                },
+                "phase": "green" if axis == "ns" else "red",
+                "phaseRemaining": 30,
+                "cycleSeconds": 63,
+                "axis": axis,
+            }
+        )
+    return lights
+
+
 def junction_radius(lane_counts: Sequence[int]) -> float:
     """The radius of a junction box, derived from the lane model.
 
@@ -651,9 +785,10 @@ def junction_radius(lane_counts: Sequence[int]) -> float:
     (`tick.ts` -> `applyCrossRoadYield`) can stop a vehicle in front of
     any of them, lit or not — so every junction can hold a queue. The
     parser's own traffic lights are no proxy for that either: it only
-    attaches one to the OSM nodes tagged `highway=traffic_signals` (51 of
-    the 7991 junctions in the Shenzhen extract). The flag is gone, so the
-    two sides of the contract have literally the same formula.
+    attaches lights to the OSM nodes tagged `highway=traffic_signals` (51
+    of the 7991 junctions in the Shenzhen extract, 82 lights). The flag is
+    gone, so the two sides of the contract have literally the same
+    formula.
 
     This mirrors the frontend's `junctionRadius`
     (`TraffSim3D-frontend/src/domain/services/junctionRadius.ts`),
@@ -1082,24 +1217,14 @@ def _build_network(
         connected_road_indices = node_to_roads[ref]
         traffic_lights: list[dict[str, Any]] = []
         if ref in signal_node_ids:
-            # Heuristic axis: pick the first two-way pair's "primary" road.
-            primary_road = roads[connected_road_indices[0]]
-            # axis from waypoints: EW if dx > dz, else NS.
-            dx = primary_road["endNode"]["x"] - primary_road["startNode"]["x"]
-            axis = "ew" if abs(dx) > 0.1 else "ns"
-            traffic_lights.append(
-                {
-                    "id": f"tl-{inter_counter}-{axis}",
-                    "position": {
-                        "x": node.x - 3 if axis == "ew" else node.x,
-                        "y": height,
-                        "z": node.z if axis == "ew" else node.z - 3,
-                    },
-                    "phase": "green" if axis == "ns" else "red",
-                    "phaseRemaining": 30,
-                    "cycleSeconds": 63,
-                    "axis": axis,
-                }
+            # One light per **axis group** of the junction's approaches —
+            # the axis comes from the road's local tangent where it meets
+            # this junction, not from a guess about one road.
+            traffic_lights = _build_traffic_lights(
+                light_index=inter_counter,
+                position={"x": node.x, "y": height, "z": node.z},
+                roads=roads,
+                connected_road_indices=connected_road_indices,
             )
         intersections.append(
             {
@@ -1119,9 +1244,9 @@ def _build_network(
                 # cross-road yield rule can stop a vehicle in front of
                 # any of them, so a queue can form there. The parser's
                 # own traffic lights are no proxy for that — it only
-                # attaches one to the OSM nodes tagged
+                # attaches lights to the OSM nodes tagged
                 # `highway=traffic_signals` (51 of the 7991 junctions in
-                # the Shenzhen extract).
+                # the Shenzhen extract, 82 lights — one per axis group).
                 "intersectionRadius": junction_radius(
                     [int(roads[i].get("laneCount", 1)) for i in connected_road_indices],
                 ),

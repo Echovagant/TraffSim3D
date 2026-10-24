@@ -53,6 +53,30 @@ const stubWorldWithLights = (intersectionCount: number): WorldLike =>
     },
   }) as unknown as WorldLike
 
+/** A multi-intersection network in which **no** intersection owns a light.
+ *
+ * Every built-in scene carries lights now — a junction gets one light per
+ * axis group of its approaches (`defaultScene.ts` → `lightsForIntersection`)
+ * — so the "no light anywhere" case needs a stub of its own. */
+const stubWorldWithoutLights = (intersectionCount: number): WorldLike =>
+  ({
+    network: {
+      vehicles: {},
+      intersections: Object.fromEntries(
+        Array.from({ length: intersectionCount }, (_, i) => [
+          `i${i}`,
+          {
+            id: `i${i}`,
+            position: { x: i * 100, y: 0, z: 0 },
+            connectedRoads: [],
+            intersectionRadius: 4,
+            trafficLights: [],
+          },
+        ]),
+      ),
+    },
+  }) as unknown as WorldLike
+
 describe('useCameraFocus — pending channels', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -240,9 +264,11 @@ describe('useCameraFocus — focusOnSelection', () => {
 
   it('returns false when every intersection has an empty trafficLights array', async () => {
     const m = await loadModule()
-    const world = useWorldStore()
-    world.switchScene('loop') // 4 intersections, none signalised
-    const intersections = Object.values(world.getNetwork().intersections)
+    // A multi-intersection network with no light anywhere. The built-in
+    // scenes all carry lights now (one per axis group), so this case is
+    // modelled with a stub.
+    const world = stubWorldWithoutLights(3)
+    const intersections = Object.values(world.network.intersections)
     expect(intersections.length).toBeGreaterThan(1)
     expect(intersections.every((i) => i.trafficLights.length === 0)).toBe(true)
 

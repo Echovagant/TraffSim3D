@@ -12,8 +12,9 @@ import {
   roadLength,
   stopLineSOnRoad,
 } from '@domain/services/laneGeometry'
+import { approachAxis, approachAxisGroups, type RoadAxis } from '@domain/services/approachAxis'
 import { cornerRadius, junctionRadius } from '@domain/services/junctionRadius'
-import { DEFAULT_CYCLE_SECONDS } from '@shared/constants/simulation'
+import { DEFAULT_CYCLE_SECONDS, ROAD_LANE_WIDTH } from '@shared/constants/simulation'
 
 const NS_GREEN = DEFAULT_CYCLE_SECONDS * (30 / 63) // ~30s
 const EW_GREEN = NS_GREEN
@@ -131,6 +132,88 @@ const roadStraight = (
   level,
 })
 
+// ---------------------------------------------------------------------------
+// The lights of a junction
+// ---------------------------------------------------------------------------
+//
+// A junction's approaches are grouped by the **axis they approach on**
+// (`approachAxisGroups`): the north and south arms of a crossroads are one
+// group, the east and west arms the other. Each group gets its **own**
+// light, and the two groups are driven in opposition — the perpendicular
+// approaches are what the signal-conflict resolution arbitrates.
+//
+// The axis is **derived from the geometry**, never guessed: `approachAxis`
+// reads the road's local tangent where it meets the junction (see
+// `@domain/services/approachAxis`).
+
+/**
+ * How far (m) outside the carriageway a light pole stands.
+ */
+const LIGHT_STANDOFF_M = 1.5
+
+/**
+ * The light of one **axis group** of a junction.
+ *
+ * The pole stands just outside the carriageway of the widest road of the
+ * group, on the side the group approaches from: an `ns` light stands west
+ * of the junction, an `ew` light north of it.
+ */
+const lightForAxis = (
+  intersection: Intersection,
+  axis: RoadAxis,
+  roads: Readonly<Record<string, Road>>,
+): TrafficLight => {
+  let halfWidth = 0
+  for (const roadId of intersection.connectedRoads) {
+    const road = roads[roadId]
+    if (!road) continue
+    if (approachAxis(road, intersection) !== axis) continue
+    halfWidth = Math.max(halfWidth, (road.laneCount * ROAD_LANE_WIDTH) / 2)
+  }
+  const offset = halfWidth + LIGHT_STANDOFF_M
+  // `i-corner-0` -> `corner-0`, so the id reads `tl-ns-corner-0`.
+  const suffix = intersection.id.startsWith('i-') ? intersection.id.slice(2) : intersection.id
+  return {
+    id: `tl-${axis}-${suffix}`,
+    position: {
+      x: axis === 'ns' ? intersection.position.x - offset : intersection.position.x,
+      y: intersection.position.y,
+      z: axis === 'ew' ? intersection.position.z - offset : intersection.position.z,
+    },
+    // The two axis groups start in opposition: `ns` green, `ew` red.
+    phase: axis === 'ns' ? LightPhase.Green : LightPhase.Red,
+    phaseRemaining: axis === 'ns' ? NS_GREEN : EW_GREEN + 3,
+    cycleSeconds: DEFAULT_CYCLE_SECONDS,
+    axis,
+  }
+}
+
+/**
+ * The lights of a junction: **one per axis group** among its connected
+ * roads.
+ *
+ * `existing` carries the lights the scene already declares — their ids and
+ * positions are stable (the ids are referenced by the tests and by the RL
+ * observation), so they are kept exactly as they are. Any axis group
+ * without a light gets one built here, and the **geometry** decides which
+ * group that is.
+ *
+ * A junction whose roads are all on one axis therefore carries exactly one
+ * light, and a junction without roads carries none.
+ */
+const lightsForIntersection = (
+  intersection: Intersection,
+  roads: Readonly<Record<string, Road>>,
+  existing: readonly TrafficLight[] = [],
+): TrafficLight[] => {
+  const lights: TrafficLight[] = [...existing]
+  for (const axis of approachAxisGroups(intersection, roads)) {
+    if (lights.some((light) => light.axis === axis)) continue
+    lights.push(lightForAxis(intersection, axis, roads))
+  }
+  return lights
+}
+
 /**
  * Build the default cross-intersection scene (renamed from
  * `buildDefaultNetwork`). One NS + one EW road, both 60u
@@ -185,6 +268,9 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
     // drove into it.
     intersectionRadius: junctionRadius(6),
   }
+  // The NS road and the EW road are two axis groups, so the junction
+  // carries one light per group — the two declared above.
+  intersection.trafficLights = lightsForIntersection(intersection, net.roads, [lightNS, lightEW])
   net.intersections[intersection.id] = intersection
 
   // 6 default vehicles: one per OUTER lane of each direction.
@@ -334,6 +420,9 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
     // crossing carriageway, so the outer lanes were never inside it.
     intersectionRadius: junctionRadius(4),
   }
+  // The N and S legs are ONE axis group (`ns`), the E–W road the other
+  // (`ew`) — two lights, one per group.
+  intersectionT.trafficLights = lightsForIntersection(intersectionT, net.roads, [lightNS, lightEW])
   net.intersections[intersectionT.id] = intersectionT
 
   const ewLen = roadLength(roadEW)
@@ -363,9 +452,18 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
  * Rectangular-loop demo scene.
  *
  * 4 straight roads forming a 60×60 square loop, joined at 4 corner
- * intersections (no traffic lights — corner is a smooth turn). Each
- * road is 2 lanes (1 forward, 1 backward). 8 default vehicles spread
- * around the loop so the user sees a circulating traffic pattern.
+ * intersections. Each road is 2 lanes (1 forward, 1 backward). 8 default
+ * vehicles spread around the loop so the user sees a circulating traffic
+ * pattern.
+ *
+ * ## The corners are signalised
+ *
+ * A corner is a crossing of an east–west and a north–south leg, so it
+ * carries **one light per axis group** (`lightsForIntersection`) — the
+ * same rule every other junction follows. The corners used to be unlit,
+ * which meant the traffic circulating the loop met nothing that could
+ * arbitrate a conflict with the perpendicular leg: the lights were
+ * decorative.
  *
  * Trade-off note: vehicles do NOT decelerate on
  * approach to corners. Rapier will let them take the chord at full
@@ -406,6 +504,10 @@ export const buildRectangularLoopNetwork = (): RoadNetwork => {
       // 3.5 + 4.5 + 0.5 = 8.5 m.
       intersectionRadius: cornerRadius(2),
     }
+    // The two legs of the corner are two axis groups (the leg that runs
+    // along Z is `ns`, the one along X is `ew`), so the corner carries
+    // one light per group.
+    inter.trafficLights = lightsForIntersection(inter, net.roads)
     net.intersections[id] = inter
   }
 
@@ -549,23 +651,24 @@ export const buildElevatedScene = (): RoadNetwork => {
   net.intersections[intersectionLow.id] = intersectionLow
 
   // 高架 T 接 (r-ew-low+r-ramp 端点 + r-ew-high+r-ramp 端点 在 r-ramp 起点/终点处)
-  // 这里不放红绿灯 — ramp 端点是直通点, 不算正式路口.
-  // 但为了 net.roads 完整, 我们仍注册一个无灯的 intersection 作为连接点.
+  // ramp 端点是直通点 —— 两条腿 (r-ramp 与 r-ew-high) 都沿 X 方向, 所以它们
+  // 属于**同一个** axis group, 这个路口只有**一盏**灯 (`ew`).
+  // (以前这里一盏灯都没有: 匝道上的车与高架上的车互相不受约束.)
   const intersectionHighStart: Intersection = {
     id: 'i-high-start',
     position: { x: RAMP_END_X, y: LEVEL_HEIGHT, z: 0 },
     trafficLights: [],
     connectedRoads: ['r-ramp', 'r-ew-high'],
-    // The ramp's end is a **through** point, not a junction: it has no
-    // traffic light, so no vehicle is held there by the light. The box
-    // still carries the clearance, because the front-end paints a stop
+    // The ramp's end is a **through** point: it is not a crossroads, so
+    // the box still carries the clearance (the front-end paints a stop
     // line on every junction's box edge and the cross-road yield rule
-    // can stop a vehicle in front of any of them, lit or not.
+    // can stop a vehicle in front of any of them, lit or not).
     // 4 lanes x 3.5 m = 14 m -> half-width 7 m + 4.5 m clearance: 11.5 m
     // (the box used to be 7 m — the half-width alone, without the
     // clearance).
     intersectionRadius: junctionRadius(4),
   }
+  intersectionHighStart.trafficLights = lightsForIntersection(intersectionHighStart, net.roads)
   net.intersections[intersectionHighStart.id] = intersectionHighStart
 
   // 4 辆默认车: 1 在 NS 南半, 1 在 EW 西段, 1 在 ramp 中, 1 在高架东段
@@ -707,6 +810,12 @@ export const buildCorridorScene = (): RoadNetwork => {
     // crossing carriageway, so the outer lanes were never inside it).
     intersectionRadius: junctionRadius(4),
   }
+  // The corridor (ns) and the north road (ew) are two axis groups — one
+  // light per group.
+  intersectionNorth.trafficLights = lightsForIntersection(intersectionNorth, net.roads, [
+    intersectionNorth.trafficLights[0]!,
+    intersectionNorth.trafficLights[1]!,
+  ])
   net.intersections[intersectionNorth.id] = intersectionNorth
 
   // South intersection (4-way: NS corridor + EW road)
@@ -734,6 +843,12 @@ export const buildCorridorScene = (): RoadNetwork => {
     connectedRoads: ['r-ns-corridor', 'r-ew-south'],
     intersectionRadius: junctionRadius(4),
   }
+  // Same two axis groups as the north junction: `ns` (the corridor) and
+  // `ew` (the south road).
+  intersectionSouth.trafficLights = lightsForIntersection(intersectionSouth, net.roads, [
+    intersectionSouth.trafficLights[0]!,
+    intersectionSouth.trafficLights[1]!,
+  ])
   net.intersections[intersectionSouth.id] = intersectionSouth
 
   // 6 default vehicles spread across 4 road segments (OOB 教训: 拉开距离)

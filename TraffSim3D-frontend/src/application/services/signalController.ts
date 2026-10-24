@@ -13,6 +13,7 @@ import type { Road } from '@domain/entities/Road'
 import type { Intersection } from '@domain/entities/Intersection'
 import type { LightPhase } from '@domain/value-objects/Phase'
 import { laneForwardSign, roadLength, stopLineSOnRoad } from '@domain/services/laneGeometry'
+import { approachAxis, roadPolylineAxis } from '@domain/services/approachAxis'
 import { STOP_LINE_DISTANCE } from '@shared/constants/simulation'
 import type { SignalActionName } from '@shared/constants/simulation'
 import {
@@ -106,8 +107,10 @@ export type ControllerKind = 'fixed-cycle' | 'actuated' | 'coordinated' | 'rl'
 // 1. **Topology (primary).** Take the intersection that owns the light
 //    (`Intersection.trafficLights` holds the light, and
 //    `Intersection.connectedRoads` holds the roads) and keep the roads
-//    whose geometry matches `light.axis`. A T-junction therefore
-//    contributes *both* of its NS arms, and never the EW arm.
+//    whose **approach axis at that intersection** matches `light.axis`
+//    (`approachAxis` — the road's local tangent where it meets the
+//    junction). A T-junction therefore contributes *both* of its NS arms,
+//    and never the EW arm.
 // 2. **Network-wide fallback.** When the light is attached to no
 //    intersection at all (the Simulation Lab synthesises a light from
 //    nothing but an axis — see `SimulationLabView.vue`) or when its
@@ -117,6 +120,16 @@ export type ControllerKind = 'fixed-cycle' | 'actuated' | 'coordinated' | 'rl'
 // The fallback keeps the "whole network" reading that the Simulation Lab
 // readout and the RL observation (idx 0 / 1) expect, while the primary
 // path keeps the per-intersection reading that a signal actually has.
+//
+// ## Why the approach axis, and not the road's extent
+//
+// The road-level axis (`roadAxis`) reads the road's **whole extent**: a
+// street that runs north for 300 m and bends east for the last 40 m is
+// an east-west road by that measure. The axis a light governs is the
+// direction the traffic travels **at the junction**, so the primary path
+// uses `approachAxis` — the road's local tangent where it meets the
+// intersection. On a straight road the two agree; on a curved one they
+// do not, and the approach is the one the driver sees.
 
 /**
  * The geometric axis of a road: `ns` when the road runs predominantly
@@ -126,20 +139,14 @@ export type ControllerKind = 'fixed-cycle' | 'actuated' | 'coordinated' | 'rl'
  * along each axis (the per-segment |dx| / |dz| are summed), so a curved
  * road is judged by its real extent rather than by its end-to-end
  * chord. A 2-point road reduces to `|endNode - startNode|`.
+ *
+ * This is the **whole-road** reading — the road's extent, not the
+ * direction it travels *at a junction*. The rule itself lives in
+ * `@domain/services/approachAxis` (`roadPolylineAxis`), which is also
+ * where the **approach** axis (`approachAxis`) is decided; this export
+ * stays as the name the application layer has always used.
  */
-export const roadAxis = (road: Road): TrafficLight['axis'] => {
-  const points =
-    road.waypoints && road.waypoints.length >= 2 ? road.waypoints : [road.startNode, road.endNode]
-  let dx = 0
-  let dz = 0
-  for (let i = 1; i < points.length; i++) {
-    const prev = points[i - 1]!
-    const cur = points[i]!
-    dx += Math.abs(cur.x - prev.x)
-    dz += Math.abs(cur.z - prev.z)
-  }
-  return dz > dx ? 'ns' : 'ew'
-}
+export const roadAxis = (road: Road): TrafficLight['axis'] => roadPolylineAxis(road)
 
 /**
  * light id → the intersection that owns it.
@@ -191,9 +198,9 @@ export const findLightIntersection = (
  * The roads a light governs on its own axis.
  *
  * See the module section above for the resolution order: the roads
- * connected to the light's own intersection whose geometry matches the
- * axis, falling back to every axis-matching road in the network when
- * the light is not attached to an intersection.
+ * connected to the light's own intersection whose **approach axis at that
+ * intersection** matches the axis, falling back to every axis-matching
+ * road in the network when the light is not attached to an intersection.
  */
 export const axisRoadsForLight = (light: TrafficLight, network: RoadNetwork): Road[] => {
   const intersection = findLightIntersection(light, network)
@@ -202,7 +209,7 @@ export const axisRoadsForLight = (light: TrafficLight, network: RoadNetwork): Ro
     for (const roadId of intersection.connectedRoads) {
       const road = network.roads[roadId]
       if (!road) continue
-      if (roadAxis(road) !== light.axis) continue
+      if (approachAxis(road, intersection) !== light.axis) continue
       scoped.push(road)
     }
   }

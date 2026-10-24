@@ -19,7 +19,9 @@ import {
   buildCorridorScene,
 } from './defaultScene'
 import { CORNER_TURN_ENVELOPE_M } from '@domain/services/junctionRadius'
+import { approachAxisGroups } from '@domain/services/approachAxis'
 import { INTERSECTION_CLEARANCE_M, ROAD_LANE_WIDTH } from '@shared/constants/simulation'
+import { LightPhase } from '@domain/value-objects/Phase'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { Intersection } from '@domain/entities/Intersection'
 
@@ -54,13 +56,18 @@ describe('buildTJunctionNetwork', () => {
 })
 
 describe('buildRectangularLoopNetwork', () => {
-  it('produces 4 roads, 4 corner intersections (no lights), 8 vehicles', () => {
+  it('produces 4 roads, 4 corner intersections (2 lights each), 8 vehicles', () => {
     const net = buildRectangularLoopNetwork()
     expect(Object.keys(net.roads).length).toBe(4)
     expect(Object.keys(net.intersections).length).toBe(4)
     expect(Object.keys(net.vehicles).length).toBe(8)
     for (const inter of Object.values(net.intersections)) {
-      expect(inter.trafficLights.length).toBe(0)
+      // A corner is a crossing of an east–west and a north–south leg, so
+      // it carries **one light per axis group**. The corners used to be
+      // unlit, which left the circulating traffic with nothing to
+      // arbitrate a conflict with the perpendicular leg.
+      expect(inter.trafficLights.length).toBe(2)
+      expect(inter.trafficLights.map((l) => l.axis).sort()).toEqual(['ew', 'ns'])
       expect(inter.connectedRoads.length).toBe(2)
       // 2 lanes x 3.5 m = 7 m wide -> half-width 3.5 m, plus the 4.5 m
       // clearance, plus the 0.5 m turning envelope: 8.5 m. The clearance
@@ -131,6 +138,38 @@ describe('buildCorridorScene', () => {
     const net = buildCorridorScene()
     for (const inter of Object.values(net.intersections)) {
       expect(inter.trafficLights.length).toBe(2)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// one light per axis group
+// ---------------------------------------------------------------------------
+
+describe('every built-in scene gives a junction one light per axis group', () => {
+  it('the lights of a junction are exactly its axis groups', () => {
+    for (const { name, build } of SCENES) {
+      const net = build()
+      for (const inter of Object.values(net.intersections)) {
+        // The geometry decides the axis groups — the north and south arms
+        // of a crossroads are one group, the east and west arms the other.
+        const axes = approachAxisGroups(inter, net.roads)
+        const lightAxes = inter.trafficLights.map((light) => light.axis).sort()
+        expect(lightAxes, `${name}/${inter.id}`).toEqual([...axes].sort())
+      }
+    }
+  })
+
+  it('the two axis groups of a junction are driven in opposition', () => {
+    // A junction with both axes carries one green and one red light: the
+    // perpendicular approaches never show green at the same time.
+    for (const { name, build } of SCENES) {
+      const net = build()
+      for (const inter of Object.values(net.intersections)) {
+        if (inter.trafficLights.length < 2) continue
+        const phases = inter.trafficLights.map((light) => light.phase).sort()
+        expect(phases, `${name}/${inter.id}`).toEqual([LightPhase.Green, LightPhase.Red].sort())
+      }
     }
   })
 })

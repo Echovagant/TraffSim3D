@@ -17,6 +17,7 @@ import type { Vehicle } from '@domain/entities/Vehicle'
 import type { Road } from '@domain/entities/Road'
 import type { Intersection } from '@domain/entities/Intersection'
 import type { TrafficLight } from '@domain/entities/TrafficLight'
+import { LaneId } from '@domain/value-objects/LaneId'
 import { LightPhase } from '@domain/value-objects/Phase'
 import {
   inIntersectionBox,
@@ -34,6 +35,8 @@ import {
   perpendicularOffsetAlongRoad,
 } from '@domain/services/laneChange'
 import { junctionIndex, type JunctionIndex } from '@domain/services/roadJunctionIndex'
+import { roadContinuation, type RoadContinuation } from '@domain/services/roadTransition'
+import { approachAxis } from '@domain/services/approachAxis'
 import { rampSpeed, statusFromHysteresis, safeGapGipps } from '@domain/services/vehicleDynamics'
 import { computeSteeringAngle, steeringAngleToOmega } from '@domain/services/purePursuit'
 import { pythonSpeedStep } from '@domain/services/egoKernel'
@@ -431,7 +434,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // road end and perpendicular distance exceeded the 5m limit), s
       // stays stale — possibly >= roadLength or <= 0. Clamp and snap the
       // Rapier body so rendering and physics stay in sync.
-      const vRoad = network.roads[v.roadId]
+      let vRoad = network.roads[v.roadId]
       if (vRoad) {
         const len = roadLength(vRoad)
         // ===== travel-end wrap =====
@@ -454,7 +457,32 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         // position instead (`travelEndOverrun`).
         const wrappedS = wrappedTravelS(v, vRoad)
         if (wrappedS !== null) {
-          applyTravelEndWrap(v, vRoad, wrappedS, ctx)
+          // ===== junction turn =====
+          //
+          // The travel end of a road can be a JUNCTION, and the road
+          // network is a graph: the vehicle continues onto the road
+          // that meets its own road there. Without this, every car
+          // looped on its own way — measured on the real imported OSM
+          // city (391 roads / 450 junctions, 8 cars, 90 s): 43 200
+          // vehicle-frames, **0 road changes**.
+          //
+          // The turn is a pivot in place: the entry point of the new
+          // road and the exit point of the old one are the same
+          // junction, so the body moves ~0 m and changes heading.
+          //
+          // `roadContinuation` returns null when no turn is possible
+          // (no junction at the travel end, or the junction has no
+          // other road) — then the historical wrap happens, unchanged.
+          const turn = roadContinuation(network, vRoad, v.laneIndex, v.heading)
+          const turnedRoad = turn ? network.roads[turn.roadId] : undefined
+          if (turn && turnedRoad) {
+            applyRoadTurn(v, turnedRoad, turn, ctx)
+            // The guards below must judge the vehicle against the road
+            // it is on NOW — the old road would snap it straight back.
+            vRoad = turnedRoad
+          } else {
+            applyTravelEndWrap(v, vRoad, wrappedS, ctx)
+          }
         } else {
           // Guard: the body is off the lane it is supposed to be on
           // (findNearestLane could not project it, or the physics
@@ -596,7 +624,9 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     // replaces the previous hard-coded accel=3.5 / decel=10 with the
     // same per-type ramp the Rapier path uses (`rampSpeed`).
     for (const v of Object.values(network.vehicles)) {
-      const road = network.roads[v.roadId]
+      // `let`: a junction turn puts the vehicle on another road, and
+      // everything below has to work on THAT road.
+      let road = network.roads[v.roadId]
       if (!road) continue
       // The replay target already carries the Python-exact next
       // speed (step 2.5). Ramping it through the ramp would cap the
@@ -611,8 +641,36 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       const sign = laneForwardSign(v.laneIndex, road.laneCount)
       v.s += v.speed * sign * dt
       const len = roadLength(road)
-      if (v.s > len) v.s -= len
-      if (v.s < 0) v.s += len
+      // ===== junction turn =====
+      //
+      // The same rule the physics path applies: a lane that runs past
+      // its travel end continues onto the road that meets it there,
+      // and only falls back to the historical wrap when no turn is
+      // possible. The physics-free path is the faithful spelling of the
+      // application-layer model, so both paths have to agree on where a
+      // vehicle goes next.
+      const pastTravelEnd = sign === 1 ? v.s > len : v.s < 0
+      if (pastTravelEnd) {
+        const turn = roadContinuation(network, road, v.laneIndex, v.heading)
+        const turnedRoad = turn ? network.roads[turn.roadId] : undefined
+        if (turn && turnedRoad) {
+          v.roadId = turn.roadId
+          v.laneIndex = turn.laneIndex
+          v.s = turn.s
+          v.heading = turn.heading
+          v.lane = LaneId.make(turn.roadId, turn.laneIndex)
+          // A lane change belongs to the lane space of the road the
+          // vehicle was on — it does not carry onto the new road.
+          v.desiredLaneIndex = null
+          v.laneChangeStartedAt = null
+          // The position/heading derivation below must run on the NEW
+          // road — the old one no longer holds this vehicle.
+          road = turnedRoad
+        } else {
+          if (v.s > len) v.s -= len
+          if (v.s < 0) v.s += len
+        }
+      }
       const lp = lanePoint(road, v.laneIndex, v.s)
       v.position.x = lp.position.x
       v.position.y = lp.position.y
@@ -885,6 +943,42 @@ const applyTravelEndWrap = (v: Vehicle, road: Road, newS: number, ctx: TickConte
 }
 
 /**
+ * Teleport the vehicle onto the road it turns onto and re-launch it.
+ *
+ * The body is moved to the **lane point** of the new (road, lane, s) —
+ * so it lands on the correct lateral lane offset, not on the road
+ * centreline — and is re-oriented along the new lane's travel
+ * direction.
+ *
+ * The speed is preserved: a turn is a pivot, not a stop.
+ * `setVehiclePosition` zeroes the body's linear velocity, so the speed
+ * has to be re-applied afterwards (exactly like the travel-end wrap).
+ *
+ * The turn is ~0 m of movement — the exit point of the old road and the
+ * entry point of the new one are the same junction — so the vehicle
+ * keeps its momentum and simply changes heading.
+ */
+const applyRoadTurn = (v: Vehicle, road: Road, turn: RoadContinuation, ctx: TickContext): void => {
+  const lp = lanePoint(road, turn.laneIndex, turn.s)
+  v.roadId = road.id
+  v.laneIndex = turn.laneIndex
+  v.s = turn.s
+  v.position.x = lp.position.x
+  v.position.y = lp.position.y
+  v.position.z = lp.position.z
+  v.heading = turn.heading
+  v.lane = LaneId.make(road.id, turn.laneIndex)
+  // A lane change is expressed in the lane space of the road the vehicle
+  // was on; the new road has its own lane space, so the change does not
+  // carry over.
+  v.desiredLaneIndex = null
+  v.laneChangeStartedAt = null
+  ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
+  ctx.rapierWorld!.setVehicleHeading(v.id, turn.heading)
+  ctx.rapierWorld!.setVehicleSpeed(v.id, v.speed, turn.heading)
+}
+
+/**
  * Apply the lane-change lateral velocity to every vehicle that is
  * changing lanes.
  *
@@ -1073,12 +1167,29 @@ const applyTrafficLightConstraint = (
     // the light stopped governing it, so it accelerated straight
     // through the red. A vehicle that has not crossed the line is
     // still governed by it, right down to the line itself.
+    // Which light governs THIS approach?
+    //
+    // The axis is the road's **approach axis at this junction** — the
+    // local tangent where the road meets the junction, not the road's
+    // end-to-end delta. Three places have to agree on that number:
+    // the light is created per axis group (`approachAxisGroups`), the
+    // queue is scoped by it (`axisRoadsForLight`), and this test
+    // picks the light that holds the vehicle.
+    //
+    // The old test (`|endNode.z - startNode.z| > |endNode.x - startNode.x|`,
+    // the road's whole extent) disagreed with the polyline-extent test
+    // the queue scoping used, and with the local-tangent test the
+    // lights are built from. Measured on the real Shenzhen extract:
+    // **1661 of the 7320 roads** have a different approach axis than
+    // their whole-road axis — for those, the old test picked the wrong
+    // light (or none).
+    //
+    // Computed ONCE per intersection, not once per light: the projection
+    // is O(waypoints), and a junction with two axis groups would
+    // otherwise pay for it twice — for every vehicle, every tick.
+    const axis = approachAxis(road, inter)
     for (const light of inter.trafficLights) {
-      const roadIsNS =
-        Math.abs(road.endNode.z - road.startNode.z) > Math.abs(road.endNode.x - road.startNode.x)
-      const lightAxisMatches =
-        (roadIsNS && light.axis === 'ns') || (!roadIsNS && light.axis === 'ew')
-      if (!lightAxisMatches) continue
+      if (light.axis !== axis) continue
       // Exhaustive phase set.
       // Red-family phases (Red / RedLeft / AllRed / FlashingRed) = full stop.
       // Yellow-family (Yellow / YellowLeft) = prepare to stop.

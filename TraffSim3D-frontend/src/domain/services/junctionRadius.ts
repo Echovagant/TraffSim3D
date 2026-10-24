@@ -48,10 +48,10 @@
 //     a vehicle in front of **any** junction, lit or not. Every junction
 //     can therefore hold a queue ⇒ the clearance always applies;
 //   - a traffic light is not a proxy for "can a queue form here"
-//     anyway: the parser only attaches one to the OSM nodes tagged
+//     anyway: the parser only attaches lights to the OSM nodes tagged
 //     `highway=traffic_signals` (51 of the 7991 junctions in the
-//     Shenzhen extract), and the imported maps already applied the
-//     clearance to **all** of them.
+//     Shenzhen extract — 82 lights, one per axis group), and the
+//     imported maps already applied the clearance to **all** of them.
 //
 // So the flag was a second rule that could drift away from the first —
 // and it did: the built-in scenes' unlit junctions were sized by the

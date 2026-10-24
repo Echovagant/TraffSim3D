@@ -318,9 +318,10 @@ const normalizeIntersection = (
   // does not look at the traffic lights), and the cross-road yield rule
   // (`tick.ts` → `applyCrossRoadYield`) can stop a vehicle in front of
   // any of them, lit or not. The parser's own traffic lights are no proxy
-  // for that — it only attaches one to the OSM nodes tagged
+  // for that — it only attaches them to the OSM nodes tagged
   // `highway=traffic_signals` (51 of the 7991 junctions in the Shenzhen
-  // extract).
+  // extract; 82 lights, one per axis group of the junction's
+  // approaches).
   //
   // A junction whose roads the payload did not carry falls back to the
   // default lane count — the same 2-lane road the old hard-coded 8 m
