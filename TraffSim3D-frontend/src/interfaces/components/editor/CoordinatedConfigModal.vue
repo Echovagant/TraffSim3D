@@ -6,21 +6,21 @@
         <button class="ghost" title="关闭" @click="close">✕</button>
       </header>
       <p class="hint">
-        每对相邻交叉口 (按 road id 配对) 设一个时间偏移. 正值 = B 轴绿比 A 轴绿晚这个秒数开始.
-        实际生效需要控制器切到 "协调".
+        每个路口设一个时间偏移 (相对全局基准). 正值 = 该路口的绿灯比基准晚这个秒数开始.
+        一条走廊上的各个路口配上递延的偏移, 就是绿波带. 实际生效需要控制器切到 "协调".
       </p>
       <table>
         <thead>
           <tr>
-            <th>路口对</th>
+            <th>路口</th>
             <th>偏移 (s)</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="[pair, val] in offsets" :key="pair">
+          <tr v-for="row in rows" :key="row.key">
             <td>
-              <code>{{ pair }}</code>
+              <code>{{ row.label }}</code>
             </td>
             <td>
               <input
@@ -28,16 +28,16 @@
                 step="0.5"
                 min="-30"
                 max="30"
-                :value="val"
-                @change="onChange(pair, Number(($event.target as HTMLInputElement).value))"
+                :value="row.value"
+                @change="onChange(row.key, Number(($event.target as HTMLInputElement).value))"
               />
             </td>
             <td>
-              <button class="ghost" title="重置为 0" @click="onReset(pair)">↺</button>
+              <button class="ghost" title="重置为 0" @click="onReset(row.key)">↺</button>
             </td>
           </tr>
-          <tr v-if="!offsets.length">
-            <td colspan="3" class="empty">无路口对 — 默认场景有 1 对 (r-ns | r-ew).</td>
+          <tr v-if="!rows.length">
+            <td colspan="3" class="empty">场景里没有路口.</td>
           </tr>
         </tbody>
       </table>
@@ -54,22 +54,38 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useWorldStore } from '@interfaces/stores/worldStore'
+import { COORDINATED_DEFAULT_OFFSET_KEY } from '@application/services/controllers'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void }>()
 
 const store = useWorldStore()
-const offsets = computed(() =>
-  Array.from(store.coordinatedOffsets.entries()).sort(([a], [b]) => a.localeCompare(b)),
-)
+
+/**
+ * The rows: the corridor-wide default first, then one row per junction
+ * of the current scene.
+ *
+ * The offset is **per junction** — a green wave is a relation between
+ * junctions, so the shift of one junction's whole plan against the
+ * common reference is what the wave is. The default row is the offset a
+ * junction inherits when it has none of its own.
+ */
+const rows = computed(() => {
+  const ids = Object.keys(store.network.intersections).sort()
+  return [COORDINATED_DEFAULT_OFFSET_KEY, ...ids].map((key) => ({
+    key,
+    label: key === COORDINATED_DEFAULT_OFFSET_KEY ? '默认 (全部路口)' : key,
+    value: store.coordinatedOffsets.get(key) ?? 0,
+  }))
+})
 const enabled = computed(() => store.coordinatedOffsetsEnabled)
 
 const close = (): void => emit('update:open', false)
 
-const onChange = (pair: string, v: number): void => {
-  if (Number.isFinite(v)) store.setCoordinatedOffset(pair, v)
+const onChange = (key: string, v: number): void => {
+  if (Number.isFinite(v)) store.setCoordinatedOffset(key, v)
 }
-const onReset = (pair: string): void => store.setCoordinatedOffset(pair, 0)
+const onReset = (key: string): void => store.setCoordinatedOffset(key, 0)
 const onToggle = (e: Event): void => {
   store.toggleCoordinatedOffsets((e.target as HTMLInputElement).checked)
 }

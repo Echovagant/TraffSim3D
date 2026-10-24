@@ -1,57 +1,53 @@
 // src/application/services/controllers/RLController.ts
 //
-// The RL signal controller becomes a real
-// control surface.
+// The RL controller: the browser's half of the five-action control
+// surface, applied to the **junction**.
 //
-// It still runs the plain 30/3/3/30 cycle when nothing drives it, so
-// selecting "RL" in the UI does not change the traffic — but it now
-// *consumes* external actions from the shared five-action vocabulary
-// (the shared five-action vocabulary):
+// The five actions are the ones the Python training sim defines
+// (`app/apps/rl/sim_core.py` → `class TrafficLight` → `apply_action`,
+// driven by `app/apps/rl/signal_env.py`). They are operations on the
+// junction, and the browser now models the junction the same way:
 //
-//   extend_green          the current light's remaining time grows by 5 s
-//                         (never past MAX_GREEN_SECS)
-//   shorten_red           the current light's remaining time shrinks by 5 s
-//                         (never below the minimum-red floor on a red,
-//                         never below the minimum-green floor on a green)
+//   extend_green          the junction's current green axis grows by 5 s
+//                         (never past `MAX_GREEN_SECS`)
+//   shorten_red           the opposite axis is served 5 s earlier — its
+//                         red shrinks by 5 s (never below `MIN_RED_SECS`)
 //   preempt /
-//   force_all_red         the light holds AllRed for 3 s
+//   force_all_red         the **whole junction** holds all-red for 3 s,
+//                         then resumes the interrupted phase with the
+//                         time it had left
 //   no_op                 nothing
+//
+// The Python's `resume_state` trick is the behaviour to copy: the phase
+// **and its remaining time** are remembered before the all-red, and the
+// junction comes back to them. A clearance that resumed into "nothing is
+// served" would wedge the junction — the browser's plan has no such
+// state (every phase has a successor), but the resume point is recorded
+// all the same.
 //
 // `applyAction` is **synchronous**: it only mutates the pending-action
 // queue. The next `decide()` consumes the queue. It never calls
 // `decide()` itself.
 //
-// SCOPE NOTE — the controller is **per light** (one controller
-// per light). "All lights go AllRed" is therefore realised by
-// the caller applying the action to *every* light of the intersection;
-// each light's controller then holds its own AllRed for 3 s.
-//
-// The action source (`SignalActionSource`) is the seam for Sprint 3: it
-// decides only *where* the actions come from, so replacing the injected
-// sequence with the trained policy is a one-line change at the
-// construction site.
-import type { TrafficLight } from '@domain/entities/TrafficLight'
+// The action source (`SignalActionSource`) is the seam for the trained
+// policy: it decides only *where* the actions come from, so replacing
+// the injected sequence with the trained policy is a one-line change at
+// the construction site. It is polled **once per junction per tick** —
+// the same rate the training env drives its light (`SignalEnv.step`
+// applies one action per step).
+
+import type { Intersection } from '@domain/entities/Intersection'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
-import type {
-  SignalAction,
-  SignalActionSource,
-  SignalController,
-  SignalDecision,
-} from '../signalController'
+import type { TrafficLight } from '@domain/entities/TrafficLight'
+import type { SignalAction, SignalActionSource } from '../signalController'
 import { LightPhase } from '@domain/value-objects/Phase'
 import {
-  ALL_RED_SECS,
-  ALL_RED_CLEARANCE_SECS,
-  GREEN_PHASE_SECS,
   MAX_GREEN_SECS,
-  MIN_GREEN_SECS,
   MIN_RED_SECS,
   PHASE_ADJUST_SECS,
-  PHASE_EPSILON_SECS,
-  RED_PHASE_SECS,
-  YELLOW_CLEAR_SECS,
   type SignalActionName,
 } from '@shared/constants/simulation'
+import { axisLightFor, JunctionControllerBase, type JunctionPlanState } from './junctionPlan'
 
 export interface RLControllerDeps {
   /**
@@ -64,165 +60,123 @@ export interface RLControllerDeps {
   actionSource?: SignalActionSource
 }
 
-/**
- * Shorten a phase by the phase-adjust step.
- *
- * The floors are the project's existing convention, applied per phase:
- * a **red** light never drops below `MIN_RED_SECS` and a **green** light
- * never drops below `MIN_GREEN_SECS`. The green floor is
- * what stops a controller that shortens on every decision from
- * *flickering* the light — 0.6 s per phase, which no driver can react
- * to. The yellow and all-red phases have no floor: they are clearance
- * intervals, not service intervals.
- *
- * Mirrors the Python training sim, where the same bound is enforced by
- * the environment masking the action (`app/apps/rl/signal_env.py`) — the
- * physical light model itself is untouched.
- */
-const shrinkRed = (duration: number, phase: LightPhase): number => {
-  const next = duration - PHASE_ADJUST_SECS
-  if (phase === LightPhase.Red) return Math.max(next, MIN_RED_SECS)
-  if (phase === LightPhase.Green) return Math.max(next, MIN_GREEN_SECS)
-  return Math.max(next, 0)
-}
-
-export class RLController implements SignalController {
+export class RLController extends JunctionControllerBase {
   private readonly actionSource: SignalActionSource | null
-  /** Actions queued by `applyAction`; consumed by the next `decide()`. */
-  private pending: SignalActionName[] = []
-  /** simTime until which the light is held AllRed (-Infinity = not held). */
-  private allRedUntil = Number.NEGATIVE_INFINITY
-  /** The phase to resume when the all-red ends. */
-  private resumePhase: LightPhase = LightPhase.Green
-  /** The remaining time the resumed phase had when the all-red began. */
-  private resumeRemaining = 0
 
   constructor(deps: RLControllerDeps = {}) {
+    super()
     this.actionSource = deps.actionSource ?? null
   }
 
-  applyAction(_light: TrafficLight, action: SignalActionName): void {
-    // Synchronous: mutate the pending queue ONLY. The next decide()
-    // consumes it — this method never calls decide().
-    this.pending.push(action)
-  }
-
-  decide(light: TrafficLight, network: RoadNetwork, simTime: number): SignalDecision {
-    // 1. Ask the action source for this light's action and queue it
-    //    exactly like an injected `applyAction()`.
-    const sourced = this.actionSource?.nextAction(light, network, simTime) ?? null
-    if (sourced !== null) this.pending.push(sourced)
-
-    // 2. Consume the pending queue ("next decide() consumes").
-    const actions = this.pending
-    this.pending = []
-
-    // 3. The base phase machine — the same transitions as
-    //    `FixedCycleController` (green → yellow → all-red → red → green).
-    let phase = light.phase
-    let duration = light.phaseRemaining
-    if (light.phaseRemaining <= PHASE_EPSILON_SECS) {
-      if (phase === LightPhase.Green) {
-        phase = LightPhase.Yellow
-        duration = YELLOW_CLEAR_SECS
-      } else if (phase === LightPhase.Yellow) {
-        phase = LightPhase.AllRed
-        duration = ALL_RED_CLEARANCE_SECS
-      } else if (phase === LightPhase.AllRed) {
-        // The all-red runs out into a **full** red, never straight back
-        // into the green — skipping the red is what used to make a
-        // desynchronised pair of lights ping-pong every 3 s.
-        phase = LightPhase.Red
-        duration = RED_PHASE_SECS
-      } else {
-        phase = LightPhase.Green
-        duration = GREEN_PHASE_SECS
-      }
-    }
-
-    // 3b. A clearance that ended with the previous step resumes BEFORE the
-    //     actions are applied, so the resume point is the interrupted phase
-    //     (with the time it had left) — not the all-red state the light was
-    //     left in. Without this order a preempt landing on that step would
-    //     overwrite the resume point and the interrupted phase's remaining
-    //     time would be lost.
-    if (this.allRedUntil > Number.NEGATIVE_INFINITY && simTime >= this.allRedUntil) {
-      this.allRedUntil = Number.NEGATIVE_INFINITY
-      phase = this.resumePhase
-      duration = this.resumeRemaining
-    }
-
-    // 4. Apply the queued actions, in order.
-    let preempt = false
+  /**
+   * Apply the queued actions to the junction's plan.
+   *
+   * The preemption (`preempt` / `force_all_red`) is the shared
+   * machinery's — it is a property of the junction, not of this
+   * controller — so it is handled by the base class.
+   */
+  protected override applyActions(
+    state: JunctionPlanState,
+    actions: readonly SignalActionName[],
+    junction: Intersection,
+    network: RoadNetwork,
+    simTime: number,
+  ): void {
+    super.applyActions(state, actions, junction, network, simTime)
     for (const action of actions) {
-      switch (action) {
-        case 'extend_green':
-          // The green may grow by 5 s, but never past `MAX_GREEN_SECS` —
-          // the same bound the Python training sim uses, so a policy
-          // trained against one side behaves the same on the other. It
-          // bounds the *remaining* time, not the wall-clock duration.
-          duration = Math.min(duration + PHASE_ADJUST_SECS, MAX_GREEN_SECS)
-          break
-        case 'shorten_red':
-          duration = shrinkRed(duration, phase)
-          break
-        case 'preempt':
-        case 'force_all_red':
-          preempt = true
-          break
-        case 'no_op':
-          break
+      if (action === 'extend_green') {
+        // The green may grow by 5 s, but never past `MAX_GREEN_SECS` —
+        // the same bound the Python training sim uses, so a policy
+        // trained against one side behaves the same on the other.
+        //
+        // The bound is on the green's **duration**: the remaining time
+        // may not exceed what is left of the budget. (A clamp on the
+        // remaining alone would pin the countdown: an action applied on
+        // every tick would keep the green from ever running out.)
+        //
+        // The action only means something while an axis is served: the
+        // Python freezes the phase clock during its clearance, so an
+        // adjustment landing there would shorten the *next* green.
+        if (state.phase === LightPhase.Green) {
+          const elapsed = simTime - state.greenStartedAt
+          const budget = Math.max(0, MAX_GREEN_SECS - elapsed)
+          state.remaining = Math.min(state.remaining + PHASE_ADJUST_SECS, budget)
+        }
+      } else if (action === 'shorten_red') {
+        // The opposite axis is served 5 s earlier. The green's remaining
+        // time is what the opposite axis waits, so it shrinks by the same
+        // 5 s.
+        //
+        // The floor is **refused**, not clamped: the Python's environment
+        // masks the action when it would push the green below
+        // `MIN_GREEN_SECS` (10 s — the same number as the browser's
+        // `MIN_RED_SECS`), and the light is not touched at all. Clamping
+        // instead would pin the countdown, and the green would never run
+        // out.
+        //
+        // Like the extension, it is only legal while an axis is served:
+        // during the clearance the clock is frozen, and an adjustment
+        // there would shorten the *next* green.
+        if (
+          state.phase === LightPhase.Green &&
+          state.remaining - PHASE_ADJUST_SECS >= MIN_RED_SECS
+        ) {
+          state.remaining -= PHASE_ADJUST_SECS
+        }
       }
+      // 'no_op' — nothing.
     }
-
-    const available = this.availableActions(phase, duration)
-
-    if (preempt) {
-      // All-red clearance. Remember where to resume, unless the light is
-      // already clearing (a second preempt must not lose the resume point).
-      // `allRedUntil` is `-Infinity` exactly when the light is not clearing:
-      // step 3b resets it when a clearance ends.
-      if (this.allRedUntil === Number.NEGATIVE_INFINITY) {
-        this.resumePhase = phase
-        this.resumeRemaining = duration
-      }
-      this.allRedUntil = simTime + ALL_RED_SECS
-      return {
-        phase: LightPhase.AllRed,
-        duration: ALL_RED_SECS,
-        actions: available,
-        decidedAt: simTime,
-      }
-    }
-
-    if (simTime < this.allRedUntil) {
-      // Still clearing the intersection.
-      return {
-        phase: LightPhase.AllRed,
-        duration: this.allRedUntil - simTime,
-        actions: available,
-        decidedAt: simTime,
-      }
-    }
-
-    return { phase, duration, actions: available, decidedAt: simTime }
   }
 
   /**
-   * The action space offered to the agent, with the availability flags of
-   * ("preemption is only legal when the light is idle").
+   * The action space offered to the agent, with the availability flags.
+   *
+   * `preempt` / `force_all_red` are only legal when the junction is not
+   * already held; `extend_green` and `shorten_red` only while an axis
+   * is served.
    */
-  private availableActions(phase: LightPhase, duration: number): ReadonlyArray<SignalAction> {
-    const clearing = phase === LightPhase.AllRed
+  protected override planActions(
+    state: JunctionPlanState,
+    _simTime: number,
+  ): ReadonlyArray<SignalAction> {
+    const holding = state.allRedUntil > Number.NEGATIVE_INFINITY
+    const serving = state.phase === LightPhase.Green
     return [
-      { name: 'extend_green', available: phase === LightPhase.Green },
+      { name: 'extend_green', available: serving },
       {
         name: 'shorten_red',
-        available: phase === LightPhase.Red && duration > MIN_RED_SECS,
+        available: serving && state.remaining - PHASE_ADJUST_SECS >= MIN_RED_SECS,
       },
-      { name: 'preempt', available: !clearing },
-      { name: 'force_all_red', available: !clearing },
+      { name: 'preempt', available: !holding },
+      { name: 'force_all_red', available: !holding },
       { name: 'no_op', available: true },
     ]
+  }
+
+  /**
+   * Poll the action source once per junction per tick.
+   *
+   * The source is given the light of the axis the junction is serving,
+   * so the observation the policy reads is the junction's — the same
+   * six numbers the training env builds (`signal_env.SignalEnv._obs`).
+   */
+  protected override pollActions(
+    state: JunctionPlanState,
+    junction: Intersection,
+    network: RoadNetwork,
+    simTime: number,
+  ): void {
+    const light = this.servedLight(junction, state)
+    if (light === null) return
+    const sourced = this.actionSource?.nextAction(light, network, simTime)
+    if (sourced !== null && sourced !== undefined) this.pending.push(sourced)
+  }
+
+  /** The light of the axis the junction is serving. */
+  private servedLight(junction: Intersection, state: JunctionPlanState): TrafficLight | null {
+    return (
+      axisLightFor(junction, state.axis) ??
+      axisLightFor(junction, state.axis === 'ns' ? 'ew' : 'ns')
+    )
   }
 }

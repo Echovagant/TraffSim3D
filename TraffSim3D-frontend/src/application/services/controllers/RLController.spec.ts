@@ -1,63 +1,82 @@
 // src/application/services/controllers/RLController.spec.ts
 //
-// The RL controller is a real control surface.
+// The RL controller's five actions, applied to the **junction**.
 //
-// The contract is:
+// The semantics are the Python training sim's
+// (`app/apps/rl/sim_core.py` → `class TrafficLight` → `apply_action`,
+// driven by `app/apps/rl/signal_env.py`):
+//
+//   extend_green          the junction's current green axis grows by 5 s
+//                         (never past MAX_GREEN_SECS)
+//   shorten_red           the opposite axis is served 5 s earlier — its
+//                         red shrinks by 5 s (never below MIN_RED_SECS)
+//   preempt /
+//   force_all_red         the whole junction holds all-red for 3 s, then
+//                         resumes the interrupted phase with the time it
+//                         had left
+//   no_op                 nothing
+//
+// The contract on top of that:
 //   - `applyAction` is synchronous and only mutates the pending-action
 //     queue — it never calls `decide()`.
 //   - the next `decide()` consumes the queue.
 
 import { describe, it, expect } from 'vitest'
 import { RLController } from './RLController'
-import { makeTestLight, buildTestNetwork } from '@__fixtures__/testNetwork'
+import { buildTestNetwork } from '@__fixtures__/testNetwork'
 import { LightPhase } from '@domain/value-objects/Phase'
+import type { Intersection } from '@domain/entities/Intersection'
+import type { TrafficLight } from '@domain/entities/TrafficLight'
 import {
   ALL_RED_SECS,
   MAX_GREEN_SECS,
-  MIN_GREEN_SECS,
   MIN_RED_SECS,
   PHASE_ADJUST_SECS,
 } from '@shared/constants/simulation'
 import { createSequenceActionSource } from '../signalController'
 
-describe('RLController', () => {
-  const net = buildTestNetwork()
+const makeLight = (axis: 'ns' | 'ew', phase: LightPhase, remaining: number): TrafficLight => ({
+  id: `tl-${axis}`,
+  position: { x: 0, y: 0, z: 0 },
+  phase,
+  phaseRemaining: remaining,
+  cycleSeconds: 72,
+  axis,
+})
 
-  it('runs the plain cycle: green → yellow at phaseRemaining=0', () => {
-    const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 0 })
-    const d = c.decide(light, net, 0)
-    expect(d.phase).toBe(LightPhase.Yellow)
-    expect(d.duration).toBe(3)
-  })
+const makeJunction = (nsRemaining = 30): Intersection => ({
+  id: 'i-1',
+  position: { x: 0, y: 0, z: 0 },
+  connectedRoads: ['r-ns', 'r-ew'],
+  trafficLights: [
+    makeLight('ns', LightPhase.Green, nsRemaining),
+    makeLight('ew', LightPhase.Red, 36),
+  ],
+  intersectionRadius: 8,
+})
 
-  it('stays in green while phaseRemaining > 0', () => {
+describe('RLController — the junction runs the plain cycle', () => {
+  it('runs green → yellow → all-red → green on the other axis', () => {
+    const net = buildTestNetwork()
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 10 })
-    const d = c.decide(light, net, 0)
-    expect(d.phase).toBe(LightPhase.Green)
-    expect(d.duration).toBe(10)
-  })
 
-  it('runs the whole green → yellow → all-red → red → green cycle', () => {
-    const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 0 })
-    expect(c.decide(light, net, 0).phase).toBe(LightPhase.Yellow)
-    light.phase = LightPhase.Yellow
-    light.phaseRemaining = 0
-    expect(c.decide(light, net, 0).phase).toBe(LightPhase.AllRed)
-    light.phase = LightPhase.AllRed
-    light.phaseRemaining = 0
-    expect(c.decide(light, net, 0).phase).toBe(LightPhase.Red)
-    light.phase = LightPhase.Red
-    light.phaseRemaining = 0
-    expect(c.decide(light, net, 0).phase).toBe(LightPhase.Green)
+    expect(c.decide(junction, net, 0, 0).phase).toBe(LightPhase.Green)
+    expect(c.decide(junction, net, 0, 30).phase).toBe(LightPhase.Yellow)
+    expect(c.decide(junction, net, 0, 3).phase).toBe(LightPhase.AllRed)
+    const other = c.decide(junction, net, 0, 3)
+    expect(other.phase).toBe(LightPhase.Green)
+    expect(other.axis).toBe('ew')
   })
 
   it('offers the whole vocabulary as its action space', () => {
+    const net = buildTestNetwork()
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    const d = c.decide(light, net, 0)
+
+    const d = c.decide(junction, net, 0, 0)
     expect(d.actions.map((a) => a.name)).toEqual([
       'extend_green',
       'shorten_red',
@@ -65,28 +84,30 @@ describe('RLController', () => {
       'force_all_red',
       'no_op',
     ])
-    // A green light may be extended; it is not red, so it cannot be shortened.
+    // The junction is serving an axis: the green may be extended and the
+    // opposite axis' red may be shortened.
     expect(d.actions.find((a) => a.name === 'extend_green')?.available).toBe(true)
-    expect(d.actions.find((a) => a.name === 'shorten_red')?.available).toBe(false)
+    expect(d.actions.find((a) => a.name === 'shorten_red')?.available).toBe(true)
   })
 })
 
 describe('RLController — applyAction', () => {
-  const net = buildTestNetwork()
-
-  it('only queues: the light is untouched until the next decide()', () => {
+  it('only queues: the plan is untouched until the next decide()', () => {
+    const net = buildTestNetwork()
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    c.applyAction(light, 'extend_green')
-    expect(light.phase).toBe(LightPhase.Green)
-    expect(light.phaseRemaining).toBe(30)
+
+    c.applyAction(junction, 'extend_green')
     // The effect appears on the next decide().
-    expect(c.decide(light, net, 0).duration).toBe(30 + PHASE_ADJUST_SECS)
+    expect(c.decide(junction, net, 0, 0).duration).toBe(30 + PHASE_ADJUST_SECS)
   })
 
   it('never calls decide() itself', () => {
-    // The action source is polled once per decide() — a poll counter is a
-    // direct witness that applyAction did not decide.
+    const net = buildTestNetwork()
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
+    // A poll counter is a direct witness that applyAction did not decide.
     let polls = 0
     const c = new RLController({
       actionSource: {
@@ -96,185 +117,209 @@ describe('RLController — applyAction', () => {
         },
       },
     })
-    const light = makeTestLight()
-    c.applyAction(light, 'no_op')
+
+    c.applyAction(junction, 'no_op')
     expect(polls).toBe(0)
-    c.decide(light, net, 0)
+    c.decide(junction, net, 0, 0)
     expect(polls).toBe(1)
   })
 
   it('consumes the queue exactly once', () => {
+    const net = buildTestNetwork()
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    c.applyAction(light, 'extend_green')
-    expect(c.decide(light, net, 0).duration).toBe(35)
-    // The second decide() has nothing left to consume.
-    expect(c.decide(light, net, 0.1).duration).toBe(30)
+
+    c.applyAction(junction, 'extend_green')
+    expect(c.decide(junction, net, 0, 0).duration).toBe(35)
+    // The second decide() has nothing left to consume: the extension
+    // holds (the junction's plan keeps the time it was given) and is
+    // **not** applied a second time.
+    expect(c.decide(junction, net, 0.1, 0).duration).toBe(35)
   })
 })
 
-describe('RLController — the five actions', () => {
+describe('RLController — the five actions on the junction', () => {
   const net = buildTestNetwork()
 
-  it('extend_green grows the current light’s remaining time by 5 s', () => {
+  it('extend_green grows the junction’s green by 5 s', () => {
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    c.applyAction(light, 'extend_green')
-    const d = c.decide(light, net, 0)
+
+    c.applyAction(junction, 'extend_green')
+    const d = c.decide(junction, net, 0, 0)
     expect(d.phase).toBe(LightPhase.Green)
     expect(d.duration).toBe(30 + PHASE_ADJUST_SECS)
   })
 
-  it('shorten_red shrinks the current light’s remaining time by 5 s', () => {
+  it('extend_green never exceeds the max-green bound', () => {
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Red, phaseRemaining: 30 })
-    c.applyAction(light, 'shorten_red')
-    const d = c.decide(light, net, 0)
-    expect(d.phase).toBe(LightPhase.Red)
+
+    let duration = 30
+    for (let i = 0; i < 20; i++) {
+      c.applyAction(junction, 'extend_green')
+      const d = c.decide(junction, net, 0, 0)
+      duration = d.duration
+    }
+    expect(duration).toBe(MAX_GREEN_SECS)
+  })
+
+  it('shorten_red hands the junction over 5 s earlier', () => {
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
+    const c = new RLController()
+
+    c.applyAction(junction, 'shorten_red')
+    const d = c.decide(junction, net, 0, 0)
+    expect(d.phase).toBe(LightPhase.Green)
     expect(d.duration).toBe(30 - PHASE_ADJUST_SECS)
+    // The opposite axis' red (its wait) shrinks by the same 5 s.
+    expect(d.views?.ew.remaining).toBe(30 - PHASE_ADJUST_SECS + 3 + 3)
   })
 
   it('shorten_red never drops below the minimum-red floor', () => {
+    // The floor is **refused**, not clamped: the Python's environment
+    // masks the action when it would push the green below the floor,
+    // and the light is not touched at all.
+    const junction = makeJunction(MIN_RED_SECS + PHASE_ADJUST_SECS)
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Red, phaseRemaining: MIN_RED_SECS + 2 })
-    c.applyAction(light, 'shorten_red')
-    expect(c.decide(light, net, 0).duration).toBe(MIN_RED_SECS)
+
+    c.applyAction(junction, 'shorten_red')
+    expect(c.decide(junction, net, 0, 0).duration).toBe(MIN_RED_SECS)
   })
 
-  it('shorten_red never drops a green below the minimum-green floor', () => {
-    // The symmetric counterpart of the red floor — "a red
-    // is never shorter than MIN_RED_SECS, a green is never shorter than
-    // MIN_GREEN_SECS". Without it a controller that shortens on every
-    // decision flickers the light (0.6 s per phase), which no driver can
-    // react to.
+  it('shorten_red is refused when it would break the floor', () => {
+    const junction = makeJunction(MIN_RED_SECS + 2)
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: MIN_GREEN_SECS + 2 })
-    c.applyAction(light, 'shorten_red')
-    expect(c.decide(light, net, 0).duration).toBe(MIN_GREEN_SECS)
+
+    c.applyAction(junction, 'shorten_red')
+    expect(c.decide(junction, net, 0, 0).duration).toBe(MIN_RED_SECS + 2)
   })
 
-  it('shorten_red still shrinks a green while there is room', () => {
+  it('a green shortened on every tick still runs out', () => {
+    // The clamp would pin the countdown: the remaining time would be
+    // topped back up to the floor on every tick and the green would
+    // never end. The Python's mask refuses the action instead, so the
+    // green runs its course.
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    c.applyAction(light, 'shorten_red')
-    expect(c.decide(light, net, 0).duration).toBe(30 - PHASE_ADJUST_SECS)
+
+    let plan = c.decide(junction, net, 0, 0)
+    for (let second = 0; second < 60 && plan.phase === LightPhase.Green; second += 1) {
+      c.applyAction(junction, 'shorten_red')
+      plan = c.decide(junction, net, second, 1)
+    }
+    expect(plan.phase).not.toBe(LightPhase.Green)
   })
 
-  it('shorten_red on a yellow light has no floor', () => {
-    // The clearance phases are not service intervals: the yellow must
-    // keep its zero floor (it has to expire), and the all-red clearance
-    // is not shortened at all.
+  it('a green extended on every tick still runs out', () => {
+    // The same for the extension: the bound is on the green's duration,
+    // so the remaining time cannot be topped back up past the budget.
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Yellow, phaseRemaining: 3 })
-    c.applyAction(light, 'shorten_red')
-    expect(c.decide(light, net, 0).duration).toBe(0)
-  })
 
-  it('preempt holds the light AllRed for 3 s, then the phase resumes', () => {
-    const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    c.applyAction(light, 'preempt')
-    const d = c.decide(light, net, 0)
-    expect(d.phase).toBe(LightPhase.AllRed)
-    expect(d.duration).toBe(ALL_RED_SECS)
-    // Still clearing one second later ...
-    const clearing = c.decide(light, net, 1)
-    expect(clearing.phase).toBe(LightPhase.AllRed)
-    expect(clearing.duration).toBe(ALL_RED_SECS - 1)
-    // ... and the interrupted phase resumes when the clearance is over.
-    const resumed = c.decide(light, net, ALL_RED_SECS)
-    expect(resumed.phase).toBe(LightPhase.Green)
-    expect(resumed.duration).toBe(30)
-  })
-
-  it('force_all_red behaves like preempt', () => {
-    const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    c.applyAction(light, 'force_all_red')
-    const d = c.decide(light, net, 0)
-    expect(d.phase).toBe(LightPhase.AllRed)
-    expect(d.duration).toBe(ALL_RED_SECS)
+    let plan = c.decide(junction, net, 0, 0)
+    for (let second = 0; second < 120 && plan.phase === LightPhase.Green; second += 1) {
+      c.applyAction(junction, 'extend_green')
+      plan = c.decide(junction, net, second, 1)
+    }
+    expect(plan.phase).not.toBe(LightPhase.Green)
   })
 
   it('no_op changes nothing', () => {
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    c.applyAction(light, 'no_op')
-    const d = c.decide(light, net, 0)
+
+    c.applyAction(junction, 'no_op')
+    const d = c.decide(junction, net, 0, 0)
     expect(d.phase).toBe(LightPhase.Green)
     expect(d.duration).toBe(30)
   })
 
-  it('extend_green never exceeds the max-green bound', () => {
-    // The bound is the project's existing `MAX_GREEN_SECS` convention (the
-    // `ActuatedController` caps the green the same way). It is part of the
-    // cross-language contract: the Python training sim uses the same one.
+  it('preempt holds the whole junction all-red for 3 s, then it resumes', () => {
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    let duration = 30
-    for (let i = 0; i < 20; i++) {
-      c.applyAction(light, 'extend_green')
-      const d = c.decide(light, net, 0)
-      duration = d.duration
-      // `tick.ts` writes the decision back to the light.
-      light.phaseRemaining = d.duration
-    }
-    expect(duration).toBe(MAX_GREEN_SECS)
+
+    c.applyAction(junction, 'preempt')
+    const d = c.decide(junction, net, 0, 0)
+    expect(d.phase).toBe(LightPhase.AllRed)
+    expect(d.duration).toBe(ALL_RED_SECS)
+    // Neither axis has the right of way while the junction is held.
+    expect(d.views?.ns.phase).toBe(LightPhase.AllRed)
+    expect(d.views?.ew.phase).toBe(LightPhase.Red)
+
+    // Still clearing one second later ...
+    const clearing = c.decide(junction, net, 1, 0)
+    expect(clearing.phase).toBe(LightPhase.AllRed)
+    expect(clearing.duration).toBe(ALL_RED_SECS - 1)
+
+    // ... and the interrupted phase resumes when the clearance is over.
+    const resumed = c.decide(junction, net, ALL_RED_SECS, 0)
+    expect(resumed.phase).toBe(LightPhase.Green)
+    expect(resumed.duration).toBe(30)
   })
-})
 
-describe('RLController — the all-red resume point', () => {
-  const net = buildTestNetwork()
-
-  /**
-   * Decide and write the decision back to the light, the way `tick.ts` does.
-   * Without this the light entity keeps its pre-decision state and the
-   * controller's view of the clearance diverges from the world's.
-   */
-  const apply = (c: RLController, light: ReturnType<typeof makeTestLight>, simTime: number) => {
-    const d = c.decide(light, net, simTime)
-    light.phase = d.phase
-    light.phaseRemaining = d.duration
-    return d
-  }
-
-  it('a preempt on the boundary step does not kill the light', () => {
-    // Regression (the clearance fix wave). The clearance that ends
-    // resumes BEFORE the queued actions are applied. Without that order a
-    // preempt landing on the boundary step recorded the *all-red* state as
-    // the resume point, and the light was then stuck AllRed forever — it
-    // resumed into "no phase to resume" on every later step.
+  it('preempt resumes the interrupted phase with the time it had left', () => {
+    const junction = makeJunction(12)
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 12 })
-    c.applyAction(light, 'preempt')
-    expect(apply(c, light, 0).phase).toBe(LightPhase.AllRed)
 
-    // The clearance ends at t = ALL_RED_SECS. A preempt on that very step
-    // must not lose the resume point.
-    c.applyAction(light, 'preempt')
-    expect(apply(c, light, ALL_RED_SECS).phase).toBe(LightPhase.AllRed)
-
-    // When the second clearance ends, the interrupted phase resumes with
-    // the 12 s it had left — not a fresh 30 s, and not AllRed.
-    const resumed = apply(c, light, 2 * ALL_RED_SECS)
+    c.applyAction(junction, 'preempt')
+    expect(c.decide(junction, net, 0, 0).phase).toBe(LightPhase.AllRed)
+    // The green comes back with the 12 s it had left — not a fresh 30 s.
+    const resumed = c.decide(junction, net, ALL_RED_SECS, 0)
     expect(resumed.phase).toBe(LightPhase.Green)
     expect(resumed.duration).toBe(12)
   })
 
-  it('a preempt during a clearance keeps the original resume point', () => {
-    // The case that already worked before the fix wave — pinned so the
-    // boundary fix does not regress it.
+  it('force_all_red behaves like preempt', () => {
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 12 })
-    c.applyAction(light, 'preempt')
-    apply(c, light, 0)
-    // A second preempt one second into the clearance extends it; the resume
-    // point must stay (Green, 12).
-    c.applyAction(light, 'preempt')
-    apply(c, light, 1)
-    const resumed = apply(c, light, 1 + ALL_RED_SECS)
+
+    c.applyAction(junction, 'force_all_red')
+    const d = c.decide(junction, net, 0, 0)
+    expect(d.phase).toBe(LightPhase.AllRed)
+    expect(d.duration).toBe(ALL_RED_SECS)
+  })
+
+  it('a preempt during the clearance keeps the original resume point', () => {
+    const junction = makeJunction(12)
+    net.intersections['i-1'] = junction
+    const c = new RLController()
+
+    c.applyAction(junction, 'preempt')
+    c.decide(junction, net, 0, 0)
+    // A second preempt one second into the clearance extends it; the
+    // resume point must stay (green, 12).
+    c.applyAction(junction, 'preempt')
+    c.decide(junction, net, 1, 0)
+    const resumed = c.decide(junction, net, 1 + ALL_RED_SECS, 0)
     expect(resumed.phase).toBe(LightPhase.Green)
     expect(resumed.duration).toBe(12)
+  })
+
+  it('extend_green and shorten_red do nothing during the clearance', () => {
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
+    const c = new RLController()
+
+    // The green runs out → the junction is clearing.
+    c.decide(junction, net, 0, 30)
+    c.applyAction(junction, 'extend_green')
+    c.applyAction(junction, 'shorten_red')
+    const clearing = c.decide(junction, net, 0, 0)
+    expect(clearing.phase).toBe(LightPhase.Yellow)
+    expect(clearing.duration).toBe(3)
   })
 })
 
@@ -282,21 +327,41 @@ describe('RLController — the action-source seam', () => {
   const net = buildTestNetwork()
 
   it('consumes the injected action sequence', () => {
-    // Sprint 3 swaps this source for the trained policy's — one line, and
-    // the controller does not change.
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController({
       actionSource: createSequenceActionSource(['extend_green', 'no_op']),
     })
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    expect(c.decide(light, net, 0).duration).toBe(35)
-    expect(c.decide(light, net, 0.1).duration).toBe(30)
-    // The sequence is exhausted → the controller keeps its plain cycle.
-    expect(c.decide(light, net, 0.2).duration).toBe(30)
+
+    expect(c.decide(junction, net, 0, 0).duration).toBe(35)
+    // The 'no_op' changes nothing ...
+    expect(c.decide(junction, net, 0.1, 0).duration).toBe(35)
+    // ... and the sequence is exhausted → the controller keeps its plain
+    // cycle.
+    expect(c.decide(junction, net, 0.2, 0).duration).toBe(35)
+  })
+
+  it('polls the source once per junction per tick', () => {
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
+    let polls = 0
+    const c = new RLController({
+      actionSource: {
+        nextAction: () => {
+          polls += 1
+          return null
+        },
+      },
+    })
+
+    c.decide(junction, net, 0, 0)
+    expect(polls).toBe(1)
   })
 
   it('works with no source at all — the applyAction path alone', () => {
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new RLController()
-    const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 30 })
-    expect(c.decide(light, net, 0).duration).toBe(30)
+    expect(c.decide(junction, net, 0, 0).duration).toBe(30)
   })
 })

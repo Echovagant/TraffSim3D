@@ -29,6 +29,9 @@
 // the browser half of the cross-language check, and it goes red as soon as
 // the browser's timeline drifts away from the reference.
 //
+// All three controllers are held to it. The junction owns the phase plan,
+// so the plan's shape does not depend on which controller reads it.
+//
 // The window boundaries are measured on the tick grid, so a green window
 // reads 30 s minus one tick (29.98 s at 60 Hz) — the tolerance below
 // covers that.
@@ -38,7 +41,7 @@ import { tick, type TickContext } from '@application/services/tick'
 import { buildCrossIntersectionNetwork } from '@application/services/defaultScene'
 import { LightPhase } from '@domain/value-objects/Phase'
 import type { TrafficLight } from '@domain/entities/TrafficLight'
-import type { SignalController } from '../signalController'
+import type { SignalController, ControllerKind } from '../signalController'
 
 const DT = 1 / 60
 /** Simulated seconds — three full 72 s periods. */
@@ -61,6 +64,8 @@ interface Timeline {
   greenWindows: number[][]
   /** The spans during which neither axis is green (seconds). */
   gaps: number[][]
+  /** The sim times at which the measured axis turned green (seconds). */
+  greenStarts: number[]
 }
 
 /**
@@ -71,7 +76,7 @@ interface Timeline {
  * same place in both paths, and the fallback keeps the spec free of the
  * Rapier WASM (which a signal-timing assertion has no business booting).
  */
-const recordTimeline = (controllerKind: 'fixed-cycle' | 'actuated'): Timeline => {
+const recordTimeline = (controllerKind: ControllerKind): Timeline => {
   const net = buildCrossIntersectionNetwork()
   const intersection = net.intersections['i-center']!
   const nsLight = intersection.trafficLights.find((l) => l.axis === 'ns')!
@@ -102,9 +107,14 @@ const recordTimeline = (controllerKind: 'fixed-cycle' | 'actuated'): Timeline =>
   const nsFlags: boolean[] = []
   const ewFlags: boolean[] = []
   const neitherFlags: boolean[] = []
+  const greenStarts: number[] = []
+  let wasGreen = false
   for (let frame = 0; frame < frames; frame += 1) {
     tick(net, DT, (frame + 1) * DT, ctx)
-    nsFlags.push(isGreen(nsLight))
+    const green = isGreen(nsLight)
+    if (green && !wasGreen) greenStarts.push(frame * DT)
+    wasGreen = green
+    nsFlags.push(green)
     ewFlags.push(isGreen(ewLight))
     neitherFlags.push(!isGreen(nsLight) && !isGreen(ewLight))
   }
@@ -127,90 +137,45 @@ const recordTimeline = (controllerKind: 'fixed-cycle' | 'actuated'): Timeline =>
   return {
     greenWindows: [...windows(nsFlags), ...windows(ewFlags)],
     gaps: windows(neitherFlags),
+    greenStarts,
   }
 }
 
 const lengths = (spans: number[][]): number[] => spans.map(([a, b]) => b - a)
 
+const CONTROLLERS: ControllerKind[] = ['fixed-cycle', 'rl', 'actuated']
+
 describe('the browser signal timeline has the training sim shape', () => {
-  it('the fixed-cycle controller serves 30 s greens with a symmetric 6 s clearance', () => {
-    const { greenWindows, gaps } = recordTimeline('fixed-cycle')
+  for (const controllerKind of CONTROLLERS) {
+    it(`the ${controllerKind} controller serves 30 s greens with a symmetric 6 s clearance`, () => {
+      const { greenWindows, gaps } = recordTimeline(controllerKind)
 
-    // Every green window is a full phase — never a slice.
-    const greenLengths = lengths(greenWindows)
-    expect(greenLengths.length).toBeGreaterThanOrEqual(6)
-    for (const length of greenLengths) {
-      expect(length).toBeCloseTo(EXPECTED_GREEN_SECS, 1)
-      expect(Math.abs(length - EXPECTED_GREEN_SECS)).toBeLessThanOrEqual(TOLERANCE_SECS)
-    }
+      // Every green window is a full phase — never a slice.
+      const greenLengths = lengths(greenWindows)
+      expect(greenLengths.length).toBeGreaterThanOrEqual(6)
+      for (const length of greenLengths) {
+        expect(length).toBeCloseTo(EXPECTED_GREEN_SECS, 1)
+        expect(Math.abs(length - EXPECTED_GREEN_SECS)).toBeLessThanOrEqual(TOLERANCE_SECS)
+      }
 
-    // Every gap is the training sim's clearance — and they are all equal
-    // (the clearance comes before *every* green, not only before the
-    // second axis' one).
-    const gapLengths = lengths(gaps)
-    expect(gapLengths.length).toBeGreaterThanOrEqual(4)
-    for (const length of gapLengths) {
-      expect(Math.abs(length - EXPECTED_CLEARANCE_SECS)).toBeLessThanOrEqual(TOLERANCE_SECS)
-    }
-    expect(new Set(gapLengths.map((l) => l.toFixed(2))).size).toBe(1)
-  })
+      // Every gap is the training sim's clearance — and they are all equal
+      // (the clearance comes before *every* green, not only before the
+      // second axis' one).
+      const gapLengths = lengths(gaps)
+      expect(gapLengths.length).toBeGreaterThanOrEqual(4)
+      for (const length of gapLengths) {
+        expect(Math.abs(length - EXPECTED_CLEARANCE_SECS)).toBeLessThanOrEqual(TOLERANCE_SECS)
+      }
+      expect(new Set(gapLengths.map((l) => l.toFixed(2))).size).toBe(1)
+    })
 
-  it('the fixed-cycle controller repeats every 72 s', () => {
-    const net = buildCrossIntersectionNetwork()
-    const intersection = net.intersections['i-center']!
-    const nsLight = intersection.trafficLights.find((l) => l.axis === 'ns')!
-    const controllers = new Map<string, SignalController>()
-    const ctx: TickContext = {
-      rapierWorld: null,
-      signal: {
-        controllers,
-        controllerKind: 'fixed-cycle',
-        getCoordinatedOffsets: () => new Map<string, number>(),
-        isCoordinatedEnabled: () => false,
-        getRlActionSource: () => undefined,
-      },
-      trajectoryExporter: null,
-      sensorRegistry: null,
-      lidarEnabled: false,
-      getHostPose: () => null,
-      fixedStepScheduler: null,
-      draggingId: null,
-      removeVehicle: () => {},
-      policy: null,
-      replayTargetId: null,
-    }
-    const greenStarts: number[] = []
-    let wasGreen = false
-    const frames = Math.round(SECONDS / DT)
-    for (let frame = 0; frame < frames; frame += 1) {
-      tick(net, DT, (frame + 1) * DT, ctx)
-      const green = GREEN.has(nsLight.phase)
-      if (green && !wasGreen) greenStarts.push(frame * DT)
-      wasGreen = green
-    }
-    expect(greenStarts.length).toBeGreaterThanOrEqual(3)
-    for (let i = 1; i < greenStarts.length; i += 1) {
-      const period = greenStarts[i]! - greenStarts[i - 1]!
-      expect(Math.abs(period - EXPECTED_PERIOD_SECS)).toBeLessThanOrEqual(TOLERANCE_SECS)
-    }
-  })
-
-  it('the actuated controller keeps a real clearance and serves both axes', () => {
-    const { greenWindows, gaps } = recordTimeline('actuated')
-
-    // No green is a slice: every window is at least the minimum green.
-    const greenLengths = lengths(greenWindows)
-    expect(greenLengths.length).toBeGreaterThanOrEqual(4)
-    for (const length of greenLengths) {
-      expect(length).toBeGreaterThanOrEqual(10 - TOLERANCE_SECS)
-    }
-
-    // The clearance is real: it happens, and it is not shorter than the
-    // all-red the conflict resolution charges.
-    const gapLengths = lengths(gaps)
-    expect(gapLengths.length).toBeGreaterThanOrEqual(1)
-    for (const length of gapLengths) {
-      expect(length).toBeGreaterThanOrEqual(3 - TOLERANCE_SECS)
-    }
-  })
+    it(`the ${controllerKind} controller repeats every 72 s`, () => {
+      const { greenStarts } = recordTimeline(controllerKind)
+      expect(greenStarts.length).toBeGreaterThanOrEqual(3)
+      for (let i = 1; i < greenStarts.length; i += 1) {
+        const period = greenStarts[i]! - greenStarts[i - 1]!
+        expect(Math.abs(period - EXPECTED_PERIOD_SECS)).toBeLessThanOrEqual(TOLERANCE_SECS)
+      }
+    })
+  }
 })

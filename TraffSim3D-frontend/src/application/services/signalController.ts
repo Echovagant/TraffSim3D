@@ -1,9 +1,29 @@
 // src/application/services/signalController.ts
 //
-// Per-light signal controller. One instance per
-// traffic light, owned by worldStore. Per-tick, the application
-// tick calls `controller.decide(light, network, simTime)` and
-// applies the returned decision to the light entity.
+// Junction-level signal controller. One instance per **junction**,
+// owned by worldStore. Per-tick, the application tick calls
+// `controller.decide(junction, network, simTime, dt)` and applies the
+// returned plan to the junction's lights.
+//
+// ## The junction is the unit
+//
+// A junction carries one light per traffic axis, and the two axes
+// alternate. The **plan** (which axis is served, and when the hand-over
+// happens) belongs to the junction; the lights are *views* of it. That is
+// the same shape the Python training sim uses (`app/apps/rl/sim_core.py`
+// → `class TrafficLight`: one object with `ns_green` / `ew_green`), so
+// the browser and the training env model the same thing.
+//
+// The per-light model it replaces ran one phase machine per light. Two
+// independent countdowns drift apart (each accumulates its own float
+// error and the lights start a tick apart), so the junction's clearance
+// was only accidentally 6 s.
+//
+// Before the clearance became a phase of its own, the two axes also
+// fought over it and ping-ponged every 3 s. That much is history, but
+// the hand-over was still not exact: the actuated controller's own
+// arithmetic moved it by a tick, and the clearance measured 6.00 / 6.02
+// / 6.00 / 6.02 s instead of 6.00 s four times.
 //
 // See the signal-controller contract for the full details.
 
@@ -16,6 +36,8 @@ import { laneForwardSign, roadLength, stopLineSOnRoad } from '@domain/services/l
 import { approachAxis, roadPolylineAxis } from '@domain/services/approachAxis'
 import { STOP_LINE_DISTANCE } from '@shared/constants/simulation'
 import type { SignalActionName } from '@shared/constants/simulation'
+
+export type { SignalActionName }
 import {
   FixedCycleController,
   ActuatedController,
@@ -24,11 +46,47 @@ import {
   type CoordinatedControllerDeps,
 } from './controllers'
 
+/**
+ * The traffic axes a junction serves: north–south and east–west.
+ *
+ * The same two names the Python training sim uses (`ns_green` / `ew_green`).
+ */
+export type SignalAxis = 'ns' | 'ew'
+
+/**
+ * What the light of one axis shows under the junction's plan.
+ *
+ * `remaining` is the time until that light's next change: the remaining
+ * green for a served axis, the remaining wait for the other one.
+ */
+export interface AxisSignalView {
+  phase: LightPhase
+  remaining: number
+}
+
 export interface SignalDecision {
   phase: LightPhase
   duration: number
   actions: ReadonlyArray<SignalAction>
   decidedAt: number
+}
+
+/**
+ * The junction's phase plan.
+ *
+ * `phase` / `duration` describe the junction itself (the phase it is in
+ * and how long is left); `axis` is the axis it is serving, and `views`
+ * is what each axis' light shows.
+ *
+ * `axis` and `views` are **optional** so that a controller which only
+ * knows the older per-light contract still satisfies this interface: the
+ * tick then applies the decision to the junction's lights as a whole.
+ */
+export interface JunctionSignalPlan extends SignalDecision {
+  /** The axis the junction is serving (or clearing). */
+  axis?: SignalAxis
+  /** What each axis' light shows under the plan. */
+  views?: Record<SignalAxis, AxisSignalView>
 }
 
 export interface SignalAction {
@@ -48,11 +106,16 @@ export interface SignalAction {
  * Both satisfy this one interface, so the swap is a **single line** at the
  * construction site (`createSignalController`'s `rlActionSource` dep) and
  * nothing else in the controller changes.
+ *
+ * The source is polled **once per junction per tick** — the same rate the
+ * Python training env drives its light (`SignalEnv.step` applies one
+ * action per step). `light` is the light of the axis the junction is
+ * serving, so the observation the policy reads is the junction's.
  */
 export interface SignalActionSource {
   /**
-   * The next action for `light`, or `null` when there is nothing to apply.
-   * Called once per `decide()`.
+   * The next action for the junction, or `null` when there is nothing to
+   * apply. Called once per `decide()`.
    */
   nextAction(light: TrafficLight, network: RoadNetwork, simTime: number): SignalActionName | null
 }
@@ -75,10 +138,26 @@ export const createSequenceActionSource = (
 }
 
 export interface SignalController {
-  decide(light: TrafficLight, network: RoadNetwork, simTime: number): SignalDecision
+  /**
+   * Decide the junction's phase plan for this tick.
+   *
+   * `junction` is the junction the plan belongs to. A **light** is
+   * accepted as well — the controller then resolves the junction that
+   * owns the light, which is the older per-light call shape.
+   *
+   * `dt` is the tick's step: the controller owns the junction's clock
+   * and advances it here (the lights are views of the plan, they do not
+   * carry a clock of their own any more).
+   */
+  decide(
+    junction: Intersection | TrafficLight,
+    network: RoadNetwork,
+    simTime: number,
+    dt?: number,
+  ): JunctionSignalPlan
   /** Synchronous: mutate internal pending-action queue.
    *  Next decide() consumes. */
-  applyAction(light: TrafficLight, action: SignalActionName): void
+  applyAction(junction: Intersection | TrafficLight, action: SignalActionName): void
 }
 
 export type ControllerKind = 'fixed-cycle' | 'actuated' | 'coordinated' | 'rl'

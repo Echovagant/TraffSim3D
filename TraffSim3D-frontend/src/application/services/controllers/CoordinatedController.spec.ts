@@ -1,27 +1,42 @@
-// CoordinatedController unit tests.
+// src/application/services/controllers/CoordinatedController.spec.ts
 //
-// Verify the 4 critical behaviors:
-//   1. enabled=false / offset=0 — fixed-cycle compatible (错开 30s)
-//   2. enabled + offset=0 — same as 1
-//   3. enabled + offset=15 — EW green lags NS green by 15s
-//   4. simTime rewinds → phaseTable entry rebuilt
-import { describe, it, expect } from 'vitest'
-import { CoordinatedController, type CoordinatedControllerDeps } from './CoordinatedController'
-import type { TrafficLight } from '@domain/entities/TrafficLight'
-import { LightPhase } from '@domain/value-objects/Phase'
-import type { Position } from '@domain/value-objects/Position'
+// The green wave.
+//
+// A green wave is a relation **between junctions**: the next junction
+// along a corridor starts its green a fixed number of seconds after the
+// previous one. So the offset is per **junction** — the junction's whole
+// plan is shifted by its offset against the common reference.
+//
+// The phase comes from the sim time, not from a countdown, so the
+// clearance is exactly 6 s and the period exactly 72 s however the
+// junctions are offset.
 
-const makeLight = (
-  axis: 'ns' | 'ew',
-  phase: LightPhase = LightPhase.Green,
-  phaseRemaining = 30,
-): TrafficLight => ({
+import { describe, it, expect } from 'vitest'
+import {
+  CoordinatedController,
+  COORDINATED_DEFAULT_OFFSET_KEY,
+  type CoordinatedControllerDeps,
+} from './CoordinatedController'
+import { buildTestNetwork } from '@__fixtures__/testNetwork'
+import { LightPhase } from '@domain/value-objects/Phase'
+import type { Intersection } from '@domain/entities/Intersection'
+import type { TrafficLight } from '@domain/entities/TrafficLight'
+
+const makeLight = (axis: 'ns' | 'ew', phase: LightPhase, remaining: number): TrafficLight => ({
   id: `tl-${axis}`,
-  axis,
+  position: { x: 0, y: 0, z: 0 },
   phase,
-  phaseRemaining,
-  position: { x: 0, y: 0, z: 0 } as Position,
-  cycleSeconds: 63,
+  phaseRemaining: remaining,
+  cycleSeconds: 72,
+  axis,
+})
+
+const makeJunction = (id = 'i-1'): Intersection => ({
+  id,
+  position: { x: 0, y: 0, z: 0 },
+  connectedRoads: ['r-ns', 'r-ew'],
+  trafficLights: [makeLight('ns', LightPhase.Green, 30), makeLight('ew', LightPhase.Red, 36)],
+  intersectionRadius: 8,
 })
 
 const makeDeps = (offsets: Map<string, number>, enabled: boolean): CoordinatedControllerDeps => ({
@@ -29,51 +44,118 @@ const makeDeps = (offsets: Map<string, number>, enabled: boolean): CoordinatedCo
   isEnabled: () => enabled,
 })
 
-const EMPTY_NETWORK = { roads: {}, vehicles: {}, intersections: {} } as never
+/** The sim time at which the junction's served axis goes green. */
+const greenStartOf = (
+  c: CoordinatedController,
+  junction: Intersection,
+  net: ReturnType<typeof buildTestNetwork>,
+): number => {
+  for (let t = 0; t <= 72; t += 0.5) {
+    const plan = c.decide(junction, net, t, 0)
+    if (plan.phase === LightPhase.Green && plan.axis === 'ns') return t
+  }
+  return Number.NaN
+}
 
-describe('CoordinatedController', () => {
-  it('enabled=false → 退化为 FixedCycle 行为 (NS/EW 错开 30s)', () => {
+describe('CoordinatedController — the per-junction green wave', () => {
+  it('offsets a junction’s green against the common reference', () => {
+    const net = buildTestNetwork()
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
+    const c = new CoordinatedController(makeDeps(new Map([['i-1', 10]]), true))
+
+    // The junction is anchored 10 s into the future, so at t=0 it is
+    // already 62 s into its cycle — the other axis is being served.
+    const atZero = c.decide(junction, net, 0, 0)
+    expect(atZero.phase).toBe(LightPhase.Green)
+    expect(atZero.axis).toBe('ew')
+
+    // At t=10 the junction's own axis takes over, for a full 30 s.
+    const atTen = c.decide(junction, net, 10, 0)
+    expect(atTen.phase).toBe(LightPhase.Green)
+    expect(atTen.axis).toBe('ns')
+    expect(atTen.duration).toBe(30)
+  })
+
+  it('starts the junctions’ greens the configured amount apart', () => {
+    const net = buildTestNetwork()
+    const first = makeJunction('i-1')
+    const second = makeJunction('i-2')
+    net.intersections['i-1'] = first
+    net.intersections['i-2'] = second
+    const offsets = new Map([
+      ['i-1', 0],
+      ['i-2', 12],
+    ])
+
+    const a = new CoordinatedController(makeDeps(offsets, true))
+    const b = new CoordinatedController(makeDeps(offsets, true))
+    const startA = greenStartOf(a, first, net)
+    const startB = greenStartOf(b, second, net)
+    expect(startB - startA).toBeCloseTo(12, 5)
+  })
+
+  it('ignores the offsets while the coordination is disabled', () => {
+    const net = buildTestNetwork()
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
+    const c = new CoordinatedController(makeDeps(new Map([['i-1', 10]]), false))
+
+    const plan = c.decide(junction, net, 0, 0)
+    expect(plan.phase).toBe(LightPhase.Green)
+    expect(plan.axis).toBe('ns')
+    expect(plan.duration).toBe(30)
+  })
+
+  it('inherits the corridor-wide default when the junction has none', () => {
+    const net = buildTestNetwork()
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
+    const offsets = new Map([[COORDINATED_DEFAULT_OFFSET_KEY, 10]])
+    const c = new CoordinatedController(makeDeps(offsets, true))
+
+    // The junction is anchored at the first decide — the offset shifts
+    // its whole plan against the common reference.
+    c.decide(junction, net, 0, 0)
+    const atTen = c.decide(junction, net, 10, 0)
+    expect(atTen.phase).toBe(LightPhase.Green)
+    expect(atTen.axis).toBe('ns')
+  })
+
+  it('keeps a 6 s clearance and a 72 s period, offset or not', () => {
+    const net = buildTestNetwork()
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
+    const c = new CoordinatedController(makeDeps(new Map([['i-1', 7]]), true))
+
+    // The junction is anchored 7 s into the future, so its own axis is
+    // served from t=7 to t=37.
+    c.decide(junction, net, 0, 0)
+    // The clearance: the served axis' yellow (3 s) plus the all-red
+    // (3 s) before the other axis is served.
+    const yellow = c.decide(junction, net, 37, 0)
+    expect(yellow.phase).toBe(LightPhase.Yellow)
+    expect(yellow.duration).toBe(3)
+    const allRed = c.decide(junction, net, 40, 0)
+    expect(allRed.phase).toBe(LightPhase.AllRed)
+    expect(allRed.duration).toBe(3)
+    const handedOver = c.decide(junction, net, 43, 0)
+    expect(handedOver.phase).toBe(LightPhase.Green)
+    expect(handedOver.axis).toBe('ew')
+  })
+
+  it('rebuilds the anchor when the sim time rewinds', () => {
+    const net = buildTestNetwork()
+    const junction = makeJunction()
+    net.intersections['i-1'] = junction
     const c = new CoordinatedController(makeDeps(new Map(), false))
-    const ns = makeLight('ns', LightPhase.Green)
-    const ew = makeLight('ew', LightPhase.Red)
-    expect(c.decide(ns, EMPTY_NETWORK, 0).phase).toBe(LightPhase.Green)
-    // NS 在 t=0 是绿; EW 默认与 NS 错开 30s, 此时是 Red.
-    // EW 的 decide 应该返回 Red (绿 30s 已过).
-    expect(c.decide(ew, EMPTY_NETWORK, 0).phase).toBe(LightPhase.Red)
-  })
 
-  it('enabled + offset=0 → 与 enabled=false 行为一致', () => {
-    const c = new CoordinatedController(makeDeps(new Map([['r-ns|r-ew', 0]]), true))
-    const ns = makeLight('ns', LightPhase.Green)
-    const ew = makeLight('ew', LightPhase.Red)
-    expect(c.decide(ns, EMPTY_NETWORK, 0).phase).toBe(LightPhase.Green)
-    expect(c.decide(ew, EMPTY_NETWORK, 0).phase).toBe(LightPhase.Red)
-  })
-
-  it('enabled + offset=15 → EW green 滞后 NS green 15s', () => {
-    // NS 当前是 Red (默认 phase=Red in network). 模拟 NS 在 t=10 时刚变红 (红段 36s).
-    // 我们关心的是 EW 在 t=10 时的 phase: 它应该已经处于绿段 (因为 greenStart = 10 + 15 = 25, elapsed = 25-15 = 10 → 在 0-30 段 → Green).
-    const c = new CoordinatedController(makeDeps(new Map([['r-ns|r-ew', 15]]), true))
-    const ew = makeLight('ew', LightPhase.Red) // phase=Red 不影响, computeOffsetForPhase 把 greenStart 校到 Red 段
-    // EW 在 t=10: greenStart = 10 - (30+3+3) + 15 = -11; elapsed = ((10 - (-11)) % 72 + 72) % 72 = 21; Green.
-    const d = c.decide(ew, EMPTY_NETWORK, 10)
-    expect(d.phase).toBe(LightPhase.Green)
-    expect(d.duration).toBeCloseTo(30 - 21, 1)
-  })
-
-  it('simTime 回退 → phaseTable entry 重建 (新 greenStart)', () => {
-    const c = new CoordinatedController(makeDeps(new Map(), false))
-    const light = makeLight('ns', LightPhase.Green)
-    // 第一次: t=100
-    const d1 = c.decide(light, EMPTY_NETWORK, 100)
-    // 回退: t=50. 应当重建 phaseTable. light 仍在 Green.
-    const d2 = c.decide(light, EMPTY_NETWORK, 50)
-    expect(d2.phase).toBe(LightPhase.Green)
-    // 跟 d1 的 duration 应当一致 (因为两次 greenStart 都校准到 Green 段起点)
-    expect(d2.duration).toBeCloseTo(d1.duration, 1)
-    // 再调一次 t=50 (前进), phase 应当仍为 Green 但 duration 略小 (过了一些时间).
-    const d3 = c.decide(light, EMPTY_NETWORK, 55)
-    expect(d3.phase).toBe(LightPhase.Green)
-    expect(d3.duration).toBeLessThan(d2.duration)
+    const at100 = c.decide(junction, net, 100, 0)
+    const at50 = c.decide(junction, net, 50, 0)
+    // The junction is still in the same phase — the anchor was rebuilt
+    // from it, so the rewind does not jump the signal.
+    expect(at50.phase).toBe(at100.phase)
+    expect(at50.axis).toBe(at100.axis)
+    expect(at50.duration).toBeCloseTo(at100.duration, 1)
   })
 })

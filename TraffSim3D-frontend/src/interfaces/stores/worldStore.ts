@@ -25,6 +25,7 @@ import {
   type ControllerKind,
   type SignalActionSource,
 } from '@application/services/signalController'
+import { COORDINATED_DEFAULT_OFFSET_KEY } from '@application/services/controllers'
 import {
   createPolicyActionSource,
   type PolicySignalActionSource,
@@ -312,10 +313,11 @@ export const useWorldStore = defineStore('world', () => {
   }
   const getDraggingId = (): string | null => draggingId
 
-  // Per-light signal controller cache. One
-  // SignalController instance per traffic light; lazy-created on
-  // first encounter. Switching controllerKind clears the cache so
-  // the new kind's `decide()` semantics take effect immediately.
+  // Per-junction signal controller cache. One SignalController instance
+  // per **junction**; lazy-created on first encounter. The junction owns
+  // the phase plan and its lights are views of it. Switching
+  // controllerKind clears the cache so the new kind's `decide()`
+  // semantics take effect immediately.
   let controllers: Map<string, SignalController> = new Map()
   const controllerKind = ref<ControllerKind>(DEFAULT_CONTROLLER_KIND)
   const setControllerKind = (kind: ControllerKind): void => {
@@ -327,6 +329,27 @@ export const useWorldStore = defineStore('world', () => {
   }
   const getControllerKind = (): ControllerKind => controllerKind.value
   const getControllers = (): Map<string, SignalController> => controllers
+
+  // The RL controller's action source — the trained signal policy, when
+  // one is loaded and the RL controller is the active kind.
+  const rlActionSource = (): SignalActionSource | undefined =>
+    controllerKind.value === 'rl' ? (signalPolicySource.value ?? undefined) : undefined
+
+  const controllerDeps = () => ({
+    getCoordinatedOffsets: (): ReadonlyMap<string, number> => coordinatedOffsets.value,
+    isCoordinatedEnabled: (): boolean => coordinatedOffsetsEnabled.value,
+    rlActionSource: rlActionSource(),
+  })
+
+  /** The controller of a junction, created on demand. */
+  const controllerFor = (junctionId: string): SignalController => {
+    const cached = controllers.get(junctionId)
+    if (cached) return cached
+    const created = createSignalController(controllerKind.value, controllerDeps())
+    controllers.set(junctionId, created)
+    return created
+  }
+
   const signalContext: SignalContext = {
     // A **getter**, not a snapshot: `controllers` is reassigned whenever the
     // controller kind or the signal policy changes (so the cached
@@ -340,18 +363,17 @@ export const useWorldStore = defineStore('world', () => {
     },
     getCoordinatedOffsets: () => coordinatedOffsets.value,
     isCoordinatedEnabled: () => coordinatedOffsetsEnabled.value,
-    // The RL controller's action source — the trained signal
-    // policy, when one is loaded and the RL controller is the active kind.
-    getRlActionSource: (): SignalActionSource | undefined =>
-      controllerKind.value === 'rl' ? (signalPolicySource.value ?? undefined) : undefined,
+    getRlActionSource: rlActionSource,
   }
 
   /**
-   * Force every traffic light to AllRed for `durationSeconds`.
-   * Preemption path — bypasses the controllers and writes the
-   * light state directly. RL agents will get a similar API via
-   * `controller.applyAction('force_all_red')`; for now the
-   * direct mutation is fine and explicit.
+   * Force every junction to AllRed for `durationSeconds`.
+   *
+   * The lights are written directly, so the change is visible at once;
+   * the junction's **plan** is told about it as well, so the junction
+   * holds the all-red and then resumes the phase it was interrupted in
+   * (with the time it had left) — the same contract the RL's
+   * `force_all_red` action has.
    */
   const forceAllRed = (durationSeconds = 3): void => {
     for (const inter of Object.values(network.value.intersections)) {
@@ -359,6 +381,7 @@ export const useWorldStore = defineStore('world', () => {
         light.phase = LightPhase.AllRed
         light.phaseRemaining = durationSeconds
       }
+      controllerFor(inter.id).applyAction(inter, 'force_all_red')
     }
     bumpTick()
   }
@@ -380,21 +403,35 @@ export const useWorldStore = defineStore('world', () => {
   // doesn't need to react to it; only tick() reads its state.
   const fixedStepScheduler = new FixedStepScheduler({ fixedStepSec: 0.1 })
 
-  // Coordinated UI hooks. The offsets are consulted by
-  // CoordinatedController — until then they are pure UI state
-  // that the modal reads / writes without effect on the running sim.
+  // Coordinated UI hooks — the green wave.
+  //
+  // The offsets are consulted by the CoordinatedController, which reads
+  // them **per junction**: a junction's whole plan is shifted by its
+  // offset against the common reference, and that shift is the wave.
+  //
+  // `COORDINATED_DEFAULT_OFFSET_KEY` ('r-ns|r-ew') is the corridor-wide
+  // default: a junction without an explicit offset inherits it. It is
+  // the key the editor has always written, so the existing UI keeps
+  // working.
   const coordinatedOffsets = ref<Map<string, number>>(
     new Map([
-      // Key: 'roadA-id|roadB-id' (the pair, smaller first). Value: seconds
-      // the B-axis green lags the A-axis green. Default 0 = no offset.
-      ['r-ns|r-ew', 0],
+      // Key: a junction id (its own offset) or the corridor default.
+      // Value: seconds the junction's green is shifted. Default 0 = no
+      // offset.
+      [COORDINATED_DEFAULT_OFFSET_KEY, 0],
     ]),
   )
   const coordinatedOffsetsEnabled = ref(false)
 
-  const setCoordinatedOffset = (pair: string, seconds: number): void => {
+  /**
+   * Set a junction's green-wave offset (or the corridor-wide default).
+   *
+   * `key` is a junction id, or `COORDINATED_DEFAULT_OFFSET_KEY` for the
+   * corridor-wide default.
+   */
+  const setCoordinatedOffset = (key: string, seconds: number): void => {
     const next = new Map(coordinatedOffsets.value)
-    next.set(pair, Math.max(-30, Math.min(30, seconds)))
+    next.set(key, Math.max(-30, Math.min(30, seconds)))
     coordinatedOffsets.value = next
   }
   const toggleCoordinatedOffsets = (on: boolean): void => {

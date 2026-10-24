@@ -1,118 +1,162 @@
-// Coordinated signal controller — green-wave.
+// src/application/services/controllers/CoordinatedController.ts
 //
-// Pairwise offset: r-ew 的绿相位起始时间比 r-ns 晚 `offset` 秒.
-// Phase 长度严格 30/3/3/30, 不做延长/缩短 (与 FixedCycle 行为一致).
+// The coordinated controller — the green wave.
 //
-// 决定算法: 在内部维护 phaseTable, 第一次 decide 时按当前 simTime
-// 锁定 greenStart, 之后用 (simTime - greenStart) mod 66 推出 phase.
-import type { TrafficLight } from '@domain/entities/TrafficLight'
-import type { RoadNetwork } from '@domain/entities/RoadNetwork'
+// A green wave is a relation **between junctions**: the green of the
+// next junction along a corridor starts a fixed number of seconds after
+// the green of the previous one. So the offset is per **junction**, not
+// per road pair: the junction's whole plan is shifted by its offset
+// against the common reference, and the shift is what the wave is.
+//
+// The phase comes from the sim time (not from a countdown), so the
+// clearance is exactly 6 s and the period exactly 72 s however the
+// junctions are offset. The offsets are read from the world store,
+// which owns them.
+//
+// The legacy key `r-ns|r-ew` is the **corridor-wide default**: a
+// junction without an explicit offset inherits it. It is the key the
+// editor has always written, so the existing UI keeps working.
+
+import type { Intersection } from '@domain/entities/Intersection'
 import { LightPhase } from '@domain/value-objects/Phase'
-import type { SignalAction, SignalController, SignalDecision } from '../signalController'
 import {
   ALL_RED_CLEARANCE_SECS,
   DEFAULT_CYCLE_SECONDS,
   GREEN_PHASE_SECS,
-  RED_PHASE_SECS,
   YELLOW_CLEAR_SECS,
 } from '@shared/constants/simulation'
+import type { SignalAxis } from '../signalController'
+import { JunctionControllerBase, type JunctionPlanState } from './junctionPlan'
+
+/**
+ * The key the corridor-wide default offset lives under.
+ *
+ * It is the road pair of the built-in demo scene — the key the editor
+ * has always written. A junction without an explicit offset inherits
+ * it, so the old single-offset UI keeps working while the per-junction
+ * offsets take precedence.
+ */
+export const COORDINATED_DEFAULT_OFFSET_KEY = 'r-ns|r-ew'
 
 const CYCLE_SECS = DEFAULT_CYCLE_SECONDS
 const GREEN_SECS = GREEN_PHASE_SECS
 const YELLOW_SECS = YELLOW_CLEAR_SECS
 const ALL_RED_SECS = ALL_RED_CLEARANCE_SECS
-const RED_SECS = RED_PHASE_SECS
 
-/** Default pair key for the default scene. Multi-pair is
- *  handled by a future plan (030 corridor discovery). */
-const DEFAULT_PAIR = 'r-ns|r-ew'
-
-const greenOffsetForAxis = (
-  axis: 'ns' | 'ew',
-  pair: string,
-  offsets: ReadonlyMap<string, number>,
-  enabled: boolean,
-): number => {
-  if (!enabled) return 0
-  if (axis === 'ns') return 0
-  const v = offsets.get(pair)
-  return typeof v === 'number' ? v : 0
-}
-
-interface PhaseTableEntry {
-  /** Absolute simTime at which the light enters Green. */
-  greenStart: number
-  /** Last simTime we ran decide() for this light — used to detect
-   *  simTime rewinds (scene reload, save/restore) and rebuild. */
-  lastDecideSimTime: number
-}
+/** The boundaries of the junction's cycle, in seconds from its start. */
+const SERVED_GREEN_END = GREEN_SECS
+const SERVED_YELLOW_END = GREEN_SECS + YELLOW_SECS
+const SERVED_ALL_RED_END = GREEN_SECS + YELLOW_SECS + ALL_RED_SECS
+const OTHER_GREEN_END = SERVED_ALL_RED_END + GREEN_SECS
+const OTHER_YELLOW_END = OTHER_GREEN_END + YELLOW_SECS
 
 export interface CoordinatedControllerDeps {
-  /** Same map worldStore exposes via coordinatedOffsets. */
+  /** junction id → the offset (seconds) of that junction's green. */
   getOffsets: () => ReadonlyMap<string, number>
   isEnabled: () => boolean
 }
 
-export class CoordinatedController implements SignalController {
-  private phaseTable = new Map<string, PhaseTableEntry>()
-  constructor(private readonly deps: CoordinatedControllerDeps) {}
-
-  decide(light: TrafficLight, _network: RoadNetwork, simTime: number): SignalDecision {
-    // SimTime 回退 → 重建 phaseTable.
-    let entry = this.phaseTable.get(light.id)
-    if (!entry || simTime < entry.lastDecideSimTime) {
-      const offsets = this.deps.getOffsets()
-      const enabled = this.deps.isEnabled()
-      const pairOffset = greenOffsetForAxis(light.axis, DEFAULT_PAIR, offsets, enabled)
-      // 让 greenStart 与 light.phase 对齐 — 切 controller 时不闪相位.
-      // Green → greenStart = simTime - 0 (刚刚开始, 整段绿 30s)
-      // Yellow → greenStart = simTime - 30 (黄段开始 0s 之前, 即将进入 AllRed)
-      // AllRed → greenStart = simTime - 33 (全红段开始 0s 之前, 即将进入 Red)
-      // Red → greenStart = simTime - 36 (红段开始 0s 之前, 即将进入 Green 30s)
-      const phaseOffset = computeOffsetForPhase(light.phase)
-      const greenStart = simTime - phaseOffset + pairOffset
-      entry = { greenStart, lastDecideSimTime: simTime }
-      this.phaseTable.set(light.id, entry)
-    }
-    entry.lastDecideSimTime = simTime
-
-    const elapsed = (((simTime - entry.greenStart) % CYCLE_SECS) + CYCLE_SECS) % CYCLE_SECS
-    let phase: LightPhase
-    let duration: number
-    if (elapsed < GREEN_SECS) {
-      phase = LightPhase.Green
-      duration = GREEN_SECS - elapsed
-    } else if (elapsed < GREEN_SECS + YELLOW_SECS) {
-      phase = LightPhase.Yellow
-      duration = GREEN_SECS + YELLOW_SECS - elapsed
-    } else if (elapsed < GREEN_SECS + YELLOW_SECS + ALL_RED_SECS) {
-      // The all-red clearance — the junction shows nothing to anybody for
-      // 3 s between the outgoing axis' yellow and the incoming axis' green.
-      phase = LightPhase.AllRed
-      duration = GREEN_SECS + YELLOW_SECS + ALL_RED_SECS - elapsed
-    } else {
-      phase = LightPhase.Red
-      duration = CYCLE_SECS - elapsed
-    }
-    return {
-      phase,
-      duration,
-      actions: [{ name: 'no_op', available: true }],
-      decidedAt: simTime,
-    }
+/**
+ * The phase a junction shows at `elapsed` seconds into its cycle.
+ *
+ * The served axis goes first, the other one second — the same order
+ * the junction's plan uses.
+ */
+const phaseAt = (
+  elapsed: number,
+  servedAxis: SignalAxis,
+): { phase: LightPhase; axis: SignalAxis; remaining: number } => {
+  const other: SignalAxis = servedAxis === 'ns' ? 'ew' : 'ns'
+  if (elapsed < SERVED_GREEN_END) {
+    return { phase: LightPhase.Green, axis: servedAxis, remaining: SERVED_GREEN_END - elapsed }
   }
-
-  applyAction(_light: TrafficLight, _action: SignalAction['name']): void {
-    // No external action queue (RLController).
+  if (elapsed < SERVED_YELLOW_END) {
+    return { phase: LightPhase.Yellow, axis: servedAxis, remaining: SERVED_YELLOW_END - elapsed }
   }
+  if (elapsed < SERVED_ALL_RED_END) {
+    return { phase: LightPhase.AllRed, axis: servedAxis, remaining: SERVED_ALL_RED_END - elapsed }
+  }
+  if (elapsed < OTHER_GREEN_END) {
+    return { phase: LightPhase.Green, axis: other, remaining: OTHER_GREEN_END - elapsed }
+  }
+  if (elapsed < OTHER_YELLOW_END) {
+    return { phase: LightPhase.Yellow, axis: other, remaining: OTHER_YELLOW_END - elapsed }
+  }
+  return { phase: LightPhase.AllRed, axis: other, remaining: CYCLE_SECS - elapsed }
 }
 
-/** Map a light's current phase to the greenStart offset such that the
- *  decision at simTime lands in the same phase. This way switching
- *  controllerKind does not flash the light. */
-function computeOffsetForPhase(phase: LightPhase): number {
-  if (phase === LightPhase.Green) return 0
-  if (phase === LightPhase.Yellow) return GREEN_SECS
-  if (phase === LightPhase.AllRed) return GREEN_SECS + YELLOW_SECS
-  return GREEN_SECS + YELLOW_SECS + ALL_RED_SECS
+/**
+ * The offset of a phase inside the cycle — how far into the cycle that
+ * phase starts. Used to re-anchor the junction without a phase jump.
+ */
+const cycleOffsetOf = (phase: LightPhase, axis: SignalAxis, servedAxis: SignalAxis): number => {
+  const served = axis === servedAxis
+  if (phase === LightPhase.Green) return served ? 0 : SERVED_ALL_RED_END
+  if (phase === LightPhase.Yellow) return served ? GREEN_SECS : OTHER_GREEN_END
+  return served ? SERVED_YELLOW_END : OTHER_YELLOW_END
+}
+
+export class CoordinatedController extends JunctionControllerBase {
+  /** The sim time the served axis' green started — the junction's anchor. */
+  private anchor: number | null = null
+  /** The axis the junction serves first in its cycle. */
+  private servedAxis: SignalAxis = 'ns'
+  /** The last sim time seen — a rewind rebuilds the anchor. */
+  private lastSimTime = Number.NEGATIVE_INFINITY
+  /** The offset the anchor was built with. */
+  private usedOffset = 0
+
+  constructor(private readonly deps: CoordinatedControllerDeps) {
+    super()
+  }
+
+  /**
+   * The junction's phase, read off the sim time.
+   *
+   * The plan is anchored when the controller first sees the junction (or
+   * when the offset changes, or when the sim time rewinds) and the phase
+   * follows from it. The anchor is rebuilt from the phase the junction is
+   * in, so the change is seamless — the junction does not jump.
+   */
+  protected override advance(
+    state: JunctionPlanState,
+    junction: Intersection,
+    _dt: number,
+    simTime: number,
+  ): void {
+    // While the junction is held, its clock is frozen: the plan keeps
+    // showing the all-red and the cycle carries on underneath.
+    if (state.allRedUntil > Number.NEGATIVE_INFINITY) {
+      this.lastSimTime = simTime
+      return
+    }
+    if (this.anchor === null) this.servedAxis = state.axis
+    const offset = this.offsetFor(junction)
+    if (this.anchor === null || simTime < this.lastSimTime || offset !== this.usedOffset) {
+      const phaseOffset = cycleOffsetOf(state.phase, state.axis, this.servedAxis)
+      this.anchor = simTime - phaseOffset + offset
+      this.usedOffset = offset
+    }
+    this.lastSimTime = simTime
+    const elapsed = (((simTime - this.anchor) % CYCLE_SECS) + CYCLE_SECS) % CYCLE_SECS
+    const { phase, axis, remaining } = phaseAt(elapsed, this.servedAxis)
+    state.phase = phase
+    state.axis = axis
+    state.remaining = remaining
+  }
+
+  /**
+   * The junction's offset: its own, or the corridor-wide default.
+   *
+   * The offsets are only honoured when the coordination is enabled — the
+   * switch in the UI.
+   */
+  private offsetFor(junction: Intersection): number {
+    if (!this.deps.isEnabled()) return 0
+    const offsets = this.deps.getOffsets()
+    const own = offsets.get(junction.id)
+    if (typeof own === 'number') return own
+    const fallback = offsets.get(COORDINATED_DEFAULT_OFFSET_KEY)
+    return typeof fallback === 'number' ? fallback : 0
+  }
 }

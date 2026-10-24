@@ -61,6 +61,7 @@ import { findNearestLane } from './laneFrameSync'
 import { FixedStepScheduler } from './fixedStepScheduler'
 import {
   createSignalController,
+  type JunctionSignalPlan,
   type SignalController,
   type ControllerKind,
   type SignalActionSource,
@@ -74,6 +75,12 @@ import type { PolicyAction, PolicyWeights } from '@infrastructure/rl/types'
  *  passed by reference each tick. tick() never mutates this object —
  *  it only calls `controller.decide(...)` and reads `controllerKind`. */
 export interface SignalContext {
+  /**
+   * The junction controllers, keyed by the **junction's** id.
+   *
+   * One controller per junction: the junction owns the phase plan and
+   * its lights are views of it.
+   */
   controllers: Map<string, SignalController>
   controllerKind: ControllerKind
   /** Read by tick when lazily creating a new
@@ -206,31 +213,71 @@ const resolveSignalConflicts = (inter: Intersection): void => {
   }
 }
 
+/**
+ * The controller that drives a junction.
+ *
+ * The cache is keyed by the **junction's** id: one controller per
+ * junction, because the junction owns the phase plan (the lights are
+ * views of it).
+ *
+ * A controller registered under one of the junction's **light** ids is
+ * the older per-light contract and still drives the junction — a
+ * controller that does not describe the junction's per-axis views
+ * decides for the junction as a whole.
+ */
+const junctionController = (signal: SignalContext, inter: Intersection): SignalController => {
+  const cached = signal.controllers.get(inter.id)
+  if (cached) return cached
+  for (const light of inter.trafficLights) {
+    const legacy = signal.controllers.get(light.id)
+    if (legacy) return legacy
+  }
+  // Lazy create (covers junctions added after reset/hydrate).
+  const created = createSignalController(signal.controllerKind, {
+    getCoordinatedOffsets: signal.getCoordinatedOffsets,
+    isCoordinatedEnabled: signal.isCoordinatedEnabled,
+    rlActionSource: signal.getRlActionSource(),
+  })
+  signal.controllers.set(inter.id, created)
+  return created
+}
+
+/**
+ * Write the junction's plan onto its lights.
+ *
+ * The plan's per-axis views are what the lights show: the served axis
+ * shows the junction's phase, the other one shows red with the time
+ * until it is served.
+ */
+const applyJunctionPlan = (inter: Intersection, plan: JunctionSignalPlan): void => {
+  const views = plan.views
+  for (const light of inter.trafficLights) {
+    const view = views?.[light.axis]
+    if (view !== undefined) {
+      light.phase = view.phase
+      light.phaseRemaining = view.remaining
+    } else {
+      // A controller without per-axis views decides for the junction as
+      // a whole (the older per-light contract).
+      light.phase = plan.phase
+      light.phaseRemaining = plan.duration
+    }
+  }
+}
+
 export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: TickContext): void => {
-  // 1. Advance traffic-light phases via per-light SignalController
-  //    Replaces the hand-rolled 30/3/30 loop.
+  // 1. Advance the junctions' phase plans. One plan per junction — the
+  //    lights are views of it, so the two axes cannot drift apart and
+  //    the clearance is 6 s by construction.
   if (ctx.signal) {
     for (const inter of Object.values(network.intersections)) {
-      for (const light of inter.trafficLights) {
-        light.phaseRemaining -= dt
-        let controller = ctx.signal.controllers.get(light.id)
-        if (!controller) {
-          // Lazy create (covers lights added after reset/hydrate).
-          controller = createSignalController(ctx.signal.controllerKind, {
-            getCoordinatedOffsets: ctx.signal.getCoordinatedOffsets,
-            isCoordinatedEnabled: ctx.signal.isCoordinatedEnabled,
-            rlActionSource: ctx.signal.getRlActionSource(),
-          })
-          ctx.signal.controllers.set(light.id, controller)
-        }
-        const decision = controller.decide(light, network, simTime)
-        light.phase = decision.phase
-        light.phaseRemaining = decision.duration
-      }
-      // Safety: per-light controllers can drift (e.g. ActuatedController
-      // red-shortening) and produce conflicting greens across axes.
-      // Force conflicting lights to red — traffic law requires that
-      // perpendicular approaches never show green simultaneously.
+      const controller = junctionController(ctx.signal, inter)
+      const plan = controller.decide(inter, network, simTime, dt)
+      applyJunctionPlan(inter, plan)
+      // Safety net: traffic law requires that perpendicular approaches
+      // never display green simultaneously. The junction's plan cannot
+      // produce that, so this only fires for a controller that does not
+      // describe the junction's views.
       resolveSignalConflicts(inter)
     }
   } else {

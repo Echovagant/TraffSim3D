@@ -1,48 +1,26 @@
-// 30s green + 3s yellow + 3s all-red + 30s red, no extension.
+// src/application/services/controllers/FixedCycleController.ts
 //
-// The cycle matches the Python training sim's timeline shape (a 30 s
-// phase separated by a 6 s clearance — `app/apps/rl/sim_core.py`
-// `CLEARANCE_SECS`), so a policy trained there behaves the same here.
-// The frame-rate gate stays valid when controllerKind='fixed-cycle'.
-import type { TrafficLight } from '@domain/entities/TrafficLight'
-import type { RoadNetwork } from '@domain/entities/RoadNetwork'
-import type { SignalAction, SignalController, SignalDecision } from '../signalController'
-import { LightPhase } from '@domain/value-objects/Phase'
-import {
-  ALL_RED_CLEARANCE_SECS,
-  GREEN_PHASE_SECS,
-  PHASE_EPSILON_SECS,
-  RED_PHASE_SECS,
-  YELLOW_CLEAR_SECS,
-} from '@shared/constants/simulation'
+// The junction's plain cycle: 30 s green, 3 s yellow, 3 s all-red, then
+// the other axis — a 72 s cycle with a 6 s clearance before **every**
+// green.
+//
+// The plan belongs to the junction, so the two axes cannot drift apart:
+// the clearance is 6 s by construction, not by two independent
+// countdowns happening to line up.
+//
+// The shape matches the Python training sim's timeline
+// (`app/apps/rl/sim_core.py`: a 30 s phase separated by a
+// `CLEARANCE_SECS = 6.0` clearance), so a policy trained there behaves
+// the same here. The frame-rate gate stays valid when
+// controllerKind='fixed-cycle'.
 
-export class FixedCycleController implements SignalController {
-  decide(light: TrafficLight, _network: RoadNetwork, simTime: number): SignalDecision {
-    let phase: LightPhase = light.phase
-    let duration = light.phaseRemaining
-    if (light.phaseRemaining <= PHASE_EPSILON_SECS) {
-      if (light.phase === LightPhase.Green) {
-        phase = LightPhase.Yellow
-        duration = YELLOW_CLEAR_SECS
-      } else if (light.phase === LightPhase.Yellow) {
-        // The clearance-yellow is followed by an explicit all-red: the
-        // junction shows nothing to anybody for 3 s before the red starts.
-        phase = LightPhase.AllRed
-        duration = ALL_RED_CLEARANCE_SECS
-      } else if (light.phase === LightPhase.AllRed) {
-        // The all-red runs out into a **full** red — not straight back to
-        // green. Skipping the red is what used to make a desynchronised
-        // pair of lights ping-pong every 3 s.
-        phase = LightPhase.Red
-        duration = RED_PHASE_SECS
-      } else {
-        phase = LightPhase.Green
-        duration = GREEN_PHASE_SECS
-      }
-    }
-    return { phase, duration, actions: [{ name: 'no_op', available: true }], decidedAt: simTime }
-  }
-  applyAction(_light: TrafficLight, _action: SignalAction['name']): void {
-    // no-op
-  }
-}
+import { JunctionControllerBase } from './junctionPlan'
+
+/**
+ * The fixed cycle.
+ *
+ * Everything it does — the clock, the clearance, the phase transitions
+ * and the preemption hold — is the junction's shared machinery, so the
+ * class carries no rules of its own.
+ */
+export class FixedCycleController extends JunctionControllerBase {}
