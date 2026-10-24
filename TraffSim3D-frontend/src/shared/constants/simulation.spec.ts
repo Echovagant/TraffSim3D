@@ -39,9 +39,9 @@ describe('the minimum inter-green', () => {
 
   it('is what the conflict resolution actually charges', () => {
     // Two perpendicular approaches both showing green is the conflict
-    // the resolution exists for: one of them is forced to red, and it is
-    // given exactly `CONFLICT_ALL_RED_SECS` to run. If that literal ever
-    // drifts away from the constant, this test goes red.
+    // the resolution exists for: one of them is forced into the clearance,
+    // and it is given exactly `CONFLICT_ALL_RED_SECS` to run. If that
+    // literal ever drifts away from the constant, this test goes red.
     const net = buildTestNetwork(0)
     const ns = makeTestLight({
       id: 'tl-ns',
@@ -93,11 +93,61 @@ describe('the minimum inter-green', () => {
 
     tick(net, 0.1, 0.1, ctx)
 
-    // One axis keeps the green, the other is forced to red for exactly
-    // the conflict clearance.
+    // One axis keeps the green, the other is forced into the all-red
+    // clearance — and the phase machine then serves it a **full red**,
+    // which is what stops the 3 s ping-pong.
     const phases = net.intersections['i-1']!.trafficLights.map((l) => l.phase)
-    expect(phases.filter((p) => p === LightPhase.Red)).toHaveLength(1)
-    const forced = net.intersections['i-1']!.trafficLights.find((l) => l.phase === LightPhase.Red)!
+    expect(phases.filter((p) => p === LightPhase.AllRed)).toHaveLength(1)
+    const forced = net.intersections['i-1']!.trafficLights.find(
+      (l) => l.phase === LightPhase.AllRed,
+    )!
     expect(forced.phaseRemaining).toBe(CONFLICT_ALL_RED_SECS)
+  })
+
+  it('does not fire on a legal green → yellow hand-over', () => {
+    // A yellow is the *clearing* of the axis that is ending: `green +
+    // yellow` is a legal transition, and the phase machine's own all-red
+    // phase provides the clearance. Treating the yellow as "active" is
+    // what made the browser's inter-green asymmetric.
+    const net = buildTestNetwork(0)
+    const ns = makeTestLight({
+      id: 'tl-ns',
+      axis: 'ns',
+      phase: LightPhase.Green,
+      phaseRemaining: 30,
+    })
+    const ew = makeTestLight({
+      id: 'tl-ew',
+      axis: 'ew',
+      phase: LightPhase.Yellow,
+      phaseRemaining: 3,
+    })
+    net.intersections['i-1']!.trafficLights = [ns, ew]
+
+    const ctx: TickContext = {
+      rapierWorld: null,
+      signal: {
+        controllers: new Map<string, SignalController>(),
+        controllerKind: 'fixed-cycle',
+        getCoordinatedOffsets: () => new Map(),
+        isCoordinatedEnabled: () => false,
+        getRlActionSource: () => undefined,
+      },
+      trajectoryExporter: null,
+      sensorRegistry: null,
+      lidarEnabled: false,
+      getHostPose: () => null,
+      fixedStepScheduler: null,
+      draggingId: null,
+      removeVehicle: () => {},
+      policy: null,
+      replayTargetId: null,
+    }
+
+    tick(net, 0.1, 0.1, ctx)
+
+    // The yellow keeps its phase — it was not forced into the clearance.
+    const ewLight = net.intersections['i-1']!.trafficLights.find((l) => l.axis === 'ew')!
+    expect(ewLight.phase).not.toBe(LightPhase.AllRed)
   })
 })

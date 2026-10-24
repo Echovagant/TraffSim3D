@@ -207,18 +207,18 @@ describe('updateTrafficLightNode — phase countdown bar', () => {
     expect(node.bar.scale.x).toBeCloseTo(1 / 3, 12)
   })
 
-  it('AllRed and the flashing phases fall back to the 30 s red duration', () => {
+  it('AllRed and the flashing phases fall back to the 36 s red duration', () => {
     const node = createTrafficLightNode(makeTestLight())
-    expect(PHASE_DURATIONS.red).toBe(30)
+    expect(PHASE_DURATIONS.red).toBe(36)
     for (const phase of [LightPhase.AllRed, LightPhase.RedLeft, LightPhase.FlashingRed]) {
       updateTrafficLightNode(node, makeTestLight({ phase, phaseRemaining: 6 }), 0)
-      expect(node.bar.scale.x).toBeCloseTo(0.2, 12)
+      expect(node.bar.scale.x).toBeCloseTo(6 / 36, 12)
     }
   })
 
   it('a Dark phase still renders the countdown bar', () => {
     const node = createTrafficLightNode(makeTestLight())
-    updateTrafficLightNode(node, makeTestLight({ phase: LightPhase.Dark, phaseRemaining: 30 }), 0)
+    updateTrafficLightNode(node, makeTestLight({ phase: LightPhase.Dark, phaseRemaining: 36 }), 0)
     expect(node.bar.scale.x).toBe(1)
     expect(node.barMaterial.emissiveIntensity).toBe(0)
   })

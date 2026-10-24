@@ -1,19 +1,27 @@
 // Coordinated signal controller — green-wave.
 //
 // Pairwise offset: r-ew 的绿相位起始时间比 r-ns 晚 `offset` 秒.
-// Phase 长度严格 30/3/30, 不做延长/缩短 (与 FixedCycle 行为一致).
+// Phase 长度严格 30/3/3/30, 不做延长/缩短 (与 FixedCycle 行为一致).
 //
 // 决定算法: 在内部维护 phaseTable, 第一次 decide 时按当前 simTime
-// 锁定 greenStart, 之后用 (simTime - greenStart) mod 63 推出 phase.
+// 锁定 greenStart, 之后用 (simTime - greenStart) mod 66 推出 phase.
 import type { TrafficLight } from '@domain/entities/TrafficLight'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import { LightPhase } from '@domain/value-objects/Phase'
 import type { SignalAction, SignalController, SignalDecision } from '../signalController'
+import {
+  ALL_RED_CLEARANCE_SECS,
+  DEFAULT_CYCLE_SECONDS,
+  GREEN_PHASE_SECS,
+  RED_PHASE_SECS,
+  YELLOW_CLEAR_SECS,
+} from '@shared/constants/simulation'
 
-const CYCLE_SECS = 63
-const GREEN_SECS = 30
-const YELLOW_SECS = 3
-const RED_SECS = 30
+const CYCLE_SECS = DEFAULT_CYCLE_SECONDS
+const GREEN_SECS = GREEN_PHASE_SECS
+const YELLOW_SECS = YELLOW_CLEAR_SECS
+const ALL_RED_SECS = ALL_RED_CLEARANCE_SECS
+const RED_SECS = RED_PHASE_SECS
 
 /** Default pair key for the default scene. Multi-pair is
  *  handled by a future plan (030 corridor discovery). */
@@ -58,8 +66,9 @@ export class CoordinatedController implements SignalController {
       const pairOffset = greenOffsetForAxis(light.axis, DEFAULT_PAIR, offsets, enabled)
       // 让 greenStart 与 light.phase 对齐 — 切 controller 时不闪相位.
       // Green → greenStart = simTime - 0 (刚刚开始, 整段绿 30s)
-      // Yellow → greenStart = simTime - 30 (黄段开始 0s 之前, 即将进入 Red)
-      // Red → greenStart = simTime - 33 (红段开始 0s 之前, 即将进入 Green 30s)
+      // Yellow → greenStart = simTime - 30 (黄段开始 0s 之前, 即将进入 AllRed)
+      // AllRed → greenStart = simTime - 33 (全红段开始 0s 之前, 即将进入 Red)
+      // Red → greenStart = simTime - 36 (红段开始 0s 之前, 即将进入 Green 30s)
       const phaseOffset = computeOffsetForPhase(light.phase)
       const greenStart = simTime - phaseOffset + pairOffset
       entry = { greenStart, lastDecideSimTime: simTime }
@@ -76,6 +85,11 @@ export class CoordinatedController implements SignalController {
     } else if (elapsed < GREEN_SECS + YELLOW_SECS) {
       phase = LightPhase.Yellow
       duration = GREEN_SECS + YELLOW_SECS - elapsed
+    } else if (elapsed < GREEN_SECS + YELLOW_SECS + ALL_RED_SECS) {
+      // The all-red clearance — the junction shows nothing to anybody for
+      // 3 s between the outgoing axis' yellow and the incoming axis' green.
+      phase = LightPhase.AllRed
+      duration = GREEN_SECS + YELLOW_SECS + ALL_RED_SECS - elapsed
     } else {
       phase = LightPhase.Red
       duration = CYCLE_SECS - elapsed
@@ -99,5 +113,6 @@ export class CoordinatedController implements SignalController {
 function computeOffsetForPhase(phase: LightPhase): number {
   if (phase === LightPhase.Green) return 0
   if (phase === LightPhase.Yellow) return GREEN_SECS
-  return GREEN_SECS + YELLOW_SECS
+  if (phase === LightPhase.AllRed) return GREEN_SECS + YELLOW_SECS
+  return GREEN_SECS + YELLOW_SECS + ALL_RED_SECS
 }

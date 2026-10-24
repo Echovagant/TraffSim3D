@@ -102,12 +102,23 @@ describe('ActuatedController', () => {
     expect(d.phase).toBe(LightPhase.Red)
   })
 
-  it('yellow → red when phaseRemaining hits 0', () => {
+  it('yellow → all-red when phaseRemaining hits 0', () => {
     const net = buildTestNetwork(0)
     const light = makeTestLight({ phase: LightPhase.Yellow, phaseRemaining: 0 })
     const d = c.decide(light, net, 0)
+    // The clearance-yellow is followed by an explicit all-red.
+    expect(d.phase).toBe(LightPhase.AllRed)
+    expect(d.duration).toBe(3)
+  })
+
+  it('all-red → red when phaseRemaining hits 0', () => {
+    const net = buildTestNetwork(0)
+    const light = makeTestLight({ phase: LightPhase.AllRed, phaseRemaining: 0 })
+    const d = c.decide(light, net, 0)
+    // The all-red runs out into a **full** red, never straight back into
+    // the green.
     expect(d.phase).toBe(LightPhase.Red)
-    expect(d.duration).toBe(30)
+    expect(d.duration).toBe(36)
   })
 })
 
@@ -146,6 +157,11 @@ describe('ActuatedController on an imported OSM map', () => {
 
   it('extends green when the imported map has a queue on the light axis', () => {
     const net = buildImportedNetwork()
+    // The extension is the mirror image of the red-shortening: an axis may
+    // only hold the junction while nobody is waiting on the other side.
+    delete net.vehicles['v-osm-ew-1']
+    delete net.vehicles['v-osm-branch-1']
+
     const light = importedNsLight(net)
     light.phase = LightPhase.Green
     light.phaseRemaining = 10
@@ -153,5 +169,18 @@ describe('ActuatedController on an imported OSM map', () => {
     const d = c.decide(light, net, 0)
     expect(d.phase).toBe(LightPhase.Green)
     expect(d.duration).toBe(10 + GREEN_EXTENSION_STEP)
+  })
+
+  it('does not extend green while the perpendicular axis has a queue', () => {
+    const net = buildImportedNetwork()
+    const light = importedNsLight(net)
+    light.phase = LightPhase.Green
+    light.phaseRemaining = 10
+
+    // The two EW cars (w-102 and w-103) are queued: the north–south axis
+    // may not hold the junction past its own phase while they wait.
+    const d = c.decide(light, net, 0)
+    expect(d.phase).toBe(LightPhase.Green)
+    expect(d.duration).toBe(10)
   })
 })

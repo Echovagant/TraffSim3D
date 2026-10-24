@@ -2,8 +2,6 @@
 export const M1_MIN_FPS = 30
 /** Default render scale (device pixel ratio cap). */
 export const MAX_DPR = 2
-/** Default intersection cycle: 30s green, 3s yellow, 30s red per axis. */
-export const DEFAULT_CYCLE_SECONDS = 63
 
 /**
  * Visual constants shared between the scene builder and the
@@ -20,12 +18,6 @@ export const DEFAULT_CYCLE_SECONDS = 63
 export const ROAD_LANE_WIDTH = 3.5
 /** Number of historical positions kept per vehicle for the trail line. 60 frames ≈ 1s at 60fps. */
 export const TRAIL_LENGTH = 60
-/** Per-phase duration in seconds for the default cycle. Used by the phase-countdown bar. */
-export const PHASE_DURATIONS = {
-  green: 30,
-  yellow: 3,
-  red: DEFAULT_CYCLE_SECONDS - 33, // 30s for the default 63s cycle
-} as const
 
 // ===== basic traffic physics (no Rapier) =====
 //
@@ -239,9 +231,84 @@ export const VEHICLE_BODY_SPEC: Record<
 
 // ===== signal controller constants =====
 //
-// Defaults match the hand-rolled cycle (30/3/30) so the
-// frame-rate gate is reproducible when controllerKind='fixed-cycle'.
+// The phase machine of one light runs
+//
+//   green → yellow → all-red → red → green
+//
+// with the durations below. The clearance (yellow + all-red) is the
+// "lost time" every phase change costs — 6 s — which is the same number
+// the Python training sim charges (`app/apps/rl/sim_core.py`
+// `CLEARANCE_SECS`). Keeping the two shapes identical is what makes a
+// policy trained in Python transfer to the browser.
+//
+// The durations match the hand-rolled cycle so the frame-rate gate stays
+// reproducible when controllerKind='fixed-cycle'.
 
+/** Green phase (s) — how long an axis is served. */
+export const GREEN_PHASE_SECS = 30
+/** Yellow clearance (s) — fixed, not shortened. */
+export const YELLOW_CLEAR_SECS = 3
+/**
+ * All-red clearance (s) between the yellow and the red.
+ *
+ * It is the **second half of the inter-green**: the outgoing axis runs its
+ * clearance-yellow, then the junction shows all-red before the other axis
+ * may go. The Python training sim charges the pair as one number
+ * (`CLEARANCE_SECS = 6.0` in `app/apps/rl/sim_core.py`); the browser
+ * implements it as the two phases a real signal runs.
+ */
+export const ALL_RED_CLEARANCE_SECS = 3
+/**
+ * Red phase (s) — how long an axis waits before it is served again.
+ *
+ * It holds the other axis' **whole** turn: its 30 s green plus the 6 s
+ * clearance (yellow + all-red). So one light's cycle is 72 s, and the two
+ * axis groups of a junction — started half a cycle (36 s) apart — produce
+ * the timeline the Python training sim has: 30 s green, a 6 s clearance,
+ * 30 s green, a 6 s clearance, … (a 72 s period).
+ *
+ * A 30 s red would leave the junction with a clearance only before the
+ * *second* axis' green (the two machines would be offset by an unequal
+ * amount), and the browser's timeline would stop matching the training
+ * sim's.
+ */
+export const RED_PHASE_SECS = 36
+/**
+ * The tolerance (s) the phase machine uses when it asks "has this phase
+ * run out?".
+ *
+ * A phase's clock is decremented once per tick, so it accumulates a little
+ * floating-point error (a few times 1e-11 s over a 30 s phase). Without a
+ * tolerance that error decides — at random — whether a phase ends on its
+ * tick or one tick late. The two axis groups of a junction then drift a
+ * tick apart: the browser's 6 s clearance became 6.00 s **and** 0.03 s, and
+ * the training sim's timeline is symmetric (its clock is a step counter, so
+ * it never drifts).
+ *
+ * The tolerance is 1e-6 s: four orders of magnitude below the shortest
+ * phase (3 s) and five orders of magnitude above the accumulated error, so
+ * it can never cut a real phase short.
+ */
+export const PHASE_EPSILON_SECS = 1e-6
+/**
+ * The default intersection cycle (s): 30 green + 3 yellow + 3 all-red +
+ * 36 red = **72 s per light**.
+ *
+ * The two axis groups of a junction start **36 s apart** (half a cycle:
+ * 30 green + 3 yellow + 3 all-red), so the "neither axis is green" gap is
+ * **6 s** — before *every* green, symmetric — and the repeat period is
+ * **72 s**: exactly the shape of the Python training sim's timeline
+ * (`app/apps/rl/sim_core.py`: a 30 s phase and `CLEARANCE_SECS = 6.0`).
+ */
+export const DEFAULT_CYCLE_SECONDS =
+  GREEN_PHASE_SECS + YELLOW_CLEAR_SECS + ALL_RED_CLEARANCE_SECS + RED_PHASE_SECS
+/** Per-phase duration in seconds for the default cycle. Used by the phase-countdown bar. */
+export const PHASE_DURATIONS = {
+  green: GREEN_PHASE_SECS,
+  yellow: YELLOW_CLEAR_SECS,
+  allRed: ALL_RED_CLEARANCE_SECS,
+  red: RED_PHASE_SECS,
+} as const
 /** Max green duration for ActuatedController (s). After this the
  *  light MUST cycle to yellow even with queue. */
 export const MAX_GREEN_SECS = 60
@@ -265,12 +332,16 @@ export const MIN_RED_SECS = 10
  * contract compares the two.
  */
 export const MIN_GREEN_SECS = 10
-/** Yellow clearance (s) — fixed, not shortened. */
-export const YELLOW_CLEAR_SECS = 3
 /**
  * All-red clearance (s) forced by the intersection's conflict resolution
  * when two perpendicular approaches would show green at the same time
  * (`resolveSignalConflicts` in `application/services/tick.ts`).
+ *
+ * The forced light goes into the phase machine's **all-red** phase, so the
+ * clearance is not a dead end: when it runs out the machine serves the
+ * loser a **real red** (`RED_PHASE_SECS`) before it may go green again.
+ * That is what stops a desynchronised pair of machines from ping-ponging
+ * every 3 s.
  *
  * This is a *different* mechanism from `ALL_RED_SECS` (the clearance the
  * `preempt` / `force_all_red` actions ask for): it is the safety net

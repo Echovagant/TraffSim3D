@@ -195,6 +195,29 @@ export const findLightIntersection = (
 }
 
 /**
+ * The light of the **perpendicular** axis group at the same junction — the
+ * light this one has to give way to.
+ *
+ * `null` when the light is not attached to an intersection (the Simulation
+ * Lab's synthesised axis light) or when the junction has no light for the
+ * other axis (a one-sided junction). A light with no sibling has nobody to
+ * wait for.
+ */
+export const perpendicularLightForLight = (
+  light: TrafficLight,
+  network: RoadNetwork,
+): TrafficLight | null => {
+  const intersection = findLightIntersection(light, network)
+  if (!intersection) return null
+  for (const other of intersection.trafficLights) {
+    if (other.id === light.id) continue
+    if (other.axis === light.axis) continue
+    return other
+  }
+  return null
+}
+
+/**
  * The roads a light governs on its own axis.
  *
  * See the module section above for the resolution order: the roads

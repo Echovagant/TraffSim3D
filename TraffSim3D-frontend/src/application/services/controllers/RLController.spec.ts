@@ -39,11 +39,14 @@ describe('RLController', () => {
     expect(d.duration).toBe(10)
   })
 
-  it('runs the whole green → yellow → red → green cycle', () => {
+  it('runs the whole green → yellow → all-red → red → green cycle', () => {
     const c = new RLController()
     const light = makeTestLight({ phase: LightPhase.Green, phaseRemaining: 0 })
     expect(c.decide(light, net, 0).phase).toBe(LightPhase.Yellow)
     light.phase = LightPhase.Yellow
+    light.phaseRemaining = 0
+    expect(c.decide(light, net, 0).phase).toBe(LightPhase.AllRed)
+    light.phase = LightPhase.AllRed
     light.phaseRemaining = 0
     expect(c.decide(light, net, 0).phase).toBe(LightPhase.Red)
     light.phase = LightPhase.Red

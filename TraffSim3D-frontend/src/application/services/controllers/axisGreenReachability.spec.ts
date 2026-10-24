@@ -34,8 +34,15 @@ import { LightPhase } from '@domain/value-objects/Phase'
 import type { SignalController } from '../signalController'
 
 const DT = 1 / 60
-/** Simulated seconds. Long enough for both axes to be served repeatedly. */
-const SECONDS = 60
+/**
+ * Simulated seconds. Long enough for both axes to be served repeatedly.
+ *
+ * The junction's cycle is 72 s (30 s green + 6 s clearance + 30 s green +
+ * 6 s clearance — the same shape the Python training sim has), so a window
+ * has to span more than two cycles for "every axis gets green again" to be
+ * a meaningful assertion.
+ */
+const SECONDS = 150
 /**
  * Lower bound (metres) for the distance a vehicle of the EW axis has to
  * cover. The broken controller moved 3–9 m in 90 s; the fixed one moves

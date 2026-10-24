@@ -14,10 +14,27 @@ import {
 } from '@domain/services/laneGeometry'
 import { approachAxis, approachAxisGroups, type RoadAxis } from '@domain/services/approachAxis'
 import { cornerRadius, junctionRadius } from '@domain/services/junctionRadius'
-import { DEFAULT_CYCLE_SECONDS, ROAD_LANE_WIDTH } from '@shared/constants/simulation'
+import {
+  ALL_RED_CLEARANCE_SECS,
+  DEFAULT_CYCLE_SECONDS,
+  GREEN_PHASE_SECS,
+  ROAD_LANE_WIDTH,
+  YELLOW_CLEAR_SECS,
+} from '@shared/constants/simulation'
 
-const NS_GREEN = DEFAULT_CYCLE_SECONDS * (30 / 63) // ~30s
-const EW_GREEN = NS_GREEN
+/** The green the axis group that is served first runs (s). */
+const NS_GREEN = GREEN_PHASE_SECS
+
+/**
+ * How long the **second** axis group waits before it is served (s): the
+ * first group's green, its clearance-yellow and the junction's all-red.
+ *
+ * 30 + 3 + 3 = **36 s**, so the "neither axis is green" gap is 6 s and the
+ * repeat period is 72 s — the same shape the Python training sim's
+ * timeline has (a 30 s phase separated by `CLEARANCE_SECS = 6.0` in
+ * `app/apps/rl/sim_core.py`).
+ */
+const SECOND_AXIS_DELAY = GREEN_PHASE_SECS + YELLOW_CLEAR_SECS + ALL_RED_CLEARANCE_SECS
 
 // The junction-box radius rule lives in `@domain/services/junctionRadius`
 // — the ONE place that defines it. The imported maps go through the same
@@ -181,8 +198,10 @@ const lightForAxis = (
       z: axis === 'ew' ? intersection.position.z - offset : intersection.position.z,
     },
     // The two axis groups start in opposition: `ns` green, `ew` red.
+    // The second one starts 36 s later — 30 s green + 3 s yellow + 3 s
+    // all-red — so the junction's clearance is 6 s, symmetric.
     phase: axis === 'ns' ? LightPhase.Green : LightPhase.Red,
-    phaseRemaining: axis === 'ns' ? NS_GREEN : EW_GREEN + 3,
+    phaseRemaining: axis === 'ns' ? NS_GREEN : SECOND_AXIS_DELAY,
     cycleSeconds: DEFAULT_CYCLE_SECONDS,
     axis,
   }
@@ -249,7 +268,9 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
     id: 'tl-ew',
     position: { x: 0, y: 0, z: -4 },
     phase: LightPhase.Red,
-    phaseRemaining: EW_GREEN + 3, // yellow + red
+    // The second axis starts 36 s later: 30 s green + 3 s yellow + 3 s
+    // all-red — a symmetric 6 s clearance between the two greens.
+    phaseRemaining: SECOND_AXIS_DELAY,
     cycleSeconds: DEFAULT_CYCLE_SECONDS,
     axis: 'ew',
   }
@@ -406,7 +427,8 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
     id: 'tl-ew',
     position: { x: 0, y: 0, z: 3 },
     phase: LightPhase.Red,
-    phaseRemaining: EW_GREEN + 3,
+    // The second axis starts 36 s later (green + yellow + all-red).
+    phaseRemaining: SECOND_AXIS_DELAY,
     cycleSeconds: DEFAULT_CYCLE_SECONDS,
     axis: 'ew',
   }
@@ -629,7 +651,7 @@ export const buildElevatedScene = (): RoadNetwork => {
         id: 'tl-ns',
         position: { x: -3, y: 0, z: 0 },
         phase: LightPhase.Green,
-        phaseRemaining: 30,
+        phaseRemaining: GREEN_PHASE_SECS,
         cycleSeconds: DEFAULT_CYCLE_SECONDS,
         axis: 'ns',
       },
@@ -637,7 +659,8 @@ export const buildElevatedScene = (): RoadNetwork => {
         id: 'tl-ew',
         position: { x: 0, y: 0, z: -3 },
         phase: LightPhase.Red,
-        phaseRemaining: 30,
+        // The second axis starts 36 s later (green + yellow + all-red).
+        phaseRemaining: SECOND_AXIS_DELAY,
         cycleSeconds: DEFAULT_CYCLE_SECONDS,
         axis: 'ew',
       },
@@ -791,7 +814,7 @@ export const buildCorridorScene = (): RoadNetwork => {
         id: 'tl-ns-n',
         position: { x: -3, y: 0, z: -NS_HALF },
         phase: LightPhase.Green,
-        phaseRemaining: 30,
+        phaseRemaining: GREEN_PHASE_SECS,
         cycleSeconds: DEFAULT_CYCLE_SECONDS,
         axis: 'ns',
       },
@@ -799,7 +822,8 @@ export const buildCorridorScene = (): RoadNetwork => {
         id: 'tl-ew-n',
         position: { x: 0, y: 0, z: -NS_HALF + 3 },
         phase: LightPhase.Red,
-        phaseRemaining: 30,
+        // The second axis starts 36 s later (green + yellow + all-red).
+        phaseRemaining: SECOND_AXIS_DELAY,
         cycleSeconds: DEFAULT_CYCLE_SECONDS,
         axis: 'ew',
       },
@@ -827,7 +851,8 @@ export const buildCorridorScene = (): RoadNetwork => {
         id: 'tl-ns-s',
         position: { x: 3, y: 0, z: NS_HALF },
         phase: LightPhase.Red,
-        phaseRemaining: 30,
+        // The second axis starts 36 s later (green + yellow + all-red).
+        phaseRemaining: SECOND_AXIS_DELAY,
         cycleSeconds: DEFAULT_CYCLE_SECONDS,
         axis: 'ns',
       },
@@ -835,7 +860,7 @@ export const buildCorridorScene = (): RoadNetwork => {
         id: 'tl-ew-s',
         position: { x: 0, y: 0, z: NS_HALF - 3 },
         phase: LightPhase.Green,
-        phaseRemaining: 30,
+        phaseRemaining: GREEN_PHASE_SECS,
         cycleSeconds: DEFAULT_CYCLE_SECONDS,
         axis: 'ew',
       },

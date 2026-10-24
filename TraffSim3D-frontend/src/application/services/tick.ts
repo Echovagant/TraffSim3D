@@ -163,26 +163,44 @@ const MAY_GO = new Set<LightPhase>([...GREEN_LIKE, ...YELLOW_LIKE])
 
 /**
  * Intersection-level safety: when per-light controllers produce
- * conflicting active phases (two different axes both showing green or
- * yellow), force the later light to red. Traffic law (GB 14886) requires
- * that perpendicular approaches never display green simultaneously —
- * there must always be an all-red clearance between opposing greens.
+ * conflicting greens (two different axes both showing green), force the
+ * loser into the clearance. Traffic law (GB 14886) requires that
+ * perpendicular approaches never display green simultaneously — there must
+ * always be an all-red clearance between opposing greens.
+ *
+ * ## Only green-vs-green is a conflict
+ *
+ * A **yellow** is the *clearing* of the axis that is ending, so
+ * `green + yellow` is a legal transition, not a conflict: the phase
+ * machine's own all-red phase provides the clearance there. Treating the
+ * yellow as "active" made the resolver add 3 s of clearance to a
+ * transition that already had its 6 s planned — which is where the
+ * browser's asymmetric 6.02 s / 3.03 s gaps came from.
+ *
+ * ## The loser goes into the **all-red**, not into a red
+ *
+ * The forced light is put into the phase machine's `AllRed` phase for
+ * `CONFLICT_ALL_RED_SECS`. When that runs out, the machine serves it a
+ * **full red** (`RED_PHASE_SECS`) before it may go green again — so the
+ * conflict cannot recur on the next tick. Forcing a plain `Red` used to
+ * skip that red entirely (the machine's fallback transition went straight
+ * back to green), and the junction ping-ponged every 3 s.
  */
 const resolveSignalConflicts = (inter: Intersection): void => {
   const lights = inter.trafficLights
   for (let i = 0; i < lights.length; i++) {
     const a = lights[i]!
-    if (!GREEN_LIKE.has(a.phase) && !YELLOW_LIKE.has(a.phase)) continue
+    if (!GREEN_LIKE.has(a.phase)) continue
     for (let j = i + 1; j < lights.length; j++) {
       const b = lights[j]!
       if (a.axis === b.axis) continue
-      const bActive = GREEN_LIKE.has(b.phase) || YELLOW_LIKE.has(b.phase)
-      if (!bActive) continue
-      // Conflict: both axes show green/yellow. Force the one with more
-      // remaining time to red (the other keeps its phase). When tied,
-      // force the second light.
+      if (!GREEN_LIKE.has(b.phase)) continue
+      // Conflict: both axes show green. Force the one with more
+      // remaining time into the clearance (the other keeps its phase).
+      // The comparison is the one the resolver has always used: on a tie
+      // the first light of the pair gives way.
       const target = a.phaseRemaining >= b.phaseRemaining ? a : b
-      target.phase = LightPhase.Red
+      target.phase = LightPhase.AllRed
       target.phaseRemaining = CONFLICT_ALL_RED_SECS
     }
   }

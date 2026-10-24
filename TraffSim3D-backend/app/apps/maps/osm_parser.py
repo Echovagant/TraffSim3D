@@ -188,6 +188,37 @@ INTERSECTION_CLEARANCE_M = 4.5
 # falls back to the road midpoint instead of inventing a position.
 MAX_INTERSECTION_OFFSET_M = 30.0
 
+# ===== signal phase durations (s) =====
+#
+# The browser's phase machine runs **one cycle per light**:
+#
+#   green -> yellow -> all-red -> red -> green
+#
+# with the durations below. The two axis groups of a junction start
+# 36 s apart (30 green + 3 yellow + 3 all-red), so the "neither axis is
+# green" gap is 6 s and the repeat period is 72 s - the same shape the
+# Python training sim's timeline has (`app/apps/rl/sim_core.py`: a 30 s
+# phase separated by `CLEARANCE_SECS = 6.0`).
+#
+# Mirrors the frontend's `GREEN_PHASE_SECS` / `YELLOW_CLEAR_SECS` /
+# `ALL_RED_CLEARANCE_SECS` / `RED_PHASE_SECS` / `DEFAULT_CYCLE_SECONDS`
+# (`TraffSim3D-frontend/src/shared/constants/simulation.ts`).
+GREEN_PHASE_SECONDS = 30
+YELLOW_CLEAR_SECONDS = 3
+ALL_RED_CLEARANCE_SECONDS = 3
+# The red holds the other axis' whole turn: its 30 s green plus the 6 s
+# clearance. So one light's cycle is 72 s and the two axis groups of a
+# junction - started half a cycle (36 s) apart - show the same timeline
+# the Python training sim has (a 30 s phase separated by
+# `CLEARANCE_SECS = 6.0`).
+RED_PHASE_SECONDS = 36
+# One light's full cycle: 30 + 3 + 3 + 36.
+SIGNAL_CYCLE_SECONDS = (
+    GREEN_PHASE_SECONDS + YELLOW_CLEAR_SECONDS + ALL_RED_CLEARANCE_SECONDS + RED_PHASE_SECONDS
+)
+# The second axis group starts this long after the first one.
+SECOND_AXIS_DELAY_SECONDS = GREEN_PHASE_SECONDS + YELLOW_CLEAR_SECONDS + ALL_RED_CLEARANCE_SECONDS
+
 # OSM `oneway` values meaning "traffic runs along the digitisation direction".
 _ONEWAY_FORWARD = frozenset({"yes", "true", "1"})
 # OSM `oneway` values meaning "traffic runs against the digitisation direction".
@@ -750,8 +781,14 @@ def _build_traffic_lights(
                     "z": position["z"] if axis == "ew" else position["z"] - 3,
                 },
                 "phase": "green" if axis == "ns" else "red",
-                "phaseRemaining": 30,
-                "cycleSeconds": 63,
+                # The first axis group is served for 30 s; the second one
+                # starts 36 s later (30 green + 3 yellow + 3 all-red), so
+                # the junction's clearance is 6 s - symmetric, and the
+                # repeat period is 72 s.
+                "phaseRemaining": (
+                    GREEN_PHASE_SECONDS if axis == "ns" else SECOND_AXIS_DELAY_SECONDS
+                ),
+                "cycleSeconds": SIGNAL_CYCLE_SECONDS,
                 "axis": axis,
             }
         )

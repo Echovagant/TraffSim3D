@@ -3,7 +3,7 @@
 // The RL signal controller becomes a real
 // control surface.
 //
-// It still runs the plain 30/3/30 cycle when nothing drives it, so
+// It still runs the plain 30/3/3/30 cycle when nothing drives it, so
 // selecting "RL" in the UI does not change the traffic — but it now
 // *consumes* external actions from the shared five-action vocabulary
 // (the shared five-action vocabulary):
@@ -41,17 +41,17 @@ import type {
 import { LightPhase } from '@domain/value-objects/Phase'
 import {
   ALL_RED_SECS,
+  ALL_RED_CLEARANCE_SECS,
+  GREEN_PHASE_SECS,
   MAX_GREEN_SECS,
   MIN_GREEN_SECS,
   MIN_RED_SECS,
   PHASE_ADJUST_SECS,
+  PHASE_EPSILON_SECS,
+  RED_PHASE_SECS,
+  YELLOW_CLEAR_SECS,
   type SignalActionName,
 } from '@shared/constants/simulation'
-
-/** The plain cycle — the same transitions as `FixedCycleController`. */
-const GREEN_SECS = 30
-const YELLOW_SECS = 3
-const RED_SECS = 30
 
 export interface RLControllerDeps {
   /**
@@ -118,19 +118,25 @@ export class RLController implements SignalController {
     this.pending = []
 
     // 3. The base phase machine — the same transitions as
-    //    `FixedCycleController` (green → yellow → red → green).
+    //    `FixedCycleController` (green → yellow → all-red → red → green).
     let phase = light.phase
     let duration = light.phaseRemaining
-    if (light.phaseRemaining <= 0) {
+    if (light.phaseRemaining <= PHASE_EPSILON_SECS) {
       if (phase === LightPhase.Green) {
         phase = LightPhase.Yellow
-        duration = YELLOW_SECS
+        duration = YELLOW_CLEAR_SECS
       } else if (phase === LightPhase.Yellow) {
+        phase = LightPhase.AllRed
+        duration = ALL_RED_CLEARANCE_SECS
+      } else if (phase === LightPhase.AllRed) {
+        // The all-red runs out into a **full** red, never straight back
+        // into the green — skipping the red is what used to make a
+        // desynchronised pair of lights ping-pong every 3 s.
         phase = LightPhase.Red
-        duration = RED_SECS
+        duration = RED_PHASE_SECS
       } else {
         phase = LightPhase.Green
-        duration = GREEN_SECS
+        duration = GREEN_PHASE_SECS
       }
     }
 

@@ -51,14 +51,14 @@ describe('CoordinatedController', () => {
   })
 
   it('enabled + offset=15 → EW green 滞后 NS green 15s', () => {
-    // NS 当前是 Red (默认 phase=Red in network). 模拟 NS 在 t=10 时刚变红 (红段 30s).
+    // NS 当前是 Red (默认 phase=Red in network). 模拟 NS 在 t=10 时刚变红 (红段 36s).
     // 我们关心的是 EW 在 t=10 时的 phase: 它应该已经处于绿段 (因为 greenStart = 10 + 15 = 25, elapsed = 25-15 = 10 → 在 0-30 段 → Green).
     const c = new CoordinatedController(makeDeps(new Map([['r-ns|r-ew', 15]]), true))
     const ew = makeLight('ew', LightPhase.Red) // phase=Red 不影响, computeOffsetForPhase 把 greenStart 校到 Red 段
-    // EW 在 t=10: greenStart = 10 - (30+3) + 15 = -8; elapsed = ((10 - (-8)) % 63 + 63) % 63 = 18; Green.
+    // EW 在 t=10: greenStart = 10 - (30+3+3) + 15 = -11; elapsed = ((10 - (-11)) % 72 + 72) % 72 = 21; Green.
     const d = c.decide(ew, EMPTY_NETWORK, 10)
     expect(d.phase).toBe(LightPhase.Green)
-    expect(d.duration).toBeCloseTo(30 - 18, 1)
+    expect(d.duration).toBeCloseTo(30 - 21, 1)
   })
 
   it('simTime 回退 → phaseTable entry 重建 (新 greenStart)', () => {

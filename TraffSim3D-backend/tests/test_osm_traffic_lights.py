@@ -91,6 +91,38 @@ def test_crossroads_gets_one_light_per_axis() -> None:
     assert sorted(light["phase"] for light in lights) == ["green", "red"]
 
 
+def test_the_two_lights_start_half_a_cycle_apart() -> None:
+    """The axis groups start 36 s apart, so the junction's clearance is 6 s.
+
+    The first group is served for 30 s; the second one starts 36 s later
+    (30 s green + 3 s yellow + 3 s all-red). The clearance before **every**
+    green is therefore 6 s and the repeat period is 72 s - the shape the
+    Python training sim's timeline has (``app/apps/rl/sim_core.py``: a 30 s
+    phase and ``CLEARANCE_SECS = 6.0``).
+    """
+    nodes = {
+        1: (0.0, -0.001),  # south arm
+        2: (0.0, 0.0),  # the junction
+        3: (0.0, 0.001),  # north arm
+        4: (-0.001, 0.0),  # west arm
+        5: (0.001, 0.0),  # east arm
+    }
+    ways = [
+        [1, 2, 3],  # north–south road
+        [4, 2, 5],  # east–west road
+    ]
+    net = parse_osm_xml(_build_osm(nodes, ways, {2}))
+
+    lights = {light["axis"]: light for light in _lights_of(net)}
+    assert lights["ns"]["phase"] == "green"
+    assert lights["ns"]["phaseRemaining"] == 30
+    assert lights["ew"]["phase"] == "red"
+    assert lights["ew"]["phaseRemaining"] == 36
+    # One light's cycle: 30 green + 3 yellow + 3 all-red + 36 red.
+    for light in lights.values():
+        assert light["cycleSeconds"] == 72
+
+
 def test_junction_with_one_axis_gets_exactly_one_light() -> None:
     """Both arms of this junction run east-west: one axis group, one light.
 
