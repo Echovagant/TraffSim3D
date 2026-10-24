@@ -1144,18 +1144,40 @@ const applyCrossRoadYield = (network: RoadNetwork, ctx: TickContext): void => {
       // owned by the policy (or by an injected action) — the yield rule
       // must not discard it, or the policy's output dies one step after
       // it was written.
+      //
+      // ===== THE COMMITMENT RULE =====
+      //
+      // A vehicle that is **already inside the intersection box** is
+      // committed: it clears the intersection and is never stopped by the
+      // cross-road yield. The yield only applies to a vehicle that has
+      // NOT entered the box yet — it stops *before* the intersection and
+      // lets the committed one through.
+      //
+      // The old code also stopped the LATER of two vehicles that were both
+      // inside the box ("first come, first served"). That is the deadlock:
+      // the later car was already committed, and stopping it there meant it
+      // stood **in** the intersection and blocked the very axis it was
+      // yielding to. A stopped car inside the box also keeps the other axis'
+      // vehicles out (they see an occupied box), so the whole junction
+      // locked up.
+      //
+      // The commitment rule is the same one the traffic-light constraint
+      // already uses (`distToStopLine < 0 → continue`: a vehicle that has
+      // crossed the stop line is not held by the light any more), and it is
+      // the rule the Python training sim applies (`sim_core.py` →
+      // `_signal_limit()`: "already past the stop line — the vehicle is in
+      // the intersection and keeps going" → no limit). The right of way
+      // between two perpendicular approaches is settled by the signal
+      // itself — `resolveSignalConflicts` guarantees that only one axis is
+      // ever green — so the yield rule only has to cover the case where a
+      // vehicle is *about* to enter a box that is already occupied.
       let yielded: Vehicle | null = null
       if (a.enteredIntersectionAt !== null && b.enteredIntersectionAt === null) {
         yielded = b
       } else if (b.enteredIntersectionAt !== null && a.enteredIntersectionAt === null) {
         yielded = a
-      } else if (a.enteredIntersectionAt !== null && b.enteredIntersectionAt !== null) {
-        if (a.enteredIntersectionAt < b.enteredIntersectionAt) {
-          yielded = b
-        } else if (b.enteredIntersectionAt < a.enteredIntersectionAt) {
-          yielded = a
-        }
       }
+      // Both inside the box → both are committed → neither yields.
       if (yielded && !isReplayDriven(ctx, yielded)) yielded.targetSpeed = 0
     }
   }

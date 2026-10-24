@@ -78,6 +78,22 @@ type HandleMap = Map<string, number>
  */
 const FIXED_DT_EPSILON = 1e-9
 
+/**
+ * The vehicle collider's half-height (m) — the distance from a body's
+ * centre to its underside.
+ *
+ * It is read from the spec builder — the one place the body dimensions are
+ * derived — instead of being written down a second time here, so the
+ * ground cannot drift away from the colliders it has to carry.
+ */
+const VEHICLE_COLLIDER_HALF_HEIGHT = ((): number => {
+  const zero = { x: 0, y: 0, z: 0 }
+  const types = ['car', 'truck', 'bus'] as const
+  return Math.max(
+    ...types.map((type) => buildRigidBodySpec('__ground_probe__', type, zero, 0).halfExtents.y),
+  )
+})()
+
 export class RapierWorld {
   private R: typeof import('@dimforge/rapier3d-compat') | null = null
   private world: World | null = null
@@ -117,7 +133,32 @@ export class RapierWorld {
   private buildGround(): void {
     if (!this.R || !this.world) return
     // 大地面 cuboid. 1000x1000 足够大覆盖默认 scene.
-    const groundDesc = this.R.RigidBodyDesc.fixed().setTranslation(0, -this.cfg.groundThickness, 0)
+    //
+    // The ground's TOP SURFACE sits one vehicle collider half-height below
+    // the road level, so a vehicle body — whose centre the application
+    // layer keeps at the road's own y (`tick.ts` → `setVehicleHeight`) —
+    // RESTS ON the ground instead of being buried in it.
+    //
+    // The ground used to have its top surface AT the road level (y = 0),
+    // with the vehicle's underside 0.75 m below its centre: every vehicle
+    // was embedded 0.75 m into the ground, and the contact solver pushed
+    // it back out with a deep-penetration impulse that **torqued** the
+    // body. Measured: a car **stopped at a red light** drifted from
+    // heading 0 to 0.79 rad (45°) while standing perfectly still; it then
+    // drove crooked, tripped the 5 m lane guard, had its speed zeroed and
+    // got stuck there.
+    //
+    // Lowering the ground is the right layer for this fix: the road's
+    // height belongs to the application layer (the lane geometry carries
+    // it, and the tick writes it onto the body), so the physics ground
+    // only has to sit *below* the road — exactly one collider half-height,
+    // so the body rests on it with its centre on the road.
+    const groundTopY = -VEHICLE_COLLIDER_HALF_HEIGHT
+    const groundDesc = this.R.RigidBodyDesc.fixed().setTranslation(
+      0,
+      groundTopY - this.cfg.groundThickness,
+      0,
+    )
     const body = this.world.createRigidBody(groundDesc)
     // GROUND FRICTION IS ZERO — and that is deliberate.
     //
@@ -166,11 +207,48 @@ export class RapierWorld {
         return spec.vehicleId
       }
     }
+    // DAMPING IS ZERO — and that is deliberate, for the same reason the
+    // ground's friction is zero (see `buildGround`).
+    //
+    // The longitudinal dynamics live in the application layer: the speed
+    // ramp (`rampSpeed`) adds `accel · dt` per step and the traffic-light /
+    // car-following constraints decide what the ramp aims at. The physics
+    // body's job is to carry that speed (mass, footprint, contacts,
+    // turning radius) — not to re-derive it.
+    //
+    // A damping coefficient is a **second longitudinal model**: Rapier
+    // multiplies the linear velocity by `1 / (1 + damping · dt)` on every
+    // sub-step, so the speed the body actually integrates is not the speed
+    // the application layer commanded. The two fight, and the damping
+    // wins, because it is applied to the velocity *after* the command:
+    //
+    //     v_next = (v + accel·dt) / (1 + damping·dt)
+    //     ⇒  v*   = accel / damping        (the equilibrium)
+    //
+    // With the old `linearDamping = 0.2` that equilibrium was **10.0 m/s
+    // for a car, 7.0 for a truck, 6.0 for a bus** — a hard speed ceiling
+    // that the application layer never asked for, and that the
+    // physics-free fallback path does not have (it reaches the road's
+    // 16.67 m/s limit). Measured on the cross scene: the physics path
+    // topped out at 9.84 / 6.98 / 6.00 m/s while the fallback reached
+    // 16.67 — the physics path covered ~50 % of the distance the
+    // application model asked for.
+    //
+    // `angularDamping = 0.4` had the same effect on the turn rate: the
+    // body rotated at 99.34 % of the angular velocity Pure Pursuit
+    // commanded. It is zero for the same reason — the steering law owns
+    // the heading, the physics owns the inertia.
+    //
+    // The one consequence of a zero angular damping is that a body with
+    // no steering command keeps the angular velocity it had. That is
+    // handled where the standstill is decided (`applyControl` zeroes the
+    // angular velocity of a body that is commanded to a stop), not by
+    // letting the damping silently slow the vehicle down.
     const bodyDesc = this.R.RigidBodyDesc.dynamic()
       .setTranslation(spec.position.x, spec.position.y, spec.position.z)
       .setRotation(this.toRapierQuat(spec.heading))
-      .setLinearDamping(0.2)
-      .setAngularDamping(0.4)
+      .setLinearDamping(0)
+      .setAngularDamping(0)
     const body = this.world.createRigidBody(bodyDesc)
     const colliderDesc = this.R.ColliderDesc.cuboid(
       spec.halfExtents.x,
@@ -238,6 +316,22 @@ export class RapierWorld {
     } else {
       const lv = body.linvel()
       v = lv.x !== 0 || lv.z !== 0 ? Math.hypot(lv.x, lv.z) : 0
+    }
+    // A body that is commanded to a standstill also stops turning.
+    //
+    // The bodies carry no angular damping (see `registerVehicle`), so a
+    // body that kept an angular velocity would keep rotating forever.
+    // The steering loop only writes an angular velocity to a *moving*
+    // vehicle (`tick.ts` skips a vehicle slower than 0.5 m/s), so a
+    // vehicle that comes to a stop — at a red light, behind a leader —
+    // would otherwise keep the turn rate it had when it stopped and
+    // rotate on the spot.
+    //
+    // Zeroing it here (rather than in the damping) keeps the standstill
+    // a decision of the application layer, which is the layer that
+    // commanded the stop in the first place.
+    if (v === 0) {
+      body.setAngvel({ x: 0, y: 0, z: 0 }, true)
     }
     // heading 是 world-space (lane forward). 投影到 Rapier 2D.
     const vx = v * Math.cos(heading)
@@ -382,8 +476,11 @@ export class RapierWorld {
    *               negative → clockwise (right turn in XZ)
    *               0 → straight ahead (or coast)
    *
-   * Rapier bodies have `angularDamping` set at construction time so
-   * that angular velocity naturally decays without explicit damping code.
+   * The body carries **no angular damping** (see `registerVehicle`), so
+   * this value is the turn rate the body actually holds until the next
+   * command. A vehicle that stops is stopped from turning by
+   * `applyControl`, which zeroes the angular velocity of a body that is
+   * commanded to a standstill.
    */
   setVehicleAngularVelocity(vehicleId: string, omega: number): void {
     if (!this.world) return

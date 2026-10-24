@@ -16,7 +16,7 @@
  */
 
 import type { Road } from '@domain/entities/Road'
-import { lanePoint } from './laneGeometry'
+import { lanePoint, laneForwardSign } from './laneGeometry'
 
 /** Per-vehicle-type Pure Pursuit parameters. */
 export interface PurePursuitOptions {
@@ -68,10 +68,26 @@ export const computeSteeringAngle = (
   s: number,
   opts: PurePursuitOptions = DEFAULT_PURE_PURSUIT,
 ): number => {
-  // 1. Lookahead point: `lookahead` meters ahead along the lane.
-  //    lanePoint() clamps s to [0, roadLength] internally, so even if
-  //    we overshoot the end we get a valid world position.
-  const lookaheadS = s + opts.lookahead
+  // 1. Lookahead point: `lookahead` meters ahead along the lane **in the
+  //    lane's own travel direction**.
+  //
+  //    The direction matters: a lane with `laneIndex >= laneCount / 2` is
+  //    travelled **backwards** (end → start, see `laneForwardSign`), so its
+  //    arc length *decreases* as the vehicle drives on. Adding the lookahead
+  //    unconditionally put the target point BEHIND such a vehicle, and the
+  //    steering law then pulled it further off course: measured on the
+  //    cross scene, a +0.1° heading error produced −1.0906e-3 rad of
+  //    steering on a forward lane but **+1.0906e-3 rad — the opposite
+  //    sign** — on a backward lane. A vehicle on a backward lane turned
+  //    180° within 7 s, changed lane four times and ended up 4.99 m off
+  //    the centreline (exactly on the 5 m lane guard).
+  //
+  //    `lanePoint()` clamps the arc length into `[0, roadLength]`, so the
+  //    lookahead stays finite near the ends of the road. On a backward
+  //    lane the clamped point (s = 0) is still *ahead* of the vehicle —
+  //    the vehicle travels towards s = 0 — so the steering stays sane.
+  const travelSign = laneForwardSign(laneIndex, road.laneCount)
+  const lookaheadS = travelSign === 1 ? s + opts.lookahead : s - opts.lookahead
   const lp = lanePoint(road, laneIndex, lookaheadS)
 
   // 2. Vector from vehicle to lookahead point

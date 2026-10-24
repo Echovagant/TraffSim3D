@@ -377,14 +377,25 @@ describe('RapierWorld — before init()', () => {
 // ---------------------------------------------------------------------------
 
 describe('RapierWorld — init()', () => {
-  it('builds exactly one fixed ground body at y = -groundThickness', async () => {
+  it('builds exactly one fixed ground body whose TOP surface is one vehicle half-height below the road', async () => {
     const w = new RapierWorld()
     await w.init()
     expect(R.state.worldCount).toBe(1)
     expect(vehicleBodies()).toHaveLength(0)
     const g = groundBody()
     expect(g.desc.kind).toBe('fixed')
-    expect(g.desc.translation).toEqual({ x: 0, y: -DEFAULT_WORLD_CONFIG.groundThickness, z: 0 })
+    // The ground's top surface sits one vehicle collider half-height
+    // (0.75 m) below the road level, so a vehicle body — whose centre the
+    // application layer keeps at the road's y — RESTS on the ground
+    // instead of being buried 0.75 m inside it. A buried body was pushed
+    // out by the contact solver with an impulse that torqued it: a car
+    // stopped at a red light drifted 0.79 rad while standing still.
+    // See `RapierWorld.buildGround`.
+    expect(g.desc.translation).toEqual({
+      x: 0,
+      y: -(0.75 + DEFAULT_WORLD_CONFIG.groundThickness),
+      z: 0,
+    })
   })
 
   it('ground collider is a 500 x thickness x 500 cuboid, frictionless, restitution 0', async () => {
@@ -437,7 +448,11 @@ describe('RapierWorld — init()', () => {
     })
     await w.init()
     expect(R.state.gravity).toEqual({ x: 0, y: -1.62, z: 0 })
-    expect(groundBody().desc.translation).toEqual({ x: 0, y: -2.5, z: 0 })
+    expect(groundBody().desc.translation).toEqual({
+      x: 0,
+      y: -(0.75 + 2.5),
+      z: 0,
+    })
     expect(groundColliderDesc().halfExtents.y).toBe(2.5)
   })
 
@@ -472,14 +487,21 @@ describe('RapierWorld — registerVehicle', () => {
     expect(Number(h)).toBe(R.state.colliders[1]!.handle)
   })
 
-  it('car: dynamic body, damping 0.2 / 0.4, collider (2.1, 0.75, 0.9) mass 1500 μ=0.5 e=0.2', async () => {
+  it('car: dynamic body, NO damping, collider (2.1, 0.75, 0.9) mass 1500 μ=0.5 e=0.2', async () => {
     const w = new RapierWorld()
     await w.init()
     w.registerVehicle(spec({ type: 'car' }))
     const b = vehicleBodies()[0]!
     expect(b.desc.kind).toBe('dynamic')
-    expect(b.desc.linDamping).toBe(0.2)
-    expect(b.desc.angDamping).toBe(0.4)
+    // Damping is ZERO: the longitudinal dynamics belong to the application
+    // layer (the speed ramp + the traffic constraints), and a damping
+    // coefficient is a second, competing longitudinal model. With
+    // `linearDamping = 0.2` the body's speed equilibrated at
+    // `accel / damping` — 10 m/s for a car, 7 for a truck, 6 for a bus —
+    // a speed ceiling the application layer never asked for.
+    // See `RapierWorld.registerVehicle`.
+    expect(b.desc.linDamping).toBe(0)
+    expect(b.desc.angDamping).toBe(0)
     const d = vehicleColliderDescs()[0]!
     expect(d.halfExtents.x).toBeCloseTo(2.1, 10)
     expect(d.halfExtents.y).toBe(0.75)
