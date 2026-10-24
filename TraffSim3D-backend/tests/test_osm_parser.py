@@ -8,10 +8,13 @@ from pathlib import Path
 import pytest
 
 from app.apps.maps.osm_parser import (
+    INTERSECTION_CLEARANCE_M,
     MAX_INTERSECTION_OFFSET_M,
+    ROAD_LANE_WIDTH,
     _project_intersection_on_road,
     _project_onto_polyline,
     _spawn_arc_length,
+    junction_radius,
     parse_osm_xml,
     parse_osmpbf,
 )
@@ -19,6 +22,11 @@ from app.apps.maps.osm_parser import (
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 FIXTURE_XML = FIXTURE_DIR / "sample-4way.osm"
 FIXTURE_PBF = FIXTURE_DIR / "sample-4way.osm.pbf"
+
+# The longest vehicle in the fleet (the 9 m bus). Its nose may overhang
+# the stop line by half its length, because the stop rule acts on the
+# vehicle's centre — which is what the clearance is for.
+LONGEST_VEHICLE_M = 9.0
 
 
 def _build_pbf_fixture_if_missing() -> Path:
@@ -718,3 +726,240 @@ def test_real_map_spawns_fewer_cars_inside_a_junction() -> None:
     before = _count_spawn_points_in_junctions(legacy, 5.0)
     after = _count_spawn_points_in_junctions(net, 5.0)
     assert after < before
+
+
+# ---------------------------------------------------------------------------
+# How big the junction box is.
+#
+# The regression these lock down: the backend wrote a hard-coded 8 m into
+# every imported junction. That number is narrower than the carriageway of
+# the road it is supposed to delimit (a 6-lane road is 21 m wide, so its
+# half-width is 10.5 m) — so the outer lanes were never inside the box,
+# and the intersection-occupancy rule never saw them. On top of that the
+# stop rule acts on the vehicle's CENTRE, so a queued vehicle's nose may
+# legitimately overhang by half its length and reach into the crossing
+# carriageway.
+#
+# The rule (identical to the built-in scenes'):
+#
+#     radius = widest connected road's half-width + clearance
+#     clearance = 4.5 m (half of the 9 m bus) — only where a queue can form
+# ---------------------------------------------------------------------------
+
+
+def test_mirrored_constants_match_the_frontend() -> None:
+    """The two ends have to use the same numbers.
+
+    `ROAD_LANE_WIDTH` is the width the frontend gives EVERY lane of EVERY
+    road — imported ones included (`laneGeometry.ts` -> `lanePoint`), so
+    it is the geometric truth in the app. `INTERSECTION_CLEARANCE_M` is
+    half the longest vehicle (the 9 m bus), because the stop rule acts on
+    the vehicle's centre and the nose may overhang by that much.
+
+    The values are **literals on purpose**: a test that derived them from
+    the constants would still pass when the constant is mutated.
+    """
+    assert ROAD_LANE_WIDTH == 3.5
+    assert INTERSECTION_CLEARANCE_M == 4.5
+
+
+def test_junction_radius_follows_the_lane_model() -> None:
+    """The radius is the widest connected road's half-width (+ clearance).
+
+    The numbers are literals on purpose — see above.
+    """
+    # 6 lanes x 3.5 m = 21 m wide -> half-width 10.5 m.
+    assert junction_radius([6], signalised=True) == 15.0
+    assert junction_radius([6], signalised=False) == 10.5
+    # 4 lanes -> 14 m wide -> half-width 7 m.
+    assert junction_radius([4], signalised=True) == 11.5
+    assert junction_radius([4], signalised=False) == 7.0
+    # 2 lanes -> 7 m wide -> half-width 3.5 m.
+    assert junction_radius([2], signalised=True) == 8.0
+    # 1 lane -> 3.5 m wide -> half-width 1.75 m.
+    assert junction_radius([1], signalised=True) == 6.25
+    # The **widest** connected road decides: the box is shared by every
+    # approach, so it has to hold the widest carriageway.
+    assert junction_radius([1, 6], signalised=True) == 15.0
+    assert junction_radius([6, 1], signalised=True) == 15.0
+    # An empty junction still has a sane box.
+    assert junction_radius([], signalised=True) == INTERSECTION_CLEARANCE_M + ROAD_LANE_WIDTH / 2
+
+
+def test_a_signalised_junction_adds_the_clearance() -> None:
+    """The clearance is what keeps a queued nose out of the crossing
+    carriageway — so it is added exactly where a queue can form."""
+    with_clearance = junction_radius([4], signalised=True)
+    without = junction_radius([4], signalised=False)
+    assert with_clearance - without == INTERSECTION_CLEARANCE_M
+    assert with_clearance > without
+
+
+CROSS_OSM = b"""<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+  <node id="1" lat="0.00000" lon="0.00000"/>
+  <node id="2" lat="0.00050" lon="0.00000"/>
+  <node id="3" lat="0.00100" lon="0.00000"/>
+  <node id="4" lat="0.00050" lon="-0.00050"/>
+  <node id="5" lat="0.00050" lon="0.00050"/>
+  <way id="10">
+    <nd ref="1"/><nd ref="2"/><nd ref="3"/>
+    <tag k="highway" v="residential"/><tag k="lanes" v="4"/>
+  </way>
+  <way id="11">
+    <nd ref="4"/><nd ref="2"/><nd ref="5"/>
+    <tag k="highway" v="residential"/><tag k="lanes" v="4"/>
+  </way>
+</osm>
+"""
+
+
+def test_the_parsed_radius_is_derived_from_the_connected_roads() -> None:
+    """End-to-end: the radius in the payload follows the lane model."""
+    net = parse_osm_xml(CROSS_OSM)
+    assert len(net["intersections"]) == 1
+    inter = net["intersections"][0]
+    lane_counts = {r["id"]: int(r["laneCount"]) for r in net["roads"]}
+    widest = max(lane_counts[rid] for rid in inter["connectedRoads"])
+    assert widest == 4
+    # 4 lanes -> half-width 7 m, + the 4.5 m clearance.
+    assert inter["intersectionRadius"] == pytest.approx(11.5)
+
+
+def test_a_queued_vehicle_nose_clears_the_crossing_carriageway() -> None:
+    """The geometry the radius exists for.
+
+    The stop line sits on the box edge (`stopLineSOnRoad` =
+    `centreS +/- radius`), so a vehicle waiting at it has its **centre**
+    on the edge and its **nose** half a vehicle length further on. That
+    nose must not reach into the crossing carriageway — otherwise the
+    crossing traffic drives into the queue.
+
+    With the old hard-coded 8 m the 9 m bus's nose reached 3.5 m into
+    the 14 m wide crossing road; with the derived radius it stops exactly
+    at its edge.
+    """
+    net = parse_osm_xml(CROSS_OSM)
+    inter = net["intersections"][0]
+    radius = float(inter["intersectionRadius"])
+    lane_counts = {r["id"]: int(r["laneCount"]) for r in net["roads"]}
+    crossing_half_width = max(
+        lane_counts[rid] * ROAD_LANE_WIDTH / 2 for rid in inter["connectedRoads"]
+    )
+
+    # The forward approach of the NS road (w-10) stops `radius` before
+    # the junction's centre.
+    road = next(r for r in net["roads"] if r["id"] == "w-10")
+    centre_s, _ = _project_intersection_on_road(road, inter)
+    stop_s = centre_s - radius
+    nose_s = stop_s + LONGEST_VEHICLE_M / 2  # the centre stops on the line
+
+    # The nose has to stay outside the crossing carriageway …
+    assert centre_s - nose_s >= crossing_half_width
+    # … and the box has to hold the carriageway in the first place.
+    assert radius >= crossing_half_width
+    # The clearance is what buys that last inequality.
+    assert radius == pytest.approx(crossing_half_width + INTERSECTION_CLEARANCE_M)
+
+
+def test_a_road_without_any_open_stretch_gets_no_spawn_point() -> None:
+    """The defined rule for a road that is covered by junction boxes.
+
+    A wider box (sized by the lane model) reaches further along the
+    road, so a short link between two junctions can end up covered from
+    end to end. There is then no point on it that is outside every box,
+    and a car may not start inside an intersection — so the road gets NO
+    spawn point. That is a rule, not an accident: the old code parked
+    the car on the box edge, i.e. inside the junction.
+    """
+    xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+  <node id="1" lat="0.00000" lon="0.00000"/>
+  <node id="2" lat="0.00000" lon="0.00019"/>
+  <node id="3" lat="0.00100" lon="0.00000"/>
+  <node id="4" lat="0.00100" lon="0.00019"/>
+  <way id="10">
+    <nd ref="1"/><nd ref="2"/>
+    <tag k="highway" v="residential"/><tag k="lanes" v="4"/>
+  </way>
+  <way id="11">
+    <nd ref="1"/><nd ref="3"/>
+    <tag k="highway" v="residential"/><tag k="lanes" v="4"/>
+  </way>
+  <way id="12">
+    <nd ref="2"/><nd ref="4"/>
+    <tag k="highway" v="residential"/><tag k="lanes" v="4"/>
+  </way>
+</osm>
+"""
+    net = parse_osm_xml(xml)
+    road = next(r for r in net["roads"] if r["id"] == "w-10")
+    length = _road_length(road)
+    # The road is long enough to hold a car …
+    assert length >= 20.0
+    # … but both ends have a 4-lane junction, so the boxes cover it.
+    radius = max(float(i["intersectionRadius"]) for i in net["intersections"])
+    assert 2 * radius > length
+
+    # No spawn point — instead of one inside a junction.
+    assert not [sp for sp in net["spawnPoints"] if sp["roadId"] == "w-10"]
+    # And the helper agrees: there is no legal place to start a car.
+    assert _spawn_arc_length(road, net["intersections"]) is None
+
+
+def test_a_spawn_point_never_lands_inside_a_junction_box() -> None:
+    """The spawn placement rule under the wider boxes.
+
+    Every spawn point has to be outside every junction box of its own
+    road — measured to the box **edge**, which is what the traffic light
+    governs.
+    """
+    net = parse_osm_xml(CROSS_OSM)
+    roads = {r["id"]: r for r in net["roads"]}
+    for sp in net["spawnPoints"]:
+        road = roads[sp["roadId"]]
+        for inter in net["intersections"]:
+            if sp["roadId"] not in inter["connectedRoads"]:
+                continue
+            s, _ = _project_intersection_on_road(road, inter)
+            radius = float(inter["intersectionRadius"])
+            assert abs(sp["s"] - s) - radius >= 0
+
+
+@pytest.mark.skipif(
+    not REAL_OSM_FIXTURE.exists(),
+    reason="the real Shenzhen OSM extract is not checked in",
+)
+def test_real_map_junction_boxes_hold_the_crossing_carriageway() -> None:
+    """End-to-end on the real extract: every junction box is sized by
+    the lane model, and no car starts inside one."""
+    net = parse_osm_xml(REAL_OSM_FIXTURE.read_bytes())
+    lane_counts = {r["id"]: int(r["laneCount"]) for r in net["roads"]}
+    roads = {r["id"]: r for r in net["roads"]}
+
+    for inter in net["intersections"]:
+        widest = max(lane_counts[rid] for rid in inter["connectedRoads"] if rid in lane_counts)
+        half_width = widest * ROAD_LANE_WIDTH / 2
+        radius = float(inter["intersectionRadius"])
+        # The box holds the crossing carriageway …
+        assert radius >= half_width
+        # … and leaves room for a queued nose.
+        assert radius == pytest.approx(half_width + INTERSECTION_CLEARANCE_M)
+
+    # No spawn point sits inside a junction box, and none sits at the
+    # travel end (the simulation teleports such a car back to s ≈ 0).
+    inside = 0
+    at_end = 0
+    for sp in net["spawnPoints"]:
+        road = roads[sp["roadId"]]
+        if sp["s"] >= _road_length(road) - 1e-6:
+            at_end += 1
+        for inter in net["intersections"]:
+            if sp["roadId"] not in inter["connectedRoads"]:
+                continue
+            s, _ = _project_intersection_on_road(road, inter)
+            if abs(sp["s"] - s) < float(inter["intersectionRadius"]):
+                inside += 1
+                break
+    assert inside == 0
+    assert at_end == 0

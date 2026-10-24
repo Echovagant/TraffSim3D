@@ -73,6 +73,24 @@ That projection also decides where the cars appear. Spawning at `s = 0`
 because the road's start is where the junction usually is. The spawn
 point now goes to the end of the road that is furthest from every
 junction on it (`_spawn_arc_length`).
+
+How big the junction box is
+---------------------------
+The box is not a decoration: the stop line sits on its edge
+(`stopLineSOnRoad` = `centreS +/- intersectionRadius`), and the
+intersection-occupancy rule works on the same interval. A box that is
+narrower than the road it delimits leaves the outer lanes outside the
+box, so the rule never sees them.
+
+Its radius is therefore derived from the lane model — the widest
+connected road's half-width, plus the clearance a queued vehicle's nose
+needs (`junction_radius`). It used to be a hard-coded 8 m, which was
+narrower than a 6-lane road's 10.5 m half-width.
+
+A wider box reaches further along the road, so a short road can end up
+covered by the boxes of the junctions at both ends. Such a road gets no
+spawn point at all — there is no legal place on it to start a car
+(`_spawn_arc_length`).
 """
 
 from __future__ import annotations
@@ -121,6 +139,25 @@ BBox = tuple[float, float, float, float]  # (south, west, north, east)
 # has more than the single lane a one-way road ends up with.
 SPAWN_MIN_ROAD_LENGTH_M = 20.0
 SPAWN_MIN_LANES = 2
+
+# Width of one lane (m). Mirrors the frontend's `ROAD_LANE_WIDTH`
+# (`TraffSim3D-frontend/src/shared/constants/simulation.ts`), which is the
+# width the frontend uses for **every** road — imported ones included
+# (`laneGeometry.ts` -> `lanePoint` -> `laneOffset`). The two ends have to
+# agree: the junction box is computed here, but the carriageway it has to
+# contain is the one the frontend draws and the one the stop line and the
+# intersection-occupancy rule work on.
+ROAD_LANE_WIDTH = 3.5
+
+# Extra radius (m) on top of the crossing road's half-width, so that a
+# vehicle queued at the stop line does not stick its nose into the
+# crossing carriageway. The stop rule acts on the vehicle's **centre**
+# (`tick.ts` -> `distToStopLine`), so the nose may legitimately overhang
+# by up to half the longest vehicle (the 9 m bus -> 4.5 m).
+#
+# Mirrors the frontend's `INTERSECTION_CLEARANCE_M`
+# (`TraffSim3D-frontend/src/shared/constants/simulation.ts`).
+INTERSECTION_CLEARANCE_M = 4.5
 
 # How far (m) an intersection position may sit from a connected road's
 # centreline and still be trusted as "this intersection is on that road".
@@ -485,11 +522,49 @@ def _project_intersection_on_road(
     return s, True
 
 
+def junction_radius(lane_counts: Sequence[int], signalised: bool) -> float:
+    """The radius of a junction box, derived from the lane model.
+
+    The box has to do two jobs at once, and the second one is the reason it
+    cannot be a fixed number:
+
+    1. **Contain the crossing carriageway.** The stop line sits on the box
+       edge (`stopLineSOnRoad` = `centreS +/- intersectionRadius`), so a
+       box narrower than the road it delimits leaves the outer lanes
+       outside the box — and the intersection-occupancy rule never sees
+       them. The carriageway's half-width is `laneCount * ROAD_LANE_WIDTH
+       / 2`, and the box is shared by every approach, so the **widest**
+       connected road decides.
+    2. **Keep a queued nose out of the crossing carriageway.** The stop
+       rule acts on the vehicle's centre, so a car waiting at the stop
+       line may overhang by up to half its length (4.5 m for the 9 m
+       bus). The box needs that much clearance on top of the half-width.
+
+    So: `radius = widest half-width + clearance`, and the clearance is
+    only needed where a queue can actually form — a junction without a
+    traffic light has no stop line to queue at.
+
+    The imported maps treat **every** junction as signalised (see the
+    call site in `_build_network`), because the parser's own traffic
+    lights are far too sparse to be a proxy for "can a queue form here".
+
+    This mirrors the frontend's `junctionRadius`
+    (`TraffSim3D-frontend/src/application/services/defaultScene.ts`),
+    which is applied to the built-in scenes; the imported maps get it
+    here, because the parser is the only place that knows the lane
+    counts of an OSM network.
+    """
+    widest = max((int(count) for count in lane_counts), default=1)
+    half_width = widest * ROAD_LANE_WIDTH / 2.0
+    return half_width + (INTERSECTION_CLEARANCE_M if signalised else 0.0)
+
+
 def _spawn_arc_length(
     road: dict[str, Any],
     intersections: Sequence[dict[str, Any]],
-) -> float:
-    """The arc length of this road's spawn point.
+) -> float | None:
+    """The arc length of this road's spawn point, or `None` if there is
+    no legal place to put one.
 
     One spawn point per road, placed at the point that is **furthest from
     every intersection on that road** — measured to the *edge* of the
@@ -517,6 +592,16 @@ def _spawn_arc_length(
       only used when it is the *start* of the lane (`s = 0`).
     - A road without any intersection keeps `s = 0` (unchanged
       behaviour).
+
+    A junction box now reaches much further along the road than the old
+    hard-coded 8 m did (it is sized by the lane model, see
+    `junction_radius`), so a short road can be **entirely** covered by
+    the boxes of the junctions at its ends. There is then no point left
+    that is outside every box, and the answer is `None`: the road gets
+    **no spawn point at all**. That is a defined rule, not an accident —
+    the alternative (parking the car on the box edge) would put it inside
+    an intersection, which is the very thing the spawn placement exists
+    to prevent.
     """
     waypoints = road.get("waypoints") or []
     length = _polyline_length(waypoints)
@@ -566,9 +651,10 @@ def _spawn_arc_length(
             continue
         candidates.append((lo + hi) / 2.0)
     if not candidates:
-        # Every part of the road is inside a junction box. Fall back to
-        # the point that is least deep inside one.
-        return min((max(0.0, s - radius) for s, radius in junctions), default=0.0)
+        # Every part of the road is inside a junction box: there is no
+        # open stretch left, so there is no legal place to start a car.
+        # The road gets no spawn point (see `_build_spawn_points`).
+        return None
     # Prefer the point with the most room around it.
     return max(
         candidates,
@@ -601,6 +687,10 @@ def _build_spawn_points(
     `s` is not always 0: it is the end of the road that is furthest from
     every junction on it (see `_spawn_arc_length`), so an imported map
     does not spawn its cars inside an intersection.
+
+    A road whose whole length is covered by junction boxes gets **no**
+    spawn point: there is no point on it that is outside every box, and
+    a car may not start inside an intersection.
     """
     spawn_points: list[dict[str, Any]] = []
     for road in roads:
@@ -608,13 +698,18 @@ def _build_spawn_points(
             continue
         if _polyline_length(road["waypoints"]) < SPAWN_MIN_ROAD_LENGTH_M:
             continue
+        s = _spawn_arc_length(road, intersections)
+        if s is None:
+            # No open stretch: the road is covered by junction boxes from
+            # end to end. Skipped on purpose — see `_spawn_arc_length`.
+            continue
         road_id = str(road["id"])
         spawn_points.append(
             {
                 "id": f"sp-{road_id}-0",
                 "roadId": road_id,
                 "laneIndex": 0,
-                "s": _spawn_arc_length(road, intersections),
+                "s": s,
                 "occupiedBy": None,
             }
         )
@@ -868,7 +963,25 @@ def _build_network(
                 "position": {"x": node.x, "y": height, "z": node.z},
                 "trafficLights": traffic_lights,
                 "connectedRoads": [roads[i]["id"] for i in way_indices],
-                "intersectionRadius": 8,
+                # Sized by the lane model, not by a fixed number: the box
+                # has to hold the carriageway of the roads it crosses, and
+                # leave room for a queued vehicle's nose. The old
+                # hard-coded 8 m was narrower than a 6-lane road's
+                # half-width (10.5 m), so the outer lanes were never
+                # inside the box.
+                #
+                # Every imported junction counts as signalised: the
+                # frontend puts a stop line on the box edge of *every*
+                # junction, and the cross-road yield rule can stop a
+                # vehicle in front of any of them, so a queue can form
+                # there. The parser's own traffic lights are no proxy for
+                # that — it only attaches one to the OSM nodes tagged
+                # `highway=traffic_signals` (51 of the 7991 junctions in
+                # the Shenzhen extract).
+                "intersectionRadius": junction_radius(
+                    [int(roads[i].get("laneCount", 1)) for i in way_indices],
+                    signalised=True,
+                ),
             }
         )
 
