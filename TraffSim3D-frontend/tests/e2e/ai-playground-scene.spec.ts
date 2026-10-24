@@ -79,7 +79,13 @@ test('AI Playground: corridor scene option selectable', async ({ page }) => {
   await page.locator('[data-testid="start-train-button"]').click()
 
   // Verify train request included scene_kind=corridor
-  expect(capturedBody.scene_kind).toBe('corridor')
+  //
+  // `expect.poll`, not a bare assertion: the click only *dispatches* the
+  // handler — `onStart` is async and issues its fetch a tick later. On a
+  // busy machine (the full suite) the assertion used to run before the
+  // request existed and read an empty body, so the spec failed at random.
+  // That is a race in the test, not in the product.
+  await expect.poll(() => capturedBody.scene_kind).toBe('corridor')
 
   // Status should reflect corridor scene_kind after refresh
   await page.waitForTimeout(500)
