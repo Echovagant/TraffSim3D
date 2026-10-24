@@ -312,25 +312,6 @@ jobs:
         # on a bare runner.
         run: npx playwright install --with-deps chromium
 
-      - name: Start the backend on :8001
-        working-directory: TraffSim3D-backend
-        run: |
-          nohup python -m uvicorn app.main:app --port 8001 > /tmp/uvicorn.log 2>&1 &
-          echo "uvicorn started (pid $!)"
-
-      - name: Wait for the backend to answer /health
-        run: |
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8001/health > /dev/null 2>&1; then
-              echo "backend is healthy"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "backend did not become healthy within 60s"
-          cat /tmp/uvicorn.log || true
-          exit 1
-
       - name: Generate the CI-only Playwright config
         # `playwright.config.ts` hard-codes use.baseURL and webServer.url
         # to http://localhost:5173 and starts vite on its default port.
@@ -375,7 +356,8 @@ jobs:
           })
           EOF
 
-      - name: Run the Playwright suite
+      - name: Run the Playwright suite (the backend lives in this step)
+        working-directory: TraffSim3D-frontend
         env:
           # VITE_BACKEND_PORT drives the vite dev-server proxy
           # (/api and /health -> localhost:8001). VITE_BACKEND_URL is the
@@ -400,7 +382,36 @@ jobs:
           # below runs exactly that spec, on its own ports and its own
           # backend, so it can never contaminate this suite.
           E2E_BACKEND_URL: 'http://localhost:8001'
-        run: npx playwright test --config=playwright.ci.config.ts
+        run: |
+          # The backend is started **in this step**, not in an earlier one.
+          #
+          # A backgrounded process does not reliably survive the boundary
+          # between two steps: the runner tears the step's process group
+          # down when the step ends, so the next step finds no server and
+          # the health check times out. Measured 2026-10-25: this job
+          # failed at "Wait for the backend to answer /health" on both
+          # runs 74 and 75, while the very same backend starts in a
+          # second on this machine.
+          #
+          # Starting it here keeps it alive for exactly as long as the
+          # tests need it, and the uvicorn log lands in this step's own
+          # output — so a crash is visible instead of a bare timeout.
+          ( cd ../TraffSim3D-backend && exec python -m uvicorn app.main:app --port 8001 ) > /tmp/uvicorn.log 2>&1 &
+          BACKEND_PID=$!
+          trap 'kill $BACKEND_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8001/health > /dev/null 2>&1; then
+              echo "backend is healthy"
+              break
+            fi
+            if [ "$i" -ge 30 ]; then
+              echo "backend did not become healthy within 60s"
+              cat /tmp/uvicorn.log || true
+              exit 1
+            fi
+            sleep 2
+          done
+          npx playwright test --config=playwright.ci.config.ts
 
   e2e-real:
     name: E2E — real PPO training (blocking)
@@ -477,41 +488,7 @@ jobs:
       - name: Install the Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: Start the backend on :8011
-        # A dedicated RL data directory keeps this job's status document
-        # and checkpoints away from everything else, and guarantees the
-        # run starts from a clean slate.
-        working-directory: TraffSim3D-backend
-        env:
-          TRAFFIC_RL_DATA_DIR: ${{ github.workspace }}/TraffSim3D-backend/.data/rl-real-e2e
-        run: |
-          nohup python -m uvicorn app.main:app --port 8011 > /tmp/uvicorn-real.log 2>&1 &
-          echo "uvicorn started (pid $!)"
-
-      - name: Wait for the backend and assert stable-baselines3 is installed
-        # The capabilities endpoint imports torch on the first call, which
-        # takes far longer than a plain /health probe — so the wait loop
-        # asks for capabilities, not /health, and allows a generous
-        # budget for the cold import.
-        #
-        # This step FAILS the job when SB3 is missing. It must: a job
-        # that quietly skipped the real run would be worse than no job.
-        run: |
-          for i in $(seq 1 60); do
-            if curl -fsS http://localhost:8011/api/v1/rl/capabilities > /tmp/rl-caps.json 2>/dev/null; then
-              break
-            fi
-            sleep 2
-          done
-          if [ ! -s /tmp/rl-caps.json ]; then
-            echo "backend did not answer /api/v1/rl/capabilities within 120s"
-            cat /tmp/uvicorn-real.log || true
-            exit 1
-          fi
-          cat /tmp/rl-caps.json
-          python -c "import json,sys;c=json.load(open('/tmp/rl-caps.json'));print('sb3_available =',c['sb3_available'],'| torch =',c['torch_version'],'| cuda =',c['cuda_available']);sys.exit(0 if c['sb3_available'] else 'stable-baselines3 is NOT installed -> the real-training run would silently degrade to dry-run')"
-
-      - name: Run the real PPO training e2e
+      - name: Run the real PPO training e2e (the backend lives in this step)
         # E2E_REAL_TRAINING=1 is the spec's opt-in gate; the npm script
         # sets it too, but it is spelled out here so the job reads on its
         # own.
@@ -529,6 +506,13 @@ jobs:
         #
         # The spec itself talks to the backend directly (Node, no CORS)
         # through E2E_BACKEND_URL.
+        #
+        # The backend is started **in this step**: a backgrounded process
+        # does not reliably survive the boundary between two steps (the
+        # runner tears the step's process group down), so the next step
+        # would find no server. Measured 2026-10-25: this job failed at
+        # the health/capabilities wait on runs 74 and 75 while the same
+        # backend starts in a second on this machine.
         env:
           E2E_REAL_TRAINING: '1'
           E2E_FRONTEND_PORT: '5191'
@@ -538,5 +522,33 @@ jobs:
           # The hosted runners have no GPU; pin the device so the job is
           # deterministic on any runner image.
           E2E_REAL_DEVICE: 'cpu'
+          # A dedicated RL data directory keeps this job's status document
+          # and checkpoints away from everything else, and guarantees the
+          # run starts from a clean slate.
+          TRAFFIC_RL_DATA_DIR: ${{ github.workspace }}/TraffSim3D-backend/.data/rl-real-e2e
           E2E_REAL_STEPS: '200'
-        run: npm run test:e2e:real
+        run: |
+          ( cd ../TraffSim3D-backend && exec python -m uvicorn app.main:app --port 8011 ) > /tmp/uvicorn-real.log 2>&1 &
+          BACKEND_PID=$!
+          trap 'kill $BACKEND_PID 2>/dev/null || true' EXIT
+          # The capabilities endpoint imports torch on the first call, which
+          # takes far longer than a plain /health probe — so the wait loop
+          # asks for capabilities, not /health, and allows a generous
+          # budget for the cold import.
+          #
+          # This FAILS the job when SB3 is missing. It must: a job that
+          # quietly skipped the real run would be worse than no job.
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8011/api/v1/rl/capabilities > /tmp/rl-caps.json 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          if [ ! -s /tmp/rl-caps.json ]; then
+            echo "backend did not answer /api/v1/rl/capabilities within 120s"
+            cat /tmp/uvicorn-real.log || true
+            exit 1
+          fi
+          cat /tmp/rl-caps.json
+          python -c "import json,sys;c=json.load(open('/tmp/rl-caps.json'));print('sb3_available =',c['sb3_available'],'| torch =',c['torch_version'],'| cuda =',c['cuda_available']);sys.exit(0 if c['sb3_available'] else 'stable-baselines3 is NOT installed -> the real-training run would silently degrade to dry-run')"
+          npm run test:e2e:real
