@@ -11,6 +11,7 @@ import {
   expectSceneScreenshot,
   pauseSimulation,
 } from './helpers/wait'
+import { freezeScene } from './helpers/freezeScene'
 
 test.describe('Scene switch screenshots', () => {
   test('cross intersection scene', async ({ page }) => {
@@ -26,13 +27,21 @@ test.describe('Scene switch screenshots', () => {
 
   test('rectangular loop scene', async ({ page }) => {
     await waitForSceneReady(page)
-    await switchScene(page, 'loop')
+    // Frozen: the loop scene's corner boxes grew (4 m -> 8.5 m — the
+    // rule's clearance now applies to every junction, corners included),
+    // so this capture is re-recorded. A live frame drifts by ~1 %
+    // between runs (the vehicles move), which is above the 0.5 %
+    // tolerance — the freeze is the convention `helpers/wait.ts`
+    // prescribes for every scene screenshot.
+    await freezeScene(page, 'loop')
     await expectSceneScreenshot(page, 'loop-scene.png')
   })
 
   test('elevated bridge scene', async ({ page }) => {
     await waitForSceneReady(page)
-    await switchScene(page, 'elevated')
+    // Frozen, for the same reason as the loop scene: the elevated
+    // scene's ramp-end junction box grew (7 m -> 11.5 m).
+    await freezeScene(page, 'elevated')
     await expectSceneScreenshot(page, 'elevated-scene.png')
   })
 

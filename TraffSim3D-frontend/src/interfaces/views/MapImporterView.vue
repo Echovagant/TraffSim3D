@@ -516,10 +516,10 @@ const loadFixture = (): void => {
         },
       ],
       connectedRoads: ['w-1', 'w-2', 'w-3'],
-      // The example's roads are 4-lane (half-width 7 m), and this junction
-      // has a traffic light, so the rule gives 7 + 4.5 = 11.5 m — the same
-      // number the built-in scenes and the imported maps derive.
-      intersectionRadius: junctionRadius(4, true),
+      // The example's roads are 4-lane (half-width 7 m), and the rule
+      // adds the 4.5 m clearance: 7 + 4.5 = 11.5 m — the same number
+      // the built-in scenes and the imported maps derive.
+      intersectionRadius: junctionRadius(4),
     },
   }
   const network = createRoadNetworkFrom({

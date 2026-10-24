@@ -764,35 +764,41 @@ def test_mirrored_constants_match_the_frontend() -> None:
 
 
 def test_junction_radius_follows_the_lane_model() -> None:
-    """The radius is the widest connected road's half-width (+ clearance).
+    """The radius is the widest connected road's half-width + the clearance.
 
     The numbers are literals on purpose — see above.
     """
-    # 6 lanes x 3.5 m = 21 m wide -> half-width 10.5 m.
-    assert junction_radius([6], signalised=True) == 15.0
-    assert junction_radius([6], signalised=False) == 10.5
-    # 4 lanes -> 14 m wide -> half-width 7 m.
-    assert junction_radius([4], signalised=True) == 11.5
-    assert junction_radius([4], signalised=False) == 7.0
-    # 2 lanes -> 7 m wide -> half-width 3.5 m.
-    assert junction_radius([2], signalised=True) == 8.0
-    # 1 lane -> 3.5 m wide -> half-width 1.75 m.
-    assert junction_radius([1], signalised=True) == 6.25
+    # 6 lanes x 3.5 m = 21 m wide -> half-width 10.5 m + 4.5 m clearance.
+    assert junction_radius([6]) == 15.0
+    # 4 lanes -> 14 m wide -> half-width 7 m + 4.5 m clearance.
+    assert junction_radius([4]) == 11.5
+    # 2 lanes -> 7 m wide -> half-width 3.5 m + 4.5 m clearance.
+    assert junction_radius([2]) == 8.0
+    # 1 lane -> 3.5 m wide -> half-width 1.75 m + 4.5 m clearance.
+    assert junction_radius([1]) == 6.25
     # The **widest** connected road decides: the box is shared by every
     # approach, so it has to hold the widest carriageway.
-    assert junction_radius([1, 6], signalised=True) == 15.0
-    assert junction_radius([6, 1], signalised=True) == 15.0
+    assert junction_radius([1, 6]) == 15.0
+    assert junction_radius([6, 1]) == 15.0
     # An empty junction still has a sane box.
-    assert junction_radius([], signalised=True) == INTERSECTION_CLEARANCE_M + ROAD_LANE_WIDTH / 2
+    assert junction_radius([]) == INTERSECTION_CLEARANCE_M + ROAD_LANE_WIDTH / 2
 
 
-def test_a_signalised_junction_adds_the_clearance() -> None:
-    """The clearance is what keeps a queued nose out of the crossing
-    carriageway — so it is added exactly where a queue can form."""
-    with_clearance = junction_radius([4], signalised=True)
-    without = junction_radius([4], signalised=False)
-    assert with_clearance - without == INTERSECTION_CLEARANCE_M
-    assert with_clearance > without
+def test_the_clearance_applies_to_every_junction() -> None:
+    """The clearance is unconditional — there is no "queueable" flag any more.
+
+    The clearance is what keeps a queued nose out of the crossing
+    carriageway, and a queue can form at **every** junction: the frontend
+    paints a stop line on every junction's box edge and the cross-road
+    yield rule can stop a vehicle in front of any of them, lit or not.
+    """
+    for lane_counts in ([1], [2], [4], [6], [1, 6], []):
+        half_width = max(lane_counts, default=1) * ROAD_LANE_WIDTH / 2
+        assert junction_radius(lane_counts) == half_width + INTERSECTION_CLEARANCE_M
+        # The box always reaches past the crossing carriageway by exactly
+        # the clearance — never by less.
+        assert junction_radius(lane_counts) - half_width == INTERSECTION_CLEARANCE_M
+        assert junction_radius(lane_counts) > half_width
 
 
 CROSS_OSM = b"""<?xml version="1.0" encoding="UTF-8"?>

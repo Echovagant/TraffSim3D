@@ -312,22 +312,20 @@ const normalizeIntersection = (
   const laneCounts = connectedRoads
     .map((roadId) => laneCountOf(roadId))
     .filter((count): count is number => count !== undefined)
-  // Every imported junction can hold a queue: the frontend paints a stop
-  // line on **every** junction's box edge (`roadStopLines` does not look
-  // at the traffic lights), and the cross-road yield rule
-  // (`tick.ts` → `applyCrossRoadYield`) can stop a vehicle in front of any
-  // of them, lit or not. The parser's own traffic lights are no proxy for
-  // that — it only attaches one to the OSM nodes tagged
+  // The rule is unconditional — the clearance applies to every junction,
+  // imported or built-in. Every junction can hold a queue: the frontend
+  // paints a stop line on **every** junction's box edge (`roadStopLines`
+  // does not look at the traffic lights), and the cross-road yield rule
+  // (`tick.ts` → `applyCrossRoadYield`) can stop a vehicle in front of
+  // any of them, lit or not. The parser's own traffic lights are no proxy
+  // for that — it only attaches one to the OSM nodes tagged
   // `highway=traffic_signals` (51 of the 7991 junctions in the Shenzhen
   // extract).
   //
   // A junction whose roads the payload did not carry falls back to the
   // default lane count — the same 2-lane road the old hard-coded 8 m
   // default assumed, but derived by the rule instead of asserted.
-  const radius = junctionRadiusForRoads(
-    laneCounts.length > 0 ? laneCounts : [DEFAULT_LANE_COUNT],
-    true,
-  )
+  const radius = junctionRadiusForRoads(laneCounts.length > 0 ? laneCounts : [DEFAULT_LANE_COUNT])
   const payloadRadius = finiteNumber(raw.intersectionRadius)
   return {
     intersection: {

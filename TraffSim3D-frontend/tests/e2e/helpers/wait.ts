@@ -94,21 +94,39 @@ export const SCENE_CLIP = { x: 265, y: 270, width: 700, height: 460 } as const
  * got depends on how long the run took — which is exactly the variability
  * the freeze was supposed to remove. With the reset, the captured frame
  * shows the scene as it was authored, so the baseline is reproducible.
+ *
+ * ⚠ The reset here is **not** the product's `R` shortcut. The product's
+ * `world.reset()` means "reset the scene to the **default**" (the
+ * cross-intersection scene) — that is what the keyboard-shortcuts modal
+ * documents — so calling it from here swapped the scene under the
+ * capture's feet: a capture of the corridor scene ended up showing the
+ * cross intersection under the corridor's baseline name. This helper
+ * therefore rebuilds **the scene that is on screen** through the store's
+ * own `switchScene`, which puts the vehicles back in their authored
+ * positions without changing which scene it is.
  */
 export const pauseSimulation = async (page: Page, { resetFirst = true } = {}): Promise<void> => {
-  if (resetFirst) {
-    await page.evaluate(() => {
-      const w = window as unknown as { __world?: { reset?: () => void } }
-      if (w.__world?.reset) w.__world.reset()
-    })
-    // The reset rebuilds the bodies; give the renderer a frame to pick the
-    // new poses up before the freeze is observed.
-    await page.waitForTimeout(250)
-  }
+  // Stop the simulation **first**. While the scene is rebuilt, the fresh
+  // vehicles must not start driving — otherwise the captured frame
+  // depends on how long the rebuild took, which is the very variability
+  // the freeze is here to remove. (`loadNetwork` does not resume the
+  // simulation, so pausing first is enough.)
   await page.evaluate(() => {
     const w = window as unknown as { __world?: { isRunning?: boolean } }
     if (w.__world) w.__world.isRunning = false
   })
+  if (resetFirst) {
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        __world?: { currentSceneKind?: string; switchScene?: (kind: string) => void }
+      }
+      const kind = w.__world?.currentSceneKind ?? 'cross'
+      w.__world?.switchScene?.(kind)
+    })
+    // The scene was rebuilt; give the renderer a frame to pick the
+    // new poses up before the freeze is observed.
+    await page.waitForTimeout(250)
+  }
   // One more frame so the renderer picks up the frozen state.
   await page.waitForTimeout(150)
 }

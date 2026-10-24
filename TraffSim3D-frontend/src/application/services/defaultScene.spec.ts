@@ -4,6 +4,11 @@
 //   - cross: 2 roads + 1 (4-way) intersection + 6 vehicles
 //   - t:     3 roads + 1 (3-way) intersection + 4 vehicles
 //   - loop:  4 roads + 4 corner intersections + 8 vehicles
+//
+// The junction-box radius is checked against **the one rule**
+// (`@domain/services/junctionRadius`): the crossing carriageway plus the
+// nose-overhang clearance — for every junction, lit or not. A corner
+// adds the turning envelope on top of it.
 
 import { describe, it, expect } from 'vitest'
 import {
@@ -13,6 +18,10 @@ import {
   buildElevatedScene,
   buildCorridorScene,
 } from './defaultScene'
+import { CORNER_TURN_ENVELOPE_M } from '@domain/services/junctionRadius'
+import { INTERSECTION_CLEARANCE_M, ROAD_LANE_WIDTH } from '@shared/constants/simulation'
+import type { RoadNetwork } from '@domain/entities/RoadNetwork'
+import type { Intersection } from '@domain/entities/Intersection'
 
 describe('buildCrossIntersectionNetwork', () => {
   it('produces 2 roads, 1 (4-way) intersection, 6 vehicles', () => {
@@ -53,7 +62,15 @@ describe('buildRectangularLoopNetwork', () => {
     for (const inter of Object.values(net.intersections)) {
       expect(inter.trafficLights.length).toBe(0)
       expect(inter.connectedRoads.length).toBe(2)
-      expect(inter.intersectionRadius).toBe(4)
+      // 2 lanes x 3.5 m = 7 m wide -> half-width 3.5 m, plus the 4.5 m
+      // clearance, plus the 0.5 m turning envelope: 8.5 m. The clearance
+      // applies here too — an unlit corner can still hold a queue (the
+      // front-end paints a stop line on every junction's box edge, and
+      // the cross-road yield rule can stop a vehicle in front of any of
+      // them).
+      expect(inter.intersectionRadius).toBe(
+        (2 * ROAD_LANE_WIDTH) / 2 + INTERSECTION_CLEARANCE_M + CORNER_TURN_ENVELOPE_M,
+      )
     }
   })
 })
@@ -114,6 +131,89 @@ describe('buildCorridorScene', () => {
     const net = buildCorridorScene()
     for (const inter of Object.values(net.intersections)) {
       expect(inter.trafficLights.length).toBe(2)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// the one rule
+// ---------------------------------------------------------------------------
+
+/** The box the rule gives a junction with `laneCount` lanes. */
+const ruleRadius = (laneCount: number, corner = false): number =>
+  (laneCount * ROAD_LANE_WIDTH) / 2 +
+  INTERSECTION_CLEARANCE_M +
+  (corner ? CORNER_TURN_ENVELOPE_M : 0)
+
+/** The half-width of the widest road a junction connects. */
+const widestHalfWidth = (net: RoadNetwork, inter: Intersection): number =>
+  Math.max(
+    ...inter.connectedRoads.map((id) => {
+      const road = net.roads[id]
+      if (!road) return 0
+      return (road.laneCount * ROAD_LANE_WIDTH) / 2
+    }),
+  )
+
+const SCENES: Array<{ name: string; build: () => RoadNetwork }> = [
+  { name: 'cross', build: buildCrossIntersectionNetwork },
+  { name: 't', build: buildTJunctionNetwork },
+  { name: 'loop', build: buildRectangularLoopNetwork },
+  { name: 'elevated', build: buildElevatedScene },
+  { name: 'corridor', build: buildCorridorScene },
+]
+
+describe('every built-in scene follows the one junction-box rule', () => {
+  it('every junction box holds the crossing carriageway PLUS the clearance', () => {
+    for (const { name, build } of SCENES) {
+      const net = build()
+      for (const inter of Object.values(net.intersections)) {
+        const half = widestHalfWidth(net, inter)
+        expect(
+          inter.intersectionRadius,
+          `${name}/${inter.id}: the box must hold the carriageway (${half} m) plus the clearance`,
+        ).toBeGreaterThanOrEqual(half + INTERSECTION_CLEARANCE_M)
+      }
+    }
+  })
+
+  it('no junction box is the bare half-width any more', () => {
+    // The regression this file exists for: a junction that only carries
+    // the carriageway's half-width has no room for a queued vehicle's
+    // nose, so the crossing traffic drives into it.
+    for (const { name, build } of SCENES) {
+      const net = build()
+      for (const inter of Object.values(net.intersections)) {
+        expect(inter.intersectionRadius, `${name}/${inter.id}`).not.toBe(
+          widestHalfWidth(net, inter),
+        )
+      }
+    }
+  })
+
+  it("each scene's junction radii are exactly the rule's numbers", () => {
+    // Written as the rule's terms, not as bare literals, so a change to
+    // the rule shows up here — and so the table cannot drift away from
+    // the geometry it describes.
+    const expected: Record<string, Record<string, number>> = {
+      cross: { 'i-center': ruleRadius(6) },
+      t: { 'i-t': ruleRadius(4) },
+      loop: {
+        'i-corner-0': ruleRadius(2, true),
+        'i-corner-1': ruleRadius(2, true),
+        'i-corner-2': ruleRadius(2, true),
+        'i-corner-3': ruleRadius(2, true),
+      },
+      elevated: { 'i-low': ruleRadius(4), 'i-high-start': ruleRadius(4) },
+      corridor: { 'i-north': ruleRadius(4), 'i-south': ruleRadius(4) },
+    }
+    for (const { name, build } of SCENES) {
+      const net = build()
+      const want = expected[name]!
+      expect(Object.keys(net.intersections).sort()).toEqual(Object.keys(want).sort())
+      for (const [id, radius] of Object.entries(want)) {
+        expect(net.intersections[id]!.intersectionRadius, `${name}/${id}`).toBe(radius)
+      }
     }
   })
 })

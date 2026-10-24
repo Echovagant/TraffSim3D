@@ -183,7 +183,7 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
     // vehicle queued at the stop line stopped with its NOSE 0.7 m inside
     // the crossing road's outermost lane — where the crossing traffic
     // drove into it.
-    intersectionRadius: junctionRadius(6, true),
+    intersectionRadius: junctionRadius(6),
   }
   net.intersections[intersection.id] = intersection
 
@@ -332,7 +332,7 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
     // 4 lanes x 3.5 m = 14 m wide -> half-width 7 m, plus the 4.5 m
     // clearance: 11.5 m. The box used to be 6 m — narrower than the
     // crossing carriageway, so the outer lanes were never inside it.
-    intersectionRadius: junctionRadius(4, true),
+    intersectionRadius: junctionRadius(4),
   }
   net.intersections[intersectionT.id] = intersectionT
 
@@ -400,10 +400,10 @@ export const buildRectangularLoopNetwork = (): RoadNetwork => {
       position: a,
       trafficLights: [],
       connectedRoads: [`r-loop-${i}`, `r-loop-${(i + 3) % 4}`],
-      // 2 lanes x 3.5 m = 7 m wide -> half-width 3.5 m. The corner has no
-      // traffic light, so no queue can form and no nose can overhang: the
-      // box only has to hold the carriageway and the car **in the turn**
-      // (see `cornerRadius` -> `CORNER_TURN_ENVELOPE_M`): 3.5 + 0.5 = 4 m.
+      // 2 lanes x 3.5 m = 7 m wide -> half-width 3.5 m, plus the 4.5 m
+      // clearance, plus the extra room a vehicle **in the turn** needs
+      // (see `cornerRadius` -> `CORNER_TURN_ENVELOPE_M`):
+      // 3.5 + 4.5 + 0.5 = 8.5 m.
       intersectionRadius: cornerRadius(2),
     }
     net.intersections[id] = inter
@@ -544,7 +544,7 @@ export const buildElevatedScene = (): RoadNetwork => {
     // 4 lanes x 3.5 m = 14 m wide -> half-width 7 m, plus the 4.5 m
     // clearance: 11.5 m (the box used to be 6 m — narrower than the
     // crossing carriageway).
-    intersectionRadius: junctionRadius(4, true),
+    intersectionRadius: junctionRadius(4),
   }
   net.intersections[intersectionLow.id] = intersectionLow
 
@@ -556,11 +556,15 @@ export const buildElevatedScene = (): RoadNetwork => {
     position: { x: RAMP_END_X, y: LEVEL_HEIGHT, z: 0 },
     trafficLights: [],
     connectedRoads: ['r-ramp', 'r-ew-high'],
-    // The ramp's end is a **through** point, not a junction: no traffic
-    // light, so no queue can form and no nose can overhang. The box only
-    // has to hold the carriageway: 4 lanes x 3.5 m = 14 m -> half-width
-    // 7 m (the box used to be 4 m, narrower than the road).
-    intersectionRadius: junctionRadius(4, false),
+    // The ramp's end is a **through** point, not a junction: it has no
+    // traffic light, so no vehicle is held there by the light. The box
+    // still carries the clearance, because the front-end paints a stop
+    // line on every junction's box edge and the cross-road yield rule
+    // can stop a vehicle in front of any of them, lit or not.
+    // 4 lanes x 3.5 m = 14 m -> half-width 7 m + 4.5 m clearance: 11.5 m
+    // (the box used to be 7 m — the half-width alone, without the
+    // clearance).
+    intersectionRadius: junctionRadius(4),
   }
   net.intersections[intersectionHighStart.id] = intersectionHighStart
 
@@ -701,7 +705,7 @@ export const buildCorridorScene = (): RoadNetwork => {
     // 4 lanes x 3.5 m = 14 m wide -> half-width 7 m, plus the 4.5 m
     // clearance: 11.5 m (the box used to be 6 m — narrower than the
     // crossing carriageway, so the outer lanes were never inside it).
-    intersectionRadius: junctionRadius(4, true),
+    intersectionRadius: junctionRadius(4),
   }
   net.intersections[intersectionNorth.id] = intersectionNorth
 
@@ -728,7 +732,7 @@ export const buildCorridorScene = (): RoadNetwork => {
       },
     ],
     connectedRoads: ['r-ns-corridor', 'r-ew-south'],
-    intersectionRadius: junctionRadius(4, true),
+    intersectionRadius: junctionRadius(4),
   }
   net.intersections[intersectionSouth.id] = intersectionSouth
 

@@ -12,7 +12,13 @@
  *     further zoom-out than a 60m intersection).
  */
 import { test, expect, type Page } from '@playwright/test'
-import { waitForSceneReady, switchScene, expectSceneScreenshot } from './helpers/wait'
+import {
+  waitForSceneReady,
+  switchScene,
+  expectSceneScreenshot,
+  waitForCameraIdle,
+} from './helpers/wait'
+import { pauseSim } from './helpers/freezeScene'
 
 interface CameraState {
   position: { x: number; y: number; z: number }
@@ -128,8 +134,17 @@ test('scene switch reruns fit', async ({ page }) => {
   // 60×60 cross scene, so the fit distance increases. We use loop
   // (not corridor) because corridor and cross happen to share the
   // same bbox (both are 60×60).
+  // Frozen BEFORE the switch: the loop scene's corner boxes grew (4 m ->
+  // 8.5 m — the rule's clearance now applies to every junction), so this
+  // capture is re-recorded, and a live frame drifts by ~1 % between runs
+  // — above the 0.5 % tolerance. Pausing before the switch leaves the
+  // scene at its authored frame (every vehicle where the scene put it).
+  await pauseSim(page)
   await switchScene(page, 'loop')
   await settleFit(page)
+  // Wait for the camera to actually come to rest rather than guessing a
+  // duration — see waitForCameraIdle.
+  await waitForCameraIdle(page)
   const loop = await getCamera(page)
   expect(loop).not.toBeNull()
   expect(loop!.distance, `cross=${cross!.distance}, loop=${loop!.distance}`).toBeGreaterThan(

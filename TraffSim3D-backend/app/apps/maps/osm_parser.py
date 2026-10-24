@@ -522,7 +522,7 @@ def _project_intersection_on_road(
     return s, True
 
 
-def junction_radius(lane_counts: Sequence[int], signalised: bool) -> float:
+def junction_radius(lane_counts: Sequence[int]) -> float:
     """The radius of a junction box, derived from the lane model.
 
     The box has to do two jobs at once, and the second one is the reason it
@@ -540,23 +540,28 @@ def junction_radius(lane_counts: Sequence[int], signalised: bool) -> float:
        line may overhang by up to half its length (4.5 m for the 9 m
        bus). The box needs that much clearance on top of the half-width.
 
-    So: `radius = widest half-width + clearance`, and the clearance is
-    only needed where a queue can actually form — a junction without a
-    traffic light has no stop line to queue at.
+    So: `radius = widest half-width + clearance`.
 
-    The imported maps treat **every** junction as signalised (see the
-    call site in `_build_network`), because the parser's own traffic
-    lights are far too sparse to be a proxy for "can a queue form here".
+    The clearance is **unconditional**. It used to be conditional on the
+    junction being signalised, but that condition was wrong: the frontend
+    paints a stop line on **every** junction's box edge (`roadStopLines`
+    does not look at the traffic lights) and the cross-road yield rule
+    (`tick.ts` -> `applyCrossRoadYield`) can stop a vehicle in front of
+    any of them, lit or not — so every junction can hold a queue. The
+    parser's own traffic lights are no proxy for that either: it only
+    attaches one to the OSM nodes tagged `highway=traffic_signals` (51 of
+    the 7991 junctions in the Shenzhen extract). The flag is gone, so the
+    two sides of the contract have literally the same formula.
 
     This mirrors the frontend's `junctionRadius`
-    (`TraffSim3D-frontend/src/application/services/defaultScene.ts`),
+    (`TraffSim3D-frontend/src/domain/services/junctionRadius.ts`),
     which is applied to the built-in scenes; the imported maps get it
     here, because the parser is the only place that knows the lane
     counts of an OSM network.
     """
     widest = max((int(count) for count in lane_counts), default=1)
     half_width = widest * ROAD_LANE_WIDTH / 2.0
-    return half_width + (INTERSECTION_CLEARANCE_M if signalised else 0.0)
+    return half_width + INTERSECTION_CLEARANCE_M
 
 
 def _spawn_arc_length(
@@ -970,17 +975,16 @@ def _build_network(
                 # half-width (10.5 m), so the outer lanes were never
                 # inside the box.
                 #
-                # Every imported junction counts as signalised: the
-                # frontend puts a stop line on the box edge of *every*
-                # junction, and the cross-road yield rule can stop a
-                # vehicle in front of any of them, so a queue can form
-                # there. The parser's own traffic lights are no proxy for
-                # that — it only attaches one to the OSM nodes tagged
+                # The clearance is unconditional: the frontend puts a stop
+                # line on the box edge of *every* junction, and the
+                # cross-road yield rule can stop a vehicle in front of
+                # any of them, so a queue can form there. The parser's
+                # own traffic lights are no proxy for that — it only
+                # attaches one to the OSM nodes tagged
                 # `highway=traffic_signals` (51 of the 7991 junctions in
                 # the Shenzhen extract).
                 "intersectionRadius": junction_radius(
                     [int(roads[i].get("laneCount", 1)) for i in way_indices],
-                    signalised=True,
                 ),
             }
         )

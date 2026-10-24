@@ -14,11 +14,16 @@
  * the visual screenshot here is the integration check.
  */
 import { test, expect } from '@playwright/test'
-import { waitForSceneReady, switchScene, expectSceneScreenshot } from './helpers/wait'
+import { waitForSceneReady, expectSceneScreenshot } from './helpers/wait'
+import { advanceSimulation, freezeScene } from './helpers/freezeScene'
 
 test('elevated scene: bridge visible + 4 vehicles + v-e3 starts on ramp', async ({ page }) => {
   await waitForSceneReady(page)
-  await switchScene(page, 'elevated')
+  // Frozen: the elevated scene's ramp-end junction box grew (7 m ->
+  // 11.5 m — the rule's clearance now applies to every junction), so
+  // this capture is re-recorded. A live frame drifts by ~1 % between
+  // runs (the vehicles move), which is above the 0.5 % tolerance.
+  await freezeScene(page, 'elevated')
 
   // Wait until the elevated scene's 4 vehicles are present (v-e1..v-e4).
   await page.waitForFunction(
@@ -35,8 +40,11 @@ test('elevated scene: bridge visible + 4 vehicles + v-e3 starts on ramp', async 
   )
 
   // Visual regression of the elevated bridge from the default camera angle.
-  // Distinct name from scenes.spec.ts's `elevated-scene.png`: this test waits
-  // for all 4 vehicles before capturing, so the two are different scenes-in-time.
+  // Distinct name from scenes.spec.ts's `elevated-scene.png`: this test
+  // captures the scene at its authored frame (every vehicle where the scene
+  // put it), while `elevated-after-3s.png` below captures the same scene
+  // three seconds of simulation later — so the two are different
+  // scenes-in-time.
   await expectSceneScreenshot(page, 'elevated-ramp-scene.png')
 
   // Verify v-e3 is on the ramp road, at the height the ramp has **at the
@@ -112,7 +120,15 @@ test('elevated scene: bridge visible + 4 vehicles + v-e3 starts on ramp', async 
   })
   expect(level).toBe(1)
 
-  // After a few seconds, capture a "running" screenshot for visual review.
-  await page.waitForTimeout(3000)
+  // After a few seconds of simulation, capture a "running" screenshot for
+  // visual review.
+  //
+  // The three seconds are **simulation** time, not wall clock: the store's
+  // own `step` is called a fixed number of times with a fixed dt. Letting
+  // the scene run for 3 s of wall clock would make the capture depend on
+  // the machine's frame rate — two runs of this spec would then capture
+  // two different frames and the committed baseline could never be
+  // compared.
+  await advanceSimulation(page, 180) // 180 x (1/60) s = 3 s
   await expectSceneScreenshot(page, 'elevated-after-3s.png')
 })

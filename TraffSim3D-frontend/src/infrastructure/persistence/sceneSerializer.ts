@@ -273,16 +273,16 @@ export const hydrateNetwork = (raw: unknown): HydrationResult => {
     //
     // The radius is now derived from the lane model of the roads the
     // junction connects — the same rule the built-in scenes and the
-    // imported maps use (`@domain/services/junctionRadius`). `queueable`
-    // is true: the front-end paints a stop line on every junction's box
-    // edge and the cross-road yield rule can stop a vehicle in front of
-    // any of them, lit or not.
+    // imported maps use (`@domain/services/junctionRadius`). The rule is
+    // unconditional: the front-end paints a stop line on every junction's
+    // box edge and the cross-road yield rule can stop a vehicle in front
+    // of any of them, lit or not, so every junction can hold a queue.
     const raw = i as unknown as Record<string, unknown>
     if (typeof raw.intersectionRadius !== 'number' || !Number.isFinite(raw.intersectionRadius)) {
       const laneCounts = i.connectedRoads
         .map((roadId) => net.roads[roadId]?.laneCount)
         .filter((count): count is number => typeof count === 'number')
-      raw.intersectionRadius = junctionRadiusForRoads(laneCounts, true)
+      raw.intersectionRadius = junctionRadiusForRoads(laneCounts)
     }
     net.intersections[i.id] = i
   }

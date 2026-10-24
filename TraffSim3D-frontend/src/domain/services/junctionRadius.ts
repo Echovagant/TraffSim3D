@@ -24,7 +24,7 @@
 // ## The rule
 //
 //     radius = half-width of the widest connected road
-//              + the nose-overhang clearance, when a queue can form
+//              + the nose-overhang clearance
 //
 // The half-width is `laneCount * ROAD_LANE_WIDTH / 2`. The widest
 // connected road decides, because the box is shared by every approach.
@@ -36,6 +36,28 @@
 // length. Without the clearance, the overhang reaches into the
 // crossing carriageway and the crossing traffic drives into it.
 //
+// ## Why there is no "queueable" flag
+//
+// The clearance used to be conditional — it was applied only to a
+// junction that could hold a queue, i.e. one with a traffic light.
+// That condition was wrong, and it was wrong in the same way twice:
+//
+//   - the front-end paints a stop line on **every** junction's box edge
+//     (`roadStopLines` does not look at the traffic lights), and the
+//     cross-road yield rule (`tick.ts` → `applyCrossRoadYield`) can stop
+//     a vehicle in front of **any** junction, lit or not. Every junction
+//     can therefore hold a queue ⇒ the clearance always applies;
+//   - a traffic light is not a proxy for "can a queue form here"
+//     anyway: the parser only attaches one to the OSM nodes tagged
+//     `highway=traffic_signals` (51 of the 7991 junctions in the
+//     Shenzhen extract), and the imported maps already applied the
+//     clearance to **all** of them.
+//
+// So the flag was a second rule that could drift away from the first —
+// and it did: the built-in scenes' unlit junctions were sized by the
+// half-width alone while every imported junction was sized by the
+// half-width **plus** the clearance. One rule, no flag.
+//
 // ## Who owns the number
 //
 // The frontend owns it — for **every** map, built-in or imported. The
@@ -45,37 +67,22 @@
 // (`app/apps/maps/osm_parser.py` → `junction_radius`), and a
 // cross-check over the real Shenzhen OSM extract (7991 junctions)
 // proved the two agree on every one of them.
-//
-// The `queueable` flag is the one input that differs between the two
-// kinds of map, and it is a statement about **where traffic can be
-// stopped**, not about the geometry:
-//
-//   - a built-in junction with a traffic light can hold a queue at its
-//     stop line → the clearance applies;
-//   - a built-in junction without one (the loop scene's corners, the
-//     elevated scene's ramp end) cannot → the half-width alone;
-//   - **every** imported junction can: the frontend paints a stop line
-//     on every junction's box edge and the cross-road yield rule
-//     (`tick.ts` → `applyCrossRoadYield`) can stop a vehicle in front
-//     of any of them, lit or not. The parser's own traffic lights are
-//     no proxy for that — it only attaches one to the OSM nodes tagged
-//     `highway=traffic_signals` (51 of the 7991 junctions in the
-//     Shenzhen extract).
 
 import { INTERSECTION_CLEARANCE_M, ROAD_LANE_WIDTH } from '@shared/constants/simulation'
 
 /**
- * The radius of a junction box that has to hold the carriageway of a road
- * with `laneCount` lanes — plus the clearance that keeps a queued vehicle's
- * nose out of it (see `INTERSECTION_CLEARANCE_M`).
+ * The radius of a junction box: the carriageway of a road with
+ * `laneCount` lanes, **plus** the clearance that keeps a queued
+ * vehicle's nose out of it (see `INTERSECTION_CLEARANCE_M`).
+ *
+ * There is no condition on this: every junction box gets the clearance,
+ * because every junction can hold a queue (see the module header).
  *
  * @param laneCount  the lane count of the widest road the junction connects
- * @param queueable  true when a vehicle can be **stopped in front of** this
- *   junction (so a queue — and therefore a nose overhang — can form there)
  */
-export const junctionRadius = (laneCount: number, queueable: boolean): number => {
+export const junctionRadius = (laneCount: number): number => {
   const halfWidth = (laneCount * ROAD_LANE_WIDTH) / 2
-  return queueable ? halfWidth + INTERSECTION_CLEARANCE_M : halfWidth
+  return halfWidth + INTERSECTION_CLEARANCE_M
 }
 
 /**
@@ -88,31 +95,25 @@ export const junctionRadius = (laneCount: number, queueable: boolean): number =>
  * `junction_radius` uses the same default (`max(..., default=1)`), so the
  * two sides still agree in that degenerate case.
  */
-export const junctionRadiusForRoads = (
-  laneCounts: readonly number[],
-  queueable: boolean,
-): number => {
+export const junctionRadiusForRoads = (laneCounts: readonly number[]): number => {
   const widest = laneCounts.length > 0 ? Math.max(...laneCounts) : 1
-  return junctionRadius(widest, queueable)
+  return junctionRadius(widest)
 }
 
 /**
- * The extra room a **corner** — two roads meeting at an angle, with no
- * traffic light — needs on top of the carriageway it has to hold.
+ * The extra room a **corner** — two roads meeting at an angle — needs on
+ * top of the box the rule already gives it.
  *
  * A corner is not a queue, but a vehicle **in the turn** is inside the
  * junction while it turns, and it sweeps outside the two carriageways'
  * half-widths. The loop scene's four corners carry this margin on top of
- * the rule's half-width (2 lanes → 3.5 m + 0.5 m = 4 m).
+ * the rule's half-width and clearance (2 lanes → 3.5 + 4.5 + 0.5 = 8.5 m).
  */
 export const CORNER_TURN_ENVELOPE_M = 0.5
 
 /**
- * The radius of a **corner** junction: the rule's half-width plus the
+ * The radius of a **corner** junction: the rule's radius plus the
  * turning envelope (see `CORNER_TURN_ENVELOPE_M`).
- *
- * A corner never holds a queue — it has no traffic light — so the
- * nose-overhang clearance does not apply to it.
  */
 export const cornerRadius = (laneCount: number): number =>
-  junctionRadius(laneCount, false) + CORNER_TURN_ENVELOPE_M
+  junctionRadius(laneCount) + CORNER_TURN_ENVELOPE_M
