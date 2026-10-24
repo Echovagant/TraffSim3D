@@ -33,6 +33,7 @@ import {
   LANE_CHANGE_CONVERGED_M,
   perpendicularOffsetAlongRoad,
 } from '@domain/services/laneChange'
+import { junctionIndex, type JunctionIndex } from '@domain/services/roadJunctionIndex'
 import { rampSpeed, statusFromHysteresis, safeGapGipps } from '@domain/services/vehicleDynamics'
 import { computeSteeringAngle, steeringAngleToOmega } from '@domain/services/purePursuit'
 import { pythonSpeedStep } from '@domain/services/egoKernel'
@@ -44,7 +45,6 @@ import {
   MIN_GAP,
   SPAWN_POINT_RELEASE_DISTANCE,
   STOP_LINE_BUFFER,
-  STOP_LINE_DISTANCE,
   TIME_HEADWAY,
   TRAJECTORY_SAMPLE_INTERVAL,
   CONFLICT_ALL_RED_SECS,
@@ -235,7 +235,13 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   }
 
   // 2. Stamp each vehicle's intersection-entry time.
-  updateIntersectionEntry(network, simTime)
+  //
+  // The junction index is fetched ONCE here and handed to the two rules
+  // that need it. Its freshness check is O(junctions), and an imported
+  // district has thousands of them — fetching it per lookup would cost
+  // millions of property lookups per frame.
+  const junctions = junctionIndex(network)
+  updateIntersectionEntry(network, simTime, junctions)
 
   // 2.5. RL replay override. When a policy + replay target
   //      are set, build a 14-dim obs matching Python's `SimCore._obs()`,
@@ -319,7 +325,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   }
 
   // 4. Cross-road yield (先到先行) — right-of-way priority.
-  applyCrossRoadYield(network, ctx)
+  applyCrossRoadYield(network, ctx, junctions)
 
   // 5-6. Hand each vehicle's control to Rapier + step.
   if (ctx.rapierWorld) {
@@ -958,23 +964,39 @@ const finishLaneChanges = (network: RoadNetwork, ctx: TickContext, simTime: numb
 }
 
 /** Stamp simTime on entering intersection. */
-const updateIntersectionEntry = (network: RoadNetwork, simTime: number): void => {
+const updateIntersectionEntry = (
+  network: RoadNetwork,
+  simTime: number,
+  junctions: JunctionIndex,
+): void => {
   for (const v of Object.values(network.vehicles)) {
     const road = network.roads[v.roadId]
     if (!road) continue
-    // Pick the per-intersection radius when the vehicle's
-    // road is connected to one (T / corner intersections may have
-    // different radii than the 4-way default). Falls back to the
-    // STOP_LINE_DISTANCE*2 default if no connected intersection matches.
-    const inter = Object.values(network.intersections).find((i) =>
-      i.connectedRoads.includes(road.id),
-    )
-    const radius = inter?.intersectionRadius ?? STOP_LINE_DISTANCE * 2
-    // The box is centred on the intersection's **projected** position on
-    // this road (the OSM junction sits at a way endpoint, not at the road
-    // midpoint). `inter` may be undefined → the historical midpoint
-    // assumption is used.
-    if (inIntersectionBox(road, v.s, radius, inter)) {
+    // EVERY junction box on this road — not just the first one.
+    //
+    // The old code took the first connected intersection and tested only
+    // its box. On the built-in scenes that is the same thing (one
+    // junction per road), but an OSM way has a junction at BOTH ends —
+    // the two crossroads it connects — so the second junction was
+    // invisible to the occupancy rule: a car driving through it was
+    // never "in the intersection", and the cross-road yield rule then
+    // treated it as a car still waiting to enter.
+    //
+    // Measured on the real Shenzhen extract (391 roads / 450 junctions),
+    // the old rule missed 4 952 of 43 200 vehicle-frames.
+    //
+    // A road with no junction at all now has NO box — the old fallback
+    // put a phantom 10 m box at the road's midpoint, which marked a
+    // car "in the intersection" while it was merely halfway along a
+    // street that has no crossroads.
+    let inBox = false
+    for (const inter of junctions.on(road.id)) {
+      if (inIntersectionBox(road, v.s, inter.intersectionRadius, inter)) {
+        inBox = true
+        break
+      }
+    }
+    if (inBox) {
       if (v.enteredIntersectionAt === null) {
         v.enteredIntersectionAt = simTime
       }
@@ -1129,7 +1151,11 @@ const applyCarFollowingConstraint = (
   v.targetSpeed = leader.speed
 }
 
-const applyCrossRoadYield = (network: RoadNetwork, ctx: TickContext): void => {
+const applyCrossRoadYield = (
+  network: RoadNetwork,
+  ctx: TickContext,
+  junctions: JunctionIndex,
+): void => {
   const cars = Object.values(network.vehicles)
   for (let i = 0; i < cars.length; i++) {
     const a = cars[i]!
@@ -1140,6 +1166,18 @@ const applyCrossRoadYield = (network: RoadNetwork, ctx: TickContext): void => {
       const roadB = network.roads[b.roadId]
       if (!roadB) continue
       if (a.roadId === b.roadId) continue
+      // The two roads must actually MEET at a junction.
+      //
+      // The rule used to fire between any two vehicles on different
+      // roads: a car entering any junction froze every other car on
+      // every other road of the network. On the built-in scenes that is
+      // harmless (they are one crossroads), but on an imported city it
+      // reached 2 073 m — the car that had to wait was half the district
+      // away, and its own junction was 452 m off.
+      //
+      // Two roads that share a junction are the only pair that can
+      // actually conflict, so that is the pair the rule is about.
+      if (!junctions.sharedJunction(a.roadId, b.roadId)) continue
       // The later arrival yields. The replay target's speed is
       // owned by the policy (or by an injected action) — the yield rule
       // must not discard it, or the policy's output dies one step after
