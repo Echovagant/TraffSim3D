@@ -104,11 +104,8 @@ const corner = (): { net: RoadNetwork; road: Road } => {
 }
 
 /** The road the vehicle takes for a given vehicle identity. */
-const roadFor = (
-  net: RoadNetwork,
-  road: Road,
-  seed: string,
-): string | null => roadContinuation(net, road, 0, HEADING_EAST, seed)?.roadId ?? null
+const roadFor = (net: RoadNetwork, road: Road, seed: string): string | null =>
+  roadContinuation(net, road, 0, HEADING_EAST, seed)?.roadId ?? null
 
 describe('the movement at a junction', () => {
   it('turns a quarter of the time, not never', () => {

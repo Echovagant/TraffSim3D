@@ -37,7 +37,12 @@ import {
 import { junctionIndex, type JunctionIndex } from '@domain/services/roadJunctionIndex'
 import { roadContinuation, type RoadContinuation } from '@domain/services/roadTransition'
 import { approachAxis } from '@domain/services/approachAxis'
-import { rampSpeed, statusFromHysteresis, safeGapGipps, safeSpeedGipps } from '@domain/services/vehicleDynamics'
+import {
+  rampSpeed,
+  statusFromHysteresis,
+  safeGapGipps,
+  safeSpeedGipps,
+} from '@domain/services/vehicleDynamics'
 import { computeSteeringAngle, steeringAngleToOmega } from '@domain/services/purePursuit'
 import { pythonSpeedStep } from '@domain/services/egoKernel'
 import { tickOobCleanup, isOobExiting, recordLaneGuard } from './oobCleanup'
