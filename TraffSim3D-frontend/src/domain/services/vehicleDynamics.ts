@@ -137,6 +137,46 @@ export const safeGapGipps = (
 }
 
 /**
+ * The speed a follower may still have and still keep the safe gap.
+ *
+ * This is the **inverse** of `safeGapGipps`: the follower may hold the
+ * speed `v` while the gap it has is at least
+ *
+ *     v * timeHeadway + minGap + v * (v - leaderSpeed) / (2 * decelCap)
+ *
+ * and solving that inequality for `v` gives the expression below. The
+ * two are therefore consistent by construction — there is no second set
+ * of parameters to keep in step.
+ *
+ * Why the model needs it: the gap alone does not tell a follower what
+ * to do. Clamping its target to the leader's **current** speed means a
+ * leader that brakes hard leaves the follower at that speed, and the
+ * follower — whose own braking is capped at `MAX_DECEL_COMFY` — closes
+ * the remaining gap and hits it. Measured 2026-10-25 on the 5 x 5 grid:
+ * 1364 frames of a follower at 8.97 m/s inside a leader at 2.49 m/s.
+ * This is the speed from which the follower can still brake down in
+ * time, so it slows **before** the gap is gone.
+ *
+ * @param leaderSpeed  m/s, the vehicle ahead's current speed
+ * @param gap          m, bumper-to-bumper distance to the leader
+ * @param timeHeadway  s, desired following time
+ * @param minGap       m, hard bumper-to-bumper floor
+ * @param decelCap     m/s², the follower's own braking capability
+ * @returns the safe speed in m/s
+ */
+export const safeSpeedGipps = (
+  leaderSpeed: number,
+  gap: number,
+  timeHeadway: number,
+  minGap: number,
+  decelCap: number = MAX_DECEL_COMFY,
+): number => {
+  const net = Math.max(0, gap - minGap)
+  const k = 2 * decelCap * timeHeadway - leaderSpeed
+  return (-k + Math.sqrt(k * k + 8 * decelCap * net)) / 2
+}
+
+/**
  * Hysteresis state machine.
  *
  * Returns the next observable `status` given the current observable
