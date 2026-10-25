@@ -248,6 +248,29 @@ export const useWorldStore = defineStore('world', () => {
   const signalPolicySource = shallowRef<PolicySignalActionSource | null>(null)
   /** The policy's most recent decision — the UI's readout. */
   const signalPolicyDecision = ref<SignalPolicyDecision | null>(null)
+  /**
+   * Where the loaded policy came from: the product's own shipped grid
+   * policy (`shipped`, fetched from `/rl/signal/grid-policy`) or a local
+   * training run's checkpoint (`checkpoint`). The AI Playground's status
+   * line distinguishes the two — "the product ships a trained policy" and
+   * "you trained this one" are different claims.
+   */
+  const signalPolicyOrigin = ref<'shipped' | 'checkpoint' | null>(null)
+
+  /** Wire a fetched signal policy into the store (shared by both loaders). */
+  const adoptSignalPolicy = (w: PolicyWeights, origin: 'shipped' | 'checkpoint'): void => {
+    const source = createPolicyActionSource(w, (decision) => {
+      signalPolicyDecision.value = decision
+    })
+    signalPolicy.value = w
+    signalPolicySource.value = source
+    signalPolicyOrigin.value = origin
+    signalPolicyDecision.value = null
+    // The RL controllers were built without a source; drop the cache so
+    // the next tick creates them with the policy attached.
+    controllers = new Map()
+    bumpTick()
+  }
 
   /** Load a trained signal policy by checkpoint name.
    *
@@ -260,17 +283,29 @@ export const useWorldStore = defineStore('world', () => {
   ): Promise<{ ok: true; obs_dim: number; action_dim: number } | { ok: false; reason: string }> => {
     try {
       const w = await defaultRLWeights.getCheckpointWeights(name)
-      const source = createPolicyActionSource(w, (decision) => {
-        signalPolicyDecision.value = decision
-      })
-      signalPolicy.value = w
-      signalPolicySource.value = source
-      signalPolicyDecision.value = null
-      // The RL controllers were built without a source; drop the cache so
-      // the next tick creates them with the policy attached.
-      controllers = new Map()
-      bumpTick()
+      adoptSignalPolicy(w, 'checkpoint')
       return { ok: true, obs_dim: w.obs_dim, action_dim: w.action_dim }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return { ok: false, reason: msg }
+    }
+  }
+
+  /** Load the grid policy the product ships with.
+   *
+   * The backend serves the trained 5×5 MAPPO policy at
+   * `/rl/signal/grid-policy` — no local training run or checkpoint needed.
+   * This is the delivery surface: the AI Playground calls it on mount so a
+   * trained policy is in charge by default. A missing backend is a normal
+   * state, not an error — the caller decides what to show.
+   */
+  const loadShippedGridPolicy = async (): Promise<
+    { ok: true; name: string } | { ok: false; reason: string }
+  > => {
+    try {
+      const w = await defaultRLWeights.getGridPolicy()
+      adoptSignalPolicy(w, 'shipped')
+      return { ok: true, name: w.name }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return { ok: false, reason: msg }
@@ -281,6 +316,7 @@ export const useWorldStore = defineStore('world', () => {
   const clearSignalPolicy = (): void => {
     signalPolicy.value = null
     signalPolicySource.value = null
+    signalPolicyOrigin.value = null
     signalPolicyDecision.value = null
     controllers = new Map()
     bumpTick()
@@ -1384,7 +1420,9 @@ export const useWorldStore = defineStore('world', () => {
     // the traffic-signal policy surface
     signalPolicy,
     signalPolicyDecision,
+    signalPolicyOrigin,
     loadSignalPolicy,
+    loadShippedGridPolicy,
     clearSignalPolicy,
     // sensor + exporter surface
     sensorRegistry,

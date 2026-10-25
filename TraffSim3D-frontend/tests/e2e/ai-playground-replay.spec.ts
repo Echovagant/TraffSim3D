@@ -33,6 +33,11 @@ const FIXTURE_PATH = resolve(
 )
 const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf-8'))
 
+// The list renders each entry's mtime (`toLocaleString`), so a live
+// `Date.now()` here would drift the rendered timestamp on every run — a
+// permanent sub-tolerance visual diff against the baseline. Pinned.
+const PINNED_MTIME_MS = 1_700_000_000_000
+
 const FAKE_CHECKPOINTS = {
   checkpoints: [
     {
@@ -40,7 +45,7 @@ const FAKE_CHECKPOINTS = {
       process: 'pid4242',
       agent_id: null,
       size_kb: 32.0,
-      mtime_ms: Date.now() - 30_000,
+      mtime_ms: PINNED_MTIME_MS,
     },
   ],
 }

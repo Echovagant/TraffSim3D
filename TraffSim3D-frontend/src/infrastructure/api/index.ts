@@ -11,8 +11,17 @@ export { createHttpClient, BackendError } from './httpClient'
 export type { HttpClient, HttpClientOptions, RequestOptions } from './httpClient'
 export { createBackendService } from './backendService'
 export type { BackendService, HealthResponse, PingResponse } from './backendService'
-export { createRLWeightsClient, RL_WEIGHTS_TIMEOUT_MS } from './rlWeightsClient'
-export type { CheckpointWeightsResponse, RLWeightsClient } from './rlWeightsClient'
+export {
+  createRLWeightsClient,
+  RL_WEIGHTS_TIMEOUT_MS,
+  GRID_POLICY_TIMEOUT_MS,
+} from './rlWeightsClient'
+export type {
+  CheckpointWeightsResponse,
+  GridPolicyResponse,
+  GridPolicyTrainingInfo,
+  RLWeightsClient,
+} from './rlWeightsClient'
 export {
   VALIDATE_NETWORK_PATH,
   VALIDATE_NETWORK_TIMEOUT_MS,

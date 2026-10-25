@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import AIPlaygroundView from './AIPlaygroundView.vue'
+import { useWorldStore } from '@interfaces/stores/worldStore'
 import { constantSignalPolicy } from '@__fixtures__/signalPolicy'
 import { SIGNAL_ACTION_NAMES } from '@shared/constants/simulation'
 
@@ -117,6 +118,93 @@ describe('AIPlaygroundView — the AI signal-command readout', () => {
     expect(wrapper.get('[data-testid="signal-policy-action"]').text()).toBe('preempt')
     expect(wrapper.get('[data-testid="signal-policy-queue-ns"]').text()).not.toBe('—')
     expect(wrapper.get('[data-testid="signal-policy-queue-ew"]').text()).not.toBe('—')
+
+    wrapper.unmount()
+  })
+})
+
+describe('AIPlaygroundView — the shipped grid policy is the default', () => {
+  let fetchSpy: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    fetchSpy = vi.fn()
+    ;(globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** The payload `GET /rl/signal/grid-policy` serves on a healthy backend. */
+  const GRID_POLICY = {
+    ...constantSignalPolicy(PREEMPT),
+    name: 'network_mappo_weights.json',
+    policy_kind: 'signal',
+    source: 'shipped',
+    action_names: SIGNAL_ACTION_NAMES,
+  }
+
+  const mountView = async (): Promise<VueWrapper> => {
+    const wrapper = mount(AIPlaygroundView, { global: { stubs: { RouterLink: true } } })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await wrapper.vm.$nextTick()
+    return wrapper
+  }
+
+  it('mount puts the shipped policy in charge of the lights', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/rl/signal/grid-policy')) {
+        return Promise.resolve(mockResponse(GRID_POLICY))
+      }
+      return Promise.resolve(mockResponse({}, 404))
+    })
+    const wrapper = await mountView()
+
+    const store = useWorldStore()
+    expect(store.signalPolicyOrigin).toBe('shipped')
+    expect(store.controllerKind).toBe('rl')
+    const checkbox = wrapper.get('[data-testid="rl-signal-controller-checkbox"]')
+      .element as HTMLInputElement
+    expect(checkbox.checked).toBe(true)
+    // The status line says WHERE the policy came from — a shipped policy
+    // and a locally trained checkpoint are different claims.
+    expect(wrapper.get('[data-testid="signal-policy-status"]').text()).toContain('随产品附带')
+
+    wrapper.unmount()
+  })
+
+  it('without the backend the page stays usable and the lights stay actuated', async () => {
+    fetchSpy.mockImplementation(() => Promise.resolve(mockResponse({}, 404)))
+    const wrapper = await mountView()
+
+    const store = useWorldStore()
+    expect(store.signalPolicy).toBeNull()
+    expect(store.signalPolicyOrigin).toBeNull()
+    expect(store.controllerKind).toBe('actuated')
+    const checkbox = wrapper.get('[data-testid="rl-signal-controller-checkbox"]')
+      .element as HTMLInputElement
+    expect(checkbox.checked).toBe(false)
+    expect(wrapper.get('[data-testid="signal-policy-status"]').text()).toContain('未加载')
+
+    wrapper.unmount()
+  })
+
+  it('the user can still send the lights back to the actuated controller', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/rl/signal/grid-policy')) {
+        return Promise.resolve(mockResponse(GRID_POLICY))
+      }
+      return Promise.resolve(mockResponse({}, 404))
+    })
+    const wrapper = await mountView()
+
+    await wrapper.get('[data-testid="rl-signal-controller-checkbox"]').setValue(false)
+
+    const store = useWorldStore()
+    expect(store.controllerKind).toBe('actuated')
+    expect(store.signalPolicy).not.toBeNull()
 
     wrapper.unmount()
   })

@@ -543,9 +543,20 @@
         </label>
       </div>
       <p class="muted small" data-testid="signal-policy-status">
-        <template v-if="world.signalPolicy">
+        <template v-if="world.signalPolicy && world.signalPolicyOrigin === 'shipped'">
+          ✓ 已加载随产品附带的网格策略 <code>{{ world.signalPolicy.name }}</code> ({{
+            world.signalPolicy.obs_dim
+          }}
+          obs / {{ world.signalPolicy.action_dim }} act · 离散) — RL
+          正在指挥信号灯；到场景页把场景切到「5×5 网格」即可观看 25 个路口。
+        </template>
+        <template v-else-if="world.signalPolicy">
           ✓ 已加载 <code>{{ world.signalPolicy.name }}</code> ({{ world.signalPolicy.obs_dim }} obs
           / {{ world.signalPolicy.action_dim }} act · 离散)
+        </template>
+        <template v-else-if="shippedPolicyState === 'unavailable'">
+          未加载 — 随产品附带的网格策略需要后端 ({{ BACKEND_URL }}) 在运行；上面本地训练出的
+          checkpoint 仍可加载。
         </template>
         <template v-else-if="signalCheckpoints.length > 0">
           未加载 — 上面有 {{ signalCheckpoints.length }} 个信号灯 checkpoint,选一个再点「加载」。
@@ -812,6 +823,30 @@ const signalError = ref<string | null>(null)
 const rlControlsSignal = ref(false)
 const signalTraining = ref(false)
 
+// ===== the shipped grid policy =====
+//
+// The product ships a trained grid policy (the seed-0 MAPPO run whose
+// browser-side delay beat the fixed cycle): the backend serves it at
+// /rl/signal/grid-policy, and this page puts it in charge **on mount**.
+// It is the default, not a lock-in — the checkbox below still sends the
+// lights back to the actuated controller, and a locally trained
+// checkpoint can still be loaded over it.
+const shippedPolicyState = ref<'loading' | 'loaded' | 'unavailable' | null>(null)
+
+const onLoadShippedGridPolicy = async (): Promise<void> => {
+  shippedPolicyState.value = 'loading'
+  const r = await world.loadShippedGridPolicy()
+  if (r.ok) {
+    shippedPolicyState.value = 'loaded'
+    rlControlsSignal.value = true
+    world.setControllerKind('rl')
+  } else {
+    // A missing backend is a normal state for this page (everything else
+    // on it degrades the same way) — the status line says so; no toast.
+    shippedPolicyState.value = 'unavailable'
+  }
+}
+
 /**
  * Train the signal agent from the browser.
  *
@@ -874,6 +909,7 @@ const onClearSignalPolicy = (): void => {
   world.clearSignalPolicy()
   signalCkptName.value = ''
   rlControlsSignal.value = false
+  shippedPolicyState.value = null
   showFlashMessage('信号灯策略已清除', 'info')
 }
 
@@ -1283,6 +1319,10 @@ onMounted(() => {
   refreshCapabilities()
   refreshStatus()
   refreshTrainingConfig()
+  // The shipped grid policy is the page's default: a trained policy in
+  // charge of the lights as soon as the page opens (silently skipped
+  // when the backend is absent).
+  void onLoadShippedGridPolicy()
   pollHandle = window.setInterval(refreshStatus, 2000)
   // Poll `window.__replayLast` (set by tick.ts on each
   // replay inference) and copy into the store so the replay-status

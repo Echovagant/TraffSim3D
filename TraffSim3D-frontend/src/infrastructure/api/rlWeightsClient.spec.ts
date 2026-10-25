@@ -14,7 +14,11 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { BackendError, createHttpClient } from './httpClient'
-import { createRLWeightsClient, RL_WEIGHTS_TIMEOUT_MS } from './rlWeightsClient'
+import {
+  createRLWeightsClient,
+  GRID_POLICY_TIMEOUT_MS,
+  RL_WEIGHTS_TIMEOUT_MS,
+} from './rlWeightsClient'
 
 /** A fetch that never settles until the request is aborted. */
 const hangingFetch = () =>
@@ -120,5 +124,52 @@ describe('RL weights client', () => {
     await expect(client.getCheckpointWeights('ppo_step_0230000.zip')).rejects.toBeInstanceOf(
       BackendError,
     )
+  })
+
+  it('fetches the shipped grid policy from its own endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () =>
+        JSON.stringify({
+          name: 'network_mappo_weights.json',
+          obs_dim: 6,
+          action_dim: 5,
+          action_space: 'discrete',
+          hidden_sizes: [64, 64],
+          layers: {},
+          policy_kind: 'signal',
+          source: 'shipped',
+        }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const client = createRLWeightsClient(createHttpClient('/api/v1'))
+    const policy = await client.getGridPolicy()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/rl/signal/grid-policy')
+    expect(policy.source).toBe('shipped')
+    expect(policy.policy_kind).toBe('signal')
+  })
+
+  it('gives the grid-policy request a tighter budget than a torch export', async () => {
+    // No SB3 model is loaded here — a cold backend that has not answered
+    // within 10 s is a broken install and should surface, not hang the
+    // page's default-load path for the checkpoint budget's 30 s.
+    expect(GRID_POLICY_TIMEOUT_MS).toBe(10000)
+    expect(GRID_POLICY_TIMEOUT_MS).toBeLessThan(RL_WEIGHTS_TIMEOUT_MS)
+
+    vi.useFakeTimers()
+    const fetchMock = hangingFetch()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const client = createRLWeightsClient(createHttpClient('/api/v1'))
+    const pending = client.getGridPolicy()
+    pending.catch(() => undefined)
+
+    await vi.advanceTimersByTimeAsync(GRID_POLICY_TIMEOUT_MS)
+    await expect(pending).rejects.toThrow(/timed out after 10000ms/)
   })
 })

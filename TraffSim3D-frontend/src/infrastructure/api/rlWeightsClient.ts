@@ -18,11 +18,40 @@ export interface CheckpointWeightsResponse extends PolicyWeights {
   layers: PolicyWeights['layers']
 }
 
+/** The training provenance the shipped grid policy carries. */
+export interface GridPolicyTrainingInfo {
+  grid: string
+  demand_scale: number
+  env_steps: number
+  best_step: number
+  margin: number
+  beats_baseline: boolean
+  actions: Record<string, number>
+}
+
+/** GET /rl/signal/grid-policy — the policy the product ships with.
+ *
+ * Same weights shape as a checkpoint export (a discrete five-action
+ * policy, no `log_std`), plus the two delivery markers (`policy_kind`,
+ * `source`) and the training provenance. See
+ * `app/apps/rl/grid_policy.py` — the backend validates the same
+ * constraints before serving it. */
+export interface GridPolicyResponse extends CheckpointWeightsResponse {
+  policy_kind: 'signal'
+  source: 'shipped'
+  action_names: string[]
+  training?: GridPolicyTrainingInfo
+}
+
 export interface RLWeightsClient {
   /** GET /rl/checkpoints/{name}/weights → JSON weights + architecture.
    *  Throws BackendError(404) when the checkpoint doesn't exist or
    *  BackendError(503) when SB3 isn't installed on the backend. */
   getCheckpointWeights(name: string): Promise<CheckpointWeightsResponse>
+  /** GET /rl/signal/grid-policy → the shipped grid MAPPO policy.
+   *  Throws BackendError(503) when the shipped asset is broken (a broken
+   *  install) and the network error when the backend is absent. */
+  getGridPolicy(): Promise<GridPolicyResponse>
 }
 
 /**
@@ -48,9 +77,24 @@ export interface RLWeightsClient {
  */
 export const RL_WEIGHTS_TIMEOUT_MS = 30000
 
+/**
+ * Timeout budget for the shipped-grid-policy request, in milliseconds.
+ *
+ * Unlike the checkpoint export this endpoint loads no torch model — the
+ * backend reads and validates a ~150 KB JSON asset (the first call; later
+ * calls are served from the module cache). The budget is deliberately
+ * tighter than the checkpoint one: 10 s covers a cold backend that is
+ * still importing its own modules, and a genuinely broken install should
+ * surface as an error quickly rather than hang the page's default-load
+ * path for half a minute.
+ */
+export const GRID_POLICY_TIMEOUT_MS = 10000
+
 export const createRLWeightsClient = (http: HttpClient): RLWeightsClient => ({
   getCheckpointWeights: (name) =>
     http.get<CheckpointWeightsResponse>(`/rl/checkpoints/${encodeURIComponent(name)}/weights`, {
       timeoutMs: RL_WEIGHTS_TIMEOUT_MS,
     }),
+  getGridPolicy: () =>
+    http.get<GridPolicyResponse>('/rl/signal/grid-policy', { timeoutMs: GRID_POLICY_TIMEOUT_MS }),
 })

@@ -253,6 +253,54 @@ describe('worldStore signal policy', () => {
     expect(world.signalPolicy).toBeNull()
   })
 
+  it('loadShippedGridPolicy adopts the product policy and marks its origin', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/rl/signal/grid-policy')) {
+        return Promise.resolve(
+          mockResponse({
+            ...constantSignalPolicy(PREEMPT),
+            name: 'network_mappo_weights.json',
+            policy_kind: 'signal',
+            source: 'shipped',
+          }),
+        )
+      }
+      return Promise.resolve(mockResponse({}, 404))
+    })
+    const world = useWorldStore()
+    const r = await world.loadShippedGridPolicy()
+    expect(r.ok).toBe(true)
+    expect(world.signalPolicy?.name).toBe('network_mappo_weights.json')
+    expect(world.signalPolicyOrigin).toBe('shipped')
+  })
+
+  it('loadShippedGridPolicy fails gracefully without a backend', async () => {
+    fetchSpy.mockRejectedValue(new TypeError('Failed to fetch'))
+    const world = useWorldStore()
+    const r = await world.loadShippedGridPolicy()
+    expect(r.ok).toBe(false)
+    expect(world.signalPolicy).toBeNull()
+    expect(world.signalPolicyOrigin).toBeNull()
+  })
+
+  it('clearSignalPolicy resets the origin along with the policy', async () => {
+    fetchSpy.mockImplementation((url: string) =>
+      Promise.resolve(
+        mockResponse({
+          ...constantSignalPolicy(PREEMPT),
+          name: 'network_mappo_weights.json',
+          policy_kind: 'signal',
+          source: 'shipped',
+        }),
+      ),
+    )
+    const world = useWorldStore()
+    await world.loadShippedGridPolicy()
+    expect(world.signalPolicyOrigin).toBe('shipped')
+    world.clearSignalPolicy()
+    expect(world.signalPolicyOrigin).toBeNull()
+  })
+
   it('without a policy the RL controller runs the plain cycle', async () => {
     const world = useWorldStore()
     world.setControllerKind('rl')

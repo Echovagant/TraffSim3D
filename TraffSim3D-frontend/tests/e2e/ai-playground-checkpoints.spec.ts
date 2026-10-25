@@ -9,25 +9,30 @@ import { expectVisualScreenshot } from './helpers/visual'
 import { waitForSceneReady } from './helpers/wait'
 
 // Sorted by mtime desc to match backend's list_checkpoints() ordering.
+// The list renders each entry's mtime (`toLocaleString`), so a live
+// `Date.now()` here would drift the rendered timestamp on every run — a
+// permanent sub-tolerance visual diff against the baseline. Pinned.
+const PINNED_MTIME_MS = 1_700_000_000_000
+
 const FAKE_CHECKPOINTS = {
   checkpoints: [
     {
       name: 'ppo_step_0005000.zip',
       process: 'pid5678',
       size_kb: 25.4,
-      mtime_ms: Date.now() - 5_000,
+      mtime_ms: PINNED_MTIME_MS,
     },
     {
       name: 'ppo_step_0003000.zip',
       process: 'pid1234',
       size_kb: 25.1,
-      mtime_ms: Date.now() - 30_000,
+      mtime_ms: PINNED_MTIME_MS,
     },
     {
       name: 'ppo_step_0000500.zip',
       process: 'pid1234',
       size_kb: 24.3,
-      mtime_ms: Date.now() - 60_000,
+      mtime_ms: PINNED_MTIME_MS,
     },
   ],
 }

@@ -29,6 +29,10 @@ const FAKE_STATUS = {
   finished_at_ms: Date.now(),
 }
 
+// Pinned mtime: the rendered timestamp must not drift between runs
+// (see the same constant in ai-playground-checkpoints.spec.ts).
+const PINNED_MTIME_MS = 1_700_000_000_000
+
 const FAKE_CHECKPOINTS = {
   checkpoints: [
     {
@@ -36,14 +40,14 @@ const FAKE_CHECKPOINTS = {
       process: 'pid12345',
       agent_id: 0,
       size_kb: 25.0,
-      mtime_ms: Date.now() - 5_000,
+      mtime_ms: PINNED_MTIME_MS,
     },
     {
       name: 'ppo_agent1_step_0000600.zip',
       process: 'pid12345',
       agent_id: 1,
       size_kb: 24.9,
-      mtime_ms: Date.now() - 5_000,
+      mtime_ms: PINNED_MTIME_MS,
     },
   ],
 }
