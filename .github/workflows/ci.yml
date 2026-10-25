@@ -40,9 +40,19 @@ env:
   # vite port and the one `playwright.config.ts` hard-codes.
   FRONTEND_PORT: '5188'
   BACKEND_PORT: '8001'
-  # Faster PyPI mirror first (the project's toolchain note for slow
-  # networks). The install steps fall back to pypi.org if the mirror fails.
-  PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+  # pypi.org first, and the mirror as the fallback.
+  #
+  # The mirror exists because a developer machine on a slow link cannot
+  # reach pypi.org quickly. A hosted runner is the opposite case: it is
+  # close to pypi.org and far from the mirror, and the `rl` extra pulls
+  # torch (a multi-gigabyte download) — measured 2026-10-25, three jobs
+  # sat in the install step for over 25 minutes while the same step took
+  # 137 s in an earlier run. The mirror-first order was optimising for
+  # the wrong network.
+  #
+  # The install steps below retry against the mirror, so a runner that
+  # genuinely cannot reach pypi.org still works.
+  PIP_INDEX_URL: https://pypi.org/simple
 
 jobs:
   backend:
@@ -73,12 +83,13 @@ jobs:
           #    required: without SB3 the suite silently takes its "no-SB3
           #    fallback" paths and the RL engine is never exercised.
           #
-          # The mirror is tried first; if it is unreachable, retry against
-          # PyPI directly (the `--index-url` overrides the job-level
-          # PIP_INDEX_URL for that retry).
+          # pypi.org is tried first (the job-level PIP_INDEX_URL); if it is
+          # unreachable, retry against the mirror (the `--index-url`
+          # overrides the job-level PIP_INDEX_URL for that retry). See the
+          # env block for why the order is this way round.
           python -m pip install -e ".[dev,rl]" pytest-cov \
             || python -m pip install -e ".[dev,rl]" pytest-cov \
-                 --index-url https://pypi.org/simple
+                 --index-url https://mirrors.aliyun.com/pypi/simple
 
       - name: pytest + coverage
         # `--cov-fail-under=70` is what turns the documented 70% threshold
@@ -246,7 +257,7 @@ jobs:
         run: |
           python -m pip install -e ".[dev,rl]" \
             || python -m pip install -e ".[dev,rl]" \
-                 --index-url https://pypi.org/simple
+                 --index-url https://mirrors.aliyun.com/pypi/simple
 
       - name: Install the frontend
         working-directory: TraffSim3D-frontend
@@ -327,7 +338,7 @@ jobs:
         working-directory: TraffSim3D-backend
         run: |
           python -m pip install -e . \
-            || python -m pip install -e . --index-url https://pypi.org/simple
+            || python -m pip install -e . --index-url https://mirrors.aliyun.com/pypi/simple
 
       - name: Install the frontend
         run: npm ci
@@ -409,6 +420,7 @@ jobs:
           # backend, so it can never contaminate this suite.
           E2E_BACKEND_URL: 'http://localhost:8001'
         run: |
+          emit() { local l="${1:0:400}"; echo "::${2}::${l//\%/%25}"; }
           # The backend is started **in this step**, not in an earlier one.
           #
           # A backgrounded process does not reliably survive the boundary
@@ -422,21 +434,46 @@ jobs:
           # Starting it here keeps it alive for exactly as long as the
           # tests need it, and the uvicorn log lands in this step's own
           # output — so a crash is visible instead of a bare timeout.
-          ( cd ../TraffSim3D-backend && exec python -m uvicorn app.main:app --port 8001 ) > /tmp/uvicorn.log 2>&1 &
+          #
+          # `--host 127.0.0.1` and the `127.0.0.1` probe: `localhost`
+          # resolves to `::1` first on a Linux runner, and the two
+          # spellings are not interchangeable for a server that binds one
+          # family only. The probe asks for the exact address the server
+          # was told to bind.
+          ( cd ../TraffSim3D-backend && exec python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 ) > /tmp/uvicorn.log 2>&1 &
           BACKEND_PID=$!
           trap 'kill $BACKEND_PID 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8001/health > /dev/null 2>&1; then
+          # 75 x 2 s = 150 s. A cold runner imports numpy, osmium and
+          # fastapi from a cold page cache; 60 s was not enough for that
+          # on the hosted runner, and the job as a whole allows 25 min.
+          BACKEND_READY=0
+          for i in $(seq 1 75); do
+            if curl -fsS http://127.0.0.1:8001/health > /dev/null 2>&1; then
               echo "backend is healthy"
+              BACKEND_READY=1
               break
             fi
-            if [ "$i" -ge 30 ]; then
-              echo "backend did not become healthy within 60s"
-              cat /tmp/uvicorn.log || true
+            # A server that has *died* is not going to become healthy:
+            # waiting out the whole budget hides the reason behind a
+            # timeout. Say so now, and publish the log.
+            if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+              emit "the backend process DIED before it became healthy (after $((i * 2))s)" error
+              emit "--- the uvicorn log follows as warnings ---" error
+              tail -40 /tmp/uvicorn.log 2>/dev/null | while IFS= read -r line; do
+                emit "$line" warning
+              done
               exit 1
             fi
             sleep 2
           done
+          if [ "$BACKEND_READY" -ne 1 ]; then
+            emit "the backend did not become healthy within 150s (it was still running)" error
+            emit "--- the uvicorn log follows as warnings ---" error
+            tail -40 /tmp/uvicorn.log 2>/dev/null | while IFS= read -r line; do
+              emit "$line" warning
+            done
+            exit 1
+          fi
           set +e
           npx playwright test --config=playwright.ci.config.ts --reporter=list 2>&1 | tee /tmp/playwright.log
           STATUS=${PIPESTATUS[0]}
@@ -516,12 +553,12 @@ jobs:
       - name: Install the backend (with the rl extra — SB3 + torch)
         # The `rl` extra is the whole point of this job: without
         # stable-baselines3 the trainer degrades to dry-run and the run
-        # produces a fake curve. Same mirror-first / pypi.org-fallback
+        # produces a fake curve. Same pypi.org-first / mirror-fallback
         # pattern the other backend jobs use.
         working-directory: TraffSim3D-backend
         run: |
           python -m pip install -e ".[rl]" \
-            || python -m pip install -e ".[rl]" --index-url https://pypi.org/simple
+            || python -m pip install -e ".[rl]" --index-url https://mirrors.aliyun.com/pypi/simple
 
       - name: Install the frontend
         run: npm ci
@@ -569,7 +606,8 @@ jobs:
           TRAFFIC_RL_DATA_DIR: ${{ github.workspace }}/TraffSim3D-backend/.data/rl-real-e2e
           E2E_REAL_STEPS: '200'
         run: |
-          ( cd ../TraffSim3D-backend && exec python -m uvicorn app.main:app --port 8011 ) > /tmp/uvicorn-real.log 2>&1 &
+          emit() { local l="${1:0:400}"; echo "::${2}::${l//\%/%25}"; }
+          ( cd ../TraffSim3D-backend && exec python -m uvicorn app.main:app --host 127.0.0.1 --port 8011 ) > /tmp/uvicorn-real.log 2>&1 &
           BACKEND_PID=$!
           trap 'kill $BACKEND_PID 2>/dev/null || true' EXIT
           # The capabilities endpoint imports torch on the first call, which
@@ -577,23 +615,37 @@ jobs:
           # asks for capabilities, not /health, and allows a generous
           # budget for the cold import.
           #
+          # The probe uses `127.0.0.1` because that is the address the
+          # server was told to bind; `localhost` resolves to `::1` first
+          # on a Linux runner.
+          #
           # This FAILS the job when SB3 is missing. It must: a job that
           # quietly skipped the real run would be worse than no job.
-          emit() { local l="${1:0:400}"; echo "::${2}::${l//\%/%25}"; }
-          # 90 x 2 s = 180 s. The capabilities endpoint imports torch on the
-          # first call, and on a hosted runner that cold import (2 GB of
-          # packages, cold page cache) can outlast the old 120 s budget —
+          #
+          # 150 x 2 s = 300 s. The capabilities endpoint imports torch on
+          # the first call, and on a hosted runner that cold import (2 GB
+          # of packages, cold page cache) can outlast a short budget —
           # the job as a whole allows 25 min, so there is room to wait
           # longer rather than to fail a backend that was merely slow.
-          for i in $(seq 1 90); do
-            if curl -fsS http://localhost:8011/api/v1/rl/capabilities > /tmp/rl-caps.json 2>/dev/null; then
+          for i in $(seq 1 150); do
+            if curl -fsS http://127.0.0.1:8011/api/v1/rl/capabilities > /tmp/rl-caps.json 2>/dev/null; then
               break
+            fi
+            # A server that has *died* is not going to answer: waiting out
+            # the whole budget hides the reason behind a timeout.
+            if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+              emit "the backend process DIED before it answered /api/v1/rl/capabilities (after $((i * 2))s)" error
+              emit "--- the uvicorn log follows as warnings ---" error
+              tail -40 /tmp/uvicorn-real.log 2>/dev/null | while IFS= read -r line; do
+                emit "$line" warning
+              done
+              exit 1
             fi
             sleep 2
           done
           if [ ! -s /tmp/rl-caps.json ]; then
-            echo "backend did not answer /api/v1/rl/capabilities within 180s"
-            emit "the backend never answered /api/v1/rl/capabilities within 180s" error
+            echo "backend did not answer /api/v1/rl/capabilities within 300s"
+            emit "the backend never answered /api/v1/rl/capabilities within 300s (it was still running)" error
             emit "--- the uvicorn log follows as warnings ---" error
             tail -40 /tmp/uvicorn-real.log 2>/dev/null | while IFS= read -r line; do
               emit "$line" warning
