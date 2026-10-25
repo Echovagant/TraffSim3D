@@ -481,6 +481,40 @@ export const OUT_OF_BOUNDS_M = 50
 export const LATERAL_DRIFT_THRESHOLD_M = 15
 
 /**
+ * The share of the movements at a junction that are **turns** rather than
+ * going straight on.
+ *
+ * The rule this replaces was "if a road continues the vehicle's heading,
+ * take it" — which is the same as saying no vehicle ever turns where it
+ * could go straight. Measured on the 5 x 5 grid (25 junctions, 40
+ * segments, 25 vehicles, 90 s): all 29 ninety-degree turns happened at
+ * the **edge** of the map and **none** at an interior junction, because
+ * an interior junction always has a straight continuation. A traffic
+ * simulation whose vehicles never turn at an ordinary crossroads is not
+ * modelling a city.
+ *
+ * 0.25 is the share of movements that are turns in a real street
+ * network: through movements dominate, and the rest are right and left
+ * turns. The split between right and left is `RIGHT_TURN_SHARE` below.
+ *
+ * The decision is **deterministic**: it is a hash of the vehicle, the
+ * junction and the road it came from, so a run can be reproduced exactly
+ * (see `domain/services/roadTransition.ts`). The training side's network
+ * environment uses the same two numbers
+ * (`app/apps/rl/network_signal_env.py`).
+ */
+export const TURN_PROBABILITY = 0.25
+
+/**
+ * Of the turns, the share that are **right** turns.
+ *
+ * Right turns outnumber left ones in a street network — left turns are
+ * the ones a median or a one-way pair usually forbids, and they are
+ * slower, so drivers take them less often.
+ */
+export const RIGHT_TURN_SHARE = 0.6
+
+/**
  * Constants mirrored from the Python RL sim
  * (`TraffSim3D-backend/app/apps/rl/sim_core.py`).
  *

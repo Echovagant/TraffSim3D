@@ -35,6 +35,7 @@ import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import { laneForwardSign, lanePoint, projectIntersectionOnRoad, roadLength } from './laneGeometry'
 import { isDrivableLane } from './oneway'
 import { junctionIndex } from './roadJunctionIndex'
+import { RIGHT_TURN_SHARE, TURN_PROBABILITY } from '@shared/constants/simulation'
 
 /**
  * How far (m) a junction's projected centre may sit from a road's travel
@@ -67,22 +68,83 @@ export interface RoadContinuation {
   heading: number
 }
 
+/** Two headings are "the same" for the tie-break below. */
+const SAME_HEADING_EPS = 1e-9
+
 /**
- * The angle between two directions, wrapped to [0, π].
+ * The movement a candidate represents, relative to the vehicle's incoming
+ * heading.
  *
- * A direction and its opposite are π apart, so this metric cannot tell
- * "straight ahead" from "backwards" — that is deliberate: the caller
- * picks the candidate that best continues the vehicle's heading, and a
- * u-turn is never a better continuation than going straight.
+ * `right` and `left` are decided by the **sign** of the signed turn angle:
+ * the model's headings run from +X (east) towards +Z (north), so a
+ * vehicle heading north (pi/2) that ends up heading east (0) has turned
+ * by -pi/2 — which, in right-hand traffic, is a **right** turn.
  */
-const headingDelta = (a: number, b: number): number => {
-  let d = Math.abs(a - b) % (2 * Math.PI)
-  if (d > Math.PI) d = 2 * Math.PI - d
+type Movement = 'straight' | 'right' | 'left' | 'uturn'
+
+/** Up to this angle the movement is "straight on" (45 degrees). */
+const STRAIGHT_LIMIT_RAD = Math.PI / 4
+/** Beyond this angle the movement is a u-turn (135 degrees). */
+const U_TURN_LIMIT_RAD = (3 * Math.PI) / 4
+
+/**
+ * The signed turn angle from one heading to another, in (-pi, pi].
+ *
+ * A positive angle is a **left** turn and a negative one a **right**
+ * turn — see `Movement`.
+ */
+const signedTurnAngle = (from: number, to: number): number => {
+  let d = (to - from) % (2 * Math.PI)
+  if (d > Math.PI) d -= 2 * Math.PI
+  if (d < -Math.PI) d += 2 * Math.PI
   return d
 }
 
-/** Two headings are "the same" for the tie-break below. */
-const SAME_HEADING_EPS = 1e-9
+/** The movement a signed turn angle represents. */
+const movementOf = (delta: number): Movement => {
+  const magnitude = Math.abs(delta)
+  if (magnitude > U_TURN_LIMIT_RAD) return 'uturn'
+  if (magnitude <= STRAIGHT_LIMIT_RAD) return 'straight'
+  return delta < 0 ? 'right' : 'left'
+}
+
+/**
+ * A hash of a key into [0, 1) — FNV-1a, 32 bit.
+ *
+ * Integer arithmetic only, so the same key gives the same number on
+ * every platform and in every engine. That is what makes the turn
+ * decision **reproducible**: the simulation has no random source, and a
+ * run can be replayed exactly.
+ */
+const hash01 = (key: string): number => {
+  let h = 0x811c9dc5
+  for (let i = 0; i < key.length; i += 1) {
+    h ^= key.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  // murmur3's finalizer. The FNV multiply mixes the low bits well but
+  // leaves the high ones poorly mixed — and the value is taken from the
+  // high end, so without this the shares came out skewed (measured: a
+  // right-turn share of 0.49 where 0.60 was asked for).
+  h ^= h >>> 16
+  h = Math.imul(h, 0x85ebca6b) >>> 0
+  h ^= h >>> 13
+  h = Math.imul(h, 0xc2b2ae35) >>> 0
+  h ^= h >>> 16
+  // The `^` operator yields a **signed** 32-bit integer, so the value has
+  // to be brought back to unsigned here — otherwise the fraction below
+  // is negative for half the keys and the shares come out skewed.
+  h = h >>> 0
+  return h / 0x100000000
+}
+
+/** A candidate road, with the movement it represents. */
+interface Candidate extends RoadContinuation {
+  /** The signed turn angle from the vehicle's heading. */
+  delta: number
+  /** The movement this candidate represents. */
+  movement: Movement
+}
 
 /**
  * The continuation of `road` / `laneIndex` for a vehicle that has run
@@ -92,19 +154,40 @@ const SAME_HEADING_EPS = 1e-9
  * at the travel end at all, or the junction has no other road to
  * continue onto.
  *
- * The choice between several candidate roads is deterministic: the one
- * whose travel direction at the entry point best continues `heading`
- * wins, and a tie is broken by the road id (lexicographically) so the
- * simulation is reproducible.
+ * The choice between several candidate roads is **deterministic**: the
+ * movement is decided first (see below) and the road that best carries
+ * that movement wins, with ties broken by the road id (lexicographically)
+ * so the result does not depend on the order the junction lists its
+ * roads in.
+ *
+ * **Which movement the vehicle makes** is the interesting part. The rule
+ * used to be "take the road that best continues the heading", which is
+ * the same as saying that a vehicle never turns where it could go
+ * straight — measured on the 5 x 5 grid, all 29 ninety-degree turns
+ * landed at the edge of the map and none at an interior junction, so
+ * the city had no crossroads behaviour at all.
+ *
+ * Now a vehicle **turns** with the probability `TURN_PROBABILITY` (a
+ * quarter of the movements in a real street network), and a right turn
+ * is the likelier of the two (`RIGHT_TURN_SHARE`); otherwise it goes
+ * straight on. The decision is a **hash** of the vehicle, the junction
+ * and the road it came from — no random source, so a run replays
+ * exactly. A junction with no straight continuation (a corner, a
+ * T-junction) forces a turn, and a u-turn is only ever taken when
+ * nothing else is on offer.
+ *
+ * `turnSeed` is the vehicle's identity: with it the movement is the
+ * probabilistic one above; without it the choice falls back to "straight
+ * on when that is possible", which is the rule the topology tests use.
  *
  * **The pivot's sideways jump — a known limitation.** The junction sits
  * on the roads' centre lines, while the lane the vehicle lands in sits
  * `laneOffset(lane)` to the side of it, so the pivot moves the body
  * sideways by up to that offset. The landing point itself is already
  * snapped to the lane: measured on the real Shenzhen import (391 roads,
- * 8 cars, 90 s, 14 turns) the car ends up **0.00 m** off the centre of
- * the lane it turns into, every turn, and its lateral offset stays
- * 0.00 m for the rest of the run — no lane guard fires.
+ * 8 cars, 90 s) the car ends up **0.00 m** off the centre of the lane
+ * it turns into, every turn, and its lateral offset stays 0.00 m for
+ * the rest of the run — no lane guard fires.
  *
  * What remains is the size of the jump itself: 0.74 m on average,
  * 1.76 m at p95 and 1.78 m at worst on the import, and 10.21 m on a
@@ -120,6 +203,7 @@ export const roadContinuation = (
   road: Road,
   laneIndex: number,
   heading: number,
+  turnSeed?: string,
 ): RoadContinuation | null => {
   const len = roadLength(road)
   if (len < 1e-6) return null
@@ -147,7 +231,7 @@ export const roadContinuation = (
 
   // 2. The candidate roads: the junction's other roads. The road the
   //    vehicle came from is never a candidate.
-  const candidates: RoadContinuation[] = []
+  const candidates: Candidate[] = []
   for (const otherId of junction.connectedRoads) {
     if (otherId === road.id) continue
     const other = network.roads[otherId]
@@ -209,23 +293,62 @@ export const roadContinuation = (
       continue
     }
 
+    const candidateHeading = lanePoint(other, newLane, entryS).heading
+    const delta = signedTurnAngle(heading, candidateHeading)
     candidates.push({
       roadId: other.id,
       laneIndex: newLane,
       s: entryS,
-      heading: lanePoint(other, newLane, entryS).heading,
+      heading: candidateHeading,
+      delta,
+      movement: movementOf(delta),
     })
   }
   if (candidates.length === 0) return null
 
-  // 3. The candidate that best continues the vehicle's heading. Ties go
-  //    to the lexicographically smaller road id, so the result does not
-  //    depend on the order the junction lists its roads in.
-  let best = candidates[0]!
-  let bestDelta = headingDelta(heading, best.heading)
-  for (let i = 1; i < candidates.length; i++) {
-    const candidate = candidates[i]!
-    const delta = headingDelta(heading, candidate.heading)
+  // 3. The movement the vehicle makes.
+  //
+  //    The candidates are grouped by the movement they represent, and a
+  //    hash of (vehicle, junction, road) decides which movement it
+  //    takes. A junction with no straight continuation — a corner, a
+  //    T-junction — has no choice to make, so it forces a turn.
+  const straights = candidates.filter((c) => c.movement === 'straight')
+  const rights = candidates.filter((c) => c.movement === 'right')
+  const lefts = candidates.filter((c) => c.movement === 'left')
+  const uturns = candidates.filter((c) => c.movement === 'uturn')
+
+  let pool: Candidate[]
+  if (turnSeed === undefined) {
+    // No vehicle identity: the historical rule — straight on when that
+    // is possible, and the best of the rest otherwise.
+    pool = straights.length > 0 ? straights : [...rights, ...lefts, ...uturns]
+  } else {
+    const key = `${turnSeed}|${junction.id}|${road.id}`
+    const wantsTurn = hash01(`${key}|turn`) < TURN_PROBABILITY
+    const preferRight = hash01(`${key}|side`) < RIGHT_TURN_SHARE
+    if (wantsTurn || straights.length === 0) {
+      const preferred = preferRight ? rights : lefts
+      const other = preferRight ? lefts : rights
+      pool =
+        preferred.length > 0
+          ? preferred
+          : other.length > 0
+            ? other
+            : [...straights, ...uturns]
+    } else {
+      pool = straights
+    }
+  }
+  if (pool.length === 0) return null
+
+  // 4. The candidate that best carries that movement. Ties go to the
+  //    lexicographically smaller road id, so the result does not depend
+  //    on the order the junction lists its roads in.
+  let best = pool[0]!
+  let bestDelta = Math.abs(best.delta)
+  for (let i = 1; i < pool.length; i++) {
+    const candidate = pool[i]!
+    const delta = Math.abs(candidate.delta)
     const better =
       delta < bestDelta - SAME_HEADING_EPS ||
       (Math.abs(delta - bestDelta) <= SAME_HEADING_EPS && candidate.roadId < best.roadId)

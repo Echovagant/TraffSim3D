@@ -37,7 +37,7 @@ import {
 import { junctionIndex, type JunctionIndex } from '@domain/services/roadJunctionIndex'
 import { roadContinuation, type RoadContinuation } from '@domain/services/roadTransition'
 import { approachAxis } from '@domain/services/approachAxis'
-import { rampSpeed, statusFromHysteresis, safeGapGipps } from '@domain/services/vehicleDynamics'
+import { rampSpeed, statusFromHysteresis, safeGapGipps, safeSpeedGipps } from '@domain/services/vehicleDynamics'
 import { computeSteeringAngle, steeringAngleToOmega } from '@domain/services/purePursuit'
 import { pythonSpeedStep } from '@domain/services/egoKernel'
 import { tickOobCleanup, isOobExiting, recordLaneGuard } from './oobCleanup'
@@ -538,7 +538,11 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
           // `roadContinuation` returns null when no turn is possible
           // (no junction at the travel end, or the junction has no
           // other road) — then the historical wrap happens, unchanged.
-          const turn = roadContinuation(network, vRoad, v.laneIndex, v.heading)
+          // The vehicle's identity is the turn's seed: the movement it
+          // makes at this junction (straight on, or a right / left turn)
+          // is a hash of it, so the decision is reproducible and the two
+          // motion paths below cannot disagree about it.
+          const turn = roadContinuation(network, vRoad, v.laneIndex, v.heading, v.id)
           const turnedRoad = turn ? network.roads[turn.roadId] : undefined
           if (turn && turnedRoad) {
             applyRoadTurn(v, turnedRoad, turn, ctx)
@@ -716,7 +720,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // vehicle goes next.
       const pastTravelEnd = sign === 1 ? v.s > len : v.s < 0
       if (pastTravelEnd) {
-        const turn = roadContinuation(network, road, v.laneIndex, v.heading)
+        const turn = roadContinuation(network, road, v.laneIndex, v.heading, v.id)
         const turnedRoad = turn ? network.roads[turn.roadId] : undefined
         if (turn && turnedRoad) {
           v.roadId = turn.roadId
@@ -1323,8 +1327,27 @@ const applyCarFollowingConstraint = (
   // leader's deceleration. Without it, Newell's `speed*TIME_HEADWAY +
   // MIN_GAP` under-protects when the leader is braking hard.
   const safeGap = safeGapGipps(v.speed, leader.speed, gap, TIME_HEADWAY, MIN_GAP)
-  if (gap >= safeGap) return
-  v.targetSpeed = leader.speed
+  // The speed the follower may still hold and still keep that gap: the
+  // **inverse** of the formula above, so the two agree by construction.
+  //
+  // The old rule clamped the follower's target to the leader's
+  // **current** speed, so a leader that braked hard left the follower
+  // at that speed — and the follower, whose own braking is capped at
+  // MAX_DECEL_COMFY, closed the remaining gap and hit it. Measured
+  // 2026-10-25 on the 5 x 5 grid: 1364 frames of a follower at 8.97 m/s
+  // inside a leader at 2.49 m/s.
+  const safeSpeed = safeSpeedGipps(leader.speed, gap, TIME_HEADWAY, MIN_GAP)
+  if (gap >= safeGap) {
+    // The desired gap is available. The only thing that can still be
+    // wrong is the follower's own speed: it may be too fast for the gap
+    // it has, and then it has to give way *now* rather than when the
+    // gap is already gone.
+    if (v.speed > safeSpeed) v.targetSpeed = safeSpeed
+    return
+  }
+  // The gap is short: the follower gives way, and it may not be faster
+  // than it could brake to from.
+  v.targetSpeed = Math.min(leader.speed, safeSpeed)
 }
 
 const applyCrossRoadYield = (
