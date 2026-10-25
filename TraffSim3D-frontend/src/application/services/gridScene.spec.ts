@@ -145,15 +145,32 @@ describe('the 5 x 5 grid scene', () => {
     }
   })
 
-  it('places one vehicle on every junction (25 of the 25)', () => {
-    // The density is measured, not chosen: 25 vehicles (one per junction)
-    // over 90 s hold 0 crash frames, 0 red-light runs, 0 stuck vehicles and
-    // 0 lane-guard events, with 81 road changes and all 40 segments driven.
+  it('places a QUEUE on every junction, not a single vehicle', () => {
+    // The density is measured, not chosen. A queue is vehicles **on the
+    // same approach** — that is what the signal agent reads, and what
+    // forms when cars arrive on one lane faster than the light lets
+    // them go.
     //
-    // A sparser layout (13 vehicles) was measured too; it is clean as well,
-    // but it leaves a third of the map without traffic, and the scene is
-    // the one the 25-junction signal work is built on.
-    expect(Object.keys(net.vehicles).length).toBe(25)
+    // Measured over 90 s at this density (67 vehicles):
+    //
+    //   - 132 road changes (69 straight, 63 at ninety degrees, no
+    //     u-turn), all 40 segments driven, all 25 junctions entered;
+    //   - 0 red-light runs, 0 stuck vehicles, 0 lane-guard events;
+    //   - 16 frames of body overlap (0.0044 % of the vehicle frames) —
+    //     the known pivot-turn collision, recorded in
+    //     `domain/services/roadTransition.ts`;
+    //   - the queues the agent reads peak at **8**, which is the point:
+    //     the observation's `MAX_QUEUE` is 10, so the browser now
+    //     exercises the agent over the whole range it was trained on.
+    //     At one vehicle per junction the queues peaked at 6 and the
+    //     signal problem was trivial; the training environment, whose
+    //     queues reached 21, was training the agent for a world the
+    //     browser never showed.
+    //
+    // The corners carry about half the traffic (two approaches against
+    // three or four), so they get one vehicle and every other junction
+    // gets three.
+    expect(Object.keys(net.vehicles).length).toBe(67)
     const approached = new Set(
       Object.values(net.vehicles).map((v) => {
         const road = net.roads[v.roadId]!
@@ -168,7 +185,7 @@ describe('the 5 x 5 grid scene', () => {
         return ''
       }),
     )
-    // 25 distinct junctions, one per vehicle.
+    // All 25 junctions are approached (the queues land on them).
     expect(approached.size).toBe(25)
   })
 

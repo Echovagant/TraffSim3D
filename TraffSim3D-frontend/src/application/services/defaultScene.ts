@@ -1079,7 +1079,7 @@ const shiftJunctionBy = (inter: Intersection, seconds: number): void => {
  * The density is a measured one, not a taste call: see the block below
  * the vehicle loop.
  */
-export const buildGridNetwork = (): RoadNetwork => {
+export const buildGridNetwork = (queueLengthPerJunction = 3): RoadNetwork => {
   const net = createRoadNetwork()
 
   // --- the 40 segments ---------------------------------------------------
@@ -1187,29 +1187,28 @@ export const buildGridNetwork = (): RoadNetwork => {
    * (a bus's accel ceiling is 1.2 m/s²), so they need less of it.
    */
   const START_MARGIN_M = 24
+  /**
+   * The gap between two vehicles waiting on the same approach (m).
+   *
+   * A queue is vehicles **on the same approach**, not vehicles spread
+   * over the map: the signal agent reads the queue length, and a queue
+   * is what forms when cars arrive on one lane faster than the light
+   * lets them go. The spacing has to clear the longest body (a bus) so
+   * the scene does not open with two vehicles inside each other.
+   */
+  const QUEUE_SPACING_M = 12
   let vehicleIndex = 0
+  let junctionIndex = 0
   for (let i = 0; i < GRID_SIZE; i++) {
     for (let j = 0; j < GRID_SIZE; j++) {
-      // **One vehicle per junction** (25 of them), so every junction is seen
-      // queueing on the red and released on the green.
-      //
-      // The density is measured, not chosen: 25 vehicles over 90 s hold
-      // **0 crash frames, 0 red-light runs, 0 stuck vehicles, 0 lane-guard
-      // events**, with 81 road changes and all 40 segments driven.
-      //
-      // The earlier, sparser layout (13 vehicles, one junction in two) was
-      // a reaction to a measurement taken with a *too small* start margin
-      // (8 m): a vehicle that starts too close to the stop line cannot
-      // brake on the red, and the car behind it rams it. With the 24 m
-      // margin below, the full density holds.
-      vehicleIndex += 1
       const inter = net.intersections[gridJunctionId(i, j)]!
       // The approach **alternates between the two axes**, so the map
       // opens with traffic on both of them. (Measured: with every
       // approach on the east–west road, the 12 north–south segments of
       // the three inner columns were never driven in 90 s — a third of
       // the map stood empty.)
-      const eastWest = vehicleIndex % 2 === 1
+      const eastWest = junctionIndex % 2 === 1
+      junctionIndex += 1
       // Where the vehicle comes from. On the west / north edge of the
       // map there is no road behind the junction, so the vehicle comes
       // from the other side — on the backward lane.
@@ -1228,25 +1227,47 @@ export const buildGridNetwork = (): RoadNetwork => {
           ? 0
           : GRID_LANE_COUNT - 1
       const road = net.roads[roadId]!
-      // A quarter of the traffic is heavy: the rest is cars.
-      const heavy = vehicleIndex % 5 === 0
-      const isBus = vehicleIndex % 7 === 0
-      const type = isBus ? 'bus' : heavy ? 'truck' : 'car'
-      const speed = type === 'car' ? 8 : type === 'bus' ? 7 : 6
-      const color = type === 'car' ? '#3a86ff' : type === 'bus' ? '#22c55e' : '#f5f5f4'
-      // Anchored **upstream** of the stop line of the junction it
-      // approaches, with room to brake — a vehicle that starts on the
-      // line cannot stop on the red.
-      const s =
-        startUpstreamOfStopLine(road, inter, laneIndex, START_MARGIN_M) ?? roadLength(road) * 0.5
-      defaults.push(
-        at(road, laneIndex, s, speed, {
-          id: `v-g${vehicleIndex}`,
-          type,
-          color,
-          status: 'driving',
-        }),
-      )
+      // The **queue** on that approach.
+      //
+      // The density is set so that the queue the signal agent reads is
+      // the interesting one. The observation's `MAX_QUEUE` is 10, and at
+      // one vehicle per junction the grid's queues peaked at **6** — the
+      // ruler was never reached, so the signal problem was trivial,
+      // while the training environment (whose queues reached 21) was
+      // training the agent for a world the browser never shows.
+      //
+      // A corner has two approaches and every other junction three or
+      // four, so the corners carry about half the traffic: one vehicle
+      // there, two everywhere else.
+      const queueLength = inter.connectedRoads.length <= 2 ? 1 : queueLengthPerJunction
+      for (let position = 0; position < queueLength; position++) {
+        vehicleIndex += 1
+        // A quarter of the traffic is heavy: the rest are cars.
+        const heavy = vehicleIndex % 5 === 0
+        const isBus = vehicleIndex % 7 === 0
+        const type = isBus ? 'bus' : heavy ? 'truck' : 'car'
+        const speed = type === 'car' ? 8 : type === 'bus' ? 7 : 6
+        const color = type === 'car' ? '#3a86ff' : type === 'bus' ? '#22c55e' : '#f5f5f4'
+        // Anchored **upstream** of the stop line of the junction it
+        // approaches, with room to brake — a vehicle that starts on the
+        // line cannot stop on the red — and the queue spaced out behind
+        // the first one.
+        const s =
+          startUpstreamOfStopLine(
+            road,
+            inter,
+            laneIndex,
+            START_MARGIN_M + position * QUEUE_SPACING_M,
+          ) ?? roadLength(road) * 0.5
+        defaults.push(
+          at(road, laneIndex, s, speed, {
+            id: `v-g${vehicleIndex}`,
+            type,
+            color,
+            status: 'driving',
+          }),
+        )
+      }
     }
   }
   for (const v of defaults) net.vehicles[v.id] = v
