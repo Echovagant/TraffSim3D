@@ -306,8 +306,18 @@ def test_the_drain_closes_the_conservation_window() -> None:
 
     The vehicles still on a link when the demand is switched off arrive
     during the drain, so the window closes exactly: ``sent == arrived``.
+
+    The **turning is switched off** for this test, and the reason is a
+    property of the model rather than of the bookkeeping: with a turn
+    probability, a vehicle can circulate through the network without
+    ever leaving it — a right turn at every junction of a 2 x 2 grid is
+    a closed loop of four junctions. Such a vehicle is still on a link
+    when the drain ends, so the window does not close, and the drain
+    would have to run forever. The conservation itself is unaffected:
+    the per-step identity ``sent == arrived + in transit`` holds with
+    the turning on, and that is what the test above pins.
     """
-    env = NetworkSignalEnv(max_steps=int(120.0 / DT))
+    env = NetworkSignalEnv(max_steps=int(120.0 / DT), turn_probability=0.0)
     env.reset(seed=0)
     for _ in range(int(120.0 / DT)):
         env.step([NO_OP] * env.n_junctions)
@@ -324,6 +334,44 @@ def test_the_drain_closes_the_conservation_window() -> None:
             f"arrived {pair['arrived']} - the vehicles were lost on the link"
         )
         assert pair["in_transit"] == 0
+
+
+def test_the_turning_keeps_the_conservation_exactly() -> None:
+    """The per-step conservation holds with the turning **on**.
+
+    The default configuration turns a quarter of the movements, so this
+    is the configuration the signal agent will actually be trained in —
+    and the vehicles still have to be conserved exactly: what a junction
+    sends down a link is what its neighbour receives, one link later.
+    """
+    env = NetworkSignalEnv(max_steps=int(120.0 / DT))
+    env.reset(seed=0)
+
+    for _ in range(int(120.0 / DT)):
+        env.step([NO_OP] * env.n_junctions)
+        for pair in env.conservation_report()["pairs"]:
+            assert pair["sent"] == pair["arrived"] + pair["in_transit"], (
+                f"{pair['from']} -> {pair['to']}: sent {pair['sent']}, "
+                f"arrived {pair['arrived']}, in transit {pair['in_transit']}"
+            )
+
+
+def test_some_vehicles_circulate_when_they_turn_at_every_junction() -> None:
+    """A right turn at every junction of a 2 x 2 grid is a closed loop.
+
+    It is a property of the model, and it is worth pinning: a traffic
+    network whose vehicles can circulate for ever cannot be drained, so
+    any measurement that wants an empty network has to switch the
+    turning off (see ``test_the_drain_closes_the_conservation_window``).
+    """
+    env = NetworkSignalEnv(max_steps=int(200.0 / DT))
+    env.reset(seed=0)
+    for _ in range(int(200.0 / DT)):
+        env.step([NO_OP] * env.n_junctions)
+
+    report = env.conservation_report()
+    circulating = [p for p in report["pairs"] if p["in_transit"] > 0]
+    assert circulating, "no vehicle was still travelling — the loop did not form"
 
 
 def test_the_junctions_account_for_every_vehicle() -> None:

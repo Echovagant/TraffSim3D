@@ -148,6 +148,30 @@ LEFT_TURN = {"n": "e", "s": "w", "e": "s", "w": "n"}
 #: The exit arm of a right turn.
 RIGHT_TURN = {"n": "w", "s": "e", "e": "n", "w": "s"}
 
+#: The share of the movements at a junction that are **turns** rather than
+#: going straight on - the browser's ``TURN_PROBABILITY``.
+#:
+#: The two sides have to agree on the *rate*, because that is what the
+#: traffic the signal agent sees is made of: a network where every
+#: vehicle goes straight is a different network from one where a quarter
+#: of the movements turn. Measured 2026-10-25 on the browser's 5 x 5
+#: grid: with the old "go straight if you can" rule every ninety-degree
+#: turn happened at the edge of the map and none at an interior
+#: junction, and the imported city made 14 turns in 90 s; with the
+#: probability the same city makes 30.
+#:
+#: The two sides do **not** have to agree on *which* vehicle turns: the
+#: browser decides per vehicle (a hash of vehicle, junction and road),
+#: this one per visit (a hash of junction, arm and visit count). The
+#: agent never sees that choice - it sees queues.
+TURN_PROBABILITY = 0.25
+
+#: Of the turns, the share that are right turns - the browser's
+#: ``RIGHT_TURN_SHARE``. Right turns outnumber left ones in a street
+#: network: left turns are the ones a median or a one-way pair usually
+#: forbids, and they are slower.
+RIGHT_TURN_SHARE = 0.6
+
 
 def junction_radius(lane_count: int) -> float:
     """The junction box radius of a junction with `lane_count` lanes.
@@ -343,7 +367,7 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
         *,
         condition: TrafficCondition = TRAIN_CONDITION,
         max_steps: int = 2000,
-        turn_probability: float = 0.0,
+        turn_probability: float = TURN_PROBABILITY,
         seed: int | None = None,
         vehicle_speed: float = NPC_SPEED,
         saturation_headway: float = SATURATION_HEADWAY_SECS,
@@ -691,17 +715,18 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
     def _exit_direction(self, junction_id: str, incoming: str) -> str:
         """The arm a vehicle leaves the junction by.
 
-        Straight ahead by default (the browser's rule: "go straight if
-        you can"), and a probabilistic turn when ``turn_probability`` is
-        positive. The turn is **reproducible**: it is a hash of the
+        A turn happens with the probability ``turn_probability`` (the
+        browser's ``TURN_PROBABILITY``); otherwise the vehicle goes
+        straight on. The turn is **reproducible**: it is a hash of the
         episode's coordinates, not a draw from the interpreter's global
-        random state.
+        random state. Of the turns, ``RIGHT_TURN_SHARE`` are right turns
+        - the browser's split.
         """
         if self.turn_probability <= 0.0:
             return OPPOSITE[incoming]
         if self._uniform(junction_id, incoming, "turn") >= self.turn_probability:
             return OPPOSITE[incoming]
-        if self._uniform(junction_id, incoming, "side") < 0.5:
+        if self._uniform(junction_id, incoming, "side") < 1.0 - RIGHT_TURN_SHARE:
             return LEFT_TURN[incoming]
         return RIGHT_TURN[incoming]
 
