@@ -197,6 +197,27 @@ interface Candidate extends RoadContinuation {
  * junction instead of the lane centre) would leave the car a whole lane
  * width off its own lane — 5.25 m on that corner — so the landing point
  * stays snapped to the lane.
+ *
+ * **The pivot also leaves a collision behind** (measured 2026-10-25 on
+ * the 5 x 5 grid: 5 frames of overlap in 135 000 vehicle frames, 0.0037 %,
+ * 0.271 m at worst). The mechanism: a turning vehicle's body sweeps
+ * sideways across the junction's corner — up to 7.4 m, because the lane
+ * it came from and the lane it enters are each 5.25 m from their own
+ * centre line — and the vehicle behind it on the same road drives into
+ * the corner the turner left there. The cross-road yield rule cannot
+ * catch it: that rule never stops a vehicle that is inside the junction
+ * box, and the follower 8.2 m short of the centre already counts as
+ * inside. Making the rule distinguish "past the conflict point" from
+ * "in the box" would fix this crash and break the principle the rule
+ * exists for: a vehicle that rolled into the box later would then stop
+ * the one that got there first, standing in the intersection and
+ * blocking the very axis it was yielding to. The follow model cannot
+ * catch it either — the follower was 10 m behind and slower, so it was
+ * never closing in; it is the turner's body that is in the way.
+ *
+ * So the collision is a property of the **pivot**, not of the traffic
+ * rules: the fix is the arc, and the arc is a model change, not a bug
+ * fix.
  */
 export const roadContinuation = (
   network: RoadNetwork,
@@ -329,12 +350,7 @@ export const roadContinuation = (
     if (wantsTurn || straights.length === 0) {
       const preferred = preferRight ? rights : lefts
       const other = preferRight ? lefts : rights
-      pool =
-        preferred.length > 0
-          ? preferred
-          : other.length > 0
-            ? other
-            : [...straights, ...uturns]
+      pool = preferred.length > 0 ? preferred : other.length > 0 ? other : [...straights, ...uturns]
     } else {
       pool = straights
     }
