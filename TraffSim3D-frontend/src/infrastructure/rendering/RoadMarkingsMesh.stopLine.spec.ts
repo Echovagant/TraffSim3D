@@ -68,21 +68,21 @@ const makeIntersection = (id: string, s: number, radius = 8): Intersection => ({
 
 /** The arc lengths of the painted (white) stop lines. */
 const paintedStopLines = (road: Road, intersections: readonly Intersection[]): number[] => {
-  const group = createRoadMarkings(road, { intersections })
-  const lines = group.children.filter(
-    (c): c is THREE.Line =>
-      c instanceof THREE.Line &&
-      !(c instanceof THREE.LineSegments) &&
-      (c.material as THREE.LineBasicMaterial).color.getHex() === 0xffffff,
-  )
-  return lines
-    .map((line) => {
-      const p = line.geometry.attributes.position!
-      const midX = (p.getX(0) + p.getX(1)) / 2
-      const midZ = (p.getZ(0) + p.getZ(1)) / 2
-      return worldToCenterlineS(road, midX, midZ).s
-    })
-    .sort((a, b) => a - b)
+  const group = createRoadMarkings([road], { intersections })
+  const lines: number[] = []
+  for (const child of group.children) {
+    if (!(child instanceof THREE.LineSegments)) continue
+    const p = child.geometry.attributes.position!.array as Float32Array
+    // The stop lines are the paint at 0.03u above the road; the arrows
+    // sit at 0.025u and the dashes and the centre line at 0.02u.
+    for (let i = 0; i < p.length; i += 6) {
+      if (Math.abs(p[i + 1]! - 0.03) > 1e-6) continue
+      const midX = (p[i]! + p[i + 3]!) / 2
+      const midZ = (p[i + 2]! + p[i + 5]!) / 2
+      lines.push(worldToCenterlineS(road, midX, midZ).s)
+    }
+  }
+  return lines.sort((a, b) => a - b)
 }
 
 /** A network with one red light at `junctionS` along the road. */

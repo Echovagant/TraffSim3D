@@ -7,7 +7,6 @@ import {
   laneForwardSign,
   roadForward,
   roadLength,
-  roadPolylineLengths,
   roadRight,
   roadStopLines,
   roadWaypoints,
@@ -24,31 +23,17 @@ const DASH = 0.6
 const GAP = 0.6
 
 /**
- * Build a small "↑" arrow in a lane's center, pointing in the
- * road's *forward* direction (local +z). For backward lanes the
- * caller rotates the returned group by 180° around y.
+ * The points of the "↑" arrow painted in a lane's center, in the road's
+ * *forward* direction (local +z), as four segments. The backward lanes
+ * are the same shape turned by 180°.
  */
-const buildArrow = (arrowSize: number): THREE.LineSegments => {
-  const a = arrowSize
-  const pts: Array<[number, number]> = [
-    [-a * 0.5, -a * 1.0],
-    [-a * 0.5, a * 0.6],
-    [-a * 0.5, a * 0.6],
-    [a * 0.5, a * 0.6],
-    [-a * 0.7, a * 0.4],
-    [0, a * 1.0],
-    [0, a * 1.0],
-    [a * 0.7, a * 0.4],
-  ]
-  const positions: number[] = []
-  for (const [x, z] of pts) {
-    positions.push(x, 0, z)
-  }
-  const geom = new THREE.BufferGeometry()
-  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-  const mat = new THREE.LineBasicMaterial({ color: ARROW_COLOR })
-  return new THREE.LineSegments(geom, mat)
-}
+const ARROW_SEGMENTS: ReadonlyArray<readonly [number, number, number, number]> = [
+  [-0.5, -1.0, -0.5, 0.6],
+  [-0.5, 0.6, 0.5, 0.6],
+  [-0.7, 0.4, 0.0, 1.0],
+  [0.0, 1.0, 0.7, 0.4],
+]
+const ARROW_SIZE = 0.55
 
 /**
  * Polyline-aware road markings. Centerline follows the
@@ -72,106 +57,154 @@ export interface RoadMarkingsOptions {
   intersections?: readonly Intersection[]
 }
 
-export const createRoadMarkings = (road: Road, options: RoadMarkingsOptions = {}): THREE.Group => {
+const _pos = new THREE.Vector3()
+const _quat = new THREE.Quaternion()
+const _euler = new THREE.Euler()
+const _scale = new THREE.Vector3(1, 1, 1)
+const _matrix = new THREE.Matrix4()
+const _point = new THREE.Vector3()
+
+/**
+ * The painted markings of a whole network as ONE line mesh.
+ *
+ * Every road used to own its markings: a centre line, a dash batch, one
+ * line object per stop line and one per arrow — 480 objects (480 draw
+ * calls) on a 5x5 grid, each of them a few pixels long. The paint is
+ * unchanged — the same vertices, the same colours — but the lines of
+ * every road now live in one buffer, and the colours travel as vertex
+ * colours instead of one material per layer.
+ */
+export const createRoadMarkings = (
+  roads: readonly Road[],
+  options: RoadMarkingsOptions = {},
+): THREE.Group => {
   const group = new THREE.Group()
-  const wps = roadWaypoints(road)
-  const length = roadLength(road)
-  if (length < 1e-6 || wps.length < 2) return group
+  const positions: number[] = []
+  const colors: number[] = []
+  const color = new THREE.Color()
 
-  const laneWidth = ROAD_LANE_WIDTH
-  const halfWidth = (road.laneCount * laneWidth) / 2
+  /** Append one painted segment, carrying its colour as a vertex colour. */
+  const pushSegment = (
+    ax: number,
+    ay: number,
+    az: number,
+    bx: number,
+    by: number,
+    bz: number,
+    hex: number,
+  ): void => {
+    color.setHex(hex)
+    positions.push(ax, ay, az, bx, by, bz)
+    colors.push(color.r, color.g, color.b, color.r, color.g, color.b)
+  }
 
-  // Centerline: solid yellow line from waypoints[0] → waypoints[N-1].
-  if (road.laneCount % 2 === 0) {
-    const positions = new Float32Array(wps.length * 3)
-    for (let i = 0; i < wps.length; i++) {
-      positions[i * 3 + 0] = wps[i]!.x
-      positions[i * 3 + 1] = (wps[i]!.y ?? 0) + 0.02
-      positions[i * 3 + 2] = wps[i]!.z
+  for (const road of roads) {
+    const wps = roadWaypoints(road)
+    const length = roadLength(road)
+    if (length < 1e-6 || wps.length < 2) continue
+
+    const laneWidth = ROAD_LANE_WIDTH
+    const halfWidth = (road.laneCount * laneWidth) / 2
+
+    // Centerline: solid yellow line from waypoints[0] → waypoints[N-1].
+    if (road.laneCount % 2 === 0) {
+      for (let i = 0; i < wps.length - 1; i++) {
+        const a = wps[i]!
+        const b = wps[i + 1]!
+        pushSegment(a.x, (a.y ?? 0) + 0.02, a.z, b.x, (b.y ?? 0) + 0.02, b.z, CENTERLINE_COLOR)
+      }
     }
-    const geom = new THREE.BufferGeometry()
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    const mat = new THREE.LineBasicMaterial({ color: CENTERLINE_COLOR })
-    group.add(new THREE.Line(geom, mat))
-  }
 
-  // Lane divider offsets (perpendicular distance from centerline).
-  const dividerOffsets: number[] = []
-  for (let i = 0; i < road.laneCount - 1; i++) {
-    const offset = laneOffset(i, road.laneCount) + laneWidth / 2
-    if (Math.abs(offset) > 1e-3) dividerOffsets.push(offset)
-  }
-  if (dividerOffsets.length === 0) return group
-
-  // Distribute dashes evenly along the polyline arc length.
-  const segLen = DASH + GAP
-  const totalDashes = Math.max(0, Math.floor((length + GAP) / segLen))
-
-  // Per-offset, walk the polyline and emit a dash at each `s`.
-  const dashSegments: Array<{ offset: number; sStart: number; sEnd: number }> = []
-  for (const offset of dividerOffsets) {
-    for (let i = 0; i < totalDashes; i++) {
-      const sCenter = i * segLen
-      const sStart = sCenter
-      const sEnd = Math.min(length, sCenter + DASH)
-      if (sEnd <= sStart) continue
-      dashSegments.push({ offset, sStart, sEnd })
+    // Lane divider offsets (perpendicular distance from centerline).
+    const dividerOffsets: number[] = []
+    for (let i = 0; i < road.laneCount - 1; i++) {
+      const offset = laneOffset(i, road.laneCount) + laneWidth / 2
+      if (Math.abs(offset) > 1e-3) dividerOffsets.push(offset)
     }
-  }
+    // A road without a lane divider (a single lane) carries no stop line
+    // and no arrow either — the rule the per-road painter had.
+    if (dividerOffsets.length === 0) continue
 
-  if (dashSegments.length > 0) {
-    // Emit each dash as a line segment in world space.
-    const positions = new Float32Array(dashSegments.length * 2 * 3)
-    let cursor = 0
-    for (const d of dashSegments) {
-      const pStart = pointAt(road, d.offset, d.sStart)
-      const pEnd = pointAt(road, d.offset, d.sEnd)
-      positions[cursor++] = pStart.x
-      positions[cursor++] = pStart.y + 0.02
-      positions[cursor++] = pStart.z
-      positions[cursor++] = pEnd.x
-      positions[cursor++] = pEnd.y + 0.02
-      positions[cursor++] = pEnd.z
+    // Distribute dashes evenly along the polyline arc length.
+    const segLen = DASH + GAP
+    const totalDashes = Math.max(0, Math.floor((length + GAP) / segLen))
+
+    // Per-offset, walk the polyline and emit a dash at each `s`.
+    for (const offset of dividerOffsets) {
+      for (let i = 0; i < totalDashes; i++) {
+        const sCenter = i * segLen
+        const sStart = sCenter
+        const sEnd = Math.min(length, sCenter + DASH)
+        if (sEnd <= sStart) continue
+        const pStart = pointAt(road, offset, sStart)
+        const pEnd = pointAt(road, offset, sEnd)
+        pushSegment(
+          pStart.x,
+          pStart.y + 0.02,
+          pStart.z,
+          pEnd.x,
+          pEnd.y + 0.02,
+          pEnd.z,
+          DIVIDER_COLOR,
+        )
+      }
     }
-    const geom = new THREE.BufferGeometry()
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    const mat = new THREE.LineBasicMaterial({ color: DIVIDER_COLOR })
-    group.add(new THREE.LineSegments(geom, mat))
-  }
 
-  // Stop lines: one per approach of every connected intersection, at
-  // the arc length the traffic logic stops at. `roadStopLines` and the
-  // tick's `stopLineSOnRoad` read the SAME projection, so the painted
-  // line and the enforced line cannot drift apart.
-  for (const s of roadStopLines(road, options.intersections ?? [])) {
-    const rgt = roadRight(road, s)
-    const cx = pointAt(road, 0, s)
-    const a = new THREE.Vector3(cx.x + rgt.ux * -halfWidth, cx.y + 0.03, cx.z + rgt.uz * -halfWidth)
-    const b = new THREE.Vector3(cx.x + rgt.ux * halfWidth, cx.y + 0.03, cx.z + rgt.uz * halfWidth)
-    const lineGeom = new THREE.BufferGeometry().setFromPoints([a, b])
-    const lineMat = new THREE.LineBasicMaterial({ color: STOPLINE_COLOR })
-    group.add(new THREE.Line(lineGeom, lineMat))
-  }
+    // Stop lines: one per approach of every connected intersection, at
+    // the arc length the traffic logic stops at. `roadStopLines` and the
+    // tick's `stopLineSOnRoad` read the SAME projection, so the painted
+    // line and the enforced line cannot drift apart.
+    for (const s of roadStopLines(road, options.intersections ?? [])) {
+      const rgt = roadRight(road, s)
+      const cx = pointAt(road, 0, s)
+      pushSegment(
+        cx.x + rgt.ux * -halfWidth,
+        cx.y + 0.03,
+        cx.z + rgt.uz * -halfWidth,
+        cx.x + rgt.ux * halfWidth,
+        cx.y + 0.03,
+        cx.z + rgt.uz * halfWidth,
+        STOPLINE_COLOR,
+      )
+    }
 
-  // Lane direction arrows at s = 0.2·len and 0.8·len, per lane.
-  if (road.laneCount >= 3) {
-    const arrowSize = 0.55
-    const arrowSlots = [length * 0.2, length * 0.8]
-    for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
-      const sign = laneForwardSign(laneIndex, road.laneCount)
-      const off = laneOffset(laneIndex, road.laneCount)
-      for (const s of arrowSlots) {
-        const arrow = buildArrow(arrowSize)
-        const p = pointAt(road, off, s)
-        arrow.position.set(p.x, p.y + 0.025, p.z)
-        const fwd = roadForward(road, s)
-        const yaw = Math.atan2(fwd.uz, fwd.ux)
-        arrow.rotation.y = -yaw + (sign === -1 ? Math.PI : 0)
-        group.add(arrow)
+    // Lane direction arrows at s = 0.2·len and 0.8·len, per lane.
+    if (road.laneCount >= 3) {
+      const arrowSlots = [length * 0.2, length * 0.8]
+      for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
+        const sign = laneForwardSign(laneIndex, road.laneCount)
+        const off = laneOffset(laneIndex, road.laneCount)
+        for (const s of arrowSlots) {
+          const p = pointAt(road, off, s)
+          const fwd = roadForward(road, s)
+          const yaw = Math.atan2(fwd.uz, fwd.ux)
+          // The arrow used to be its own object with a position and a
+          // rotation; the placement is baked into the vertices here, so
+          // the paint lands on exactly the same pixels.
+          _euler.set(0, -yaw + (sign === -1 ? Math.PI : 0), 0)
+          _quat.setFromEuler(_euler)
+          _pos.set(p.x, p.y + 0.025, p.z)
+          _matrix.compose(_pos, _quat, _scale)
+          for (const [ax, az, bx, bz] of ARROW_SEGMENTS) {
+            _point.set(ax * ARROW_SIZE, 0, az * ARROW_SIZE).applyMatrix4(_matrix)
+            const startX = _point.x
+            const startY = _point.y
+            const startZ = _point.z
+            _point.set(bx * ARROW_SIZE, 0, bz * ARROW_SIZE).applyMatrix4(_matrix)
+            pushSegment(startX, startY, startZ, _point.x, _point.y, _point.z, ARROW_COLOR)
+          }
+        }
       }
     }
   }
 
+  if (positions.length === 0) return group
+
+  const geom = new THREE.BufferGeometry()
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+  const mat = new THREE.LineBasicMaterial({ color: 0xffffff, vertexColors: true })
+  group.add(new THREE.LineSegments(geom, mat))
   return group
 }
 

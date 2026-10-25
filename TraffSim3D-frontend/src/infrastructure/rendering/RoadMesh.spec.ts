@@ -3,22 +3,26 @@
 // createRoadMesh extrudes a triangle strip along the road polyline. The
 // vertex buffer IS the contract, so assert exact coordinates — the
 // perpendicular is (uz, -ux) and halfWidth = laneCount * 3.5 / 2.
+//
+// The whole network's roads share one mesh (one draw call), so the
+// builder takes a LIST of roads; a single road is the degenerate case.
 
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
-import { createRoadMesh } from './RoadMesh'
+import { createRoadMesh, roadSurfaceGeometry } from './RoadMesh'
 import { makeTestRoad, makePolylineRoad } from '@__fixtures__/testNetwork'
 import { ROAD_LANE_WIDTH } from '@shared/constants/simulation'
+import type { Road } from '@domain/entities/Road'
 
-const positionsOf = (road: Parameters<typeof createRoadMesh>[0]): Float32Array =>
-  createRoadMesh(road).geometry.attributes.position!.array as Float32Array
+const positionsOf = (road: Road): Float32Array =>
+  createRoadMesh([road]).geometry.attributes.position!.array as Float32Array
 
 describe('createRoadMesh — 2-point road', () => {
   // r-ns runs (0,0,-30) -> (0,0,30), laneCount 2 => halfWidth 3.5.
   const road = makeTestRoad('r-ns', 'ns', 2)
 
   it('collapses to 4 vertices / 6 indices (a single quad) for a 2-point road', () => {
-    const geom = createRoadMesh(road).geometry
+    const geom = createRoadMesh([road]).geometry
     expect(geom.attributes.position!.count).toBe(4)
     expect(geom.index!.count).toBe(6)
     expect(geom.attributes.position!.itemSize).toBe(3)
@@ -46,12 +50,12 @@ describe('createRoadMesh — 2-point road', () => {
   })
 
   it('emits CCW winding for each segment: (a, b, c)(b, d, c)', () => {
-    const idx = createRoadMesh(road).geometry.index!.array as ArrayLike<number>
+    const idx = createRoadMesh([road]).geometry.index!.array as ArrayLike<number>
     expect(Array.from(idx)).toEqual([0, 1, 2, 1, 3, 2])
   })
 
   it('computes vertex normals (needed for the lit road material)', () => {
-    const geom = createRoadMesh(road).geometry
+    const geom = createRoadMesh([road]).geometry
     expect(geom.attributes.normal).toBeDefined()
     expect(geom.attributes.normal!.count).toBe(4)
     // Flat strip -> every normal points straight up (+Y).
@@ -59,7 +63,7 @@ describe('createRoadMesh — 2-point road', () => {
   })
 
   it('uses the asphalt material (0x374151, roughness 0.95)', () => {
-    const mat = createRoadMesh(road).material as THREE.MeshStandardMaterial
+    const mat = createRoadMesh([road]).material as THREE.MeshStandardMaterial
     expect(mat.color.getHex()).toBe(0x374151)
     expect(mat.roughness).toBe(0.95)
   })
@@ -86,7 +90,7 @@ describe('createRoadMesh — polyline road', () => {
   )
 
   it('emits 2 vertices per waypoint and 2 triangles per segment', () => {
-    const geom = createRoadMesh(road).geometry
+    const geom = createRoadMesh([road]).geometry
     expect(geom.attributes.position!.count).toBe(6)
     expect(geom.index!.count).toBe(12)
     expect(Array.from(geom.index!.array as ArrayLike<number>)).toEqual([
@@ -155,5 +159,53 @@ describe('createRoadMesh — degenerate road', () => {
     expect(p[2]).toBeCloseTo(-5.5, 6)
     expect(p[3]).toBeCloseTo(5, 6)
     expect(p[5]).toBeCloseTo(1.5, 6)
+  })
+})
+
+describe('createRoadMesh — the whole network in one mesh', () => {
+  const roads = [
+    makeTestRoad('r-ns', 'ns', 2),
+    makeTestRoad('r-ew', 'ew', 2),
+    makeTestRoad('r-diag', 'ew', 4),
+  ]
+
+  it('merges every road into one buffer, vertex for vertex', () => {
+    const mesh = createRoadMesh(roads)
+    const expectedVertices = roads.reduce(
+      (sum, road) => sum + roadSurfaceGeometry(road).attributes.position!.count,
+      0,
+    )
+    expect(mesh.geometry.attributes.position!.count).toBe(expectedVertices)
+  })
+
+  it('keeps the per-road geometry in the same order the roads were given', () => {
+    const mesh = createRoadMesh(roads)
+    const merged = mesh.geometry.attributes.position!.array as Float32Array
+    let cursor = 0
+    for (const road of roads) {
+      const own = roadSurfaceGeometry(road).attributes.position!.array as Float32Array
+      for (let i = 0; i < own.length; i++) expect(merged[cursor + i]).toBeCloseTo(own[i]!, 6)
+      cursor += own.length
+    }
+  })
+
+  it('re-bases the index buffer so every road keeps its own triangles', () => {
+    const mesh = createRoadMesh(roads)
+    const idx = Array.from(mesh.geometry.index!.array as ArrayLike<number>)
+    const expected = roads.reduce((sum, road) => sum + roadSurfaceGeometry(road).index!.count, 0)
+    expect(idx).toHaveLength(expected)
+    // The second road's first triangle must point at its own vertices.
+    const first = roads[0]!.laneCount
+    expect(idx[0]).toBe(0)
+    expect(Math.max(...idx)).toBe(
+      roads.reduce((sum, road) => sum + roadSurfaceGeometry(road).attributes.position!.count, 0) -
+        1,
+    )
+    expect(first).toBe(2)
+  })
+
+  it('builds an empty mesh for a network without roads', () => {
+    const mesh = createRoadMesh([])
+    expect(mesh.geometry.attributes.position).toBeUndefined()
   })
 })

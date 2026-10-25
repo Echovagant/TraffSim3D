@@ -1,8 +1,6 @@
 import * as THREE from 'three'
-import type { Intersection } from '@domain/entities/Intersection'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { TrafficLight } from '@domain/entities/TrafficLight'
-import type { Road } from '@domain/entities/Road'
 import { createGroundMesh, GROUND_DEFAULT_SIZE, GROUND_PADDING } from './GroundMesh'
 
 /** Rendering mode. `flat` (default) renders the ground
@@ -15,8 +13,8 @@ export type RenderMode = 'flat' | 'smart-city'
 import { createRoadMesh } from './RoadMesh'
 import { createRoadMarkings } from './RoadMarkingsMesh'
 import {
-  createTrafficLightNode,
-  updateTrafficLightNode,
+  createTrafficLightLayer,
+  type TrafficLightLayer,
   type TrafficLightNode,
 } from './TrafficLightNode'
 import { createSelectionRing } from './SelectionRingMesh'
@@ -24,63 +22,35 @@ import { createVehicleInstances, type VehicleInstances } from './VehicleInstance
 
 const Y_SELECTION_RING_BASE = 0.05
 
-export interface RoadNode {
-  /** Group containing the road plane + lane markings. */
-  group: THREE.Group
-}
-
 export interface BuiltScene {
   root: THREE.Group
   /** Instanced vehicle rendering (3 InstancedMesh, one per type). */
   vehicles: VehicleInstances
   lightNodes: Map<string, TrafficLightNode>
-  roadNodes: Map<string, RoadNode>
+  /** The signal heads of the whole network, in three draw calls. */
+  lightLayer: TrafficLightLayer
+  /**
+   * The network's road surface — every road merged into ONE mesh, so the
+   * carriageway costs one draw call instead of one per road.
+   */
+  roadSurface: THREE.Mesh | null
+  /**
+   * The network's painted markings — every centre line, dash, stop line
+   * and arrow merged into ONE line mesh.
+   */
+  roadMarkings: THREE.Group | null
   /** Single ring, reparented/repositioned per selection. Hidden when nothing is selected. */
   selectionRing: THREE.Mesh
 }
 
-/** Per-frame update for a traffic light: delegated to TrafficLightNode
- *  which now owns all phase-specific logic (color, emissive, flashing,
- *  countdown bar). */
-const updateLightNode = (light: TrafficLight, node: TrafficLightNode, simTime: number): void => {
-  updateTrafficLightNode(node, light, simTime)
-}
-
-const disposeLightNode = (node: TrafficLightNode): void => {
-  node.sphere.geometry.dispose()
-  node.sphereMaterial.dispose()
-  node.bar.geometry.dispose()
-  node.barMaterial.dispose()
-  // First child is the pole.
-  const pole = node.group.children[0]
-  if (pole instanceof THREE.Mesh) {
-    pole.geometry.dispose()
-    ;(pole.material as THREE.Material).dispose()
+/** Every traffic light of the network, in the order the junctions list them. */
+const collectLights = (network: RoadNetwork): TrafficLight[] => {
+  const lights: TrafficLight[] = []
+  for (const inter of Object.values(network.intersections)) {
+    for (const light of inter.trafficLights) lights.push(light)
   }
+  return lights
 }
-
-const disposeRoadNode = (node: RoadNode): void => {
-  for (const child of node.group.children) {
-    if (child instanceof THREE.Mesh) {
-      child.geometry.dispose()
-      ;(child.material as THREE.Material).dispose()
-    } else if (child instanceof THREE.Line || child instanceof THREE.LineSegments) {
-      child.geometry.dispose()
-      ;(child.material as THREE.Material).dispose()
-    }
-  }
-}
-
-const buildRoadNode = (road: Road, intersections: readonly Intersection[]): RoadNode => {
-  const group = new THREE.Group()
-  group.add(createRoadMesh(road))
-  // The intersections go along so the painted stop lines land where the
-  // traffic logic stops a vehicle (same projection, same source).
-  group.add(createRoadMarkings(road, { intersections }))
-  return { group }
-}
-
-const buildLightNode = (light: TrafficLight): TrafficLightNode => createTrafficLightNode(light)
 
 export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): BuiltScene => {
   const root = new THREE.Group()
@@ -129,16 +99,25 @@ export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): Bui
     root.add(pickPlane)
   }
 
-  const roadNodes = new Map<string, RoadNode>()
+  let roadSurface: THREE.Mesh | null = null
+  let roadMarkings: THREE.Group | null = null
   // Smart-city mode skips Three.js road meshes because
   // Cesium draws roads from real OSM data (GeoJsonDataSource).
   if (mode === 'flat') {
+    const roads = Object.values(network.roads)
     const intersections = Object.values(network.intersections)
-    for (const road of Object.values(network.roads)) {
-      const node = buildRoadNode(road, intersections)
-      root.add(node.group)
-      roadNodes.set(road.id, node)
+    // The whole carriageway is one mesh and the whole paint is one line
+    // mesh: the geometry is the same as when every road had a mesh of
+    // its own, but the scene spends two draw calls on it instead of
+    // hundreds.
+    if (roads.length > 0) {
+      roadSurface = createRoadMesh(roads)
+      root.add(roadSurface)
     }
+    // The intersections go along so the painted stop lines land where the
+    // traffic logic stops a vehicle (same projection, same source).
+    roadMarkings = createRoadMarkings(roads, { intersections })
+    root.add(roadMarkings)
   }
 
   // Instanced vehicle rendering.
@@ -152,19 +131,15 @@ export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): Bui
     if (trail) root.add(trail.line)
   }
 
-  const lightNodes = new Map<string, TrafficLightNode>()
-  for (const inter of Object.values(network.intersections)) {
-    for (const light of inter.trafficLights) {
-      const node = buildLightNode(light)
-      root.add(node.group)
-      lightNodes.set(light.id, node)
-    }
-  }
+  const lightLayer = createTrafficLightLayer()
+  lightLayer.setLights(collectLights(network))
+  root.add(lightLayer.root)
+  const lightNodes = lightLayer.nodes
 
   const selectionRing = createSelectionRing()
   root.add(selectionRing)
 
-  return { root, vehicles, lightNodes, roadNodes, selectionRing }
+  return { root, vehicles, lightNodes, lightLayer, roadSurface, roadMarkings, selectionRing }
 }
 
 /**
@@ -187,7 +162,7 @@ export const syncMeshTransforms = (
   for (const inter of Object.values(network.intersections)) {
     for (const light of inter.trafficLights) {
       const node = built.lightNodes.get(light.id)
-      if (node) updateLightNode(light, node, simTime)
+      if (node) built.lightLayer.update(node, light, simTime)
     }
   }
 }
@@ -221,33 +196,18 @@ export const syncSceneContents = (network: RoadNetwork, built: BuiltScene): void
     }
   }
 
-  // Lights (lights live under intersections, not at the top level of the network).
-  const liveLightIds = new Set<string>()
-  for (const inter of Object.values(network.intersections)) {
-    for (const l of inter.trafficLights) liveLightIds.add(l.id)
-  }
-  for (const [id, node] of built.lightNodes) {
-    if (!liveLightIds.has(id)) {
-      built.root.remove(node.group)
-      disposeLightNode(node)
-      built.lightNodes.delete(id)
-    }
-  }
-  for (const id of liveLightIds) {
-    if (!built.lightNodes.has(id)) {
-      // Find the light entity to build the node.
-      let found: TrafficLight | undefined
-      for (const inter of Object.values(network.intersections)) {
-        const l = inter.trafficLights.find((x) => x.id === id)
-        if (l) {
-          found = l
-          break
-        }
+  // Lights (lights live under intersections, not at the top level of the
+  // network). The heads share three meshes, so a change in the set of
+  // lights rebuilds them — the cheap path (no change) is the norm.
+  const liveLights = collectLights(network)
+  if (liveLights.length !== built.lightNodes.size) {
+    built.lightLayer.setLights(liveLights)
+  } else {
+    for (const light of liveLights) {
+      if (!built.lightNodes.has(light.id)) {
+        built.lightLayer.setLights(liveLights)
+        break
       }
-      if (!found) continue
-      const node = buildLightNode(found)
-      built.root.add(node.group)
-      built.lightNodes.set(id, node)
     }
   }
 }
@@ -267,7 +227,7 @@ export const syncSelection = (
     pos = built.vehicles.getPosition(selected.id)
   } else {
     const node = built.lightNodes.get(selected.id)
-    if (node) pos = node.group.position
+    if (node) pos = node.position
   }
   if (!pos) {
     ring.visible = false

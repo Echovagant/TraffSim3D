@@ -520,7 +520,9 @@ describe('ThreeJSRenderer — scene rebuild', () => {
     const scRoot = builtRoot()
     expect(scRoot).not.toBe(flatRoot)
     expect(scRoot.children.some((c) => c.name === 'pick-plane')).toBe(true)
-    expect(scRoot.children.filter((c) => c instanceof THREE.Group)).toHaveLength(roadGroups - 2)
+    // Flat mode paints the markings in one group; smart-city has neither
+    // the road surface nor the paint.
+    expect(scRoot.children.filter((c) => c instanceof THREE.Group)).toHaveLength(roadGroups - 1)
   })
 
   it('setRenderMode to the current mode is a no-op (no rebuild)', () => {

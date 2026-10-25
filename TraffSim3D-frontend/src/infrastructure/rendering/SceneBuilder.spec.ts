@@ -76,7 +76,7 @@ describe('buildScene — ground sizing', () => {
   it('falls back to the default ground for an empty network', () => {
     const built = buildScene(createRoadNetwork())
     expect(planeWidth(groundOf(built))).toBe(GROUND_DEFAULT_SIZE)
-    expect(built.roadNodes.size).toBe(0)
+    expect(built.roadSurface).toBeNull()
     expect(built.lightNodes.size).toBe(0)
   })
 })
@@ -85,25 +85,31 @@ describe('buildScene — flat mode (default)', () => {
   const net = buildTestNetwork(2)
   const built = buildScene(net)
 
-  it('adds ground + one group per road + 3 instance meshes + trails + lights + ring', () => {
-    // 1 ground + 2 road groups + 3 vehicle meshes + 2 trails + 1 light + 1 ring
+  it('adds ground + one merged road surface + one markings group + 3 instance meshes + trails + lights + ring', () => {
+    // 1 ground + 1 road surface + 1 markings + 3 vehicle meshes + 2 trails + 1 light + 1 ring
     expect(built.root.children).toHaveLength(10)
   })
 
-  it('indexes road nodes by road id, each holding the mesh + its markings group', () => {
-    expect([...built.roadNodes.keys()].sort()).toEqual(['r-ew', 'r-ns'])
-    for (const node of built.roadNodes.values()) {
-      expect(node.group.children).toHaveLength(2)
-      expect((node.group.children[0] as THREE.Mesh).isMesh).toBe(true)
-      expect((node.group.children[1] as THREE.Group).isGroup).toBe(true)
-    }
+  it('draws every road in ONE surface mesh and ONE markings group', () => {
+    expect(built.roadSurface).not.toBeNull()
+    expect(built.root.children).toContain(built.roadSurface)
+    expect(built.roadMarkings).not.toBeNull()
+    expect(built.root.children).toContain(built.roadMarkings)
+    // Both roads' quads live in the one buffer: 2 roads x 4 vertices.
+    expect(built.roadSurface!.geometry.attributes.position!.count).toBe(8)
+    // ... and the paint of both roads lives in the one line mesh.
+    expect(built.roadMarkings!.children).toHaveLength(1)
+    expect(built.roadMarkings!.children[0]).toBeInstanceOf(THREE.LineSegments)
   })
 
-  it('indexes light nodes by light id and parents each group into the root', () => {
+  it('indexes light nodes by light id and parents the signal heads into the root', () => {
     expect([...built.lightNodes.keys()]).toEqual(['tl-1'])
     const node = built.lightNodes.get('tl-1')!
-    expect(built.root.children).toContain(node.group)
-    expect(node.group.children).toHaveLength(3)
+    expect(built.root.children).toContain(built.lightLayer.root)
+    // Every head of the network shares three meshes.
+    expect(built.lightLayer.bulbs.count).toBe(1)
+    expect(built.lightLayer.bars.count).toBe(1)
+    expect(built.lightLayer.poles).not.toBeNull()
   })
 
   it('allocates every network vehicle into the instanced pool and parents its trail', () => {
@@ -140,7 +146,8 @@ describe('buildScene — smart-city mode', () => {
   })
 
   it('skips the Three.js road meshes — Cesium draws the basemap', () => {
-    expect(built.roadNodes.size).toBe(0)
+    expect(built.roadSurface).toBeNull()
+    expect(built.roadMarkings).toBeNull()
     // pick plane + 3 meshes + 2 trails + 1 light + 1 ring
     expect(built.root.children).toHaveLength(8)
   })
@@ -163,17 +170,27 @@ describe('syncMeshTransforms', () => {
     const node = built.lightNodes.get('tl-1')!
     net.intersections['i-1']!.trafficLights[0]!.phaseRemaining = 15
     syncMeshTransforms(net, built, 0)
-    expect(node.bar.scale.x).toBeCloseTo(0.5, 6)
+    const matrix = new THREE.Matrix4().fromArray(
+      built.lightLayer.bars.instanceMatrix.array as Float32Array,
+      node.index * 16,
+    )
+    expect(matrix.elements[0]).toBeCloseTo(0.5, 6)
   })
 
   it('blinks a flashing light off mid-cycle', () => {
     const net = buildTestNetwork(0, { phase: LightPhase.FlashingYellow })
     const built = buildScene(net)
     const node = built.lightNodes.get('tl-1')!
+    const glow = (): number =>
+      (
+        built.lightLayer.bulbs.geometry.getAttribute(
+          'instanceGlow',
+        ) as THREE.InstancedBufferAttribute
+      ).getX(node.index)
     syncMeshTransforms(net, built, 0.25)
-    expect(node.sphereMaterial.emissiveIntensity).toBe(0.5)
+    expect(glow()).toBe(0.5)
     syncMeshTransforms(net, built, 0.75)
-    expect(node.sphereMaterial.emissiveIntensity).toBe(0)
+    expect(glow()).toBe(0)
   })
 
   it('is a no-op for a light the scene does not know about', () => {
@@ -233,30 +250,26 @@ describe('syncSceneContents — traffic lights', () => {
     syncSceneContents(net, built)
 
     expect(built.lightNodes.has('tl-2')).toBe(true)
-    expect(built.root.children).toHaveLength(before + 1)
-    expect(built.root.children).toContain(built.lightNodes.get('tl-2')!.group)
+    // The heads share three meshes, so a new light does not add a child
+    // to the root — it adds an instance.
+    expect(built.root.children).toHaveLength(before)
+    expect(built.lightLayer.bulbs.count).toBe(2)
+    expect(built.lightLayer.bars.count).toBe(2)
+    expect(built.lightLayer.lightIdAt(1)).toBe('tl-2')
   })
 
-  it('disposes and unparents a node whose light left the network', () => {
+  it('drops a node whose light left the network', () => {
     const net = buildTestNetwork(0)
     const built = buildScene(net)
-    const node = built.lightNodes.get('tl-1')!
-    const pole = node.group.children[0] as THREE.Mesh
-    const spies = [
-      vi.spyOn(node.sphere.geometry, 'dispose'),
-      vi.spyOn(node.sphereMaterial, 'dispose'),
-      vi.spyOn(node.bar.geometry, 'dispose'),
-      vi.spyOn(node.barMaterial, 'dispose'),
-      vi.spyOn(pole.geometry, 'dispose'),
-      vi.spyOn(pole.material as THREE.Material, 'dispose'),
-    ]
+    const poleGeometry = built.lightLayer.poles!.geometry
+    const disposeSpy = vi.spyOn(poleGeometry, 'dispose')
 
     net.intersections['i-1']!.trafficLights = []
     syncSceneContents(net, built)
 
     expect(built.lightNodes.has('tl-1')).toBe(false)
-    expect(built.root.children).not.toContain(node.group)
-    for (const s of spies) expect(s).toHaveBeenCalledTimes(1)
+    expect(built.lightLayer.bulbs.count).toBe(0)
+    expect(disposeSpy).toHaveBeenCalledTimes(1)
   })
 
   it('removes a light that lost its intersection entirely', () => {

@@ -1,17 +1,18 @@
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { Road } from '@domain/entities/Road'
 import { ROAD_LANE_WIDTH } from '@shared/constants/simulation'
 import { roadWaypoints } from '@domain/services/laneGeometry'
 
 /**
- * Build a road as a triangle strip extruded along the polyline
+ * The surface of one road as a triangle strip extruded along the polyline
  * waypoints. For 2-point roads the math collapses to a single quad
  * (4 vertices, 6 indices), matching the older PlaneGeometry shape.
  *
  * Y component of waypoints is honoured so ramps work without
  * further changes; for flat roads y=0 throughout.
  */
-export const createRoadMesh = (road: Road): THREE.Mesh => {
+export const roadSurfaceGeometry = (road: Road): THREE.BufferGeometry => {
   const waypoints = roadWaypoints(road)
   const halfWidth = (ROAD_LANE_WIDTH * road.laneCount) / 2
   const yOffset = 0.01
@@ -95,7 +96,28 @@ export const createRoadMesh = (road: Road): THREE.Mesh => {
   geom.setAttribute('position', new THREE.BufferAttribute(positions, 3))
   geom.setIndex(indices)
   geom.computeVertexNormals()
+  return geom
+}
 
+/**
+ * The road surface of a whole network as ONE mesh.
+ *
+ * Every road used to be a mesh of its own, with a material of its own: a
+ * 5x5 grid spent 40 draw calls on nothing but asphalt, and every call
+ * cost more than the pixels it drew. The geometry is untouched — the
+ * roads are merged into one buffer, so the carriageway looks exactly the
+ * way it did — but the scene now draws it in a single call.
+ */
+export const createRoadMesh = (roads: readonly Road[]): THREE.Mesh => {
+  const geometries = roads.map((road) => roadSurfaceGeometry(road))
+  const merged =
+    geometries.length === 0 ? new THREE.BufferGeometry() : mergeGeometries(geometries, false)
+  if (!merged) {
+    // Every road's geometry comes from the builder above, so the
+    // attribute sets always match; this branch would mean the builder
+    // changed shape and the merge is no longer valid.
+    throw new Error('createRoadMesh: the road geometries could not be merged')
+  }
   const mat = new THREE.MeshStandardMaterial({ color: 0x374151, roughness: 0.95 })
-  return new THREE.Mesh(geom, mat)
+  return new THREE.Mesh(merged, mat)
 }

@@ -87,6 +87,15 @@ export class ThreeJSRenderer {
     const dir = new THREE.DirectionalLight(0xffffff, 0.8)
     dir.position.set(50, 80, 30)
     this.scene.add(dir)
+
+    // Dev-only introspection hook, same pattern as `window.__world` and
+    // `window.__camera`: the performance probes need the live renderer
+    // (draw calls, the scene graph) to tell one layer's cost from
+    // another's. `import.meta.env.DEV` is replaced with `false` in
+    // production builds, so this block is tree-shaken out of the bundle.
+    if (import.meta.env.DEV && typeof window !== 'undefined') {
+      ;(window as unknown as { __renderer?: ThreeJSRenderer }).__renderer = this
+    }
   }
 
   resize(width: number, height: number): void {
@@ -153,7 +162,7 @@ export class ThreeJSRenderer {
 
   /**
    * Cast a ray from screen coordinates and return the first hit vehicle or light, or null.
-   * Raycasts against the body meshes (vehicles) and sphere meshes (lights) of the
+   * Raycasts against the body meshes (vehicles) and the bulb instances (lights) of the
    * currently built scene. With the new vehicle models the body is a
    * child of a parent Group, so we walk up the hit object's parent
    * chain to find the Group that matches one of our vehicle nodes.
@@ -189,13 +198,11 @@ export class ThreeJSRenderer {
       }
     }
 
-    const lightMeshes: THREE.Mesh[] = []
-    for (const node of this.built.lightNodes.values()) lightMeshes.push(node.sphere)
-    const lh = raycaster.intersectObjects(lightMeshes, false)
+    const lh = raycaster.intersectObjects([this.built.lightLayer.bulbs], false)
     if (lh.length > 0) {
-      const mesh = lh[0]!.object as THREE.Mesh
-      for (const [lid, node] of this.built.lightNodes)
-        if (node.sphere === mesh) return { kind: 'light', id: lid }
+      const hit = lh[0]!
+      const id = this.built.lightLayer.lightIdAt(hit.instanceId ?? -1)
+      if (id) return { kind: 'light', id }
     }
     return null
   }
