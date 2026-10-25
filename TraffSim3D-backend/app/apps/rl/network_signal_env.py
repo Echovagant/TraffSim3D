@@ -16,6 +16,48 @@ with one light each, and its signal timeline is the reference this module
 has to match: a 30 s green, a 6 s clearance in which **neither** axis is
 green, and a 72 s period - at every junction, to the step.
 
+The level this module runs is the **3 x 3** grid: nine junctions, twelve
+segments, and the four arms of every junction. The browser's 5 x 5 grid
+is the next level up, and the model does not have to change for it - the
+topology is read off the graph, not written down.
+
+The four knobs the 3 x 3 level needed
+======================================
+
+The 2 x 2 grid could be run without thinking about the demand, the
+turning or the links. The 3 x 3 grid cannot, and the four knobs below
+are what it needed. **Every one of them defaults to the behaviour the
+2 x 2 level had**, so the existing episodes stay bit-identical (checked
+against the previous implementation, link flow by link flow).
+
+``demand_scale``
+    The 3 x 3 grid has twelve boundary arms against the 2 x 2 grid's
+    eight, so the same per-lane rate injects 1.5 x the traffic, and the
+    centre - the junction with no boundary arm at all - carries the sum
+    of four approaches. The observation's ``MAX_QUEUE`` is a
+    cross-language constant of 10 and may not change, so the demand is
+    what has to be calibrated: measured on the 3 x 3 grid over 200 s,
+    the demand of 1.0 clips 60.6 % of the steps (the peak axis queue is
+    21) and the demand of 0.35 clips none (the peak is 9).
+
+``turn_bias``
+    How the turns split between the left and the right side. The
+    browser's split (0.6 right) is the default; the bias is keyed by the
+    **movement**, because the right turn's exit direction depends on the
+    approach and a rule over absolute directions cannot say "the right
+    turn is likelier".
+
+``spillback_queue_threshold``
+    The queue at the downstream arm from which an exit counts as
+    blocked. The default is off, which is the historical behaviour: the
+    travel time down a link is free-flow, so a jam at the downstream
+    junction never reaches back into the upstream one.
+
+``reward_scale``
+    The reward is the **network total delay** - the contract's reward -
+    and the scale only multiplies it, so a policy trained on a 3 x 3
+    grid and one trained on a 5 x 5 grid see the same value scale.
+
 The **clock is not written here**. Each junction owns a ``sim_core``
 ``SimCore`` whose only job is to advance **its** light, and the advance
 goes through ``SimCore.step()`` - the same code path the single-junction
@@ -87,7 +129,9 @@ from .sim_core import (
 )
 
 __all__ = [
+    "GRID_COLS",
     "GRID_LANE_COUNT",
+    "GRID_ROWS",
     "GRID_ROW_PHASE_SECS",
     "GRID_SPACING_M",
     "GRID_SPEED_LIMIT",
@@ -95,8 +139,11 @@ __all__ = [
     "MAX_QUEUE",
     "NET_OBS_DIM",
     "NOSE_CLEARANCE_M",
+    "RIGHT_TURN_SHARE",
     "SATURATION_HEADWAY_SECS",
     "SIG_OBS_DIM",
+    "TURN_BIAS",
+    "TURN_PROBABILITY",
     "ArmSpec",
     "JunctionSpec",
     "NetworkSignalEnv",
@@ -172,6 +219,37 @@ TURN_PROBABILITY = 0.25
 #: forbids, and they are slower.
 RIGHT_TURN_SHARE = 0.6
 
+#: How the turns split between the two sides - the browser's split, and
+#: the default of the ``turn_bias`` knob.
+#:
+#: The keys are the two **turn movements**, not the four compass
+#: directions, and that is a deliberate choice: the browser's rule is
+#: "the right turn is likelier", and a rule expressed over absolute
+#: directions cannot say that. The right turn's exit depends on the
+#: approach (a vehicle arriving from the north leaves to the west, one
+#: arriving from the south leaves to the east), so a single number per
+#: direction would have to mean "right" for one approach and "left" for
+#: another. The movement fixes the exit direction instead - see
+#: ``LEFT_TURN`` / ``RIGHT_TURN`` - so one number per movement is enough
+#: to carry the browser's split exactly.
+#:
+#: A real street network runs about 0.70 through / 0.15 left / 0.15
+#: right. With the browser's ``TURN_PROBABILITY`` of 0.25 that split
+#: would need ``turn_probability=0.30`` and a 50/50 side split, which is
+#: **not** the default: the browser runs 0.25 / 0.6, and the two sides
+#: have to agree on the rate, because the rate is what the traffic the
+#: agent sees is made of.
+TURN_BIAS: dict[str, float] = {
+    "right": RIGHT_TURN_SHARE,
+    "left": 1.0 - RIGHT_TURN_SHARE,
+}
+
+#: The grid the env runs by default - the training level. 3 x 3 is nine
+#: junctions and twelve segments; the browser's grid scene is 5 x 5
+#: (twenty-five junctions, forty segments).
+GRID_ROWS = 3
+GRID_COLS = 3
+
 
 def junction_radius(lane_count: int) -> float:
     """The junction box radius of a junction with `lane_count` lanes.
@@ -199,10 +277,13 @@ def build_grid_network_dict(
     ``trafficLights`` / ``intersectionRadius``.
 
     A 2 x 2 grid is four junctions and four roads; every junction has
-    **four arms**, of which two lead to a neighbour and two are the
-    **network boundary** (a direction with no road behind it). The
+    **four arms**, of which some lead to a neighbour and the rest are
+    the **network boundary** (a direction with no road behind it). The
     boundary arms are where the external traffic enters and where the
-    traffic leaves the network.
+    traffic leaves the network. A 3 x 3 grid is nine junctions and
+    twelve segments: the four corners have two internal arms each, the
+    four edge junctions three, and the centre four - and **no** boundary
+    arm at all, so the centre only ever sees its upstream neighbours.
 
     The grid is centred on the origin and the junction positions are
     whole metres - ``build_network_graph`` snaps the node positions to an
@@ -319,18 +400,54 @@ class JunctionSpec:
 
 
 @dataclass
+class _Vehicle:
+    """One vehicle in the queue model.
+
+    The vehicle is a **record**, not a body: it has no position and no
+    speed, only the two things the queue model needs - how many
+    junctions it has crossed, and which exit arm it takes when it is
+    released.
+
+    ``movement`` is decided **once**, when the vehicle reaches the head
+    of its lane's queue, and it is kept even if the vehicle then has to
+    wait for a blocked exit. A vehicle that re-rolled its route every
+    step would change route according to how long it had to wait, and
+    the episode would stop being reproducible.
+    """
+
+    id: int
+    #: How many junctions the vehicle has crossed so far.
+    junctions: int = 0
+    #: The vehicle's route: one ``(junction, approach arm, exit arm)``
+    #: per crossing. The approach and the exit are what tell a **turn**
+    #: from a straight run: the vehicle turned at that junction when
+    #: its exit is not the opposite of the arm it came in on.
+    route: list[tuple[str, str, str]] = field(default_factory=list)
+    #: The exit direction it takes when it is released ("" = not decided).
+    movement: str = ""
+    #: How many steps the vehicle spent waiting for a blocked exit.
+    spillback_waits: int = 0
+
+
+@dataclass
 class _Lane:
     """One lane of one approach arm.
 
-    ``queue`` counts the vehicles waiting at the stop line;
+    ``vehicles`` are the vehicles waiting at the stop line, in the order
+    they arrived - a lane is a queue, first in first out;
     ``service_timer`` is the discharge clock (it is reset whenever the
     lane is not served, so a lane can never bank service across a red);
     ``arrival_timer`` is the arrival clock of an external arm.
     """
 
-    queue: int = 0
+    vehicles: list[_Vehicle] = field(default_factory=list)
     service_timer: float = 0.0
     arrival_timer: float = 0.0
+
+    @property
+    def queue(self) -> int:
+        """How many vehicles are waiting at the stop line."""
+        return len(self.vehicles)
 
 
 @dataclass
@@ -368,6 +485,10 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
         condition: TrafficCondition = TRAIN_CONDITION,
         max_steps: int = 2000,
         turn_probability: float = TURN_PROBABILITY,
+        turn_bias: dict[str, float] | None = None,
+        demand_scale: float = 1.0,
+        spillback_queue_threshold: int | None = None,
+        reward_scale: float = 1.0,
         seed: int | None = None,
         vehicle_speed: float = NPC_SPEED,
         saturation_headway: float = SATURATION_HEADWAY_SECS,
@@ -376,12 +497,51 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
     ) -> None:
         super().__init__()
         self.network: dict[str, Any] = (
-            network if network is not None else build_grid_network_dict(2, 2)
+            network if network is not None else build_grid_network_dict(GRID_ROWS, GRID_COLS)
         )
         self.graph: NetworkGraph = build_network_graph(self.network)
         self.condition = condition
         self.max_steps = int(max_steps)
         self.turn_probability = float(turn_probability)
+        #: How the turns split between the two sides. ``None`` means the
+        #: browser's split (``TURN_BIAS``) - the two sides have to agree
+        #: on it, because the split is what decides which arm the
+        #: traffic of the network ends up on.
+        self.turn_bias: dict[str, float] = dict(TURN_BIAS if turn_bias is None else turn_bias)
+        #: The demand multiplier. 1.0 is the condition's own demand.
+        #:
+        #: The demand has to be **calibrated per network size**, because
+        #: the number of external arms grows with the grid: the 2 x 2
+        #: grid has eight of them, the 3 x 3 grid twelve. At the same
+        #: per-lane rate the 3 x 3 grid therefore injects 1.5 x the
+        #: traffic, and its **centre** - the junction with no external
+        #: arm at all, which only ever sees its upstream neighbours -
+        #: carries the sum of four approaches. Measured on the 3 x 3
+        #: grid: at 1.0 the centre's queue peaks at 14 vehicles (the
+        #: observation's ``MAX_QUEUE`` is 10, so it clips), and at 0.75
+        #: it peaks at 11 - still clipping. The calibrated value is
+        #: reported in the level's notes; the default stays 1.0 so that
+        #: the existing episodes are bit-identical.
+        self.demand_scale = float(demand_scale)
+        #: The queue at the downstream arm from which an exit counts as
+        #: **spilled back**. ``None`` switches the spillback off, and
+        #: the off state is the historical behaviour: the travel time
+        #: down a link is free-flow, so a blocked downstream never
+        #: reaches back into the upstream junction.
+        #:
+        #: The threshold is counted in **vehicles**, over the whole arm
+        #: (both lanes), because that is the quantity the observation
+        #: shows: the arm's queue is what the upstream driver sees when
+        #: it looks down the road.
+        self.spillback_queue_threshold = (
+            None if spillback_queue_threshold is None else int(spillback_queue_threshold)
+        )
+        #: The reward multiplier. 1.0 is the contract's reward: the
+        #: **network total delay**, unchanged. The multiplier only
+        #: rescales it, so a policy trained on a 3 x 3 grid and one
+        #: trained on a 5 x 5 grid see the same value scale (the delay
+        #: of a bigger network is bigger in proportion to its size).
+        self.reward_scale = float(reward_scale)
         self.vehicle_speed = float(vehicle_speed)
         self.saturation_headway = float(saturation_headway)
         self.row_phase_secs = float(row_phase_secs)
@@ -407,12 +567,18 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
 
         self._arms: dict[str, dict[str, _Arm]] = {}
         self._cores: dict[str, SimCore] = {}
-        self._pending: list[tuple[float, int, str, str, str]] = []
+        # (arrival time, sequence, destination, direction, source, vehicle)
+        self._pending: list[tuple[float, int, str, str, str, _Vehicle]] = []
         self._turn_counter: dict[tuple[str, str], int] = {}
         self._sequence = 0
+        self._vehicle_sequence = 0
+        #: Every vehicle the episode has created - the record of where
+        #: the traffic went.
+        self._vehicles: list[_Vehicle] = []
         self._time = 0.0
         self._step_count = 0
         self._total_delay = 0.0
+        self._scaled_total_delay = 0.0
         self._discharged: dict[str, int] = {}
         self._received: dict[str, int] = {}
         self._external: dict[str, int] = {}
@@ -421,6 +587,8 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
         self._arrived: dict[tuple[str, str], int] = {}
         self._in_transit: dict[tuple[str, str], int] = {}
         self._left_network = 0
+        #: How many steps a vehicle spent waiting for a blocked exit.
+        self._spillback_events = 0
 
     # -- Gymnasium API ------------------------------------------------
 
@@ -450,9 +618,12 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
         self._pending = []
         self._turn_counter = {}
         self._sequence = 0
+        self._vehicle_sequence = 0
+        self._vehicles = []
         self._time = 0.0
         self._step_count = 0
         self._total_delay = 0.0
+        self._scaled_total_delay = 0.0
         self._discharged = {spec.id: 0 for spec in self._junctions}
         self._received = {spec.id: 0 for spec in self._junctions}
         self._external = {spec.id: 0 for spec in self._junctions}
@@ -461,6 +632,7 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
         self._arrived = {}
         self._in_transit = {}
         self._left_network = 0
+        self._spillback_events = 0
         return self._observations(), {}
 
     def step(self, actions: Sequence[int]) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
@@ -488,6 +660,8 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
         total_queue = self._network_queue()
         delay = total_queue * DT
         self._total_delay += delay
+        reward = -delay * self.reward_scale
+        self._scaled_total_delay += reward
         self._time += DT
         self._step_count += 1
         truncated = self._step_count >= self.max_steps
@@ -495,6 +669,8 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
         info: dict[str, Any] = {
             "delay": delay,
             "total_delay": self._total_delay,
+            "scaled_total_delay": self._scaled_total_delay,
+            "reward_scale": self.reward_scale,
             "total_queue": total_queue,
             "masked": masked,
             "queue_ns": [self._axis_queue(jid, "ns") for jid in self._junction_ids],
@@ -509,8 +685,9 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
             "arrived": {f"{a}->{b}": n for (a, b), n in self._arrived.items()},
             "in_transit": {f"{a}->{b}": n for (a, b), n in self._in_transit.items()},
             "left_network": self._left_network,
+            "spillback_events": self._spillback_events,
         }
-        return self._observations(), float(-delay), False, bool(truncated), info
+        return self._observations(), float(reward), False, bool(truncated), info
 
     def render(self) -> None:  # pragma: no cover
         pass
@@ -634,9 +811,12 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
     def _deliver_arrivals(self) -> None:
         """The vehicles that reached the downstream junction's stop line."""
         while self._pending and self._pending[0][0] <= self._time:
-            _arrival, _seq, destination, direction, source = heapq.heappop(self._pending)
+            _arrival, _seq, destination, direction, source, vehicle = heapq.heappop(self._pending)
             arm = self._arms[destination][direction]
-            self._pick_lane(arm).queue += 1
+            # The vehicle decides its exit **at every junction**: the one
+            # it has just left says nothing about the one it has reached.
+            vehicle.movement = ""
+            self._pick_lane(arm).vehicles.append(vehicle)
             self._received[destination] += 1
             key = (source, destination)
             self._arrived[key] = self._arrived.get(key, 0) + 1
@@ -655,7 +835,7 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
                     self.condition.ew_arrivals_per_hour
                     if arm.spec.axis == "ew"
                     else self.condition.ns_arrivals_per_hour
-                )
+                ) * self.demand_scale
                 if rate <= 0:
                     continue
                 headway = 3600.0 / float(rate)
@@ -663,33 +843,80 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
                     lane.arrival_timer += DT
                     while lane.arrival_timer >= headway:
                         lane.arrival_timer -= headway
-                        lane.queue += 1
+                        lane.vehicles.append(self._new_vehicle())
                         self._external[junction_id] += 1
                         self._external_by_axis[arm.spec.axis] += 1
 
+    def _new_vehicle(self) -> _Vehicle:
+        """A vehicle that has just entered the network."""
+        self._vehicle_sequence += 1
+        vehicle = _Vehicle(id=self._vehicle_sequence)
+        self._vehicles.append(vehicle)
+        return vehicle
+
     def _serve_queues(self) -> None:
-        """The green serves the queues at the saturation flow."""
+        """The green serves the queues at the saturation flow.
+
+        The head vehicle of a lane decides its exit **once**, when it
+        reaches the head, and keeps that decision while it waits. A
+        vehicle whose exit is blocked by the queue at the downstream
+        junction stays where it is - that is the spillback: the
+        downstream congestion reaches back into the upstream junction
+        instead of the traffic piling up on the link.
+        """
         for junction_id in self._junction_ids:
             core = self._cores[junction_id]
             for direction in DIRECTIONS:
                 arm = self._arms[junction_id][direction]
                 green = core.light.ns_green if arm.spec.axis == "ns" else core.light.ew_green
                 for lane in arm.lanes:
-                    if not green or lane.queue == 0:
+                    if not green or not lane.vehicles:
                         # No banking: a lane that is not served starts its
                         # next service interval from zero.
                         lane.service_timer = 0.0
                         continue
+                    vehicle = lane.vehicles[0]
+                    if not vehicle.movement:
+                        vehicle.movement = self._exit_direction(junction_id, direction)
+                    if self._is_spilled_back(junction_id, vehicle.movement):
+                        # The exit is blocked: the vehicle waits here.
+                        vehicle.spillback_waits += 1
+                        self._spillback_events += 1
+                        lane.service_timer = 0.0
+                        continue
                     lane.service_timer += DT
-                    if lane.service_timer >= self.saturation_headway:
-                        lane.service_timer -= self.saturation_headway
-                        lane.queue -= 1
-                        self._cross(junction_id, direction)
+                    if lane.service_timer < self.saturation_headway:
+                        continue
+                    lane.service_timer -= self.saturation_headway
+                    lane.vehicles.pop(0)
+                    self._cross(junction_id, direction, vehicle)
 
-    def _cross(self, junction_id: str, incoming: str) -> None:
+    def _is_spilled_back(self, junction_id: str, exit_direction: str) -> bool:
+        """Is the exit blocked by the queue at the downstream junction?
+
+        The downstream arm is the arm of the **next** junction that
+        faces this one: a vehicle leaving eastwards arrives at the
+        downstream junction from the west, so the arm it queues at is
+        the west arm.
+        """
+        if self.spillback_queue_threshold is None:
+            return False
+        exit_arm = self._arms[junction_id][exit_direction]
+        neighbour = exit_arm.spec.neighbour_id
+        if neighbour is None:
+            # The boundary arm: the vehicle leaves the network, so there
+            # is nothing downstream that could block it.
+            return False
+        downstream = self._arms[neighbour][OPPOSITE[exit_direction]]
+        queue = sum(lane.queue for lane in downstream.lanes)
+        return queue >= self.spillback_queue_threshold
+
+    def _cross(self, junction_id: str, incoming: str, vehicle: _Vehicle) -> None:
         """One vehicle crosses the intersection and picks its exit arm."""
         self._discharged[junction_id] = self._discharged.get(junction_id, 0) + 1
-        exit_direction = self._exit_direction(junction_id, incoming)
+        vehicle.junctions += 1
+        exit_direction = vehicle.movement
+        vehicle.route.append((junction_id, incoming, exit_direction))
         exit_arm = self._arms[junction_id][exit_direction]
         if exit_arm.spec.neighbour_id is None:
             # The boundary arm: the vehicle leaves the network.
@@ -706,6 +933,7 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
                 destination,
                 OPPOSITE[exit_direction],
                 junction_id,
+                vehicle,
             ),
         )
         key = (junction_id, destination)
@@ -719,14 +947,19 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
         browser's ``TURN_PROBABILITY``); otherwise the vehicle goes
         straight on. The turn is **reproducible**: it is a hash of the
         episode's coordinates, not a draw from the interpreter's global
-        random state. Of the turns, ``RIGHT_TURN_SHARE`` are right turns
-        - the browser's split.
+        random state. Of the turns, ``turn_bias["right"]`` are right
+        turns and ``turn_bias["left"]`` are left turns - the browser's
+        split (``RIGHT_TURN_SHARE``) by default.
+
+        The side is drawn with the same hash and the same comparison as
+        before the bias became a knob, so the default routes are
+        bit-identical to the ones the browser's split produces.
         """
         if self.turn_probability <= 0.0:
             return OPPOSITE[incoming]
         if self._uniform(junction_id, incoming, "turn") >= self.turn_probability:
             return OPPOSITE[incoming]
-        if self._uniform(junction_id, incoming, "side") < 1.0 - RIGHT_TURN_SHARE:
+        if self._uniform(junction_id, incoming, "side") < self.turn_bias.get("left", 0.5):
             return LEFT_TURN[incoming]
         return RIGHT_TURN[incoming]
 
@@ -854,6 +1087,50 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
             "external_by_axis": dict(self._external_by_axis),
             "left_network": self._left_network,
             "total_delay": self._total_delay,
+        }
+
+    def vehicle_report(self) -> dict[str, Any]:
+        """Where the vehicles went.
+
+        ``junctions_crossed`` is the histogram of **how many junctions
+        one vehicle passed through** - the number the level's routing
+        has to get right. A vehicle that enters at the boundary and
+        leaves at the boundary has crossed the junctions it drove
+        through; a vehicle that circulates for ever keeps counting, so
+        the histogram is over the vehicles that are **still in the
+        network** as well.
+
+        ``spillback_waits`` is the number of steps the vehicles spent
+        waiting for a blocked exit.
+        """
+        histogram: dict[int, int] = {}
+        distinct: dict[int, int] = {}
+        turned = 0
+        turns = 0
+        for vehicle in self._vehicles:
+            histogram[vehicle.junctions] = histogram.get(vehicle.junctions, 0) + 1
+            count = len({crossing[0] for crossing in vehicle.route})
+            distinct[count] = distinct.get(count, 0) + 1
+            # A turn is a crossing whose exit is not the opposite of the
+            # arm the vehicle came in on.
+            vehicle_turns = sum(
+                1
+                for _junction, approach, exit_arm in vehicle.route
+                if exit_arm != OPPOSITE[approach]
+            )
+            if vehicle_turns:
+                turned += 1
+                turns += vehicle_turns
+        return {
+            "created": len(self._vehicles),
+            "left_network": self._left_network,
+            "in_network": len(self._vehicles) - self._left_network,
+            "junctions_crossed": dict(sorted(histogram.items())),
+            "distinct_junctions": dict(sorted(distinct.items())),
+            "vehicles_with_a_turn": turned,
+            "turns": turns,
+            "spillback_events": self._spillback_events,
+            "spillback_waits": sum(vehicle.spillback_waits for vehicle in self._vehicles),
         }
 
 

@@ -197,7 +197,8 @@ def test_the_clearance_is_six_seconds_at_every_junction() -> None:
     env.reset(seed=0)
     rows = _timeline(env, 200.0)
 
-    assert len(env._junction_ids) == 4
+    # The default grid is the 3 x 3 training level - nine junctions.
+    assert len(env._junction_ids) == 9
     for junction_id in env._junction_ids:
         gaps = _clearance_gaps(rows[junction_id])
         assert len(gaps) >= 4, f"{junction_id} has only {len(gaps)} clearances in 200 s"
@@ -323,7 +324,13 @@ def test_the_drain_closes_the_conservation_window() -> None:
         env.step([NO_OP] * env.n_junctions)
 
     env.external_demand = False
-    for _ in range(int(60.0 / DT)):
+    # The drain has to outlast a **whole signal cycle** (72 s) plus the
+    # longest trip across the network: a vehicle that is still queued at
+    # a red when the demand stops waits up to a full cycle before it can
+    # leave, and the bigger grid holds more of them. 180 s covers the
+    # cycle, the longest straight run (two links, 30 s) and the queue
+    # that has to discharge first.
+    for _ in range(int(180.0 / DT)):
         env.step([NO_OP] * env.n_junctions)
 
     report = env.conservation_report()
@@ -542,7 +549,8 @@ def test_the_observation_is_the_six_dimensions_of_the_single_junction_env() -> N
     env = NetworkSignalEnv(max_steps=100)
     obs, _info = env.reset(seed=0)
     assert obs.shape == (env.n_junctions, SIG_OBS_DIM)
-    assert obs.shape == (4, 6)
+    # Nine junctions - the 3 x 3 training level.
+    assert obs.shape == (9, 6)
     assert env.observation_space.contains(obs)
 
     for index in range(env.n_junctions):
