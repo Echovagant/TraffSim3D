@@ -120,34 +120,82 @@ describe('buildSignalObservation — the observation mapping', () => {
     expect(obs[4]).toBe(1)
   })
 
-  it('idx 5 is the ELAPSED fraction of the phase — not the remaining one', () => {
-    // (cycleSeconds - phaseRemaining) / cycleSeconds — the same quantity as
-    // Python's `cycle_timer / cycle_duration`.
-    const ns = makeLight({ phaseRemaining: 30 })
+  it("idx 5 is the ELAPSED fraction of the SERVING axis's green", () => {
+    // Python's `TrafficLight` is one object with one `cycle_timer`: the
+    // clock belongs to the junction. It counts UP inside the green
+    // (0 -> 1 over 30 s), so the elapsed fraction is
+    // `(GREEN_PHASE_SECS - phaseRemaining) / GREEN_PHASE_SECS`.
+    const ns = makeLight({ phase: LightPhase.Green, phaseRemaining: 30 })
     const net = buildSignalNetwork(
       ns,
-      makeLight({ id: 'tl-ew', axis: 'ew', phase: LightPhase.Red }),
+      makeLight({ id: 'tl-ew', axis: 'ew', phase: LightPhase.Red, phaseRemaining: 36 }),
     )
-    const obs = buildSignalObservation(ns, net)
-    expect(obs[5]).toBeCloseTo((CYCLE_SECONDS - 30) / CYCLE_SECONDS, 10)
+    // The green just started => 0 (the remaining fraction would be 1).
+    expect(buildSignalObservation(ns, net)[5]).toBeCloseTo(0, 10)
 
-    // Half the cycle elapsed => 0.5 (and NOT 0.5's complement by accident).
-    const mid = makeLight({ phaseRemaining: CYCLE_SECONDS / 2 })
-    const net2 = buildSignalNetwork(mid, makeLight({ id: 'tl-ew', axis: 'ew' }))
+    // Half the green elapsed => 0.5.
+    const mid = makeLight({ phase: LightPhase.Green, phaseRemaining: 15 })
+    const net2 = buildSignalNetwork(
+      mid,
+      makeLight({ id: 'tl-ew', axis: 'ew', phase: LightPhase.Red, phaseRemaining: 36 }),
+    )
     expect(buildSignalObservation(mid, net2)[5]).toBeCloseTo(0.5, 10)
 
-    // The phase just started => elapsed 0 (the remaining fraction would be 1).
-    const fresh = makeLight({ phaseRemaining: CYCLE_SECONDS })
-    const net3 = buildSignalNetwork(fresh, makeLight({ id: 'tl-ew', axis: 'ew' }))
-    expect(buildSignalObservation(fresh, net3)[5]).toBeCloseTo(0, 10)
+    // The green is over => 1.
+    const late = makeLight({ phase: LightPhase.Green, phaseRemaining: 0 })
+    const net3 = buildSignalNetwork(
+      late,
+      makeLight({ id: 'tl-ew', axis: 'ew', phase: LightPhase.Red, phaseRemaining: 36 }),
+    )
+    expect(buildSignalObservation(late, net3)[5]).toBeCloseTo(1, 10)
   })
 
-  it('reads the phase clock of the light it is acting on', () => {
-    const ns = makeLight({ phaseRemaining: 30 })
-    const ew = makeLight({ id: 'tl-ew', axis: 'ew', phaseRemaining: 3 })
+  it("idx 5 is the JUNCTION's clock, so both axes read the same number", () => {
+    // The old browser formula read the clock of whichever light was
+    // passed in and divided it by the whole cycle (63 s), so the policy
+    // saw 0.52 .. 1.0 inside a green and jumped back to 0.52 at every
+    // phase change. A policy that had learned "the green is nearly
+    // over, extend it" would have read that as "the green has just
+    // started" — the opposite meaning.
+    const ns = makeLight({ phase: LightPhase.Green, phaseRemaining: 10 })
+    const ew = makeLight({ id: 'tl-ew', axis: 'ew', phase: LightPhase.Red, phaseRemaining: 36 })
     const net = buildSignalNetwork(ns, ew)
-    expect(buildSignalObservation(ns, net)[5]).toBeCloseTo((CYCLE_SECONDS - 30) / CYCLE_SECONDS, 10)
-    expect(buildSignalObservation(ew, net)[5]).toBeCloseTo((CYCLE_SECONDS - 3) / CYCLE_SECONDS, 10)
+    const fromNs = buildSignalObservation(ns, net)[5]
+    const fromEw = buildSignalObservation(ew, net)[5]
+    expect(fromNs).toBeCloseTo((30 - 10) / 30, 10)
+    expect(fromEw).toBe(fromNs)
+  })
+
+  it("idx 5 is frozen at 0 through the clearance, like Python's clock", () => {
+    // Python's clock is reset to 0 when the green ends and frozen there
+    // through the clearance: neither axis may go, and the phase does not
+    // advance.
+    const ns = makeLight({ phase: LightPhase.Yellow, phaseRemaining: 3 })
+    const net = buildSignalNetwork(
+      ns,
+      makeLight({ id: 'tl-ew', axis: 'ew', phase: LightPhase.Red, phaseRemaining: 33 }),
+    )
+    expect(buildSignalObservation(ns, net)[5]).toBe(0)
+
+    const allRed = makeLight({ phase: LightPhase.AllRed, phaseRemaining: 3 })
+    const net2 = buildSignalNetwork(
+      allRed,
+      makeLight({ id: 'tl-ew', axis: 'ew', phase: LightPhase.Red, phaseRemaining: 33 }),
+    )
+    expect(buildSignalObservation(allRed, net2)[5]).toBe(0)
+  })
+
+  it('idx 5 goes below 0 when the green is extended', () => {
+    // Python's `extend_green` takes 5 s off the clock, so the elapsed
+    // fraction drops below 0 and the green lasts longer. The browser has
+    // to read it the same way, or the policy is told the opposite of
+    // what Python tells it.
+    const ns = makeLight({ phase: LightPhase.Green, phaseRemaining: 45 })
+    const net = buildSignalNetwork(
+      ns,
+      makeLight({ id: 'tl-ew', axis: 'ew', phase: LightPhase.Red, phaseRemaining: 36 }),
+    )
+    expect(buildSignalObservation(ns, net)[5]).toBeCloseTo((30 - 45) / 30, 10)
   })
 })
 

@@ -31,10 +31,11 @@
 //   2    NS has the right of way        the NS light's phase ∈ {Green, Yellow}
 //   3    EW has the right of way        the EW light's phase ∈ {Green, Yellow}
 //   4    all-red (neither may go)       neither 2 nor 3
-//   5    the phase clock, **elapsed**   (cycleSeconds - phaseRemaining)
-//                                       / cycleSeconds
+//   5    the phase clock, **elapsed**   (GREEN_PHASE_SECS - the serving
+//                                       light's phaseRemaining)
+//                                       / GREEN_PHASE_SECS
 //
-// Three details are worth spelling out, because they are where the two
+// Four details are worth spelling out, because they are where the two
 // sides could silently disagree:
 //
 // 1. **idx 5 is the elapsed fraction, not the remaining one.** The
@@ -45,15 +46,25 @@
 //    different input than it was trained on. Python's `cycle_timer` counts
 //    **up** from 0 over the phase; the browser's `phaseRemaining` counts
 //    **down**, so the elapsed fraction is
-//    `(cycleSeconds - phaseRemaining) / cycleSeconds`.
+//    `(GREEN_PHASE_SECS - phaseRemaining) / GREEN_PHASE_SECS`.
 //
-//    The two sides still differ in *scale*: Python's `cycle_duration` is one
-//    phase (30 s) while the browser's `cycleSeconds` is the whole cycle
-//    (63 s). That is the known "the two traffic models are not the same
-//    model" boundary — the schema is compared, not the
-//    numbers.
+// 2. **The clock belongs to the JUNCTION, not to a light** (fixed
+//    2026-10-25). Python's `TrafficLight` is one object with one
+//    `cycle_timer`, so both of its axes read the same clock. The browser
+//    used to read the clock of whichever light was passed in, and to
+//    divide by the WHOLE cycle (63 s) rather than by the phase (30 s):
+//    the number it fed the policy ran 0.52 .. 1.0 inside a green and
+//    jumped back to 0.52 at every phase change. A policy that had
+//    learned "the green is nearly over, extend it" would have read that
+//    as "the green has just started" — the opposite meaning.
 //
-// 2. **idx 0 / 1 count the whole axis.** Python's `queue_length(axis)`
+//    The browser now takes the clock of the **serving** axis (the one
+//    that is not red) and freezes it at 0 through the clearance, exactly
+//    as Python does. A green that was extended pushes the value below 0
+//    (Python's `extend_green` takes 5 s off the clock), so the quantity
+//    runs in [-1, 1].
+//
+// 3. **idx 0 / 1 count the whole axis.** Python's `queue_length(axis)`
 //    counts every NPC of that axis that is stopped before the stop line.
 //    The browser's `getQueueLength` narrows to one lane when the light
 //    carries a `controlledLane`, so the axis-wide `getAxisQueueLength` is
@@ -67,7 +78,7 @@
 //    two traffic models are not the same model, so the numbers are not
 //    comparable — the *meaning* is.
 //
-// 3. **idx 2 / 3 count the yellow phase as "has the right of way".** The
+// 4. **idx 2 / 3 count the yellow phase as "has the right of way".** The
 //    browser's yellow is the clearance that follows the green, and the
 //    axis still has priority during it. This mirrors `MAY_GO` in
 //    `tick.ts`, which was introduced for the same reason.
@@ -75,7 +86,11 @@
 import type { TrafficLight } from '@domain/entities/TrafficLight'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import { LightPhase } from '@domain/value-objects/Phase'
-import { SIGNAL_ACTION_NAMES, type SignalActionName } from '@shared/constants/simulation'
+import {
+  GREEN_PHASE_SECS,
+  SIGNAL_ACTION_NAMES,
+  type SignalActionName,
+} from '@shared/constants/simulation'
 import { mlpForwardDiscrete } from '@infrastructure/rl/mlpInference'
 import type { PolicyWeights } from '@infrastructure/rl/types'
 import { getAxisQueueLength, type SignalActionSource } from './signalController'
@@ -138,6 +153,15 @@ export const signalQueueLengths = (
   }
 }
 
+/** Phases in which a light is the junction's **serving** axis. */
+const SERVING_PHASES = new Set<LightPhase>([
+  LightPhase.Green,
+  LightPhase.GreenLeft,
+  LightPhase.Yellow,
+  LightPhase.YellowLeft,
+  LightPhase.AllRed,
+])
+
 /**
  * The signal agent's six-dimensional observation for `light`.
  *
@@ -158,10 +182,31 @@ export const buildSignalObservation = (
 
   const { ns: nsQueue, ew: ewQueue } = signalQueueLengths(light, network, simTime)
 
-  // The **elapsed** fraction of the current phase — the same quantity as
-  // Python's `cycle_timer / cycle_duration`.
-  const cycleSeconds = light.cycleSeconds
-  const elapsed = cycleSeconds > 0 ? (cycleSeconds - light.phaseRemaining) / cycleSeconds : 0
+  // idx 5 — the phase clock.
+  //
+  // Python's `TrafficLight` is ONE object with ONE `cycle_timer`: the
+  // clock belongs to the **junction**, not to a light. It counts up
+  // inside the green (0 -> 1 over 30 s), it is reset to 0 when the green
+  // ends, and it is frozen at 0 through the clearance. A green that was
+  // extended pushes it below 0 (Python's `extend_green` takes 5 s off
+  // the clock), so the quantity runs in [-1, 1].
+  //
+  // The browser must feed the policy the same number, or the policy runs
+  // on a different input than the one it was trained on. The old browser
+  // formula — `(cycleSeconds - phaseRemaining) / cycleSeconds`, with
+  // `cycleSeconds` the WHOLE cycle — produced 0.52 .. 1.0 inside a
+  // green, jumped back to 0.52 at every phase change, and read the
+  // clock of whichever light happened to be passed in. A policy that had
+  // learned "the green is nearly over, extend it" would have read that
+  // as "the green has just started" — the exact opposite.
+  const serving = [light, sibling].find(
+    (l): l is TrafficLight => l !== null && SERVING_PHASES.has(l.phase),
+  )
+  const elapsed =
+    serving !== undefined &&
+    (serving.phase === LightPhase.Green || serving.phase === LightPhase.GreenLeft)
+      ? (GREEN_PHASE_SECS - serving.phaseRemaining) / GREEN_PHASE_SECS
+      : 0
 
   return [
     Math.min(nsQueue / SIGNAL_MAX_QUEUE, 1),
