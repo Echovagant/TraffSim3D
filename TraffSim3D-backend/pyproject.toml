@@ -14,6 +14,13 @@ dependencies = [
     # until 2026.10.19. It arrives transitively (requests/httpx), so the floor
     # has to be stated here — a transitive constraint alone is not installable.
     "certifi>=2026.10.19",
+    # `app/apps/maps/overpass_cache.py` imports `httpx2` at module level, so
+    # it is a **runtime** dependency, not a development one. Measured
+    # 2026-10-25: with it in the `dev` extra only, the e2e CI job — which
+    # installs the base dependencies alone — could not import the app at
+    # all, and the backend died four seconds into the job with
+    # "ModuleNotFoundError: No module named 'httpx2'".
+    "httpx2>=0.30",  # the httpx2 fork (starlette 1.3+ TestClient)
     "gymnasium>=1.3.0",
     "numpy>=2.5.0",
     "pbf>=0.2.0",
@@ -24,7 +31,6 @@ dependencies = [
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
-    "httpx2>=0.30",        # required by starlette 1.3+ TestClient
     "ruff>=0.7",
     "black>=24.10",
     "mypy>=1.13",
