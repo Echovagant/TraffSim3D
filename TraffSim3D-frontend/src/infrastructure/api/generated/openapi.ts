@@ -89,6 +89,9 @@ export type PathsApiV1RlSignalTrainPostResponse = Record<string, unknown>
 /** `GET /api/v1/rl/capabilities` → 200 */
 export type PathsApiV1RlCapabilitiesGetResponse = Record<string, unknown>
 
+/** `GET /api/v1/rl/signal/grid-policy` → 200 */
+export type PathsApiV1RlSignalGridPolicyGetResponse = Record<string, unknown>
+
 /** `POST /api/v1/rl/train/pause` → 200 */
 export type PathsApiV1RlTrainPausePostResponse = Record<string, unknown>
 
@@ -134,6 +137,7 @@ export interface OpenApiPaths {
   "/api/v1/rl/status": { get: PathsApiV1RlStatusGetResponse }
   "/api/v1/rl/signal/train": { post: PathsApiV1RlSignalTrainPostResponse }
   "/api/v1/rl/capabilities": { get: PathsApiV1RlCapabilitiesGetResponse }
+  "/api/v1/rl/signal/grid-policy": { get: PathsApiV1RlSignalGridPolicyGetResponse }
   "/api/v1/rl/train/pause": { post: PathsApiV1RlTrainPausePostResponse }
   "/api/v1/rl/train/resume": { post: PathsApiV1RlTrainResumePostResponse }
   "/api/v1/rl/train/terminate": { post: PathsApiV1RlTrainTerminatePostResponse }

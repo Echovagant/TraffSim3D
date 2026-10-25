@@ -481,6 +481,31 @@
         }
       }
     },
+    "/api/v1/rl/signal/grid-policy": {
+      "get": {
+        "tags": [
+          "rl",
+          "rl"
+        ],
+        "summary": "Get Grid Policy",
+        "description": "The shipped grid signal policy — the trained MAPPO actor, as JSON.\n\nThe 5 x 5 grid's policy ships **with the product** (seed 0, the run\nwhose browser-side delay beat the fixed cycle), so the AI Playground\ncan load a trained multi-junction policy without any local training\nrun or checkpoint on disk. The weights are the same ones the frontend's\n`network-mappo-policy-fixture.json` pins as a forward-pass contract —\nwritten by the same generator run, and pinned together by\n`tests/test_rl_grid_policy.py`.\n\nThe payload is the export shape the browser's `mlpForwardDiscrete`\nconsumes (`obs_dim: 6`, `action_dim: 5`, `action_space: \"discrete\"`,\nno `log_std`), plus `policy_kind: \"signal\"` / `source: \"shipped\"` and\nthe training provenance.\n\nDeliberately a **sync** endpoint: the first call after a backend start\nreads and validates the ~150 KB asset (fast, but off the event loop is\nstill the right place for file I/O), and every later call is served\nfrom the module's cache. No SB3 / torch is involved — this endpoint\nworks on a base-dependency backend.\n\nErrors:\n  - 503: the asset is missing or fails validation (a broken install,\n    not a runtime condition)",
+        "operationId": "get_grid_policy_api_v1_rl_signal_grid_policy_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Grid Policy Api V1 Rl Signal Grid Policy Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/rl/train/pause": {
       "post": {
         "tags": [

@@ -230,6 +230,41 @@ async def capabilities() -> dict[str, Any]:
     return rl_caps.detect_capabilities()
 
 
+@router.get("/rl/signal/grid-policy", tags=["rl"])
+def get_grid_policy() -> dict[str, Any]:
+    """The shipped grid signal policy — the trained MAPPO actor, as JSON.
+
+    The 5 x 5 grid's policy ships **with the product** (seed 0, the run
+    whose browser-side delay beat the fixed cycle), so the AI Playground
+    can load a trained multi-junction policy without any local training
+    run or checkpoint on disk. The weights are the same ones the frontend's
+    `network-mappo-policy-fixture.json` pins as a forward-pass contract —
+    written by the same generator run, and pinned together by
+    `tests/test_rl_grid_policy.py`.
+
+    The payload is the export shape the browser's `mlpForwardDiscrete`
+    consumes (`obs_dim: 6`, `action_dim: 5`, `action_space: "discrete"`,
+    no `log_std`), plus `policy_kind: "signal"` / `source: "shipped"` and
+    the training provenance.
+
+    Deliberately a **sync** endpoint: the first call after a backend start
+    reads and validates the ~150 KB asset (fast, but off the event loop is
+    still the right place for file I/O), and every later call is served
+    from the module's cache. No SB3 / torch is involved — this endpoint
+    works on a base-dependency backend.
+
+    Errors:
+      - 503: the asset is missing or fails validation (a broken install,
+        not a runtime condition)
+    """
+    from app.apps.rl.grid_policy import GridPolicyUnavailableError, load_grid_policy
+
+    try:
+        return load_grid_policy()
+    except GridPolicyUnavailableError as e:
+        raise HTTPException(status_code=503, detail=f"grid policy unavailable: {e}") from e
+
+
 # --- Training task control (启动/暂停/恢复/终止) ----------------------------
 #
 # Training is a detached subprocess, so these endpoints do not poke a live

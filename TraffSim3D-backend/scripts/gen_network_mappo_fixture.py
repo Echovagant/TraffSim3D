@@ -33,7 +33,12 @@ What this script does:
    - with the trainer's own actor (`torch`, the float32 forward pass), and
    - with the pure-Python reference forward below, run on the *exported*
      weights (float64 - the same arithmetic the TypeScript side does).
-4. Writes the fixture into the frontend's fixtures folder.
+4. Writes the fixture into the frontend's fixtures folder, and the same
+   policy — the weights without the test vectors — as the backend's
+   shipped asset (`app/apps/rl/assets/network_mappo_grid_policy.json`)
+   that `GET /api/v1/rl/signal/grid-policy` serves. One run, one
+   training result, both artefacts: they cannot drift apart because
+   they are written together.
 
 The logit margin is checked as well: a margin so small that the float32
 (torch) and float64 (Python / TypeScript) computations could disagree would
@@ -105,6 +110,13 @@ FIXTURE_PATH = (
     / "fixtures"
     / "network-mappo-policy-fixture.json"
 )
+
+# The backend's copy of the same weights — the delivery surface. The
+# frontend fixture is the forward-pass contract (it carries the pinned
+# observations and expected actions); this asset is the policy the
+# product serves, so it carries only the weights and the training
+# provenance.
+ASSET_PATH = BACKEND_ROOT / "app" / "apps" / "rl" / "assets" / "network_mappo_grid_policy.json"
 
 
 # --------------------------------------------------------------------------
@@ -239,6 +251,28 @@ def _train(steps: int) -> tuple[dict[str, Any], Any, dict[str, Any]]:
     return weights, loaded["actor"], summary
 
 
+def _training_block(summary: dict[str, Any]) -> dict[str, Any] | None:
+    """The `training` provenance both artefacts carry, from a run summary.
+
+    The in-process training path returns the summary it just produced; the
+    checkpoint path reads the sibling `network_mappo_summary.json` the run
+    left behind. `None` when there is no summary — the artefacts are then
+    written without the block, as before.
+    """
+    final = summary.get("final")
+    if not final:
+        return None
+    return {
+        "grid": f"{summary['junctions']} junctions",
+        "demand_scale": summary["config"]["demand_scale"],
+        "env_steps": summary["env_steps"],
+        "best_step": summary["best_step"],
+        "margin": final["margin"],
+        "beats_baseline": final["beats_baseline"],
+        "actions": final["policy"]["actions"],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--steps", type=int, default=TRAIN_STEPS)
@@ -254,8 +288,17 @@ def main() -> None:
     if args.checkpoint:
         checkpoint_path = Path(args.checkpoint)
         loaded = load_checkpoint(checkpoint_path, device="cpu")
-        weights = export_weights(loaded["actor"], name=checkpoint_path.name)
         actor = loaded["actor"]
+        # The run's own export sits next to the checkpoint and carries the
+        # canonical name ("network_mappo_weights.json"); prefer it so a
+        # re-run from a checkpoint reproduces the committed artefacts byte
+        # for byte. The run summary is a sibling of the same kind.
+        weights_sibling = checkpoint_path.with_name("network_mappo_weights.json")
+        name = weights_sibling.name if weights_sibling.exists() else checkpoint_path.name
+        weights = export_weights(actor, name=name)
+        summary_sibling = checkpoint_path.with_name("network_mappo_summary.json")
+        if summary_sibling.exists():
+            summary = json.loads(summary_sibling.read_text(encoding="utf-8"))
     else:
         weights, actor, summary = _train(args.steps)
 
@@ -311,6 +354,8 @@ def main() -> None:
         py_actions == torch_actions
     ), f"the pure-Python forward pass and the actor disagree: {py_actions} != {torch_actions}"
 
+    training_block = _training_block(summary)
+
     fixture = {
         "_comment": (
             "The network signal policy's forward-pass contract. The same "
@@ -334,21 +379,40 @@ def main() -> None:
         "expected_actions": torch_actions,
         "expected_action_names": [SIGNAL_ACTION_NAMES[a] for a in torch_actions],
     }
-    if summary.get("final"):
-        fixture["training"] = {
-            "grid": f"{summary['junctions']} junctions",
-            "demand_scale": summary["config"]["demand_scale"],
-            "env_steps": summary["env_steps"],
-            "best_step": summary["best_step"],
-            "margin": summary["final"]["margin"],
-            "beats_baseline": summary["final"]["beats_baseline"],
-            "actions": summary["final"]["policy"]["actions"],
-        }
+    if training_block is not None:
+        fixture["training"] = training_block
     FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE_PATH.write_text(json.dumps(fixture, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {FIXTURE_PATH}")
     print(f"expected_actions: {torch_actions}")
     print(f"expected_action_names: {fixture['expected_action_names']}")
+
+    asset = {
+        "_comment": (
+            "The shipped grid signal policy — the trained MAPPO actor the "
+            "product serves to the browser. Same weights as the frontend's "
+            "network-mappo-policy-fixture.json (the forward-pass contract), "
+            "written by the same generator run so the two cannot drift. "
+            "Served by GET /api/v1/rl/signal/grid-policy; asserted by "
+            "tests/test_rl_grid_policy.py."
+        ),
+        "regenerate": (
+            "cd TraffSim3D-backend && .\\.venv\\Scripts\\python.exe "
+            "scripts\\gen_network_mappo_fixture.py --checkpoint <network_mappo_checkpoint.pt>"
+        ),
+        "name": weights["name"],
+        "obs_dim": weights["obs_dim"],
+        "action_dim": weights["action_dim"],
+        "action_space": weights["action_space"],
+        "hidden_sizes": weights["hidden_sizes"],
+        "layers": layers,
+        "action_names": list(SIGNAL_ACTION_NAMES),
+    }
+    if training_block is not None:
+        asset["training"] = training_block
+    ASSET_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ASSET_PATH.write_text(json.dumps(asset, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {ASSET_PATH}")
 
 
 if __name__ == "__main__":
