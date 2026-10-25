@@ -19,7 +19,8 @@ space the other three sit on).
 Every test here is written so that the **previous** code fails it: the
 old alive bonus paid a standing step, the old success condition was
 route-agnostic, and the old red-light rule disagreed with the traffic
-model on 26 of the 72 sampled headings.
+model on 23 of the 68 sampled headings that are not on the axis
+boundary (and on the four boundary headings as well).
 """
 
 from __future__ import annotations
@@ -312,17 +313,33 @@ def test_the_red_light_axis_matches_the_traffic_model_on_every_sampled_heading()
 def test_the_old_axis_heuristic_disagreed_with_the_traffic_model() -> None:
     """The fix is not vacuous: the old rule really did disagree.
 
-    26 of the 72 sampled headings were classified differently by the old
-    "within 0.5 rad of north" heuristic than by the traffic model - which
-    is exactly why the two rules could produce a false "red light"
-    termination *and* miss a real one.
+    23 of the 68 sampled headings that are **not** on the axis boundary
+    were classified differently by the old "within 0.5 rad of north"
+    heuristic than by the traffic model - which is exactly why the two
+    rules could produce a false "red light" termination *and* miss a real
+    one.
+
+    The four headings that sit exactly on the boundary (45, 135, 225 and
+    315 degrees) are counted separately. There the two projections are
+    mathematically equal, and the tie is broken to "ns" on **every**
+    platform (see `approach_axis`): the rounding there exists precisely
+    because `sin` and `cos` of one angle can differ in the last bit
+    between platforms, which used to make this count - and the recorded
+    contract goldens - depend on the machine. Counting the boundary
+    headings into the total would put that dependency straight back.
     """
     disagreements = [
         heading
         for heading in SAMPLED_HEADINGS
         if _old_heading_ns(heading) != (approach_axis(heading) == "ns")
     ]
-    assert len(disagreements) == 26
+    off_boundary = [h for h in disagreements if round(math.degrees(h)) % 90 != 45]
+    assert len(off_boundary) == 23
+    # The boundary itself: a tie, broken the same way on every platform.
+    for deg in (45.0, 135.0, 225.0, 315.0):
+        heading = math.radians(deg)
+        assert approach_axis(heading) == "ns", deg
+        assert _old_heading_ns(heading) is False, deg
 
 
 def test_the_false_positive_and_the_missed_violation_are_gone() -> None:

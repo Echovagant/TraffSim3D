@@ -359,10 +359,27 @@ def approach_axis(heading: float) -> str:
     follows from the heading alone: a heading within 45° of ±Z runs on the
     north-south road ("ns"), a heading within 45° of ±X on the east-west
     road ("ew").
+
+    The comparison is made on the **rounded** projections. At exactly 45°
+    the two are mathematically equal, and `sin` and `cos` of one angle can
+    differ in the last bit between platforms (a different libm) — which
+    would make the axis, and with it the recorded contract goldens,
+    depend on the machine the suite runs on. Measured 2026-10-25: on the
+    Linux runner the 45° heading came out as "ew" (two gate tests failed)
+    while on Windows the same heading came out as "ns". Rounding to 12
+    decimals makes that tie exact everywhere, and changes nothing for a
+    heading that is not within a rounding error of the boundary.
+
+    The rounding is spelled out (`floor(x * 1e12 + 0.5) / 1e12`) rather
+    than left to the language's own `round`, because Python's rounds half
+    to even and JavaScript's rounds half away from zero — the two sides
+    of the contract have to round identically.
     """
     sin_h = math.sin(heading)
     cos_h = math.cos(heading)
-    return "ns" if abs(sin_h) >= abs(cos_h) else "ew"
+    ns = math.floor(abs(sin_h) * 1e12 + 0.5) / 1e12
+    ew = math.floor(abs(cos_h) * 1e12 + 0.5) / 1e12
+    return "ns" if ns >= ew else "ew"
 
 
 def approach_distance(vehicle: Vehicle) -> float:

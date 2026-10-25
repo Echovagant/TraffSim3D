@@ -209,12 +209,25 @@ const LIGHT_START = (): MirrorLight => createMirrorLight(true, false)
  * This is the **traffic model's own** classification, and the red-light rule
  * below uses it too — the two must never disagree about which axis the ego
  * is on. (The previous heuristic read the axis off "within 0.5 rad of north"
- * instead, which disagreed with the traffic model on 26 of the 72 sampled
- * headings — every 5° — so it both killed green-axis episodes and let real
- * red-light runs through.)
+ * instead, which disagreed with the traffic model on 23 of the 68 sampled
+ * headings that are not on the axis boundary — every 5° — and on the four
+ * boundary headings as well, so it both killed green-axis episodes and let
+ * real red-light runs through.)
+ *
+ * The comparison is made on the **rounded** projections, and the rounding is
+ * spelled out rather than left to `Math.round`, so that it is bit-identical
+ * to the Python side. At exactly 45° the two projections are mathematically
+ * equal, and `sin` and `cos` of one angle can differ in the last bit
+ * between platforms — which would make the axis, and with it the recorded
+ * contract goldens, depend on the machine. Measured 2026-10-25: on the
+ * Linux runner the 45° heading came out as "ew" (two gate tests failed)
+ * while on Windows it came out as "ns".
  */
-const approachAxis = (heading: number): 'ns' | 'ew' =>
-  Math.abs(Math.sin(heading)) >= Math.abs(Math.cos(heading)) ? 'ns' : 'ew'
+const approachAxis = (heading: number): 'ns' | 'ew' => {
+  // Python: math.floor(abs(v) * 1e12 + 0.5) / 1e12
+  const round12 = (v: number): number => Math.floor(Math.abs(v) * 1e12 + 0.5) / 1e12
+  return round12(Math.sin(heading)) >= round12(Math.cos(heading)) ? 'ns' : 'ew'
+}
 
 /** Python `sim_core.lateral_offset` — the perpendicular distance from the
  * centreline of the road the vehicle runs along.
@@ -591,9 +604,10 @@ export class SimCoreMirror {
     //
     // The old heuristic read the axis off the heading as "within 0.5 rad of
     // north" (61.35deg - 118.65deg), while the traffic model uses
-    // `|sin h| >= |cos h|` (45deg - 135deg and 225deg - 315deg): 26 of the
-    // 72 sampled headings (every 5deg) disagreed, so the rule both killed
-    // episodes on the green axis and let real red-light runs through.
+    // `|sin h| >= |cos h|` (45deg - 135deg and 225deg - 315deg): 23 of the
+    // 68 headings that are not on the boundary disagreed (and the four
+    // boundary headings as well), so the rule both killed episodes on the
+    // green axis and let real red-light runs through.
     if (approachAxis(this.ego.heading) === 'ns') return !this.light.nsGreen
     return !this.light.ewGreen
   }

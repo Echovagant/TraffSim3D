@@ -5,7 +5,8 @@ rules at all:
 
 - the **red-light axis** — the TS mirror classified the axis with the old
   "within 0.5 rad of north" heuristic while Python used the traffic model's
-  own `approach_axis()` (they disagree on 26 of the 72 sampled headings);
+  own `approach_axis()` (they disagree on 23 of the 68 sampled headings
+  that are not on the axis boundary, and on the four boundary headings);
 - the **success condition's road constraint** — the TS mirror scored a
   success for an ego that had left the road, Python did not.
 
