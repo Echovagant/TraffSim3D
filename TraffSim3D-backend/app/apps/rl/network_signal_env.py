@@ -16,10 +16,14 @@ with one light each, and its signal timeline is the reference this module
 has to match: a 30 s green, a 6 s clearance in which **neither** axis is
 green, and a 72 s period - at every junction, to the step.
 
-The level this module runs is the **3 x 3** grid: nine junctions, twelve
-segments, and the four arms of every junction. The browser's 5 x 5 grid
-is the next level up, and the model does not have to change for it - the
-topology is read off the graph, not written down.
+The level this module runs by default is the **3 x 3** grid: nine
+junctions, twelve segments, and the four arms of every junction. The
+browser's **5 x 5** grid is a level up, and the model does not have to
+change for it - the topology is read off the graph, not written down, so
+``build_grid_network_dict(5, 5)`` gives the browser's grid. What the
+bigger grid does need is its own demand calibration, because the number
+of boundary arms grows with the grid - that is what
+``GRID_5X5_DEMAND_SCALE`` is.
 
 The four knobs the 3 x 3 level needed
 ======================================
@@ -129,6 +133,9 @@ from .sim_core import (
 )
 
 __all__ = [
+    "GRID_5X5_COLS",
+    "GRID_5X5_DEMAND_SCALE",
+    "GRID_5X5_ROWS",
     "GRID_COLS",
     "GRID_LANE_COUNT",
     "GRID_ROWS",
@@ -250,6 +257,37 @@ TURN_BIAS: dict[str, float] = {
 GRID_ROWS = 3
 GRID_COLS = 3
 
+#: The browser's grid: five rows, five columns - twenty-five junctions,
+#: forty segments.
+GRID_5X5_ROWS = 5
+GRID_5X5_COLS = 5
+
+#: The demand multiplier the **5 x 5** grid runs at.
+#:
+#: The demand has to be calibrated per network size, because the number of
+#: boundary arms grows with the grid: the 5 x 5 grid has twenty boundary
+#: arms (forty lanes) against the 3 x 3 grid's twelve (twenty-four lanes),
+#: and its centre junction carries the sum of four approaches. The
+#: observation's ``MAX_QUEUE`` is a cross-language constant of 10 and may
+#: not change, so the demand is what has to be calibrated.
+#:
+#: Measured 2026-10-25 over 400 s, five seeds, the fixed-cycle controller:
+#:
+#: | demand | peak axis queue | clipped observations | total delay |
+#: |--------|-----------------|----------------------|-------------|
+#: | 0.20   | 8               | 0                    | 16007       |
+#: | 0.24   | 10              | 18 (0.0018 %)        | 19749       |
+#: | 0.28   | 10              | 210 (0.021 %)        | 23354       |
+#: | 0.36   | 12              | 2512 (0.25 %)        | 30645       |
+#:
+#: At 0.20 the peak is 8 on every seed - the same peak the browser's 5 x 5
+#: grid shows with its 67 vehicles - no observation is ever clipped, and
+#: the per-100 s peak profile (4, 5, 6, 4) does not grow, so the network
+#: stays below saturation. Above 0.20 the observation starts to clip,
+#: which would hide the difference between a queue of ten and a queue of
+#: thirty.
+GRID_5X5_DEMAND_SCALE = 0.20
+
 
 def junction_radius(lane_count: int) -> float:
     """The junction box radius of a junction with `lane_count` lanes.
@@ -313,6 +351,14 @@ def build_grid_network_dict(
                 "waypoints": [dict(start), dict(end)],
                 "laneCount": lane_count,
                 "speedLimit": speed_limit,
+                # The vertical level of the road, in the browser's shape
+                # (the grid is flat, so every segment is on level 0).
+                # The field is not read by the graph builder, but it is
+                # part of the shape ``serializeNetwork`` writes and the
+                # shape the OSM parser writes - so the dict this module
+                # builds is the **same dict** the browser would send for
+                # the same grid, with no translation in between.
+                "level": 0,
             }
         )
         connected.setdefault(a, []).append(road_id)
@@ -691,6 +737,28 @@ class NetworkSignalEnv(gym.Env[np.ndarray, np.ndarray]):
 
     def render(self) -> None:  # pragma: no cover
         pass
+
+    def action_mask(self) -> list[list[bool]]:
+        """Which actions every junction may take **right now**.
+
+        One row per junction, one column per action of
+        ``sim_core.SIGNAL_ACTION_NAMES``. A ``False`` marks an action
+        the env would refuse - at the moment, the single one: a
+        ``shorten_red`` that would push the green below the minimum.
+
+        The rule lives in the env, because it is the env's rule: the
+        same one ``step`` applies. A trainer that samples from the mask
+        never proposes an action the env would throw away, so its
+        action log-probability means what it says.
+        """
+        mask: list[list[bool]] = []
+        shorten_red = SIGNAL_ACTION_NAMES.index("shorten_red")
+        for junction_id in self._junction_ids:
+            row = [True] * len(SIGNAL_ACTION_NAMES)
+            if not self._may_shorten_red(self._cores[junction_id]):
+                row[shorten_red] = False
+            mask.append(row)
+        return mask
 
     # -- the topology -------------------------------------------------
 
