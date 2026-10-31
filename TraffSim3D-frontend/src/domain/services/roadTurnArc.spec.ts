@@ -34,7 +34,10 @@ describe('buildTurnArc', () => {
     // (the corner the pivot used to sweep across, sideways by up to
     // 7.4 m). The arc's points must stay on the near side: no point may
     // cross into the far quadrant.
-    const arc = buildTurnArc({ x: -14, z: 5.25, heading: 0 }, { x: -5.25, z: -14, heading: -Math.PI / 2 })
+    const arc = buildTurnArc(
+      { x: -14, z: 5.25, heading: 0 },
+      { x: -5.25, z: -14, heading: -Math.PI / 2 },
+    )
     for (let i = 0; i <= 24; i += 1) {
       const p = pointAt(arc, (i / 24) * arc.length)
       // The far quadrant for this turn is x > 0 AND z > 0 — the arc

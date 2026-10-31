@@ -56,6 +56,12 @@ export interface JunctionIndex {
    * junction.
    */
   sharedJunction(roadA: string, roadB: string): boolean
+  /**
+   * The junction the two roads SHARE, or null. Same lookup as
+   * `sharedJunction`, with the intersection itself — the drive policy's
+   * per-vehicle conflict point is "the junction my route turns at".
+   */
+  sharedJunctionOf(roadA: string, roadB: string): Intersection | null
 }
 
 interface CachedIndex {
@@ -105,6 +111,15 @@ export const junctionIndex = (network: RoadNetwork): JunctionIndex => {
   const byRoad = cached.byRoad
   return {
     on: (roadId: string): readonly Intersection[] => byRoad.get(roadId) ?? [],
+    sharedJunctionOf: (roadA: string, roadB: string): Intersection | null => {
+      const onA = byRoad.get(roadA)
+      const onB = byRoad.get(roadB)
+      if (!onA || !onB) return null
+      for (const inter of onA) {
+        if (onB.some((candidate) => candidate.id === inter.id)) return inter
+      }
+      return null
+    },
     sharedJunction: (roadA: string, roadB: string): boolean => {
       if (roadA === roadB) return true
       for (const inter of byRoad.get(roadA) ?? []) {

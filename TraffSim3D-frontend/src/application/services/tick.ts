@@ -435,8 +435,16 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       }
       const routeProgress = total > 0 ? Math.min(1, Math.max(0, (done + travel) / total)) : 0
 
+      // The driver's conflict point is the junction its route turns at
+      // next — on the grid, that is per-vehicle and per-stage (the
+      // single-junction scenario's point is the fallback).
+      const nextRouteRoad = route[index + 1]
+      const shared = junctions.sharedJunctionOf(route[index]!, nextRouteRoad ?? route[index]!)
+      const conflictPoint = shared
+        ? { x: shared.position.x, z: shared.position.z }
+        : ctx.drivePolicy.conflictPoint
       const observation = buildDriveObservation({
-        conflictPoint: ctx.drivePolicy.conflictPoint,
+        conflictPoint,
         self: {
           x: driven.position.x,
           z: driven.position.z,
@@ -963,9 +971,9 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
             road = turnedRoad
           } else {
             const arc = buildTurnArc(
-            { x: exitX, z: exitZ, heading: exitHeading },
-            { x: entryLp.position.x, z: entryLp.position.z, heading: turn.heading },
-          )
+              { x: exitX, z: exitZ, heading: exitHeading },
+              { x: entryLp.position.x, z: entryLp.position.z, heading: turn.heading },
+            )
             v.turn = {
               s: turn.s,
               heading: turn.heading,

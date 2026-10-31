@@ -1387,3 +1387,159 @@ export const buildUnsignalisedJunctionScene = (): RoadNetwork => {
 
   return net
 }
+
+// ---------------------------------------------------------------------------
+// The unsignalised GRID (Scene 4 v2)
+// ---------------------------------------------------------------------------
+
+/** The junction spacing of the unsignalised grid (m) — the training env's. */
+export const GRID_DRIVE_SPACING_M = 120
+
+/** The boundary stub length (m) — where the drivers come from. */
+export const GRID_DRIVE_STUB_M = 60
+
+/** The conflict points of the 2 x 2 grid, keyed by junction id. */
+export const GRID_DRIVE_JUNCTIONS: Record<string, { x: number; z: number }> = {
+  'g-0-0': { x: 0, z: 0 },
+  'g-0-1': { x: GRID_DRIVE_SPACING_M, z: 0 },
+  'g-1-0': { x: 0, z: GRID_DRIVE_SPACING_M },
+  'g-1-1': { x: GRID_DRIVE_SPACING_M, z: GRID_DRIVE_SPACING_M },
+}
+
+/**
+ * The eight vehicles' routes: in on one boundary stub, across the grid,
+ * out on the far-side stub — the same pairing the training env uses
+ * (each in-stub with the out-stub half a ring away), so a route crosses
+ * one to two junctions.
+ */
+export const GRID_DRIVE_ROUTES: Record<string, string[]> = {
+  'v-1': ['stub-in-0-0-n', 'link-v-0-0-f', 'stub-out-1-0-s'],
+  'v-2': ['stub-in-0-0-w', 'link-v-0-0-f', 'stub-out-1-0-w'],
+  'v-3': ['stub-in-0-1-e', 'link-v-0-1-f', 'stub-out-1-1-e'],
+  'v-4': ['stub-in-0-1-n', 'link-v-0-1-f', 'stub-out-1-1-s'],
+  'v-5': ['stub-in-1-0-s', 'link-v-0-0-r', 'stub-out-0-0-n'],
+  'v-6': ['stub-in-1-0-w', 'link-v-0-0-r', 'stub-out-0-0-w'],
+  'v-7': ['stub-in-1-1-e', 'link-v-0-1-r', 'stub-out-0-1-e'],
+  'v-8': ['stub-in-1-1-s', 'link-v-0-1-r', 'stub-out-0-1-n'],
+}
+
+/**
+ * The 2 x 2 grid of unsignalised junctions — Scene 4 v2's scenario
+ * (the training env's `build_unsignalised_grid_network`, browser side).
+ *
+ * Four junctions, NO lights anywhere, eight vehicles whose routes cross
+ * the grid: the negotiations repeat, and the traffic persists.
+ */
+export const buildUnsignalisedGridScene = (): RoadNetwork => {
+  const net = createRoadNetwork()
+  const S = GRID_DRIVE_SPACING_M
+  const stub = GRID_DRIVE_STUB_M
+
+  const roads: Road[] = []
+  const connected: Record<string, string[]> = {
+    'g-0-0': [],
+    'g-0-1': [],
+    'g-1-0': [],
+    'g-1-1': [],
+  }
+
+  const road = (id: string, ax: number, az: number, bx: number, bz: number): void => {
+    const r: Road = {
+      id,
+      startNode: { x: ax, y: 0, z: az },
+      endNode: { x: bx, y: 0, z: bz },
+      laneCount: 4,
+      speedLimit: 16.67,
+      level: 0,
+    }
+    roads.push(r)
+    net.roads[id] = r
+  }
+
+  // The connecting roads: one per direction between adjacent junctions.
+  for (const [id, ax, az, bx, bz] of [
+    ['link-h-0-0-f', 0, 0, S, 0],
+    ['link-h-0-0-r', S, 0, 0, 0],
+    ['link-h-1-0-f', 0, S, S, S],
+    ['link-h-1-0-r', S, S, 0, S],
+    ['link-v-0-0-f', 0, 0, 0, S],
+    ['link-v-0-0-r', 0, S, 0, 0],
+    ['link-v-0-1-f', S, 0, S, S],
+    ['link-v-0-1-r', S, S, S, 0],
+  ] as [string, number, number, number, number][]) {
+    road(id, ax, az, bx, bz)
+  }
+
+  // The boundary stubs: in/out pairs per outward direction.
+  const stubs: [string, number, number, number, number][] = [
+    ['stub-in-0-0-n', 0, -stub, 0, 0],
+    ['stub-out-0-0-n', 0, 0, 0, -stub],
+    ['stub-in-0-0-w', -stub, 0, 0, 0],
+    ['stub-out-0-0-w', 0, 0, -stub, 0],
+    ['stub-in-0-1-e', S + stub, 0, S, 0],
+    ['stub-out-0-1-e', S, 0, S + stub, 0],
+    ['stub-in-0-1-n', S, -stub, S, 0],
+    ['stub-out-0-1-n', S, 0, S, -stub],
+    ['stub-in-1-0-s', 0, S + stub, 0, S],
+    ['stub-out-1-0-s', 0, S, 0, S + stub],
+    ['stub-in-1-0-w', -stub, S, 0, S],
+    ['stub-out-1-0-w', 0, S, -stub, S],
+    ['stub-in-1-1-s', S, S + stub, S, S],
+    ['stub-out-1-1-s', S, S, S, S + stub],
+    ['stub-in-1-1-e', S + stub, S, S, S],
+    ['stub-out-1-1-e', S, S, S + stub, S],
+  ]
+  // The pairing the routes use is the training env's (each in-stub with
+  // the out-stub half a ring away), and it uses only these 16 roads.
+  for (const [id, ax, az, bx, bz] of stubs) {
+    road(id, ax, az, bx, bz)
+  }
+
+  // The four junctions, no lights, connected to every road that touches
+  // them.
+  for (const [id, cx, cz] of [
+    ['g-0-0', 0, 0],
+    ['g-0-1', S, 0],
+    ['g-1-0', 0, S],
+    ['g-1-1', S, S],
+  ] as [string, number, number][]) {
+    const inter: Intersection = {
+      id,
+      position: { x: cx, y: 0, z: cz },
+      trafficLights: [],
+      connectedRoads: roads
+        .filter((r) => near(r.startNode, cx, cz) || near(r.endNode, cx, cz))
+        .map((r) => r.id),
+      intersectionRadius: junctionRadius(4),
+    }
+    net.intersections[id] = inter
+  }
+
+  // The eight vehicles, staggered along their stubs — the training
+  // env's spawn fractions (30-70 %).
+  const starts: { id: string; type: Vehicle['type']; color: string; arm: string; s: number }[] = [
+    { id: 'v-1', type: 'car', color: '#3a86ff', arm: 'stub-in-0-0-n', s: 24 },
+    { id: 'v-2', type: 'car', color: '#fbbf24', arm: 'stub-in-0-0-w', s: 30 },
+    { id: 'v-3', type: 'car', color: '#22c55e', arm: 'stub-in-0-1-e', s: 36 },
+    { id: 'v-4', type: 'car', color: '#f5f5f4', arm: 'stub-in-0-1-n', s: 42 },
+    { id: 'v-5', type: 'car', color: '#a78bfa', arm: 'stub-in-1-0-s', s: 24 },
+    { id: 'v-6', type: 'car', color: '#fb7185', arm: 'stub-in-1-0-w', s: 30 },
+    { id: 'v-7', type: 'car', color: '#34d399', arm: 'stub-in-1-1-e', s: 36 },
+    { id: 'v-8', type: 'car', color: '#60a5fa', arm: 'stub-in-1-1-s', s: 42 },
+  ]
+  for (const start of starts) {
+    const road = net.roads[start.arm]!
+    net.vehicles[start.id] = at(road, 0, start.s, 0, {
+      id: start.id,
+      type: start.type,
+      color: start.color,
+      status: 'driving',
+    })
+  }
+
+  return net
+}
+
+/** Whether a node sits at a position (for the junction adjacency). */
+const near = (node: { x: number; z: number }, x: number, z: number): boolean =>
+  Math.abs(node.x - x) < 1e-6 && Math.abs(node.z - z) < 1e-6

@@ -156,7 +156,9 @@ const plan = async (): Promise<void> => {
 }
 
 /** The junction scenario is the only one the drive policy drives. */
-const isJunctionScene = computed(() => store.currentSceneKind === 'junction')
+const isJunctionScene = computed(
+  () => store.currentSceneKind === 'junction' || store.currentSceneKind === 'junction-grid',
+)
 
 const onToggleDrive = (event: Event): void => {
   const checked = (event.target as HTMLInputElement).checked

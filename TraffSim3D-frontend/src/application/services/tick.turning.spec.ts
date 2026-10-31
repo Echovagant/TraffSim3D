@@ -345,10 +345,7 @@ describe('the grid under the arc turn model (real physics)', () => {
         for (let b = a + 1; b < vehicles.length; b += 1) {
           const va = vehicles[a]!
           const vb = vehicles[b]!
-          const distance = Math.hypot(
-            va.position.x - vb.position.x,
-            va.position.z - vb.position.z,
-          )
+          const distance = Math.hypot(va.position.x - vb.position.x, va.position.z - vb.position.z)
           if (distance < 2.5) {
             overlapFrames += 1
             worst = Math.max(worst, 2.5 - distance)

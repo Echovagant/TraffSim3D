@@ -79,6 +79,7 @@
         <option value="corridor">多路口走廊</option>
         <option value="grid">5×5 网格</option>
         <option value="junction">无信号路口</option>
+        <option value="junction-grid">无信号路网</option>
       </select>
       <span
         v-else
@@ -246,6 +247,8 @@ const sceneLabel = (k: SceneKind): string => {
       return '5×5 网格'
     case 'junction':
       return '无信号路口'
+    case 'junction-grid':
+      return '无信号路网'
   }
   return k // fallback for imported scenes
 }

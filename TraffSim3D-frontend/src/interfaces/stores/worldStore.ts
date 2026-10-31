@@ -12,8 +12,10 @@ import {
   buildCorridorScene,
   buildGridNetwork,
   buildUnsignalisedJunctionScene,
+  buildUnsignalisedGridScene,
   JUNCTION_CONFLICT_POINT,
   JUNCTION_DRIVE_ROUTES,
+  GRID_DRIVE_ROUTES,
 } from '@application/services/defaultScene'
 import { tick, type SignalContext } from '@application/services/tick'
 import {
@@ -87,6 +89,8 @@ export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const
  * 'grid' (5×5 网格 — 25 signalised junctions, 40 segments).
  * 'junction' (无信号十字路口 — the four-arm junction Scene 4's
  *   cooperative policy was trained on; NO traffic lights).
+ * 'junction-grid' (无信号路网 — the 2×2 unsignalised grid, Scene 4 v2:
+ *   routes cross several junctions, so the negotiations repeat).
  * 'imported' (any OSM/PBF file loaded via MapImporter —
  *   shown in the toolbar as a read-only label with the source file name
  *   instead of the dropdown, since there's no factory to "switch back to").
@@ -100,6 +104,7 @@ export type SceneKind =
   | 'corridor'
   | 'grid'
   | 'junction'
+  | 'junction-grid'
   | 'imported'
 
 const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
@@ -118,6 +123,8 @@ const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
       return buildGridNetwork()
     case 'junction':
       return buildUnsignalisedJunctionScene()
+    case 'junction-grid':
+      return buildUnsignalisedGridScene()
     case 'imported':
       // switchScene should never be called with 'imported'
       // (the toolbar hides the dropdown for imported scenes). If a
@@ -145,6 +152,8 @@ const sceneLabelForKind = (kind: SceneKind): string => {
       return '5×5 网格'
     case 'junction':
       return '无信号路口'
+    case 'junction-grid':
+      return '无信号路网'
     case 'imported':
       return '已导入'
   }
@@ -517,6 +526,8 @@ export const useWorldStore = defineStore('world', () => {
    * check pins), so this works without a backend.
    */
   const enableDrivePolicy = (): void => {
+    const routes = driveRoutesForScene()
+    if (routes === null) return
     if (!driveWeights.value) {
       void import('@infrastructure/rl/fixtures/network-drive-policy-fixture.json').then(
         (fixture) => {
@@ -525,7 +536,7 @@ export const useWorldStore = defineStore('world', () => {
         },
       )
     }
-    driveRoutes.value = { ...JUNCTION_DRIVE_ROUTES }
+    driveRoutes.value = routes
     driveRouteIndex.value = {}
     driveEnabled.value = true
     bumpTick()
@@ -561,6 +572,18 @@ export const useWorldStore = defineStore('world', () => {
       routes: driveRoutes.value,
       routeIndex: driveRouteIndex.value,
     }
+  }
+
+  /**
+   * Enable the drive policy on the CURRENT drive scene: the junction
+   * scenario or the grid. The routes come from the scene's own table —
+   * enabling it anywhere else is a no-op (there are no negotiation
+   * routes to follow).
+   */
+  const driveRoutesForScene = (): Record<string, string[]> | null => {
+    if (currentSceneKind.value === 'junction') return { ...JUNCTION_DRIVE_ROUTES }
+    if (currentSceneKind.value === 'junction-grid') return { ...GRID_DRIVE_ROUTES }
+    return null
   }
 
   /** Bump the fit tick so the editor view asks the camera

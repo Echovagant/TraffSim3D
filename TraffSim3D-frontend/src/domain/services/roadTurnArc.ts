@@ -104,7 +104,7 @@ export const buildTurnArc = (
   const vz = Math.sin(to.heading)
   const dx = to.x - from.x
   const dz = to.z - from.z
-  const denom = ux * (-vz) - uz * (-vx)
+  const denom = ux * -vz - uz * -vx
   if (Math.abs(denom) < 1e-9) {
     const mid = { x: (from.x + to.x) / 2, z: (from.z + to.z) / 2 }
     return finalise({ p0: { x: from.x, z: from.z }, p1: mid, p2: { x: to.x, z: to.z } })
@@ -147,10 +147,7 @@ const bezierAt = (arc: Omit<TurnArc, 'length'>, t: number): { x: number; z: numb
  * numerically stabler than the analytic derivative of a quadratic at
  * its endpoints.
  */
-export const pointAt = (
-  arc: TurnArc,
-  dist: number,
-): { x: number; z: number; heading: number } => {
+export const pointAt = (arc: TurnArc, dist: number): { x: number; z: number; heading: number } => {
   const t = arc.length <= 0 ? 1 : Math.max(0, Math.min(1, dist / arc.length))
   const point = bezierAt(arc, t)
   // The tangent from the ANALYTIC derivative of the quadratic Bézier —
