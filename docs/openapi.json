@@ -289,6 +289,51 @@
         }
       }
     },
+    "/api/v1/maps/poi": {
+      "post": {
+        "tags": [
+          "maps",
+          "maps"
+        ],
+        "summary": "Fetch Pois",
+        "description": "Fetch the real-world points of interest inside a rectangle.\n\nThe POIs come from 高德 (AMap) — whose data is GCJ-02 — and are\nconverted to WGS84 and projected around the scene's origin, so a POI\nlands on the corner of the roads it belongs to.\n\nErrors:\n  - 400: no key (neither in the request nor in the environment)\n  - 502: the provider was unreachable or refused",
+        "operationId": "fetch_pois_api_v1_maps_poi_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PoiRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Fetch Pois Api V1 Maps Poi Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/maps/overpass": {
       "get": {
         "tags": [
@@ -904,6 +949,79 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "PoiRequest": {
+        "properties": {
+          "south": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "South"
+          },
+          "west": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "West"
+          },
+          "north": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "North"
+          },
+          "east": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "East"
+          },
+          "origin_lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Origin Lat"
+          },
+          "origin_lon": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Origin Lon"
+          },
+          "types": {
+            "type": "string",
+            "title": "Types",
+            "default": ""
+          },
+          "keywords": {
+            "type": "string",
+            "title": "Keywords",
+            "default": ""
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 25.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 25
+          },
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "south",
+          "west",
+          "north",
+          "east",
+          "origin_lat",
+          "origin_lon"
+        ],
+        "title": "PoiRequest",
+        "description": "What to fetch: the POIs inside a rectangle of the loaded map.\n\nThe rectangle is in **WGS84 degrees** — the same datum the scene's\nroads are in — and the POIs come back in the scene's local metres."
       },
       "RouteEndpoint": {
         "properties": {

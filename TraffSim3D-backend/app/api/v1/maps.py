@@ -12,8 +12,15 @@ import xml.etree.ElementTree as ET
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field
 
 from app.apps.maps.osm_parser import BBox, parse_osm_xml, parse_osmpbf
+from app.apps.maps.poi import (
+    PoiQuery,
+    PoiUnavailableError,
+    fetch_amap_pois,
+    resolve_amap_key,
+)
 from app.apps.maps.overpass_cache import cached_overpass_fetch, list_cached_queries
 
 router = APIRouter()
@@ -152,6 +159,71 @@ async def parse_pbf(
         raise HTTPException(status_code=400, detail=f"Invalid OSM PBF: {e}") from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PBF parse failed: {e}") from e
+
+
+class PoiRequest(BaseModel):
+    """What to fetch: the POIs inside a rectangle of the loaded map.
+
+    The rectangle is in **WGS84 degrees** — the same datum the scene's
+    roads are in — and the POIs come back in the scene's local metres.
+    """
+
+    #: The rectangle on the map.
+    south: float = Field(..., ge=-90, le=90)
+    west: float = Field(..., ge=-180, le=180)
+    north: float = Field(..., ge=-90, le=90)
+    east: float = Field(..., ge=-180, le=180)
+    #: The scene's origin (the roads were projected around it).
+    origin_lat: float = Field(..., ge=-90, le=90)
+    origin_lon: float = Field(..., ge=-180, le=180)
+    #: The provider's category filter (its own type codes).
+    types: str = ""
+    #: A free-text filter.
+    keywords: str = ""
+    #: How many POIs to ask for.
+    limit: int = Field(default=25, ge=1, le=25)
+    #: The provider's Web-service key. Optional: the deployment's
+    #: `TRAFFIC_AMAP_KEY` is the fallback.
+    key: str = ""
+
+
+@router.post("/maps/poi", tags=["maps"])
+def fetch_pois(req: PoiRequest) -> dict[str, Any]:
+    """Fetch the real-world points of interest inside a rectangle.
+
+    The POIs come from 高德 (AMap) — whose data is GCJ-02 — and are
+    converted to WGS84 and projected around the scene's origin, so a POI
+    lands on the corner of the roads it belongs to.
+
+    Errors:
+      - 400: no key (neither in the request nor in the environment)
+      - 502: the provider was unreachable or refused
+    """
+    try:
+        key = resolve_amap_key(req.key)
+    except PoiUnavailableError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    query = PoiQuery(
+        south=req.south,
+        west=req.west,
+        north=req.north,
+        east=req.east,
+        origin_lat=req.origin_lat,
+        origin_lon=req.origin_lon,
+        types=req.types,
+        keywords=req.keywords,
+        limit=req.limit,
+    )
+    try:
+        pois = fetch_amap_pois(key, query)
+    except PoiUnavailableError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {
+        "source": "amap",
+        "count": len(pois),
+        "pois": pois,
+    }
 
 
 @router.get("/maps/overpass", tags=["maps"])
