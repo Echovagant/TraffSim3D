@@ -380,6 +380,26 @@ scripts/gen_drive_policy_fixture.py  →  前端 fixture（观测 + 期望动作
 
 ---
 
+### 5.7 转弯的弧线模型（枢轴 → 弧，ADR-012）
+
+转弯不再是「原地枢轴瞬移」：车到行进末端，沿**二次贝塞尔弧**从当前位姿走到新车道
+入口位姿（控制点 = 两条方向线的交点，即角落）。**实测（真 Rapier、90 s、5×5 网格、
+67 辆）：重叠帧 5 → 0**，`tick.turning.spec.ts` 把 0 钉住。
+
+三条实现要点（详见 [ADR-012](adr/ADR-012-replacing-the-pivot-with-an-arc.md)）：
+
+- **落位语义**：`roadId / laneIndex / s / heading` 转弯开始即为目标值，
+  `Vehicle.turn` 携带弧的控制点与进度；**到长落位帧先把位姿吸到弧终点**再清 turn
+  ——否则落位帧位姿在弧中途、5 m 车道护栏恰好触发（实测踩中）。
+- **近直行不进弧**（`MIN_ARC_TURN_RAD = 0.1`）：直行 continuation 会在越过入口
+  之后才检测到行进末端，「弧」是向后的——车被往回拽、速度冻结（实测 11.83 → 0.03）。
+  直行没有扫掠要修，直接落位。
+- **两条运动路径同一个弧**：Rapier 路径车身由弧 kinematically 拖（applyControl 与
+  Pure Pursuit 让位、body linvel 清零——**转弯中 `readPose().speed` 是 0**，速度
+  真值在实体上）；物理无关路径按同一纯函数推进。pathParity 8/8。
+
+---
+
 ## 6. 跨语言契约边界
 
 这一节是整个仓库里最容易理解错的地方，所以单列。

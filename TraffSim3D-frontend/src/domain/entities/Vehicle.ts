@@ -79,4 +79,35 @@ export interface Vehicle {
    * Pre-existing vehicles default to 0 (treated as "infinitely old").
    */
   spawnedAt: number
+  /**
+   * The turn IN PROGRESS (the pivot→arc model change, ADR-012), or
+   * `undefined` when the vehicle is on its lane.
+   *
+   * `roadId` / `laneIndex` / `s` / `heading` are ALREADY the
+   * destination lane's values — set the moment the turn starts, so
+   * every consumer (constraints, yield, selection) sees the road the
+   * vehicle is committed to. The position/heading meanwhile come from
+   * the arc: `dist` metres along the Bézier from the pose the vehicle
+   * had at the travel end to the lane's entry pose. While `turn` is
+   * set, tick advances `dist` by the speed, takes the pose from the
+   * arc, and exempts the vehicle from the lane guards and Pure
+   * Pursuit (the heading is the arc's tangent, not the lane's).
+   */
+  turn?: {
+    /** The destination lane's entry arc length. */
+    s: number
+    /** The destination lane's entry heading. */
+    heading: number
+    /** The Bézier control points (start, corner, entry). */
+    p0x: number
+    p0z: number
+    p1x: number
+    p1z: number
+    p2x: number
+    p2z: number
+    /** The arc's length in metres. */
+    length: number
+    /** The distance driven along the arc so far. */
+    dist: number
+  }
 }

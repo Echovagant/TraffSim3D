@@ -36,6 +36,12 @@ import {
 } from '@domain/services/laneChange'
 import { junctionIndex, type JunctionIndex } from '@domain/services/roadJunctionIndex'
 import { roadContinuation, type RoadContinuation } from '@domain/services/roadTransition'
+import {
+  buildTurnArc,
+  pointAt as arcPointAt,
+  MIN_ARC_TURN_RAD,
+  turnAngle,
+} from '@domain/services/roadTurnArc'
 import { buildDriveObservation } from './driveObservation'
 import { approachAxis } from '@domain/services/approachAxis'
 import {
@@ -545,6 +551,11 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // Skip the dragged vehicle — its position is driven by the
       // editor's drag handler, not by Rapier.
       if (v.id === ctx.draggingId) continue
+      // Skip a vehicle that is ON A TURN ARC: its body is dragged
+      // kinematically by the arc (step 8), and an applyControl here
+      // would push the body off it — the arc owns the pose, the ramp
+      // (which already ran) owns the speed.
+      if (v.turn) continue
       const road = network.roads[v.roadId]
       if (!road) continue
       const heading = v.heading
@@ -605,6 +616,55 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       v.position.z = pose.position.z
       v.heading = pose.heading
       v.speed = pose.speed
+      // ===== the turn in progress (pivot→arc, ADR-012) =====
+      //
+      // The arc is advanced HERE, before `findNearestLane`: mid-turn
+      // the body is ON THE ARC, up to ~7 m from either lane's point —
+      // the lane projection (and the 5 m guard behind it) would fight
+      // the arc every frame. The pose is the arc's; the Rapier body is
+      // dragged along (kinematically — its speed was zeroed at turn
+      // start, see `applyRoadTurn`).
+      if (v.turn) {
+        // The speed ramp keeps feeding the vehicle — step 5a skipped it
+        // (the body is a passenger), so the ramp runs here, on the
+        // entity, exactly where the arc consumes the speed. The BODY's
+        // linvel stays zero (set at turn start): its pose is the arc's,
+        // not the integration's.
+        const turnRoad = network.roads[v.roadId]
+        v.speed = rampSpeed(v.speed, turnRoad ? v.targetSpeed : 0, dt, v.type)
+        v.turn.dist += v.speed * dt
+        const turnArc = {
+          p0: { x: v.turn.p0x, z: v.turn.p0z },
+          p1: { x: v.turn.p1x, z: v.turn.p1z },
+          p2: { x: v.turn.p2x, z: v.turn.p2z },
+          length: v.turn.length,
+        }
+        if (v.turn.dist >= v.turn.length) {
+          // Arrived: snap the pose to the arc's END (the lane's entry
+          // point) before dropping the turn — the pose mid-arc is up to
+          // ~7 m from the lane point, and the 5 m lane guard would fire
+          // on exactly this frame otherwise (measured).
+          const end = arcPointAt(turnArc, v.turn.length)
+          v.position.x = end.x
+          v.position.z = end.z
+          v.heading = end.heading
+          v.turn = undefined
+          ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
+          ctx.rapierWorld!.setVehicleHeading(v.id, end.heading)
+          ctx.rapierWorld!.setVehicleSpeed(v.id, v.speed, end.heading)
+          // Fall through: the normal lane re-derivation now agrees with
+          // the pose (the vehicle IS at its lane's entry point).
+        } else {
+          const p = arcPointAt(turnArc, v.turn.dist)
+          v.position.x = p.x
+          v.position.y = lanePoint(network.roads[v.roadId]!, v.laneIndex, v.s).position.y
+          v.heading = p.heading
+          ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
+          ctx.rapierWorld!.setVehicleHeading(v.id, p.heading)
+          ctx.rapierWorld!.setVehicleSpeed(v.id, 0, p.heading)
+          continue
+        }
+      }
       const nearest = findNearestLane(v, network)
       v.laneIndex = nearest.laneIndex
       v.s = nearest.s
@@ -777,6 +837,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     // bodies before the lane-change branch (which handles lateral slide).
     for (const v of Object.values(network.vehicles)) {
       if (v.id === ctx.draggingId) continue
+      if (v.turn) continue // the arc owns the heading mid-turn
       const road = network.roads[v.roadId]
       if (!road) continue
       // Skip steering when the vehicle is stopped — Pure Pursuit
@@ -827,6 +888,35 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         v.speed = rampSpeed(v.speed, v.targetSpeed, dt, v.type)
       }
       v.speed = Math.max(0, Math.min(MAX_SPEED, v.speed))
+      // ===== the turn in progress (pivot→arc, ADR-012) =====
+      //
+      // Same contract as the Rapier path: the arc is advanced by the
+      // speed, the pose is the arc's, and the vehicle skips its own s
+      // integration while the turn runs (the destination lane's
+      // roadId / laneIndex / s were set at turn start).
+      if (v.turn) {
+        v.turn.dist += v.speed * dt
+        if (v.turn.dist >= v.turn.length) {
+          // The pose lands on the entry point through the lane
+          // re-derivation below (the fallback derives position from s),
+          // so only the turn state is dropped here.
+          v.turn = undefined
+        } else {
+          const p = arcPointAt(
+            {
+              p0: { x: v.turn.p0x, z: v.turn.p0z },
+              p1: { x: v.turn.p1x, z: v.turn.p1z },
+              p2: { x: v.turn.p2x, z: v.turn.p2z },
+              length: v.turn.length,
+            },
+            v.turn.dist,
+          )
+          v.position.x = p.x
+          v.position.z = p.z
+          v.heading = p.heading
+          continue
+        }
+      }
       const sign = laneForwardSign(v.laneIndex, road.laneCount)
       v.s += v.speed * sign * dt
       const len = roadLength(road)
@@ -850,6 +940,10 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         )
         const turnedRoad = turn ? network.roads[turn.roadId] : undefined
         if (turn && turnedRoad) {
+          const exitHeading = v.heading
+          const exitX = v.position.x
+          const exitZ = v.position.z
+          const entryLp = lanePoint(turnedRoad, turn.laneIndex, turn.s)
           v.roadId = turn.roadId
           v.laneIndex = turn.laneIndex
           v.s = turn.s
@@ -859,8 +953,32 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
           // vehicle was on — it does not carry onto the new road.
           v.desiredLaneIndex = null
           v.laneChangeStartedAt = null
-          // The position/heading derivation below must run on the NEW
-          // road — the old one no longer holds this vehicle.
+          // Near-straight continuations land directly (see the Rapier
+          // path and MIN_ARC_TURN_RAD); real turns take the arc, exactly
+          // as the Rapier path builds it (ADR-012): the two motion paths
+          // must produce the same turn.
+          if (turnAngle(exitHeading, turn.heading) < MIN_ARC_TURN_RAD) {
+            v.position.x = entryLp.position.x
+            v.position.z = entryLp.position.z
+            road = turnedRoad
+          } else {
+            const arc = buildTurnArc(
+            { x: exitX, z: exitZ, heading: exitHeading },
+            { x: entryLp.position.x, z: entryLp.position.z, heading: turn.heading },
+          )
+            v.turn = {
+              s: turn.s,
+              heading: turn.heading,
+              p0x: arc.p0.x,
+              p0z: arc.p0.z,
+              p1x: arc.p1.x,
+              p1z: arc.p1.z,
+              p2x: arc.p2.x,
+              p2z: arc.p2.z,
+              length: arc.length,
+              dist: 0,
+            }
+          }
           road = turnedRoad
         } else {
           if (v.s > len) v.s -= len
@@ -1156,12 +1274,23 @@ const applyTravelEndWrap = (v: Vehicle, road: Road, newS: number, ctx: TickConte
  */
 const applyRoadTurn = (v: Vehicle, road: Road, turn: RoadContinuation, ctx: TickContext): void => {
   const lp = lanePoint(road, turn.laneIndex, turn.s)
+  // The EXIT heading is the pose the vehicle has NOW (step 8 re-derived
+  // it from the body) — the arc starts there, along the direction the
+  // vehicle was actually travelling, which is what kills the pivot's
+  // sideways teleport: the body now sweeps the corner along a Bézier
+  // that starts along the old heading and ends along the new (ADR-012).
+  const exitHeading = v.heading
+  const exitX = v.position.x
+  const exitZ = v.position.z
+  // The destination lane's values take effect IMMEDIATELY (constraints,
+  // yield and selection all see the road the vehicle is committed to);
+  // the body travels there along the arc — unless the continuation is
+  // near-straight (see MIN_ARC_TURN_RAD): then it lands directly, the
+  // pivot with no sweep to fix.
+  const direct = turnAngle(exitHeading, turn.heading) < MIN_ARC_TURN_RAD
   v.roadId = road.id
   v.laneIndex = turn.laneIndex
   v.s = turn.s
-  v.position.x = lp.position.x
-  v.position.y = lp.position.y
-  v.position.z = lp.position.z
   v.heading = turn.heading
   v.lane = LaneId.make(road.id, turn.laneIndex)
   // A lane change is expressed in the lane space of the road the vehicle
@@ -1169,9 +1298,37 @@ const applyRoadTurn = (v: Vehicle, road: Road, turn: RoadContinuation, ctx: Tick
   // carry over.
   v.desiredLaneIndex = null
   v.laneChangeStartedAt = null
+  if (direct) {
+    v.position.x = lp.position.x
+    v.position.y = lp.position.y
+    v.position.z = lp.position.z
+    ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
+    ctx.rapierWorld!.setVehicleHeading(v.id, turn.heading)
+    ctx.rapierWorld!.setVehicleSpeed(v.id, v.speed, turn.heading)
+    return
+  }
+  const arc = buildTurnArc(
+    { x: exitX, z: exitZ, heading: exitHeading },
+    { x: lp.position.x, z: lp.position.z, heading: turn.heading },
+  )
+  v.turn = {
+    s: turn.s,
+    heading: turn.heading,
+    p0x: arc.p0.x,
+    p0z: arc.p0.z,
+    p1x: arc.p1.x,
+    p1z: arc.p1.z,
+    p2x: arc.p2.x,
+    p2z: arc.p2.z,
+    length: arc.length,
+    dist: 0,
+  }
+  // The body is a passenger on the arc from here: its speed is zeroed
+  // (the arc drags it kinematically — see the turn block in step 8),
+  // its pose is the arc's.
   ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
-  ctx.rapierWorld!.setVehicleHeading(v.id, turn.heading)
-  ctx.rapierWorld!.setVehicleSpeed(v.id, v.speed, turn.heading)
+  ctx.rapierWorld!.setVehicleHeading(v.id, exitHeading)
+  ctx.rapierWorld!.setVehicleSpeed(v.id, 0, exitHeading)
 }
 
 /**
