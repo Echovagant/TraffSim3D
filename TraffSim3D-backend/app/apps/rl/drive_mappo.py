@@ -463,21 +463,40 @@ def export_weights(actor: DriveActor, name: str) -> dict[str, Any]:
     }
 
 
-def load_exported_weights(path: Path, obs_dim: int = OBS_DIM_DRIVE) -> dict[str, Any]:
+def load_exported_weights(
+    path: Path,
+    obs_dim: int = OBS_DIM_DRIVE,
+) -> dict[str, Any]:
     """Load the exported JSON weights back into a state dict.
 
     The curriculum's seam: a policy trained on ONE scenario initialises
     the training on the next (single junction -> grid). The JSON is the
     export format `export_weights` writes — the same file the browser's
     transfer check pins.
+
+    **Shape-preserving across observation growth**: when the checkpoint's
+    first layer is narrower than the current observation (the 23-dim v1
+    policy vs the 29-dim grid observation), the extra input columns are
+    ZERO — the new features contribute nothing at initialisation, so the
+    loaded policy behaves EXACTLY like the one it came from, and
+    training discovers how to use them. Everything else (both hidden
+    layers, the action head, the log-std) copies as is.
     """
     import torch
 
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     layers = raw["layers"]
+
+    first = torch.tensor(layers["policy_net.0.weight"], dtype=torch.float32)
+    if first.shape[1] < obs_dim:
+        grown = torch.zeros(first.shape[0], obs_dim)
+        grown[:, : first.shape[1]] = first
+        first = grown
+    bias = torch.tensor(layers["policy_net.0.bias"], dtype=torch.float32)
+
     return {
-        "policy_net.0.weight": torch.tensor(layers["policy_net.0.weight"], dtype=torch.float32),
-        "policy_net.0.bias": torch.tensor(layers["policy_net.0.bias"], dtype=torch.float32),
+        "policy_net.0.weight": first,
+        "policy_net.0.bias": bias,
         "policy_net.2.weight": torch.tensor(layers["policy_net.2.weight"], dtype=torch.float32),
         "policy_net.2.bias": torch.tensor(layers["policy_net.2.bias"], dtype=torch.float32),
         "action_net.weight": torch.tensor(layers["action_net.weight"], dtype=torch.float32),

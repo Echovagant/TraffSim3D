@@ -28,7 +28,7 @@ const observation = (
 describe('buildDriveObservation', () => {
   it('has the declared dimension', () => {
     expect(observation()).toHaveLength(DRIVE_OBS_DIM)
-    expect(DRIVE_OBS_DIM).toBe(23)
+    expect(DRIVE_OBS_DIM).toBe(29)
   })
 
   it('normalises the own state', () => {
@@ -99,18 +99,22 @@ describe('buildDriveObservation', () => {
       { x: -12, z: 0, speed: 5 }, // 18 m from self — third
       { x: -25, z: 0, speed: 5 }, // 5 m from self — first
     ])
-    // Slot 0: the (-25, 0) car. Its offset from the CONFLICT point, in
-    // the ego's frame (heading 0): dx = -25, dz = 0 → x' = -25/50.
+    // Slot 0 (idx 8..14): the (-25, 0) car. Its offset from the
+    // CONFLICT point, in the ego's frame (heading 0): dx = -25 →
+    // x' = -25/50. The flags: 25 m out of the 6 m box, moving —
+    // neither committed nor yielding.
     expect(obs[8]).toBe(1)
     expect(obs[9]).toBeCloseTo(-25 / 50, 12)
     expect(obs[10]).toBeCloseTo(0, 12)
     expect(obs[11]).toBeCloseTo(5 / 16.67, 12)
-    // Slot 1: the (-40, 0) car.
-    expect(obs[13]).toBe(1)
-    expect(obs[14]).toBeCloseTo(-40 / 50, 12)
-    // Slot 2: the (-12, 0) car.
-    expect(obs[18]).toBe(1)
-    expect(obs[19]).toBeCloseTo(-12 / 50, 12)
+    expect(obs[13]).toBe(0)
+    expect(obs[14]).toBe(0)
+    // Slot 1 (idx 15..21): the (-40, 0) car.
+    expect(obs[15]).toBe(1)
+    expect(obs[16]).toBeCloseTo(-40 / 50, 12)
+    // Slot 2 (idx 22..28): the (-12, 0) car.
+    expect(obs[22]).toBe(1)
+    expect(obs[23]).toBeCloseTo(-12 / 50, 12)
   })
 
   it('rotates the slot offsets into the ego’s frame', () => {

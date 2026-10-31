@@ -54,6 +54,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.apps.rl.drive_core import (  # noqa: E402
     ARRIVAL_TOLERANCE,
+    CONFLICT_RADIUS,
     NEAREST_OTHERS,
     OBS_DIM_DRIVE,
     SPEED_LIMIT_DRIVE,
@@ -234,14 +235,20 @@ def _observation_reference(
     cos_h = math.cos(-agent["heading"])
     sin_h = math.sin(-agent["heading"])
     for slot, other in enumerate(ranked[:NEAREST_OTHERS]):
-        base = 8 + slot * 5
+        base = 8 + slot * 7
         dx = other["x"] - conflict_x
         dz = other["z"] - conflict_z
+        other_distance = math.hypot(other["x"] - conflict_x, other["z"] - conflict_z)
         obs[base] = 1.0
         obs[base + 1] = (dx * cos_h - dz * sin_h) / 50.0
         obs[base + 2] = (dx * sin_h + dz * cos_h) / 50.0
         obs[base + 3] = other["speed"] / SPEED_LIMIT_DRIVE
         obs[base + 4] = max(-1.0, min(1.0, (arrival(other) - own_arrival) / 10.0))
+        # The negotiation flags — the same definitions the core uses:
+        # COMMITTED (inside the box, it will not yield) and YIELDING
+        # (stopped outside the box, the way is mine).
+        obs[base + 5] = 1.0 if other_distance <= CONFLICT_RADIUS else 0.0
+        obs[base + 6] = 1.0 if other["speed"] < 2.0 and other_distance > CONFLICT_RADIUS else 0.0
     return obs
 
 

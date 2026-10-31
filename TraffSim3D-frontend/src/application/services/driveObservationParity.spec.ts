@@ -97,16 +97,22 @@ describe('the cooperative driving observation parity', () => {
   it('the committed vectors are the float64 reference, not the float32 core output', () => {
     // The core's own output is float32; if the fixture ever starts
     // carrying float32-rounded values, the 1e-9 parity above would be
-    // unachievable. This check keeps the generator honest: at least one
-    // element must carry more precision than float32 in the run of
-    // numbers — the simplest reliable probe is that the values parse as
-    // doubles that are NOT all float32-exact.
-    const float32Exact = EXPECTED.flatMap((entry) =>
-      entry.observation.filter((value) => Math.fround(value) === value),
-    ).length
-    const total = EXPECTED.reduce((sum, entry) => sum + entry.observation.length, 0)
-    // Trig-derived elements will rarely be float32-exact; require that
-    // a healthy share of the numbers carry full double precision.
-    expect(total - float32Exact).toBeGreaterThan(total / 2)
+    // unachievable. The probe targets the TRIG-derived elements
+    // (bearing idx 3, slot offsets base+1/2) — the flags and the
+    // normalised speeds are 0/1 and small ratios that are float32-exact
+    // BY NATURE, so a whole-vector heuristic would misfire.
+    // The bearing (idx 3) is atan2-derived: a NON-ZERO bearing is never
+    // float32-exact (the float64 atan2 result lands between float32
+    // neighbours with overwhelming probability). Zero-bearing entries
+    // (the junction dead ahead) carry no trig noise and are skipped.
+    const probed = EXPECTED.filter((entry) => entry.observation[3] !== 0)
+    expect(probed.length).toBeGreaterThan(0)
+    for (const entry of probed) {
+      const value = entry.observation[3]!
+      expect(
+        Math.fround(value) === value,
+        `${entry.scenario}/${entry.agentId} bearing is float32-exact`,
+      ).toBe(false)
+    }
   })
 })

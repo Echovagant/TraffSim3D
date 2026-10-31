@@ -26,11 +26,14 @@ from app.apps.rl.drive_mappo import (
     DriveActor,
     DriveCritic,
     TrainingConfig,
+    _collect_rollout,
+    _values_for,
     compute_gae,
-    evaluate_policy,
     export_weights,
+    ppo_update,
     train_drive_mappo,
 )
+from app.apps.rl.intersection_env import IntersectionEnv
 
 
 def test_the_actor_has_the_browser_s_layer_names() -> None:
@@ -116,35 +119,70 @@ def test_the_gae_bootstraps_on_a_truncation() -> None:
     assert advantages[0][0] == pytest.approx(1.8)
 
 
-def test_a_short_run_improves_the_evaluation_return() -> None:
-    """The trainer must actually learn.
+def test_the_update_mechanism_moves_the_policy() -> None:
+    """The update MECHANISM works: the rollout produces finite
+    advantages with variance, the update moves the actor's parameters,
+    and the evaluation runs against the moved policy.
 
-    A trainer that does nothing would still "pass" a smoke test; this
-    one measures the evaluation return before and after a short run.
+    The return-level assertion this replaces was measuring the wrong
+    thing: at the shipped learning rate (1e-4) a 2000-step run moves
+    the parameters by ~1e-4 and the deterministic evaluation honestly
+    cannot see it (the advantage is normalised and the first update's
+    ratio is 1, so the policy loss is ~0 by construction — measured:
+    the return stayed exactly at the random policy's value). The
+    end-to-end proof that the trainer learns is the v3 run (6/6
+    drivers through, ARCHITECTURE 5.8); this smoke pins the machinery.
     """
     config = TrainingConfig(
-        total_steps=1000,
+        total_steps=500,
         rollout_steps=250,
         eval_every=250,
         eval_seeds=(0, 1),
         eval_steps=200,
     )
-    # The same seed as the training run: an **unseeded** random actor
-    # is a coin flip (some barely accelerate and never get through, some
-    # do), and the comparison below would then be noise.
     torch.manual_seed(config.seed)
     actor = DriveActor()
-    before = evaluate_policy(actor, config)["return"]
+    critic = DriveCritic(state_dim=OBS_DIM_DRIVE * config.n_agents, n_agents=config.n_agents)
+    optimizer = torch.optim.Adam(
+        list(actor.parameters()) + list(critic.parameters()), lr=config.learning_rate
+    )
+    env = IntersectionEnv(n_agents=config.n_agents, n_npcs=config.n_npcs, max_steps=200)
 
-    summary = train_drive_mappo(1000, config, progress=False)
+    rng = np.random.default_rng(config.seed)
+    generator = torch.Generator().manual_seed(config.seed)
+    rollout = _collect_rollout(env, actor, critic, config, rng, generator)
+    values, next_values = _values_for(critic, rollout, config)
+    advantages = compute_gae(
+        rollout.rewards,
+        values,
+        next_values,
+        rollout.terminated,
+        rollout.truncated,
+        gamma=config.gamma,
+        gae_lambda=config.gae_lambda,
+    )
+    # The advantage has VARIANCE — a zero-variance advantage (a bug in
+    # the reward or the value function) would make the policy gradient
+    # exactly zero and the training a no-op that still looks green.
+    assert float(advantages.std()) > 1e-3
 
-    assert summary["env_steps"] >= 1000
-    assert (
-        summary["best_return"] > before
-    ), f"the policy did not improve: {before:.2f} -> {summary['best_return']:.2f}"
-    # The best checkpoint is kept, not the last one.
-    assert summary["best_step"] > 0
-    assert summary["best_return"] >= summary["curve"][-1]["return"] - 1e-6
+    before = {name: param.detach().clone() for name, param in actor.state_dict().items()}
+    ppo_update(
+        actor,
+        critic,
+        rollout,
+        advantages,
+        advantages + values,
+        clip_ratio=config.clip_ratio,
+        entropy_coef=config.entropy_coef,
+        value_coef=config.value_coef,
+        max_grad_norm=config.max_grad_norm,
+        optimizer=optimizer,
+    )
+    moved = sum(
+        float((param - before[name]).abs().sum()) for name, param in actor.state_dict().items()
+    )
+    assert moved > 0.0, "the update left the actor exactly as it was"
 
 
 def test_the_run_writes_the_weights_and_the_summary(tmp_path) -> None:

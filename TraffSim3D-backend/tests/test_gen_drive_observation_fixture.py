@@ -46,20 +46,23 @@ def test_every_scenario_has_agents_and_poses() -> None:
 
 def test_the_expected_observations_are_well_formed() -> None:
     fixture = build_fixture()
-    assert fixture["obs_dim"] == 23
+    assert fixture["obs_dim"] == 29
     assert len(fixture["expected"]) >= 10  # 13: five scenarios, three agents each (minus npcs)
 
     for entry in fixture["expected"]:
         observation = entry["observation"]
-        assert len(observation) == 23
+        assert len(observation) == 29
         assert all(math.isfinite(value) for value in observation)
         # The clamped elements.
         for index in (2, 7):
             assert -1.0 <= observation[index] <= 1.0
         for slot in range(3):
-            base = 8 + slot * 5
+            base = 8 + slot * 7
             assert observation[base] in (0.0, 1.0)
             assert -1.0 <= observation[base + 4] <= 1.0
+            # The flags.
+            assert observation[base + 5] in (0.0, 1.0)
+            assert observation[base + 6] in (0.0, 1.0)
         # The unnormalised-bearing element.
         assert -1.0 <= observation[3] <= 1.0
 

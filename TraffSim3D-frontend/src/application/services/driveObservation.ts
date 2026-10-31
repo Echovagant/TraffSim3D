@@ -32,10 +32,12 @@
 //   [5]      inside the arrival tolerance (2 m) — 1/0
 //   [6]      how many of the others arrive before I do / their count
 //   [7]      the earliest such difference, / 10, clamped
-//   [8..22]  the three nearest others, five numbers each:
+//   [8..28]  the three nearest others, SEVEN numbers each:
 //            present (1/0), their offset FROM THE CONFLICT POINT in my
 //            frame (x, z) / 50, their speed / 16.67, their arrival
-//            time minus mine / 10, clamped
+//            time minus mine / 10, clamped, COMMITTED (inside the
+//            junction box, 1/0), and YIELDING (stopped outside the
+//            box, 1/0)
 //
 // Four details are where the two sides could disagree:
 //
@@ -56,8 +58,23 @@
 //    count (idx 6/7) runs over **all** of them — not just the nearest
 //    three that get slots.
 
-/** The observation dimension of one cooperative driver — Python's `OBS_DIM_DRIVE`. */
-export const DRIVE_OBS_DIM = 23
+/** The observation dimension of one cooperative driver — Python's `OBS_DIM_DRIVE`.
+ *
+ * 29 = 8 own-state numbers + three other-vehicle slots of SEVEN numbers
+ * each. The two extra numbers per slot are the negotiation state the
+ * arrival delta cannot carry: whether the other is COMMITTED (inside
+ * the junction box — it will not yield) and whether it is YIELDING
+ * (stopped outside the box — the way is mine). The measured conflict
+ * gap to the right-of-way rule (1.8 per window against 0.2) was
+ * attributed to exactly this blind spot.
+ */
+export const DRIVE_OBS_DIM = 29
+
+/** The junction-box radius (m) — the committed/yielding boundary. */
+export const DRIVE_CONFLICT_RADIUS_M = 6.0
+
+/** The speed under which a vehicle counts as stopped (m/s). */
+export const DRIVE_WAITING_SPEED = 2.0
 
 /** The speed the normalisation divides by (m/s) — Python's `SPEED_LIMIT_DRIVE`. */
 export const DRIVE_SPEED_LIMIT = 16.67
@@ -167,11 +184,12 @@ export const buildDriveObservation = (input: DriveObservationInput): number[] =>
   for (let slot = 0; slot < DRIVE_NEAREST_OTHERS; slot += 1) {
     const other = others[slot]
     if (!other) continue // the slot stays zero — no vehicle to see
-    const base = 8 + slot * 5
+    const base = 8 + slot * 7
     // The other's offset from the CONFLICT POINT, in the ego's frame:
     // "which side of the junction is that car coming from".
     const dx = other.x - conflictPoint.x
     const dz = other.z - conflictPoint.z
+    const otherDistance = Math.hypot(other.x - conflictPoint.x, other.z - conflictPoint.z)
     obs[base] = 1.0
     obs[base + 1] = (dx * cosH - dz * sinH) / 50.0
     obs[base + 2] = (dx * sinH + dz * cosH) / 50.0
@@ -183,6 +201,12 @@ export const buildDriveObservation = (input: DriveObservationInput): number[] =>
         (arrivalTime(other.x, other.z, other.speed, conflictPoint) - ownArrival) / 10.0,
       ),
     )
+    // The negotiation flags - COMMITTED (inside the box, it will not
+    // yield) and YIELDING (stopped outside the box, the way is mine).
+    // The same definitions the Python core uses.
+    obs[base + 5] = otherDistance <= DRIVE_CONFLICT_RADIUS_M ? 1.0 : 0.0
+    obs[base + 6] =
+      other.speed < DRIVE_WAITING_SPEED && otherDistance > DRIVE_CONFLICT_RADIUS_M ? 1.0 : 0.0
   }
 
   return obs

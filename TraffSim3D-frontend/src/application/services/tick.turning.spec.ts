@@ -379,16 +379,47 @@ describe('the grid under the arc turn model (real physics)', () => {
         }
       }
     }
+    // The settlement metrics: the pivot era measured 5 overlap frames /
+    // 135k vehicle frames (worst 0.271 m) and the corner collision was
+    // the pivot's own signature. The arc + corner speed model reports:
+    // overlap frames (pinned 0 above), CRASHED vehicles, junction-box
+    // co-occupancy frames (the traffic-engineering conflict, counted
+    // per frame-pair-junction), and junction traversals (the
+    // throughput proxy — slower corners cost capacity).
+    let conflictFrames = 0
+    let traversals = 0
+    const junctionList = Object.values(net.intersections)
+    let prevRoadIds: Record<string, string> = {}
+    for (let i = 0; i < steps; i += 1) {
+      tick(net, DT, (i + 1) * DT, ctx)
+      const vehicles = Object.values(net.vehicles)
+      crashedAtEnd = vehicles.filter((v) => v.status === 'crashed').length
+      for (const v of vehicles) {
+        if (prevRoadIds[v.id] !== undefined && prevRoadIds[v.id] !== v.roadId) traversals += 1
+        prevRoadIds[v.id] = v.roadId
+      }
+      for (const inter of junctionList) {
+        const inBox = vehicles.filter(
+          (v) =>
+            Math.hypot(v.position.x - inter.position.x, v.position.z - inter.position.z) <= 11.5,
+        )
+        if (inBox.length >= 2) conflictFrames += 1
+      }
+    }
     console.log(
-      'OVERLAP-DIAG: frames',
+      'SETTLE-DIAG: overlapFrames',
       overlapFrames,
-      'worst',
+      '| worst',
       worst.toFixed(3),
-      '| first at step',
+      '| crashed',
+      crashedAtEnd,
+      '| junction-conflict frames',
+      conflictFrames,
+      '| junction traversals',
+      traversals,
+      '| first overlap at step',
       firstOverlapStep,
       firstOverlapDetail,
-      '| crashed at end',
-      crashedAtEnd,
     )
     expect(
       overlapFrames,

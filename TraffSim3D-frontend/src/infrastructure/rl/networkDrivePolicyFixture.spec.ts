@@ -39,10 +39,10 @@ const OBSERVATIONS = fixture.observations as number[][]
 const EXPECTED = fixture.expected_actions as number[][]
 
 describe('the cooperative driving policy transfer check', () => {
-  it('is a continuous two-action policy over the 23-dim observation', () => {
+  it('is a continuous two-action policy over the 29-dim observation', () => {
     expect(POLICY.action_space).toBe('continuous')
     expect(POLICY.action_dim).toBe(2)
-    expect(POLICY.obs_dim).toBe(23)
+    expect(POLICY.obs_dim).toBe(29)
     // A continuous policy carries the Gaussian's log-std.
     expect(POLICY.layers.log_std).toBeDefined()
   })
@@ -50,7 +50,7 @@ describe('the cooperative driving policy transfer check', () => {
   it('has the layer layout the browser hard-codes', () => {
     expect(POLICY.hidden_sizes).toEqual([64, 64])
     expect(POLICY.layers['policy_net.0.weight']).toHaveLength(64)
-    expect(POLICY.layers['policy_net.0.weight'][0]).toHaveLength(23)
+    expect(POLICY.layers['policy_net.0.weight'][0]).toHaveLength(29)
     expect(POLICY.layers['policy_net.2.weight']).toHaveLength(64)
     expect(POLICY.layers['policy_net.2.weight'][0]).toHaveLength(64)
     expect(POLICY.layers['action_net.weight']).toHaveLength(2)
@@ -62,7 +62,7 @@ describe('the cooperative driving policy transfer check', () => {
     expect(OBSERVATIONS).toHaveLength(EXPECTED.length)
 
     OBSERVATIONS.forEach((observation, index) => {
-      expect(observation).toHaveLength(23)
+      expect(observation).toHaveLength(29)
       const action = mlpForwardMean(observation, POLICY)
       const expected = EXPECTED[index]!
       // The browser computes in float64 and the fixture was pinned in

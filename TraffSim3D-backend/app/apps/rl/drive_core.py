@@ -34,7 +34,7 @@ The three things that make this core different from the single-ego one
    blocked vehicle's delay, which is what turns "keep going" into
    "negotiate".
 
-The observation (23 dims, per agent)
+The observation (29 dims, per agent)
 ------------------------------------
     [0]      own speed
     [1]      own distance to the conflict point
@@ -44,9 +44,11 @@ The observation (23 dims, per agent)
     [5]      am I inside the conflict zone (0/1)
     [6]      how many of the others arrive before I do (0..3, /3)
     [7]      the earliest such difference, in seconds (/10)
-    [8..22]  the three nearest other vehicles, five numbers each:
+    [8..28]  the three nearest other vehicles, SEVEN numbers each:
              present (0/1), their offset from the conflict point in MY
-             frame (x, z), their speed, and their arrival time minus mine
+             frame (x, z), their speed, their arrival time minus mine,
+             COMMITTED (inside the junction box, 0/1), and YIELDING
+             (stopped outside the box, 0/1)
 
 The offsets are expressed in the ego's frame, so "which side of me is
 that car coming from" is directly readable — and the frame rotates with
@@ -66,7 +68,17 @@ from .idm import find_lead_vehicle, idm_acceleration
 from .network_graph import NetworkGraph, Route, point_on_road
 
 #: The observation dimension of one learned driver.
-OBS_DIM_DRIVE = 23
+#:
+#: 29 = 8 own-state numbers + three other-vehicle slots of SEVEN
+#: numbers each. The two extra numbers per slot (added 2026-10-31) are
+#: the negotiation state the policy could not see before: whether the
+#: other is INSIDE the junction box (committed — it will not yield) and
+#: whether it is STOPPED outside the box (has yielded — the way is
+#: mine). The measured gap to the right-of-way rule (conflicts 1.8 per
+#: window against 0.2) was attributed to exactly this: the arrival
+#: delta says WHEN the other arrives, not whether it will still be
+#: there when I do.
+OBS_DIM_DRIVE = 29
 
 #: The number of other vehicles each agent perceives (nearest first).
 NEAREST_OTHERS = 3
@@ -957,18 +969,27 @@ class DriveCore:
         obs[7] = max(-1.0, min(1.0, earliest_delta / 10.0))
 
         for slot, other in enumerate(others[:NEAREST_OTHERS]):
-            base = 8 + slot * 5
+            base = 8 + slot * 7
             # The offset from the conflict point, expressed in the ego's
             # frame: "which side of me is that car coming from".
             dx = other.x - conflict_x
             dz = other.z - conflict_z
             cos_h = math.cos(-agent.heading)
             sin_h = math.sin(-agent.heading)
+            other_distance = math.hypot(other.x - conflict_x, other.z - conflict_z)
             obs[base] = 1.0
             obs[base + 1] = (dx * cos_h - dz * sin_h) / 50.0
             obs[base + 2] = (dx * sin_h + dz * cos_h) / 50.0
             obs[base + 3] = other.speed / SPEED_LIMIT_DRIVE
             obs[base + 4] = max(-1.0, min(1.0, (self._arrival_time(other) - own_arrival) / 10.0))
+            # The negotiation state the arrival delta cannot carry:
+            # COMMITTED (inside the box — it will not yield, do not
+            # fight it) and YIELDING (stopped outside the box — the way
+            # is mine, go).
+            obs[base + 5] = 1.0 if other_distance <= CONFLICT_RADIUS else 0.0
+            obs[base + 6] = (
+                1.0 if other.speed < WAITING_SPEED and other_distance > CONFLICT_RADIUS else 0.0
+            )
 
         return obs
 
