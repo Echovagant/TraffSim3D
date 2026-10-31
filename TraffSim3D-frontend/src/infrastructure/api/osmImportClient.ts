@@ -71,6 +71,20 @@ export const validateOsmBBox = (bbox: OsmBBox): string | null => {
 }
 
 /**
+ * The coordinate datum the FILE's coordinates are in. OSM speaks WGS84;
+ * Chinese map tooling exports GCJ-02 (高德) or BD-09 (百度) — importing
+ * those without conversion lands the map 300-600 m off in mainland
+ * China.
+ */
+export type OsmCoordDatum = 'wgs84' | 'gcj02' | 'bd09'
+
+export const OSM_COORD_DATUMS: ReadonlyArray<{ value: OsmCoordDatum; label: string }> = [
+  { value: 'wgs84', label: 'WGS84 (OSM 默认)' },
+  { value: 'gcj02', label: 'GCJ-02 (高德)' },
+  { value: 'bd09', label: 'BD-09 (百度)' },
+]
+
+/**
  * Build the query string for a parse request. Returns `''` when `bbox` is
  * `null`, which is what keeps the no-clip request identical to the old one.
  */
@@ -79,6 +93,14 @@ export const formatOsmBBoxQuery = (bbox: OsmBBox | null): string => {
   const params = BBOX_PARAM_ORDER.map((key) => `${key}=${encodeURIComponent(bbox[key])}`)
   return `?${params.join('&')}`
 }
+
+/**
+ * The `coord` query param. The default (`wgs84`) is OMITTED — a request
+ * without the param and a request with `coord=wgs84` must be the same
+ * URL, so the no-datum request stays identical to the historical one.
+ */
+export const formatOsmCoordQuery = (datum: OsmCoordDatum): string =>
+  datum === 'wgs84' ? '' : `&coord=${encodeURIComponent(datum)}`
 
 /**
  * Human-readable echo of the clip that is actually in effect, shown next to the
@@ -96,3 +118,18 @@ export const describeOsmClip = (bbox: OsmBBox | null): string => {
 /** Append the optional bbox query to a parse endpoint URL. */
 export const withOsmBBoxQuery = (endpoint: string, bbox: OsmBBox | null): string =>
   `${endpoint}${formatOsmBBoxQuery(bbox)}`
+
+/**
+ * Append the optional bbox and datum queries to a parse endpoint URL.
+ * `datum` defaults to `wgs84`, which adds nothing — the historical URLs
+ * are preserved byte for byte.
+ */
+export const withOsmQuery = (
+  endpoint: string,
+  bbox: OsmBBox | null,
+  datum: OsmCoordDatum = 'wgs84',
+): string => {
+  const base = withOsmBBoxQuery(endpoint, bbox)
+  if (base === '') return ''
+  return `${base}${formatOsmCoordQuery(datum)}`
+}

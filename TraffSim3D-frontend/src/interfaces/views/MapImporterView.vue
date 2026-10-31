@@ -80,6 +80,18 @@
         <p v-if="bboxError" class="bbox-error" data-testid="osm-bbox-error">{{ bboxError }}</p>
       </div>
 
+      <label class="coord-datum">
+        <span>坐标系</span>
+        <select v-model="coordDatum" data-testid="coord-datum-select">
+          <option v-for="entry in OSM_COORD_DATUMS" :key="entry.value" :value="entry.value">
+            {{ entry.label }}
+          </option>
+        </select>
+        <small v-if="coordDatum !== 'wgs84'" class="coord-note">
+          {{ coordDatum === 'gcj02' ? '高德' : '百度' }} 导出的文件选这个 — 导入时自动转到 WGS84（约
+          300–600 m 的偏移）
+        </small>
+      </label>
       <div class="upload-row">
         <input
           ref="fileInput"
@@ -171,7 +183,9 @@ import {
   normalizeOsmPayload,
   spawnImportedVehicles,
   validateOsmBBox,
-  withOsmBBoxQuery,
+  OSM_COORD_DATUMS,
+  withOsmQuery,
+  type OsmCoordDatum,
   type OsmBBox,
 } from '@infrastructure/api'
 import { createRoadNetworkFrom } from '@domain/entities/RoadNetwork'
@@ -196,6 +210,8 @@ const importVehicleCount = (roadCount: number): number => importVehicleCountFor(
 const fileInput = ref<HTMLInputElement | null>(null)
 const file = ref<File | null>(null)
 const uploading = ref(false)
+/** The datum the uploaded FILE's coordinates are in (高德/百度 exports). */
+const coordDatum = ref<OsmCoordDatum>('wgs84')
 
 // --- bbox clipping (只加载仿真区域) --------------------------------
 // Off by default so an untouched upload produces the exact same request URL
@@ -384,7 +400,7 @@ const onUpload = async (): Promise<void> => {
       : `${backendUrl.value}/api/v1/maps/parse-osm`
     // activeBBox is null unless the user enabled clipping and it validates,
     // so the default request URL is unchanged.
-    const r = await fetch(withOsmBBoxQuery(endpoint, activeBBox.value), {
+    const r = await fetch(withOsmQuery(endpoint, activeBBox.value, coordDatum.value), {
       method: 'POST',
       body: fd,
     })

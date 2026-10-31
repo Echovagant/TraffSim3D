@@ -60,9 +60,11 @@ export {
   describeOsmClip,
   formatOsmBBoxQuery,
   validateOsmBBox,
+  OSM_COORD_DATUMS,
   withOsmBBoxQuery,
+  withOsmQuery,
 } from './osmImportClient'
-export type { OsmBBox } from './osmImportClient'
+export type { OsmBBox, OsmCoordDatum } from './osmImportClient'
 
 export {
   MAX_IMPORT_VEHICLES,

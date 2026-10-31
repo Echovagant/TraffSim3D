@@ -111,6 +111,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .coord_transform import to_wgs84
+
 # m/s. Keys match OSM highway=* tag values.
 HIGHWAY_SPEED_LIMIT: dict[str, float] = {
     "motorway": 33.3,
@@ -1304,6 +1306,7 @@ def parse_osm_xml(
     xml_bytes: bytes,
     bbox: BBox | None = None,
     center: tuple[float, float] | None = None,
+    coord_datum: str = "wgs84",
 ) -> dict[str, Any]:
     """Parse an OSM XML byte payload into a RoadNetwork dict.
 
@@ -1314,8 +1317,18 @@ def parse_osm_xml(
     interest. The geometry is cut at the border: a way that crosses the
     region ends where it leaves it. Omitting `bbox` keeps the historical
     ~55 km safety cap, which is clipped the same way.
+
+    `coord_datum` names the datum the FILE's coordinates are in —
+    "wgs84" (the default), "gcj02" (高德) or "bd09" (百度). Chinese map
+    data converted from those data without this step lands 300-600 m
+    off, so the conversion happens BEFORE the metric projection and the
+    bbox clipping (the bbox is expressed in the SAME datum as the file).
     """
     raw_nodes, raw_ways, signal_node_ids = _extract_osm_xml(xml_bytes)
+    if coord_datum != "wgs84":
+        raw_nodes = {
+            node_id: to_wgs84(lat, lon, coord_datum) for node_id, (lat, lon) in raw_nodes.items()
+        }
     return _build_network(
         raw_nodes,
         raw_ways,
@@ -1331,6 +1344,7 @@ def parse_osmpbf(
     pbf_bytes: bytes,
     bbox: BBox | None = None,
     center: tuple[float, float] | None = None,
+    coord_datum: str = "wgs84",
 ) -> dict[str, Any]:
     """Streaming PBF parser using libosmium. Same return shape as
     parse_osm_xml — frontend's `loadNetwork` accepts either.
@@ -1341,8 +1355,16 @@ def parse_osmpbf(
 
     Raises ValueError on malformed PBF (e.g. invalid magic, corrupt
     block, missing required fields).
+
+    `coord_datum` behaves exactly as in `parse_osm_xml` (the conversion
+    happens before the projection, so the bbox is expressed in the same
+    datum as the file).
     """
     raw_nodes, raw_ways, signal_node_ids = _extract_osm_pbf(pbf_bytes)
+    if coord_datum != "wgs84":
+        raw_nodes = {
+            node_id: to_wgs84(lat, lon, coord_datum) for node_id, (lat, lon) in raw_nodes.items()
+        }
     return _build_network(
         raw_nodes,
         raw_ways,

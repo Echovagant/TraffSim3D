@@ -38,7 +38,7 @@
           "maps"
         ],
         "summary": "Parse Osm",
-        "description": "Parse an uploaded .osm file into a RoadNetwork dict.\n\nOptional bbox query params (south, west, north, east) clip the map to an\narea of interest; omit them all to keep the parser's default\n~55 km memory-safety cap. The response shape is identical either way.",
+        "description": "Parse an uploaded .osm file into a RoadNetwork dict.\n\nOptional bbox query params (south, west, north, east) clip the map to an\narea of interest; omit them all to keep the parser's default\n~55 km memory-safety cap. `coord` names the datum the FILE's\ncoordinates are in (`wgs84` — the default — / `gcj02` / `bd09`);\nanything else is refused with 422. The response shape is identical\neither way.",
         "operationId": "parse_osm_api_v1_maps_parse_osm_post",
         "parameters": [
           {
@@ -112,6 +112,16 @@
               ],
               "title": "East"
             }
+          },
+          {
+            "name": "coord",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "wgs84",
+              "title": "Coord"
+            }
           }
         ],
         "requestBody": {
@@ -157,7 +167,7 @@
           "maps"
         ],
         "summary": "Parse Pbf",
-        "description": "Parse an uploaded .osm.pbf file into a RoadNetwork dict.\n\nSame return shape as /maps/parse-osm. Uses libosmium (osmium Python\nbindings) to stream the binary PBF. Real-world city files (city-scale\n~20MB, province-scale ~200MB) use this format.\n\nTakes the same optional bbox query params as /maps/parse-osm.",
+        "description": "Parse an uploaded .osm.pbf file into a RoadNetwork dict.\n\nSame return shape as /maps/parse-osm. Uses libosmium (osmium Python\nbindings) to stream the binary PBF. Real-world city files (city-scale\n~20MB, province-scale ~200MB) use this format.\n\nTakes the same optional bbox and `coord` query params as\n/maps/parse-osm.",
         "operationId": "parse_pbf_api_v1_maps_parse_pbf_post",
         "parameters": [
           {
@@ -230,6 +240,16 @@
                 }
               ],
               "title": "East"
+            }
+          },
+          {
+            "name": "coord",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "wgs84",
+              "title": "Coord"
             }
           }
         ],

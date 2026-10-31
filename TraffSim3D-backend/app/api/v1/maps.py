@@ -67,6 +67,24 @@ def _resolve_bbox(
     return (south, west, north, east)
 
 
+def _resolve_coord(coord: str) -> str:
+    """Validate the `coord` query param into a supported datum name.
+
+    The parser speaks WGS84; a file exported from 高德 (GCJ-02) or 百度
+    (BD-09) has to be converted BEFORE anything reads its coordinates —
+    an unknown datum must refuse loudly, because silently treating it
+    as WGS84 places the map 300-600 m off with no signal at all.
+    """
+    from app.apps.maps.coord_transform import SUPPORTED_DATUMS
+
+    if coord not in SUPPORTED_DATUMS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown coord datum {coord!r} — expected one of {', '.join(SUPPORTED_DATUMS)}",
+        )
+    return coord
+
+
 @router.post("/maps/parse-osm", tags=["maps"])
 async def parse_osm(
     file: UploadFile = File(...),
@@ -74,19 +92,28 @@ async def parse_osm(
     west: float | None = Query(default=None, ge=-180, le=180),  # noqa: B008
     north: float | None = Query(default=None, ge=-90, le=90),  # noqa: B008
     east: float | None = Query(default=None, ge=-180, le=180),  # noqa: B008
+    coord: str = Query(default="wgs84"),  # noqa: B008
 ) -> dict[str, Any]:
     """Parse an uploaded .osm file into a RoadNetwork dict.
 
     Optional bbox query params (south, west, north, east) clip the map to an
     area of interest; omit them all to keep the parser's default
-    ~55 km memory-safety cap. The response shape is identical either way.
+    ~55 km memory-safety cap. `coord` names the datum the FILE's
+    coordinates are in (`wgs84` — the default — / `gcj02` / `bd09`);
+    anything else is refused with 422. The response shape is identical
+    either way.
     """
+    datum = _resolve_coord(coord)
     bbox = _resolve_bbox(south, west, north, east)
     raw = await file.read()
     try:
         # The `bbox is None` branch stays a bare positional call so the
         # no-bbox response cannot drift from the pre-bbox behaviour.
-        return parse_osm_xml(raw) if bbox is None else parse_osm_xml(raw, bbox=bbox)
+        return (
+            parse_osm_xml(raw, bbox=bbox, coord_datum=datum)
+            if bbox is not None
+            else parse_osm_xml(raw, coord_datum=datum)
+        )
     except ET.ParseError as e:
         raise HTTPException(status_code=400, detail=f"Invalid OSM XML: {e}") from e
     except Exception as e:
@@ -100,6 +127,7 @@ async def parse_pbf(
     west: float | None = Query(default=None, ge=-180, le=180),  # noqa: B008
     north: float | None = Query(default=None, ge=-90, le=90),  # noqa: B008
     east: float | None = Query(default=None, ge=-180, le=180),  # noqa: B008
+    coord: str = Query(default="wgs84"),  # noqa: B008
 ) -> dict[str, Any]:
     """Parse an uploaded .osm.pbf file into a RoadNetwork dict.
 
@@ -107,12 +135,18 @@ async def parse_pbf(
     bindings) to stream the binary PBF. Real-world city files (city-scale
     ~20MB, province-scale ~200MB) use this format.
 
-    Takes the same optional bbox query params as /maps/parse-osm.
+    Takes the same optional bbox and `coord` query params as
+    /maps/parse-osm.
     """
+    datum = _resolve_coord(coord)
     bbox = _resolve_bbox(south, west, north, east)
     raw = await file.read()
     try:
-        return parse_osmpbf(raw) if bbox is None else parse_osmpbf(raw, bbox=bbox)
+        return (
+            parse_osmpbf(raw, bbox=bbox, coord_datum=datum)
+            if bbox is not None
+            else parse_osmpbf(raw, coord_datum=datum)
+        )
     except ValueError as e:
         # parse_osmpbf wraps libosmium errors as ValueError.
         raise HTTPException(status_code=400, detail=f"Invalid OSM PBF: {e}") from e
