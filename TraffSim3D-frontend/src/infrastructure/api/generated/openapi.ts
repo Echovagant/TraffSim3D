@@ -28,6 +28,20 @@ export interface HTTPValidationError {
   detail?: Array<ValidationError>
 }
 
+/** `PoiRequest` — from the OpenAPI `components.schemas`. */
+export interface PoiRequest {
+  south: number
+  west: number
+  north: number
+  east: number
+  origin_lat: number
+  origin_lon: number
+  types?: string
+  keywords?: string
+  limit?: number
+  key?: string
+}
+
 /** `RouteEndpoint` — from the OpenAPI `components.schemas`. */
 export interface RouteEndpoint {
   junction_id?: string | null
@@ -84,6 +98,9 @@ export type PathsApiV1MapsParseOsmPostResponse = Record<string, unknown>
 
 /** `POST /api/v1/maps/parse-pbf` → 200 */
 export type PathsApiV1MapsParsePbfPostResponse = Record<string, unknown>
+
+/** `POST /api/v1/maps/poi` → 200 */
+export type PathsApiV1MapsPoiPostResponse = Record<string, unknown>
 
 /** `GET /api/v1/maps/overpass` → 200 */
 export type PathsApiV1MapsOverpassGetResponse = Record<string, unknown>
@@ -148,6 +165,7 @@ export interface OpenApiPaths {
   "/api/v1/ping": { get: PathsApiV1PingGetResponse }
   "/api/v1/maps/parse-osm": { post: PathsApiV1MapsParseOsmPostResponse }
   "/api/v1/maps/parse-pbf": { post: PathsApiV1MapsParsePbfPostResponse }
+  "/api/v1/maps/poi": { post: PathsApiV1MapsPoiPostResponse }
   "/api/v1/maps/overpass": { get: PathsApiV1MapsOverpassGetResponse }
   "/api/v1/maps/overpass/cache": { get: PathsApiV1MapsOverpassCacheGetResponse }
   "/api/v1/rl/train": { post: PathsApiV1RlTrainPostResponse }

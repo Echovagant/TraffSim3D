@@ -46,6 +46,7 @@ import {
   type PlannedRoute,
 } from '@application/services/routePlanner'
 import { defaultRouteClient } from '@infrastructure/api/routeClient'
+import { defaultPoiClient, boundsToDegrees, type Poi } from '@infrastructure/api/poiClient'
 import type { FollowCameraTarget } from '@infrastructure/rendering/ThreeJSRenderer'
 import type { RouteRenderPath } from '@infrastructure/rendering/RouteMesh'
 import { DRIVER_EYE_HEIGHT_M } from '@shared/constants/simulation'
@@ -356,6 +357,66 @@ export const useWorldStore = defineStore('world', () => {
     signalPolicyOrigin.value = null
     signalPolicyDecision.value = null
     controllers = new Map()
+    bumpTick()
+  }
+
+  // ===== the points of interest =====
+  //
+  // The POIs belong to a MAP: they are fetched for a rectangle of the
+  // scene's origin and projected into the scene's metres, so they are
+  // cleared when the scene changes (a new map is a new set of places).
+  const pois = ref<Poi[]>([])
+  const poiSelectedId = ref<string | null>(null)
+  const poisLoading = ref(false)
+  const poiError = ref<string | null>(null)
+
+  /**
+   * Fetch the POIs around the current scene.
+   *
+   * `key` is the provider's Web-service key; empty means the
+   * deployment's own (`TRAFFIC_AMAP_KEY` on the backend).
+   */
+  const loadPois = async (key = ''): Promise<{ ok: boolean; error?: string }> => {
+    const origin = network.value.origin
+    if (!origin) {
+      poiError.value = '这个场景没有地理锚点 — POI 需要一张真实地图'
+      return { ok: false, error: poiError.value }
+    }
+    const bounds = computeNetworkBounds(network.value)
+    const rectangle = boundsToDegrees(bounds, origin)
+    poisLoading.value = true
+    poiError.value = null
+    try {
+      const result = await defaultPoiClient.fetchPois({
+        ...rectangle,
+        originLat: origin.lat,
+        originLon: origin.lon,
+        key,
+        limit: 25,
+      })
+      if (!result.ok) {
+        poiError.value = result.error
+        return { ok: false, error: result.error }
+      }
+      pois.value = result.pois
+      poiSelectedId.value = null
+      bumpTick()
+      return { ok: true }
+    } finally {
+      poisLoading.value = false
+    }
+  }
+
+  /** Select a POI (the panel shows its details; the marker brightens). */
+  const selectPoi = (id: string | null): void => {
+    poiSelectedId.value = id
+    bumpTick()
+  }
+
+  /** Drop the POIs (a new scene, or the user cleared them). */
+  const clearPois = (): void => {
+    pois.value = []
+    poiSelectedId.value = null
     bumpTick()
   }
 
@@ -1456,6 +1517,8 @@ export const useWorldStore = defineStore('world', () => {
     // The drive policy belongs to the junction scenario — a scene swap
     // ends it (the routes name the old network's roads).
     disableDrivePolicy()
+    // The POIs belonged to the old map.
+    clearPois()
     // Assign via .value so Pinia's auto-unwrap on the store
     // surfaces the new network to EntityOutline, InspectorPanel, etc.
     network.value = next
@@ -1699,6 +1762,14 @@ export const useWorldStore = defineStore('world', () => {
     loadSignalPolicy,
     loadShippedGridPolicy,
     clearSignalPolicy,
+    // the POI surface
+    pois,
+    poiSelectedId,
+    poisLoading,
+    poiError,
+    loadPois,
+    selectPoi,
+    clearPois,
     // the planned-route surface
     plannedRoute,
     routeFollowerId,

@@ -533,6 +533,15 @@ bbox 与文件同系）。GCJ-02 无公开精确反演——实现是标准的�
 （对境外数据应用偏移反而是几百米的错误）。边界内拒绝解析未知的 datum
 （静默当 WGS84 会让地图偏 300–600 米且无任何信号）。
 
+**兴趣点叠加**（`POST /maps/poi` → `app/apps/maps/poi.py`）：高德的 POI 数据
+（GCJ-02）经同一条转换管线转到 WGS84，再按**路网自己的投影原点**投影到本地米制
+（`x = (lon − origin_lon)·111000·cos_lat`、`z = (lat − origin_lat)·111000`，
+与 `osm_parser` 同一个公式）——POI 因而落在它所属的路口上。Key 优先取请求里的
+（用户自带的、配额归用户），回落到部署方的 `TRAFFIC_AMAP_KEY`；两者皆无时明确
+拒绝（400），因为空 Key 调用只会得到 provider 的隐晦错误。前端的图层是**一个
+InstancedMesh**（`PoiLayer.ts`，整批 POI 一次 draw call），标记按类别着色、
+选中时高亮；POI 不可被编辑器的拾取命中（它们是信息，不是场景物件）。
+
 ```mermaid
 flowchart LR
   turbo["Overpass Turbo<br/>导出 .osm"]

@@ -9,6 +9,7 @@ import {
   type RenderMode,
 } from './SceneBuilder'
 import { buildRouteMesh, type RouteRenderPath } from './RouteMesh'
+import { createPoiLayer, type Poi, type PoiLayer } from './PoiLayer'
 import { MAX_DPR } from '@shared/constants/simulation'
 
 /** How far ahead of the car the first-person camera looks (m). */
@@ -83,6 +84,8 @@ export class ThreeJSRenderer {
   private routeRef: RouteRenderPath | null = null
   /** The vehicle currently hidden because the camera rides in it. */
   private hiddenFollowerId: string | null = null
+  /** The POI markers (one draw call for the whole set). */
+  private poiLayer: PoiLayer | null = null
   // 'flat' (default) renders ground + road meshes (used by
   // /scene-editor). 'smart-city' skips both because Cesium provides
   // the basemap underneath. Setting this calls `buildScene` again
@@ -208,6 +211,32 @@ export class ThreeJSRenderer {
    */
   setFollowTargetGetter(getter: () => FollowCameraTarget | null): void {
     this.getFollowTarget = getter
+  }
+
+  /**
+   * Draw the points of interest.
+   *
+   * The layer lives on the SCENE (not on the built scene): the POIs are
+   * a map overlay, not part of the scene's geometry, and they must
+   * survive a scene rebuild... which is why they are CLEARED on one
+   * instead (they belonged to the old map).
+   */
+  setPois(pois: Poi[]): void {
+    if (!this.poiLayer) {
+      this.poiLayer = createPoiLayer()
+      this.scene.add(this.poiLayer.mesh)
+    }
+    this.poiLayer.set(pois)
+  }
+
+  /** Brighten the selected POI (null clears the selection). */
+  selectPoi(id: string | null): void {
+    this.poiLayer?.select(id)
+  }
+
+  /** Drop the POI markers (a new scene, or the user cleared them). */
+  clearPois(): void {
+    this.poiLayer?.set([])
   }
 
   /**
@@ -370,6 +399,10 @@ export class ThreeJSRenderer {
       if (this.getNetwork) {
         const network = this.getNetwork()
         if (network !== this.currentNetwork) {
+          // The POIs belonged to the OLD map — their coordinates are
+          // projected around the old origin, so they would be in the
+          // wrong place on the new one.
+          this.clearPois()
           if (this.built) {
             this.scene.remove(this.built.root)
             // Dispose is best-effort — new built replaces it. The old meshes

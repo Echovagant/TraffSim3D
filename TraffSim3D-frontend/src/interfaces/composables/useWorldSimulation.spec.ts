@@ -61,6 +61,8 @@ vi.mock('@infrastructure/rendering', () => ({
     setTickPolicyGetter = vi.fn()
     setFollowTargetGetter = vi.fn()
     setRouteGetter = vi.fn()
+    setPois = vi.fn()
+    selectPoi = vi.fn()
     addAuxiliary = vi.fn((mesh: { parent: unknown }) => {
       mesh.parent = SCENE
     })

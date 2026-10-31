@@ -70,6 +70,8 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
     // rebuilt whenever the planned route changes.
     renderer.setFollowTargetGetter(() => store.followCameraTarget())
     renderer.setRouteGetter(() => store.routeRenderPath())
+    // The POI markers: the store owns the list, the renderer draws it.
+    renderer.setPois(store.pois)
     renderer.start()
 
     const container = canvas.parentElement
@@ -118,6 +120,20 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
             renderer.removeAuxiliary(cloud.mesh)
           }
         }
+      },
+    )
+
+    watch(
+      () => store.pois,
+      (pois) => {
+        renderer?.setPois(pois)
+      },
+    )
+
+    watch(
+      () => store.poiSelectedId,
+      (id) => {
+        renderer?.selectPoi(id)
       },
     )
 
