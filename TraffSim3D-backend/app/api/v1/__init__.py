@@ -2,9 +2,10 @@
 
 from fastapi import APIRouter
 
-from app.api.v1 import maps, ping, rl
+from app.api.v1 import maps, ping, rl, routes
 
 api_v1 = APIRouter()
 api_v1.include_router(ping.router, prefix="", tags=["meta"])
 api_v1.include_router(maps.router, prefix="", tags=["maps"])
 api_v1.include_router(rl.router, prefix="", tags=["rl"])
+api_v1.include_router(routes.router, prefix="", tags=["routes"])

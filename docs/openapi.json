@@ -770,6 +770,51 @@
         }
       }
     },
+    "/api/v1/routes/plan": {
+      "post": {
+        "tags": [
+          "routes",
+          "routes"
+        ],
+        "summary": "Plan Route",
+        "description": "Plan the cheapest route between two places in the scene.\n\nThe request carries the scene's serialized network (the same shape\nthe RL endpoints take) and the two ends of the route. The response\nis the ordered list of legs, or `found: false` when the two ends are\nnot connected.\n\nErrors:\n  - 400: the network is empty or malformed\n  - 404: one of the ends names a junction / road that is not in the\n    network, or sits further than `NODE_SNAP_DISTANCE_M` from any of\n    its nodes",
+        "operationId": "plan_route_api_v1_routes_plan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Plan Route Api V1 Routes Plan Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -839,6 +884,66 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "RouteEndpoint": {
+        "properties": {
+          "junction_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Junction Id"
+          },
+          "road_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Id"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "forward",
+              "backward"
+            ],
+            "title": "Direction",
+            "default": "forward"
+          }
+        },
+        "type": "object",
+        "title": "RouteEndpoint",
+        "description": "One end of a planned route.\n\nEither a **junction** (`junction_id`) or the **directional end of a\nroad** (`road_id` + `direction`) — the latter is how a moving car is\naddressed: it is not at a junction yet, it is on a road, heading for\none of that road's two ends."
+      },
+      "RouteRequest": {
+        "properties": {
+          "network": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Network"
+          },
+          "start": {
+            "$ref": "#/components/schemas/RouteEndpoint"
+          },
+          "end": {
+            "$ref": "#/components/schemas/RouteEndpoint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "RouteRequest",
+        "description": "The scene network plus the two ends of the route."
       },
       "SignalTrainRequest": {
         "properties": {

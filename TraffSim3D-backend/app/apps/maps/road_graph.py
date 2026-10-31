@@ -90,10 +90,15 @@ def _polyline_length(waypoints: list[dict[str, Any]]) -> float:
     return sum(_dist(a, b) for a, b in zip(waypoints, waypoints[1:], strict=False))
 
 
-def _road_chain(road: dict[str, Any]) -> list[dict[str, Any]]:
+def road_chain(road: dict[str, Any]) -> list[dict[str, Any]]:
     """The ordered vertices of a road, with repeated positions collapsed.
 
     Falls back to `startNode`/`endNode` for payloads that carry no polyline.
+
+    Public because the routing endpoint has to resolve a road's
+    **directional end** — where a car driving forward along it will
+    arrive, and where one driving backward will arrive — and that is the
+    chain's last or first vertex respectively.
     """
     chain: list[dict[str, Any]] = []
     for waypoint in road.get("waypoints") or []:
@@ -225,7 +230,7 @@ class RoadGraph:
             return nid
 
         for road in network.get("roads", []):
-            chain = _road_chain(road)
+            chain = road_chain(road)
             if len(chain) < 2:
                 continue
             # `costOverride` is a test/authoring hook: it lets a caller state
@@ -338,8 +343,44 @@ class RoadGraph:
         nid = self._index.get((round(x * 1000), round(y * 1000), round(z * 1000)))
         return self._nodes.get(nid) if nid else None
 
+    def nearest_node(
+        self,
+        x: float,
+        z: float,
+        y: float = 0.0,
+        max_distance: float = 5.0,
+    ) -> GraphNode | None:
+        """The node closest to a world position, within `max_distance`.
+
+        `node_at` / `try_node_at` only find a node whose *rounded*
+        coordinates match exactly. A caller that knows a position only
+        approximately — an intersection the parser placed a few
+        millimetres off a waypoint, or a junction on a raised level while
+        the road's waypoints sit at ground level — needs the closest node
+        rather than an exact one.
+
+        Returns `None` when nothing is within `max_distance`, so a caller
+        cannot mistake a wild guess for a match.
+        """
+        best: GraphNode | None = None
+        best_d2 = max_distance * max_distance
+        for node in self._nodes.values():
+            pos = node.position
+            dx = float(pos.get("x", 0.0)) - x
+            dy = float(pos.get("y", 0.0)) - y
+            dz = float(pos.get("z", 0.0)) - z
+            d2 = dx * dx + dy * dy + dz * dz
+            if d2 <= best_d2:
+                best_d2 = d2
+                best = node
+        return best
+
     def neighbors(self, node_id: str) -> tuple[GraphEdge, ...]:
         return self._nodes[node_id].edges
+
+    def node(self, node_id: str) -> GraphNode:
+        """The node with this id. Raises KeyError when it does not exist."""
+        return self._nodes[node_id]
 
     def shortest_path(
         self,
