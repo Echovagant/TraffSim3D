@@ -259,7 +259,7 @@ const routeTurnSpeedLimit = (
     : nextRoad.startNode.z - nextRoad.endNode.z
   const nextHeading = Math.atan2(dirZ, dirX)
   let delta = nextHeading - lp.heading
-  delta = (delta + Math.PI) % (2 * Math.PI) - Math.PI
+  delta = ((delta + Math.PI) % (2 * Math.PI)) - Math.PI
   if (Math.abs(delta) < MIN_ARC_TURN_RAD) return null
 
   const limit = Math.sqrt(TURN_LAT_ACCEL * (junction.intersectionRadius || 11.5))
@@ -270,8 +270,7 @@ const routeTurnSpeedLimit = (
   const approachProjection = projectIntersectionOnRoad(road, junction)
   if (!approachProjection.projected) return null
   const sign = laneForwardSign(v.laneIndex, road.laneCount)
-  const distanceToJunction =
-    sign === 1 ? approachProjection.s - v.s : v.s - approachProjection.s
+  const distanceToJunction = sign === 1 ? approachProjection.s - v.s : v.s - approachProjection.s
   if (distanceToJunction <= 0) return null
   const vNow = Math.max(v.speed, limit)
   const brakeDistance = (vNow * vNow - limit * limit) / (2 * MAX_DECEL_COMFY)
@@ -539,7 +538,12 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
               p2: { x: driven.turn.p2x, z: driven.turn.p2z },
               length: driven.turn.length,
             })
-          : routeTurnSpeedLimit(network, junctions, driven, ctx.routeNextRoadId?.(driven.id) ?? null)
+          : routeTurnSpeedLimit(
+              network,
+              junctions,
+              driven,
+              ctx.routeNextRoadId?.(driven.id) ?? null,
+            )
         if (arcLimit !== null) driven.targetSpeed = Math.min(driven.targetSpeed, arcLimit)
       }
       if (typeof window !== 'undefined') {

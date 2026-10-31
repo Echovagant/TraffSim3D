@@ -63,6 +63,15 @@ class GridDriveEnv(gym.Env):
             n_npcs=n_npcs,
             conflict_point=(0.0, 0.0),
             max_steps=max_steps,
+            # The standstill-equilibrium fix — the grid is where the
+            # equilibrium was measured (one driver through in the whole
+            # window while the baselines got all six through).
+            progress_reward=True,
+            # The grid route crosses several junctions, so a rushed
+            # crossing collects several conflict events — the penalty
+            # scales with them (the v3 policy's conflicts, 1.8/window,
+            # were exactly the gap to the right-of-way baseline).
+            conflict_penalty=2.0,
         )
         self.observation_space = spaces.Box(
             low=-1.0,

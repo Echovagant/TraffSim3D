@@ -137,6 +137,28 @@ LANE_OFFSET_M = (LANE_COUNT / 2 - 0.5) * 3.5
 #: negotiation, it is a standstill.
 CONFLICT_PENALTY = 1.0
 
+#: The per-driver reward for MAKING PROGRESS along its route.
+#:
+#: v2's measured failure (three 40k-step runs, best -82.5 against the
+#: baselines' -84.8 / -68.5, ONE of six drivers through in the window)
+#: was a **standstill equilibrium**: waiting costs only the delay rate
+#: (0.1/s) while moving risks conflict and collision penalties, so the
+#: gradient pointed at "yield forever". The progress term breaks that
+#: equilibrium: driving earns what waiting costs. The scale — the full
+#: route is worth 2.0, i.e. ~20 s of waiting — keeps it WELL under the
+#: collision penalty (50) so rushing is never the cheap way out, and
+#: comfortably above the noise of a single conflict event (1.0).
+PROGRESS_REWARD = 2.0
+
+#: The per-driver bonus for REACHING the end of its route.
+#:
+#: The terminal counterpart of the progress term: a driver that gets
+#: through stops the delay bleed for good. 5.0 = ~50 s of waiting —
+#: larger than the conflict events a rushed crossing would collect
+#: (2-3 x 1.0), so it cannot be hacked by driving through traffic, and
+#: far below the collision penalty.
+FINISH_BONUS = 5.0
+
 #: The cost of an actual overlap.
 #:
 #: The ratio matters more than the number. A crash has to be worth
@@ -177,6 +199,13 @@ class DriveVehicle:
     collisions_increment: int = 0
     #: This step's conflicts (both vehicles inside the junction's box).
     conflicts_increment: int = 0
+    #: This step's route progress gain (reward input; the grid env's
+    #: progress reward consumes it).
+    progress_gain: float = 0.0
+    #: Whether the vehicle FINISHED on this step (reward input).
+    finished_increment: int = 0
+    #: The route progress at the end of the previous step.
+    prev_route_progress: float = 0.0
     #: How many collisions this vehicle was involved in (cumulative).
     collisions: int = 0
     #: How many conflicts this vehicle was involved in (cumulative).
@@ -214,6 +243,8 @@ class DriveCore:
         n_npcs: int = 1,
         conflict_point: tuple[float, float] = (0.0, 0.0),
         max_steps: int = 400,
+        progress_reward: bool = False,
+        conflict_penalty: float = CONFLICT_PENALTY,
     ) -> None:
         if n_agents < 1:
             raise ValueError(f"n_agents must be >= 1, got {n_agents}")
@@ -222,6 +253,19 @@ class DriveCore:
         self.n_npcs = max(0, n_npcs)
         self.conflict_point = conflict_point
         self.max_steps = max_steps
+        # The progress / finish incentives (the standstill-equilibrium
+        # fix). The single-junction scenario keeps its measured reward —
+        # the shipped policy's numbers were taken with it — so this is
+        # opt-in, enabled by the GRID scenario where the standstill
+        # equilibrium was measured.
+        self.progress_reward = progress_reward
+        # The conflict penalty is recalibratable per scenario: the grid
+        # measures MORE conflict events per route (a route crosses
+        # several junctions), so the same 1.0/event that worked for one
+        # junction under-weights them there (measured: the v3 policy's
+        # conflicts, 1.8/window, were the gap to the right-of-way
+        # baseline).
+        self.conflict_penalty = conflict_penalty
         self.step_count = 0
         self.sim_time = 0.0
         self.agents: list[DriveVehicle] = []
@@ -441,6 +485,8 @@ class DriveCore:
             vehicle.caused_delay_increment = 0.0
             vehicle.collisions_increment = 0
             vehicle.conflicts_increment = 0
+            vehicle.progress_gain = 0.0
+            vehicle.finished_increment = 0
 
         for index, agent in enumerate(self.agents):
             action = actions[index] if index < len(actions) else (0.0, 0.0)
@@ -663,9 +709,12 @@ class DriveCore:
             if sid in self.graph.segments
         )
         vehicle.route_progress = min(1.0, (done + vehicle.seg_t) / total_length)
+        vehicle.progress_gain = max(0.0, vehicle.route_progress - vehicle.prev_route_progress)
+        vehicle.prev_route_progress = vehicle.route_progress
         if vehicle.route_progress >= 0.999 and not vehicle.finished:
             vehicle.finished = True
             vehicle.finished_at = self.sim_time
+            vehicle.finished_increment = 1
         # The conflict point rides the route: after every advance (and
         # every pivot), the vehicle looks at the next real intersection
         # ahead.
@@ -857,8 +906,14 @@ class DriveCore:
         rewards = []
         for agent in self.agents:
             reward = -(agent.delay_increment + agent.caused_delay_increment)
-            reward -= CONFLICT_PENALTY * agent.conflicts_increment
+            reward -= self.conflict_penalty * agent.conflicts_increment
             reward -= COLLISION_PENALTY * agent.collisions_increment
+            if self.progress_reward:
+                # The standstill-equilibrium fix (see PROGRESS_REWARD):
+                # driving earns what waiting costs, and getting through
+                # stops the bleed for good.
+                reward += PROGRESS_REWARD * agent.progress_gain
+                reward += FINISH_BONUS * agent.finished_increment
             rewards.append(reward)
         return rewards
 

@@ -463,6 +463,29 @@ def export_weights(actor: DriveActor, name: str) -> dict[str, Any]:
     }
 
 
+def load_exported_weights(path: Path, obs_dim: int = OBS_DIM_DRIVE) -> dict[str, Any]:
+    """Load the exported JSON weights back into a state dict.
+
+    The curriculum's seam: a policy trained on ONE scenario initialises
+    the training on the next (single junction -> grid). The JSON is the
+    export format `export_weights` writes — the same file the browser's
+    transfer check pins.
+    """
+    import torch
+
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    layers = raw["layers"]
+    return {
+        "policy_net.0.weight": torch.tensor(layers["policy_net.0.weight"], dtype=torch.float32),
+        "policy_net.0.bias": torch.tensor(layers["policy_net.0.bias"], dtype=torch.float32),
+        "policy_net.2.weight": torch.tensor(layers["policy_net.2.weight"], dtype=torch.float32),
+        "policy_net.2.bias": torch.tensor(layers["policy_net.2.bias"], dtype=torch.float32),
+        "action_net.weight": torch.tensor(layers["action_net.weight"], dtype=torch.float32),
+        "action_net.bias": torch.tensor(layers["action_net.bias"], dtype=torch.float32),
+        "log_std": torch.tensor(layers["log_std"], dtype=torch.float32),
+    }
+
+
 def train_drive_mappo(
     steps: int,
     config: TrainingConfig | None = None,
@@ -471,6 +494,7 @@ def train_drive_mappo(
     device: str = "cpu",
     progress: bool = True,
     env_factory: Callable[[], Any] | None = None,
+    init_weights: Path | None = None,
 ) -> dict[str, Any]:
     """Train the cooperative drivers.
 
@@ -489,6 +513,10 @@ def train_drive_mappo(
         action_dim=ACTION_DIM_DRIVE,
         hidden=config.hidden_sizes,
     ).to(device)
+    # The curriculum start: the training begins FROM the weights of a
+    # policy trained on an earlier stage (single junction -> grid).
+    if init_weights is not None:
+        actor.load_state_dict(load_exported_weights(Path(init_weights)), strict=True)
     critic = DriveCritic(
         state_dim=OBS_DIM_DRIVE * config.n_agents,
         n_agents=config.n_agents,
@@ -568,6 +596,7 @@ def train_drive_mappo(
         "config": config.to_dict(),
         "env_steps": step_count,
         "best_step": best_step,
+        "init_weights": str(init_weights) if init_weights else None,
         "best_return": best_return,
         "best_metrics": best_metrics,
         "curve": curve,
