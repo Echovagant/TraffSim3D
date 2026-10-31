@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -377,6 +377,7 @@ def evaluate_policy(
     config: TrainingConfig,
     *,
     env: IntersectionEnv | None = None,
+    env_factory: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Measure the policy deterministically (the mean action).
 
@@ -384,10 +385,14 @@ def evaluate_policy(
     policy is optimised for) and, beside it, the conflict count, the
     collisions, the waiting time and how many drivers got through.
     """
-    evaluation_env = env or IntersectionEnv(
-        n_agents=config.n_agents,
-        n_npcs=config.n_npcs,
-        max_steps=config.eval_steps,
+    evaluation_env = env or (
+        env_factory()
+        if env_factory is not None
+        else IntersectionEnv(
+            n_agents=config.n_agents,
+            n_npcs=config.n_npcs,
+            max_steps=config.eval_steps,
+        )
     )
     returns: list[float] = []
     conflicts: list[int] = []
@@ -465,6 +470,7 @@ def train_drive_mappo(
     out_dir: Path | None = None,
     device: str = "cpu",
     progress: bool = True,
+    env_factory: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Train the cooperative drivers.
 
@@ -493,10 +499,14 @@ def train_drive_mappo(
         lr=config.learning_rate,
     )
 
-    env = IntersectionEnv(
-        n_agents=config.n_agents,
-        n_npcs=config.n_npcs,
-        max_steps=config.eval_steps,
+    env = (
+        env_factory()
+        if env_factory is not None
+        else IntersectionEnv(
+            n_agents=config.n_agents,
+            n_npcs=config.n_npcs,
+            max_steps=config.eval_steps,
+        )
     )
 
     curve: list[dict[str, Any]] = []
@@ -534,7 +544,7 @@ def train_drive_mappo(
         step_count += config.rollout_steps
 
         if step_count % config.eval_every < config.rollout_steps or step_count >= steps:
-            metrics = evaluate_policy(actor, config, env=env)
+            metrics = evaluate_policy(actor, config, env=env)  # the run's own env
             metrics.update({"step": step_count, **stats})
             curve.append(metrics)
             if metrics["return"] > best_return:

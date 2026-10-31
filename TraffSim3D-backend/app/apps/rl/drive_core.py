@@ -183,6 +183,13 @@ class DriveVehicle:
     conflicts: int = 0
     #: A stable identity (the pair bookkeeping needs a key).
     id: str = ""
+    #: The junction this vehicle is heading for — its own conflict
+    #: point. On the single-junction scenario this is THE junction for
+    #: everyone; on a network it is the next real intersection on the
+    #: route, updated as the route advances (see
+    #: `_update_next_junction`). `None` falls back to the core's
+    #: `conflict_point`.
+    next_junction: tuple[float, float] | None = None
     #: Whether it has reached the end of its route.
     finished: bool = False
     #: The simulation time at which it finished (0 while unfinished).
@@ -560,6 +567,51 @@ class DriveCore:
         alpha = (alpha + math.pi) % (2 * math.pi) - math.pi
         return math.atan2(2.0 * EGO_WHEELBASE * math.sin(alpha), LOOKAHEAD_DISTANCE)
 
+    def _junction_position(self, node_id: str) -> tuple[float, float] | None:
+        """The position of a REAL intersection node (no placeholders)."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or node.is_synthetic:
+            return None
+        return (node.position[0], node.position[1])
+
+    def _update_next_junction(self, vehicle: DriveVehicle) -> None:
+        """The next real intersection on the vehicle's route.
+
+        The observation is built around the junction the vehicle is
+        heading for — on a single junction that is THE junction, on a
+        network it is the next one ahead. The route's remaining segments
+        are scanned from the current one: the first segment whose end
+        node is a real intersection is it.
+        """
+        if not vehicle.route.segment_ids:
+            vehicle.next_junction = None
+            return
+        remaining = vehicle.route.segment_ids[vehicle.current_seg_idx :]
+        for seg_id in remaining:
+            endpoints = self.graph.segment_endpoints.get(seg_id)
+            if endpoints is None:
+                continue
+            position = self._junction_position(endpoints[1])
+            if position is not None:
+                vehicle.next_junction = position
+                return
+        # No real intersection AHEAD (the vehicle is on its last stub,
+        # whose end is a synthetic node). The junction it is LEAVING —
+        # the last remaining segment's start — is the meaningful point:
+        # the vehicle is driving away from it, and the observation's
+        # distance/bearing read exactly that. Falling back to the core's
+        # single-junction point here would be a lie on a grid (measured:
+        # a car at (120, 0) reading a conflict point at (0, 0)).
+        for seg_id in reversed(remaining):
+            endpoints = self.graph.segment_endpoints.get(seg_id)
+            if endpoints is None:
+                continue
+            position = self._junction_position(endpoints[0])
+            if position is not None:
+                vehicle.next_junction = position
+                return
+        vehicle.next_junction = None
+
     def _advance_route_progress(self, vehicle: DriveVehicle) -> None:
         """Track how far along its route a vehicle is.
 
@@ -614,6 +666,10 @@ class DriveCore:
         if vehicle.route_progress >= 0.999 and not vehicle.finished:
             vehicle.finished = True
             vehicle.finished_at = self.sim_time
+        # The conflict point rides the route: after every advance (and
+        # every pivot), the vehicle looks at the next real intersection
+        # ahead.
+        self._update_next_junction(vehicle)
 
     def _pivot_to_next_segment(self, vehicle: DriveVehicle) -> None:
         """Move a vehicle onto the next segment's lane — the pivot."""
@@ -657,16 +713,31 @@ class DriveCore:
             accumulated += seg_len
         return best_t
 
+    def _conflict_zones(self) -> list[tuple[float, float]]:
+        """The junction boxes a conflict can happen in.
+
+        One per real intersection on the network; the single-junction
+        scenario has exactly one. A network without any real intersection
+        falls back to the core's conflict point.
+        """
+        zones = [
+            position
+            for position in (self._junction_position(node_id) for node_id in self.graph.nodes)
+            if position is not None
+        ]
+        return zones or [self.conflict_point]
+
     def _detect_collisions(self) -> None:
         """Count the overlaps and the conflicts.
 
         A **collision** is an overlap — the bodies are in each other.
-        A **conflict** is two vehicles inside the junction's box at the
-        same time: their paths cross there, whether or not they touched.
-        The conflict is the thing the negotiation is about (the
+        A **conflict** is two vehicles inside the SAME junction's box at
+        the same time: their paths cross there, whether or not they
+        touched. The conflict is the thing the negotiation is about (the
         traffic-engineering notion), and it is what the reward charges.
+        On a network every real intersection is a zone.
         """
-        conflict_x, conflict_z = self.conflict_point
+        zones = self._conflict_zones()
         for i in range(len(self.vehicles)):
             for j in range(i + 1, len(self.vehicles)):
                 a = self.vehicles[i]
@@ -696,33 +767,33 @@ class DriveCore:
                     if b.speed >= WAITING_SPEED:
                         b.collisions_increment += 1
                 self._overlapping[pair_key] = overlapping
-                key = (a.id, b.id)
-                was_jointly = self._joint_in_zone.get(key, False)
-                a_distance = math.hypot(a.x - conflict_x, a.z - conflict_z)
-                b_distance = math.hypot(b.x - conflict_x, b.z - conflict_z)
-                # Hysteresis: a pair leaves the zone only when it is
-                # clearly outside it. Without it a vehicle sitting on the
-                # boundary flickers in and out and every flicker counts
-                # as a new conflict (measured: 486 "conflicts" in one
-                # evaluation of a policy that was not conflicting at all).
-                if was_jointly:
-                    a_in_zone = a_distance <= CONFLICT_RELEASE_M
-                    b_in_zone = b_distance <= CONFLICT_RELEASE_M
-                else:
-                    a_in_zone = a_distance <= CONFLICT_RADIUS
-                    b_in_zone = b_distance <= CONFLICT_RADIUS
-                # A conflict is an **event**: a pair that was not jointly
-                # in the box and now is. Counting the steps instead would
-                # make the metric depend on how long the episode lasted,
-                # so a policy that finishes faster would look worse.
-                jointly = a_in_zone and b_in_zone
-                if jointly and not self._joint_in_zone.get(key, False):
-                    a.conflicts += 1
-                    b.conflicts += 1
-                    a.conflicts_increment += 1
-                    b.conflicts_increment += 1
-                    self.total_conflicts += 1
-                self._joint_in_zone[key] = jointly
+                # The conflict zones: a pair conflicts when both are
+                # inside the SAME junction's box. A conflict is an
+                # **event** (counted on the transition into it, with the
+                # same release hysteresis the single-junction version
+                # had — a vehicle sitting on the boundary flickers in
+                # and out, and every flicker counted as a new conflict;
+                # measured: 486 "conflicts" in one evaluation of a
+                # policy that was not conflicting at all).
+                for zone_index, (zx, cz) in enumerate(zones):
+                    zone_key = (zone_index, a.id, b.id)
+                    was_jointly = self._joint_in_zone.get(zone_key, False)
+                    a_distance = math.hypot(a.x - zx, a.z - cz)
+                    b_distance = math.hypot(b.x - zx, b.z - cz)
+                    if was_jointly:
+                        a_in_zone = a_distance <= CONFLICT_RELEASE_M
+                        b_in_zone = b_distance <= CONFLICT_RELEASE_M
+                    else:
+                        a_in_zone = a_distance <= CONFLICT_RADIUS
+                        b_in_zone = b_distance <= CONFLICT_RADIUS
+                    jointly = a_in_zone and b_in_zone
+                    if jointly and not was_jointly:
+                        a.conflicts += 1
+                        b.conflicts += 1
+                        a.conflicts_increment += 1
+                        b.conflicts_increment += 1
+                        self.total_conflicts += 1
+                    self._joint_in_zone[zone_key] = jointly
 
     def _accumulate_delay(self) -> None:
         """Accrue waiting time, and attribute it to whoever caused it.
@@ -797,9 +868,15 @@ class DriveCore:
         """One observation per agent — ego-centric, permutation-stable."""
         return [self._observation(agent) for agent in self.agents]
 
+    def _conflict_point_for(self, vehicle: DriveVehicle) -> tuple[float, float]:
+        """The junction this vehicle's observation is built around."""
+        if vehicle.next_junction is not None:
+            return vehicle.next_junction
+        return self.conflict_point
+
     def _observation(self, agent: DriveVehicle) -> np.ndarray:
         obs = np.zeros(OBS_DIM_DRIVE, dtype=np.float32)
-        conflict_x, conflict_z = self.conflict_point
+        conflict_x, conflict_z = self._conflict_point_for(agent)
 
         own_distance = math.hypot(agent.x - conflict_x, agent.z - conflict_z)
         own_speed = max(agent.speed, 0.5)
@@ -841,11 +918,15 @@ class DriveCore:
         return obs
 
     def _arrival_time(self, vehicle: DriveVehicle) -> float:
-        """How long until this vehicle reaches the conflict point."""
-        distance = math.hypot(
-            vehicle.x - self.conflict_point[0],
-            vehicle.z - self.conflict_point[1],
-        )
+        """How long until this vehicle reaches ITS conflict point.
+
+        On the single-junction scenario every vehicle shares the point;
+        on a network each vehicle measures its own next junction — which
+        is what makes the arrival-order readout meaningful across the
+        grid.
+        """
+        cx, cz = self._conflict_point_for(vehicle)
+        distance = math.hypot(vehicle.x - cx, vehicle.z - cz)
         return distance / max(vehicle.speed, 0.5)
 
     def _others_ranked(self, agent: DriveVehicle) -> list[DriveVehicle]:

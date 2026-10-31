@@ -342,3 +342,162 @@ def evaluate_baseline(
         "return": round(returns / count, 2),
         "steps": steps // count,
     }
+
+
+# ---------------------------------------------------------------------------
+# Scene 4 v2 — the unsignalised GRID: multiple junctions, repeated
+# negotiations
+# ---------------------------------------------------------------------------
+
+
+def build_unsignalised_grid_network(
+    rows: int = 2,
+    cols: int = 2,
+    *,
+    spacing: float = 120.0,
+    stub_length: float = 60.0,
+) -> dict[str, Any]:
+    """A rows x cols grid of junctions **without** traffic lights.
+
+    The shape is the browser's (`serializeNetwork`). Adjacent junctions
+    are joined by a bidirectional pair of roads (one per direction), and
+    every boundary junction grows one **stub** pair (in/out) per outward
+    direction — where the drivers come from and leave to. A 2 x 2 grid:
+    4 junctions, 4 connecting roads, 8 stub pairs = 24 roads.
+
+    All junctions carry **no** traffic lights: at grid scale the right
+    of way is negotiated at every crossing, which is the scenario.
+    """
+    roads: list[dict[str, Any]] = []
+
+    def junction_position(r: int, c: int) -> dict[str, float]:
+        return {"x": c * spacing, "y": 0.0, "z": r * spacing}
+
+    # The connecting roads: one per direction, so each junction has an
+    # in-road and an out-road per neighbour.
+    for r in range(rows):
+        for c in range(cols):
+            if c + 1 < cols:
+                a, b = junction_position(r, c), junction_position(r, c + 1)
+                roads.append(
+                    {
+                        "id": f"link-h-{r}-{c}-f",
+                        "startNode": a,
+                        "endNode": b,
+                        "waypoints": [a, b],
+                        "laneCount": 4,
+                        "speedLimit": SPEED_LIMIT_DRIVE,
+                    }
+                )
+                roads.append(
+                    {
+                        "id": f"link-h-{r}-{c}-r",
+                        "startNode": b,
+                        "endNode": a,
+                        "waypoints": [b, a],
+                        "laneCount": 4,
+                        "speedLimit": SPEED_LIMIT_DRIVE,
+                    }
+                )
+            if r + 1 < rows:
+                a, b = junction_position(r, c), junction_position(r + 1, c)
+                roads.append(
+                    {
+                        "id": f"link-v-{r}-{c}-f",
+                        "startNode": a,
+                        "endNode": b,
+                        "waypoints": [a, b],
+                        "laneCount": 4,
+                        "speedLimit": SPEED_LIMIT_DRIVE,
+                    }
+                )
+                roads.append(
+                    {
+                        "id": f"link-v-{r}-{c}-r",
+                        "startNode": b,
+                        "endNode": a,
+                        "waypoints": [b, a],
+                        "laneCount": 4,
+                        "speedLimit": SPEED_LIMIT_DRIVE,
+                    }
+                )
+
+    # The boundary stubs: every outward direction of every boundary
+    # junction gets an in/out pair.
+    directions = {
+        "n": (0.0, -1.0),
+        "e": (1.0, 0.0),
+        "s": (0.0, 1.0),
+        "w": (-1.0, 0.0),
+    }
+    for r in range(rows):
+        for c in range(cols):
+            for name, (dx, dz) in directions.items():
+                # Each axis moves INDEPENDENTLY: dx shifts the column, dz
+                # the row. The original single expression updated BOTH
+                # components from both deltas (dz = 0 still moved the
+                # row by -1), so the east stub of a top-left junction was
+                # judged "outside" and built — geometrically ON TOP of
+                # the connecting road (measured: 12 stub pairs instead
+                # of 8 on a 2 x 2 grid).
+                outward_r = r + (1 if dz > 0 else -1 if dz < 0 else 0)
+                outward_c = c + (1 if dx > 0 else -1 if dx < 0 else 0)
+                inside = 0 <= outward_r < rows and 0 <= outward_c < cols
+                if inside:
+                    continue
+                pos = junction_position(r, c)
+                outer = {
+                    "x": pos["x"] + dx * stub_length,
+                    "y": 0.0,
+                    "z": pos["z"] + dz * stub_length,
+                }
+                roads.append(
+                    {
+                        "id": f"stub-in-{r}-{c}-{name}",
+                        "startNode": outer,
+                        "endNode": pos,
+                        "waypoints": [outer, pos],
+                        "laneCount": 4,
+                        "speedLimit": SPEED_LIMIT_DRIVE,
+                    }
+                )
+                roads.append(
+                    {
+                        "id": f"stub-out-{r}-{c}-{name}",
+                        "startNode": pos,
+                        "endNode": outer,
+                        "waypoints": [pos, outer],
+                        "laneCount": 4,
+                        "speedLimit": SPEED_LIMIT_DRIVE,
+                    }
+                )
+
+    junctions: list[dict[str, Any]] = []
+    for r in range(rows):
+        for c in range(cols):
+            pos = junction_position(r, c)
+
+            def touches(node: dict[str, float], pos=pos) -> bool:
+                return abs(node["x"] - pos["x"]) < 1e-6 and abs(node["z"] - pos["z"]) < 1e-6
+
+            connected_roads = [
+                road["id"]
+                for road in roads
+                if touches(road["endNode"]) or touches(road["startNode"])
+            ]
+            junctions.append(
+                {
+                    "id": f"g-{r}-{c}",
+                    "position": pos,
+                    "connectedRoads": connected_roads,
+                    "trafficLights": [],
+                    "intersectionRadius": 11.5,
+                }
+            )
+
+    return {
+        "roads": roads,
+        "intersections": junctions,
+        "vehicles": [],
+        "spawnPoints": [],
+    }
