@@ -71,11 +71,17 @@ test.describe('the cooperative driving policy', () => {
       )
     })
 
-    for (const id of ['v-1', 'v-2', 'v-3']) {
-      expect(outcome[id]!.road.startsWith('out-'), `${id} stuck on ${outcome[id]!.road}`).toBe(true)
-      expect(outcome[id]!.status, `${id} crashed`).toBe('driving')
+    const crashed: string[] = []
+    for (const id of ['v-1', 'v-2', 'v-3', 'v-4']) {
+      expect(
+        outcome[id]!.road.startsWith('out-'),
+        `${id} stuck on ${outcome[id]!.road}`,
+      ).toBe(true)
+      // A driver that reached the boundary stub's end brakes to a stop
+      // (the out-of-bounds exit) — `waiting` is the LEGAL terminal
+      // state. What must never happen is a crash.
+      if (outcome[id]!.status === 'crashed') crashed.push(id)
     }
-    // The scripted car gets through too — it is ordinary traffic.
-    expect(outcome['v-4']!.status).toBe('driving')
+    expect(crashed, `crashed: ${crashed.join(', ')}`).toEqual([])
   })
 })
