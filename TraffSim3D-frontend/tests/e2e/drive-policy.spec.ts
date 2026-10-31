@@ -73,10 +73,7 @@ test.describe('the cooperative driving policy', () => {
 
     const crashed: string[] = []
     for (const id of ['v-1', 'v-2', 'v-3', 'v-4']) {
-      expect(
-        outcome[id]!.road.startsWith('out-'),
-        `${id} stuck on ${outcome[id]!.road}`,
-      ).toBe(true)
+      expect(outcome[id]!.road.startsWith('out-'), `${id} stuck on ${outcome[id]!.road}`).toBe(true)
       // A driver that reached the boundary stub's end brakes to a stop
       // (the out-of-bounds exit) — `waiting` is the LEGAL terminal
       // state. What must never happen is a crash.
