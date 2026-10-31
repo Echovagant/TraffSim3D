@@ -59,6 +59,14 @@ test.describe('Scene switch screenshots', () => {
     await expectSceneScreenshot(page, 'corridor-scene.png')
   })
 
+  test('unsignalised junction scene', async ({ page }) => {
+    await waitForSceneReady(page)
+    // Frozen, like every other scene capture: the negotiation's four
+    // vehicles move, and a live frame drifts above the 0.5 % tolerance.
+    await freezeScene(page, 'junction')
+    await expectSceneScreenshot(page, 'junction-scene.png')
+  })
+
   test('5x5 grid scene', async ({ page }) => {
     await waitForSceneReady(page)
     // Frozen, like every other scene capture: the grid's vehicles move,

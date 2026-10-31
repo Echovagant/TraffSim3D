@@ -11,6 +11,9 @@ import {
   buildElevatedScene,
   buildCorridorScene,
   buildGridNetwork,
+  buildUnsignalisedJunctionScene,
+  JUNCTION_CONFLICT_POINT,
+  JUNCTION_DRIVE_ROUTES,
 } from '@application/services/defaultScene'
 import { tick, type SignalContext } from '@application/services/tick'
 import {
@@ -82,12 +85,22 @@ export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const
  * 'elevated' (高架桥 — Y-axis ramps + level tagging).
  * 'corridor' (多路口走廊 — 2-intersection corridor demo).
  * 'grid' (5×5 网格 — 25 signalised junctions, 40 segments).
+ * 'junction' (无信号十字路口 — the four-arm junction Scene 4's
+ *   cooperative policy was trained on; NO traffic lights).
  * 'imported' (any OSM/PBF file loaded via MapImporter —
  *   shown in the toolbar as a read-only label with the source file name
  *   instead of the dropdown, since there's no factory to "switch back to").
  * Adding a new scene = add a factory + an entry here.
  */
-export type SceneKind = 'cross' | 't' | 'loop' | 'elevated' | 'corridor' | 'grid' | 'imported'
+export type SceneKind =
+  | 'cross'
+  | 't'
+  | 'loop'
+  | 'elevated'
+  | 'corridor'
+  | 'grid'
+  | 'junction'
+  | 'imported'
 
 const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
   switch (kind) {
@@ -103,6 +116,8 @@ const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
       return buildCorridorScene()
     case 'grid':
       return buildGridNetwork()
+    case 'junction':
+      return buildUnsignalisedJunctionScene()
     case 'imported':
       // switchScene should never be called with 'imported'
       // (the toolbar hides the dropdown for imported scenes). If a
@@ -128,6 +143,8 @@ const sceneLabelForKind = (kind: SceneKind): string => {
       return '多路口走廊'
     case 'grid':
       return '5×5 网格'
+    case 'junction':
+      return '无信号路口'
     case 'imported':
       return '已导入'
   }
@@ -403,6 +420,17 @@ export const useWorldStore = defineStore('world', () => {
    * back to the ordinary turn rule.
    */
   const routeNextRoadId = (vehicleId: string): string | null => {
+    // A driven vehicle follows ITS OWN route (the junction scenario's
+    // in-arm/out-arm pairing); the planned route is for the route
+    // planner's follower.
+    const driveRoute = driveRoutes.value[vehicleId]
+    if (driveRoute) {
+      const vehicle = network.value.vehicles[vehicleId]
+      if (!vehicle) return null
+      const index = Math.max(0, driveRoute.indexOf(vehicle.roadId))
+      driveRouteIndex.value[vehicleId] = index
+      return driveRoute[index + 1] ?? null
+    }
     const route = plannedRoute.value
     if (!route) return null
     if (routeFollowerId.value !== vehicleId) return null
@@ -463,6 +491,76 @@ export const useWorldStore = defineStore('world', () => {
       routeRenderPathCache = { route, path: { points: route.points } }
     }
     return routeRenderPathCache.path
+  }
+
+  // ===== the cooperative driving policy (Scene 4) =====
+  //
+  // On the unsignalised-junction scene, the trained policy can drive the
+  // three negotiation vehicles: tick builds each driver's 23-dim
+  // observation (`driveObservation.ts` — pinned to Python by the
+  // observation fixture), runs the forward pass, and owns the driver's
+  // speed; the turns come from the driver's ROUTE (`JUNCTION_DRIVE_ROUTES`).
+  // Every other vehicle keeps the ordinary rules.
+
+  /** The loaded drive policy's weights (the shipped fixture, lazy). */
+  const driveWeights = shallowRef<PolicyWeights | null>(null)
+  /** Whether the policy is driving the junction's negotiation. */
+  const driveEnabled = ref(false)
+  /** Each driven vehicle's route (in-arm, out-arm) and how far along it is. */
+  const driveRoutes = ref<Record<string, string[]>>({})
+  const driveRouteIndex = ref<Record<string, number>>({})
+
+  /**
+   * Put the trained policy in charge of the junction's negotiation.
+   *
+   * The weights are the shipped fixture (the same file the transfer
+   * check pins), so this works without a backend.
+   */
+  const enableDrivePolicy = (): void => {
+    if (!driveWeights.value) {
+      void import('@infrastructure/rl/fixtures/network-drive-policy-fixture.json').then(
+        (fixture) => {
+          const w = fixture.default as unknown as PolicyWeights
+          driveWeights.value = w
+        },
+      )
+    }
+    driveRoutes.value = { ...JUNCTION_DRIVE_ROUTES }
+    driveRouteIndex.value = {}
+    driveEnabled.value = true
+    bumpTick()
+  }
+
+  /** Hand the junction's vehicles back to the ordinary rules. */
+  const disableDrivePolicy = (): void => {
+    driveEnabled.value = false
+    driveRoutes.value = {}
+    driveRouteIndex.value = {}
+    bumpTick()
+  }
+
+  /**
+   * The tick context's drive policy, or null while it is disabled.
+   *
+   * `routes` / `routeIndex` are plain objects the tick reads and
+   * mutates in place — the route index advances as the drivers move.
+   */
+  const drivePolicyContext = (): {
+    weights: PolicyWeights
+    conflictPoint: { x: number; z: number }
+    ids: readonly string[]
+    routes: Record<string, readonly string[]>
+    routeIndex: Record<string, number>
+  } | null => {
+    if (!driveEnabled.value) return null
+    if (!driveWeights.value) return null
+    return {
+      weights: driveWeights.value,
+      conflictPoint: JUNCTION_CONFLICT_POINT,
+      ids: Object.keys(driveRoutes.value),
+      routes: driveRoutes.value,
+      routeIndex: driveRouteIndex.value,
+    }
   }
 
   /** Bump the fit tick so the editor view asks the camera
@@ -891,6 +989,9 @@ export const useWorldStore = defineStore('world', () => {
       // The follower of a planned route drives the route's roads; every
       // other vehicle keeps the ordinary turn rule.
       routeNextRoadId,
+      // The junction negotiation: the trained policy owns the drivers'
+      // speed while it is enabled.
+      drivePolicy: drivePolicyContext(),
     })
     // Re-apply the user's speed pins. `tick()` owns the speed
     // computation and always re-derives it from the road limit, so
@@ -1329,6 +1430,9 @@ export const useWorldStore = defineStore('world', () => {
     clearPolicy()
     // A route over the old network means nothing in the new one.
     clearRoute()
+    // The drive policy belongs to the junction scenario — a scene swap
+    // ends it (the routes name the old network's roads).
+    disableDrivePolicy()
     // Assign via .value so Pinia's auto-unwrap on the store
     // surfaces the new network to EntityOutline, InspectorPanel, etc.
     network.value = next
@@ -1580,6 +1684,10 @@ export const useWorldStore = defineStore('world', () => {
     clearRoute,
     routeProgress,
     routeNextRoadId,
+    driveEnabled,
+    driveRoutes,
+    enableDrivePolicy,
+    disableDrivePolicy,
     followCameraTarget,
     routeRenderPath,
     // sensor + exporter surface

@@ -70,9 +70,12 @@ replay 路径开一辆车）。
   （`policy_net.0` / `policy_net.2` / `action_net` + `log_std`），导出的 JSON 与
   `PolicyWeights` 同形，`mlpForwardMean` 直接跑。
 - **观测不是契约**：23 维观测由 Python 定义、浏览器若要复用得自己重建一份 ——
-  那正是「归一化口径写错不会让任何测试变红」的老坑。**fixture 带的是固定的观测向量**
-  （策略真的遇到过的那些），前向传播因此可对拍；浏览器的**实时**观测构造留给下一轮，
-  并且必须配自己的对拍。
+  那正是「归一化口径写错不会让任何测试变红」的老坑。**两层对拍都已落地**：
+  前向传播用 `network-drive-policy-fixture.json`（固定观测 → 期望动作）；
+  实时观测构造用 `drive-observation-fixture.json`（`gen_drive_observation_fixture.py`
+  从确定性场景状态生成 Python 的 23 维向量，浏览器侧 `driveObservationParity.spec.ts`
+  以 **1e-9**（ADR-009 的 libm 噪声地板）逐元素对拍）。（2026-10-31 补记：两层均已实现，
+  策略已在浏览器里驾驶三辆协商车。）
 - **训练会振荡**：40 000 步的运行里，最优的 checkpoint 出现在中段（step 29 500），
   之后反而变差 —— 与 Scene 3 同一个现象，所以**保留评估最优的 checkpoint** 是必须的，
   不是可选的。

@@ -352,6 +352,32 @@ scripts/gen_drive_policy_fixture.py  →  前端 fixture（观测 + 期望动作
 **训练会振荡**：早期几轮的最优 checkpoint 出现在中段（step 3 000 或 29 500）而不是
 最后一步，与 Scene 3 同一个现象 ⇒ **保留评估最优的 checkpoint** 是必须项。
 
+### 5.6.2 浏览器侧：策略真的开起来
+
+无信号路口场景（`buildUnsignalisedJunctionScene`，场景下拉里的「无信号路口」）按训练
+环境的几何搭：四臂 60 m、四车道、**零盏灯**、三辆协商车 + 一辆脚本车，出发距离按训练
+的 45–80 % 分段、靠右车道（`roadContinuation` 的枢轴模型在路口执行每辆车的路线转弯）。
+
+策略的接线与两层对拍：
+
+- **前向传播**（权重 × 固定观测 → 动作）：`network-drive-policy-fixture.json` 钉住，
+  浏览器的 `mlpForwardMean` 与 Python 逐条一致（`networkDrivePolicyFixture.spec.ts`）。
+- **观测构造**（实时状态 → 23 维向量）：`driveObservation.ts` 逐元素复刻
+  `DriveCore._observation` 的口径 —— 到达时间的 0.5 m/s 下限、方位角「从车指向路口」、
+  CPython 风格的角度 wrap、槽位按**到自车的距离**排序。对拍 fixture
+  （`drive-observation-fixture.json`，`gen_drive_observation_fixture.py` 生成）持确定性
+  场景状态 + Python 的向量（float64 参考实现，与 core 的 float32 输出互核），
+  浏览器侧以 **1e-9**（ADR-009 的噪声地板）逐元素断言。
+  **这层对拍是必须的**：观测归一化写错一侧不会让任何 schema 级测试变红 ——
+  信号策略的相位钟（idx 5）就是前车之鉴。
+- **运行时归属**：开启「RL 驾驶」后，三辆协商车的**速度归策略**
+  （`pythonSpeedStep`，与 ego replay 同一个内核），**转向不归它** —— 转弯由每辆车的
+  路线决定（`routeNextRoadId`）。它们豁免浏览器的让行规则：训练环境里没有那条规则，
+  让它否决策略的加速度，协商就不可见。其余车辆一切照旧。
+
+实测（真机）：三辆协商车全部按路线通过路口、零碰撞；e2e `drive-policy.spec.ts`
+把这一行为钉住。
+
 ---
 
 ## 6. 跨语言契约边界

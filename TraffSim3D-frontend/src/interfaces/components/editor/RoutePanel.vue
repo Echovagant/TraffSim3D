@@ -39,6 +39,30 @@
 
     <p v-if="error" class="err" data-testid="route-error">{{ error }}</p>
 
+    <!-- Scene 4: the unsignalised junction's negotiation. Only on its
+         own scene — the policy's drivers, routes and conflict point are
+         that scenario's. -->
+    <div v-if="isJunctionScene" class="hud" data-testid="drive-policy-panel">
+      <div class="head">
+        <span>无信号协商</span>
+      </div>
+      <label class="ctrl toggle">
+        <input
+          type="checkbox"
+          data-testid="drive-policy-checkbox"
+          :checked="store.driveEnabled"
+          @change="onToggleDrive"
+        />
+        RL 驾驶（3 辆协商）
+      </label>
+      <div v-if="store.driveEnabled" class="rows">
+        <div v-for="entry in driveReadout" :key="entry.id" class="row">
+          <span>{{ entry.id }}</span>
+          <b :class="{ arrived: entry.arrived }" data-testid="drive-driver">{{ entry.label }}</b>
+        </div>
+      </div>
+    </div>
+
     <!-- The driving readout. It is here, and not in the toolbar, because
          in the first-person camera this panel IS the instrument panel. -->
     <div v-if="store.plannedRoute" class="hud" data-testid="route-hud">
@@ -74,6 +98,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useWorldStore } from '@interfaces/stores/worldStore'
+import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
 
 /**
  * The route planner.
@@ -129,6 +154,36 @@ const plan = async (): Promise<void> => {
     planning.value = false
   }
 }
+
+/** The junction scenario is the only one the drive policy drives. */
+const isJunctionScene = computed(() => store.currentSceneKind === 'junction')
+
+const onToggleDrive = (event: Event): void => {
+  const checked = (event.target as HTMLInputElement).checked
+  if (checked) {
+    store.enableDrivePolicy()
+    showFlashMessage('RL 正在驾驶路口协商', 'info')
+  } else {
+    store.disableDrivePolicy()
+    showFlashMessage('协商车辆回到普通规则', 'info')
+  }
+}
+
+/** Per-driver readout: speed, or "through" once it is on its out-road. */
+const driveReadout = computed(() => {
+  if (!store.driveEnabled) return []
+  return Object.keys(store.driveRoutes ?? {}).map((id) => {
+    const vehicle = store.network.vehicles[id]
+    const route = store.driveRoutes?.[id] ?? []
+    const arrived = vehicle ? route.length > 1 && vehicle.roadId === route[route.length - 1] : false
+    const speed = vehicle ? Math.round(vehicle.speed * 3.6) : 0
+    return {
+      id,
+      arrived,
+      label: !vehicle ? '—' : arrived ? '已通过' : `${speed} km/h`,
+    }
+  })
+})
 
 const followCamera = computed({
   get: () => store.followCamera,
@@ -252,5 +307,20 @@ const nextRoad = computed(() => {
 }
 .route-panel .toggle {
   margin-top: 6px;
+}
+.route-panel .rows {
+  margin-top: 4px;
+}
+.route-panel .rows .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.route-panel .rows .row b {
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.route-panel .rows .row b.arrived {
+  color: #22c55e;
 }
 </style>

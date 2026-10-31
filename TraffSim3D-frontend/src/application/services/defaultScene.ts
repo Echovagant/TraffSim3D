@@ -1285,3 +1285,105 @@ export const buildGridNetwork = (queueLengthPerJunction = 3): RoadNetwork => {
 
   return net
 }
+
+// ---------------------------------------------------------------------------
+// The unsignalised junction (Scene 4's scenario)
+// ---------------------------------------------------------------------------
+
+/** The arm length of the unsignalised junction (m) — the training env's. */
+export const JUNCTION_ARM_LENGTH_M = 60
+
+/** The junction the negotiation happens at (the network's origin). */
+export const JUNCTION_CONFLICT_POINT = { x: 0, z: 0 } as const
+
+/**
+ * The route each authored vehicle drives: in on one arm, out on another.
+ *
+ * The pairing is the training env's rule — **different arms**, so nobody
+ * makes a U-turn, and the four vehicles cover all four approaches. The
+ * RL-driven cars follow these routes at the junction
+ * (`roadContinuation` honours the route's next road); the scripted one
+ * follows its route too, at the ordinary speed control.
+ */
+export const JUNCTION_DRIVE_ROUTES: Record<string, string[]> = {
+  'v-1': ['in-e', 'out-n'],
+  'v-2': ['in-n', 'out-s'],
+  'v-3': ['in-s', 'out-w'],
+  'v-4': ['in-w', 'out-n'],
+}
+
+/**
+ * The four-arm junction **without traffic lights** — Scene 4's scenario.
+ *
+ * Three of the vehicles are the negotiation: they approach on different
+ * arms, staggered the way the training env staggers them (45–80 % along
+ * the arm), and — when RL driving is enabled — are driven by the
+ * cooperative policy. The fourth is scripted background traffic.
+ *
+ * The roads carry **no lights**: the right of way here is not given by
+ * a phase, it is negotiated. That is the whole point of the scenario
+ * (see ADR-011) — and the reason the junction has no `trafficLights`
+ * entries at all.
+ */
+export const buildUnsignalisedJunctionScene = (): RoadNetwork => {
+  const net = createRoadNetwork()
+  const L = JUNCTION_ARM_LENGTH_M
+
+  // --- the eight road halves (an in and an out per arm) ------------------
+  const arms: { name: string; outer: { x: number; z: number } }[] = [
+    { name: 'n', outer: { x: 0, z: -L } },
+    { name: 'e', outer: { x: L, z: 0 } },
+    { name: 's', outer: { x: 0, z: L } },
+    { name: 'w', outer: { x: -L, z: 0 } },
+  ]
+  for (const arm of arms) {
+    net.roads[`in-${arm.name}`] = roadStraight(
+      `in-${arm.name}`,
+      arm.outer,
+      { x: 0, z: 0 },
+      4,
+      16.67,
+    )
+    net.roads[`out-${arm.name}`] = roadStraight(
+      `out-${arm.name}`,
+      { x: 0, z: 0 },
+      arm.outer,
+      4,
+      16.67,
+    )
+  }
+
+  // --- the one junction, with no lights ----------------------------------
+  net.intersections['j-0'] = {
+    id: 'j-0',
+    position: { x: 0, y: 0, z: 0 },
+    trafficLights: [],
+    connectedRoads: arms.flatMap((arm) => [`in-${arm.name}`, `out-${arm.name}`]),
+    intersectionRadius: junctionRadius(4),
+  }
+
+  // --- the four vehicles, staggered along their arms ---------------------
+  //
+  // The start distances mirror the training env's spawn fractions
+  // (45–80 % of the arm) and the keep-right lane 0 — the poses the
+  // policy met in training. Note the arms point INWARD: in-n's forward
+  // direction runs from the outer end (z = -60) to the junction, so a
+  // vehicle at s = 27 m sits at z = -33.
+  const starts: { id: string; type: Vehicle['type']; color: string; arm: string; s: number }[] = [
+    { id: 'v-1', type: 'car', color: '#3a86ff', arm: 'in-e', s: 27 },
+    { id: 'v-2', type: 'car', color: '#fbbf24', arm: 'in-n', s: 34 },
+    { id: 'v-3', type: 'car', color: '#22c55e', arm: 'in-s', s: 41 },
+    { id: 'v-4', type: 'car', color: '#f5f5f4', arm: 'in-w', s: 34 },
+  ]
+  for (const start of starts) {
+    const road = net.roads[start.arm]!
+    net.vehicles[start.id] = at(road, 0, start.s, 0, {
+      id: start.id,
+      type: start.type,
+      color: start.color,
+      status: 'driving',
+    })
+  }
+
+  return net
+}

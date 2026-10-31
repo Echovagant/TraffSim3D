@@ -36,6 +36,7 @@ import {
 } from '@domain/services/laneChange'
 import { junctionIndex, type JunctionIndex } from '@domain/services/roadJunctionIndex'
 import { roadContinuation, type RoadContinuation } from '@domain/services/roadTransition'
+import { buildDriveObservation } from './driveObservation'
 import { approachAxis } from '@domain/services/approachAxis'
 import {
   rampSpeed,
@@ -152,6 +153,26 @@ export interface TickContext {
    * falls back to that rule too — see `roadContinuation`.
    */
   routeNextRoadId?: (vehicleId: string) => string | null
+  /**
+   * The cooperative-driving policy over the junction's negotiation
+   * (Scene 4), when it is enabled.
+   *
+   * While this is set, tick builds each listed vehicle's 23-dim
+   * observation (`driveObservation.ts` — pinned to Python's
+   * `DriveCore._observation` by the observation fixture), runs the
+   * forward pass and owns that vehicle's speed — the same ownership
+   * the ego replay has. The turns come from each driver's ROUTE
+   * (`routeNextRoadId` answers for the driven ids too). Every other
+   * vehicle keeps the ordinary rules.
+   */
+  drivePolicy?: {
+    weights: PolicyWeights
+    conflictPoint: { x: number; z: number }
+    ids: readonly string[]
+    routes: Record<string, readonly string[]>
+    /** Progress hints, advanced in place as the drivers move. */
+    routeIndex: Record<string, number>
+  } | null
 }
 
 /**
@@ -172,6 +193,18 @@ const isReplayDriven = (ctx: TickContext, v: Vehicle): boolean =>
   ctx.replayTargetId !== null &&
   (ctx.policy !== null || ctx.replayAction !== undefined) &&
   v.id === ctx.replayTargetId
+
+/**
+ * Is this vehicle's speed owned by the cooperative-driving policy?
+ *
+ * A driven vehicle is exempt from the constraint layers for the same
+ * reason the replay target is: the policy was trained WITHOUT the
+ * browser's yield rule (the training env's junction has no lights and
+ * no phase), and a constraint that vetoes the policy's acceleration
+ * would make the negotiation the policy learned invisible.
+ */
+const isDriveDriven = (ctx: TickContext, v: Vehicle): boolean =>
+  ctx.drivePolicy?.ids.includes(v.id) ?? false
 
 const GREEN_LIKE = new Set<LightPhase>([LightPhase.Green, LightPhase.GreenLeft])
 const YELLOW_LIKE = new Set<LightPhase>([LightPhase.Yellow, LightPhase.YellowLeft])
@@ -357,6 +390,71 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     }
   }
 
+  // 2.6. The cooperative-driving policy (Scene 4). Same ownership as
+  //      the ego replay above: the policy writes the target speed, and
+  //      the constraint layers stand down for the driven vehicles (see
+  //      `isDriveDriven`). The turns are NOT the policy's — they come
+  //      from each driver's route, like the route planner's follower.
+  if (ctx.drivePolicy) {
+    for (const id of ctx.drivePolicy.ids) {
+      const driven = network.vehicles[id]
+      if (!driven || driven.status === 'crashed') continue
+      if (isReplayDriven(ctx, driven)) continue
+      const route = ctx.drivePolicy.routes[id]
+      if (!route || route.length === 0) continue
+
+      // The route progress the observation's idx 4 wants: the
+      // length-weighted share of the route that is behind the vehicle.
+      // The env computes (done + seg_t) / total; the browser's
+      // equivalent is (done + the signed travel distance on the
+      // current road) / total.
+      let index = route.indexOf(driven.roadId)
+      if (index < 0) index = Math.min(ctx.drivePolicy.routeIndex[id] ?? 0, route.length - 1)
+      ctx.drivePolicy.routeIndex[id] = index
+      let done = 0
+      let total = 0
+      for (let i = 0; i < route.length; i++) {
+        const road = network.roads[route[i]!]
+        if (!road) continue
+        const length = roadLength(road)
+        total += length
+        if (i < index) done += length
+      }
+      const currentRoad = network.roads[driven.roadId]
+      let travel = 0
+      if (currentRoad) {
+        const length = roadLength(currentRoad)
+        const sign = laneForwardSign(driven.laneIndex, currentRoad.laneCount)
+        travel = sign === 1 ? driven.s : length - driven.s
+      }
+      const routeProgress = total > 0 ? Math.min(1, Math.max(0, (done + travel) / total)) : 0
+
+      const observation = buildDriveObservation({
+        conflictPoint: ctx.drivePolicy.conflictPoint,
+        self: {
+          x: driven.position.x,
+          z: driven.position.z,
+          heading: driven.heading,
+          speed: driven.speed,
+          routeProgress,
+        },
+        others: Object.values(network.vehicles)
+          .filter((other) => other.id !== id)
+          .map((other) => ({ x: other.position.x, z: other.position.z, speed: other.speed })),
+      })
+      const action = mlpForwardMean(observation, ctx.drivePolicy.weights)
+      // Python: clip(action[0], -1, 1) * 3.0, then speed + accel * dt —
+      // the same kernel the ego replay runs.
+      driven.targetSpeed = pythonSpeedStep(driven.speed, action[0], dt)
+      if (typeof window !== 'undefined') {
+        const w = window as unknown as {
+          __driveLast?: { id: string; obs: number[]; action: PolicyAction }
+        }
+        w.__driveLast = { id, obs: observation, action }
+      }
+    }
+  }
+
   // 3. Compute each vehicle's target speed (light + leader).
   for (const v of Object.values(network.vehicles)) {
     const road = network.roads[v.roadId]
@@ -373,7 +471,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     // `desiredStatus: 'driving'` while its speed is 0 (the Rapier branch
     // still zeroes the speed). Cosmetic — the vehicle was already stuck
     // there before this change.
-    if (isReplayDriven(ctx, v)) continue
+    if (isReplayDriven(ctx, v) || isDriveDriven(ctx, v)) continue
     v.targetSpeed = road.speedLimit
     applyTrafficLightConstraint(v, road, network, ctx)
     applyCarFollowingConstraint(v, road, network, ctx)
@@ -1444,7 +1542,9 @@ const applyCrossRoadYield = (
         yielded = a
       }
       // Both inside the box → both are committed → neither yields.
-      if (yielded && !isReplayDriven(ctx, yielded)) yielded.targetSpeed = 0
+      if (yielded && !isReplayDriven(ctx, yielded) && !isDriveDriven(ctx, yielded)) {
+        yielded.targetSpeed = 0
+      }
     }
   }
 }
