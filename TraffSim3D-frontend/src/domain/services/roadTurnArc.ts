@@ -139,6 +139,36 @@ const bezierAt = (arc: Omit<TurnArc, 'length'>, t: number): { x: number; z: numb
 }
 
 /**
+ * The lateral acceleration a turn is taken at (m/s²) — the comfortable
+ * limit a real driver keeps. The corner speed follows from the curve's
+ * radius: v = √(a_lat · R).
+ */
+export const TURN_LAT_ACCEL = 2.5
+
+/**
+ * The speed a turn should be taken at (m/s).
+ *
+ * The radius is the circular-equivalent one: arc length over the turn
+ * angle (the angle between the entry direction and the exit direction).
+ * For a right-angle corner between the grid's lanes this lands at
+ * R ≈ 9–13 m → v ≈ 4.8–5.7 m/s (17–20 km/h) — a city corner speed, not
+ * the 60 km/h the un-capped arc used to carry.
+ *
+ * A collinear arc (no turn) has no limit — `Infinity`.
+ */
+export const turnSpeedLimit = (
+  arc: Pick<TurnArc, 'p0' | 'p1' | 'p2' | 'length'>,
+  latAccel: number = TURN_LAT_ACCEL,
+): number => {
+  const inAngle = Math.atan2(arc.p1.z - arc.p0.z, arc.p1.x - arc.p0.x)
+  const outAngle = Math.atan2(arc.p2.z - arc.p1.z, arc.p2.x - arc.p1.x)
+  const angle = turnAngle(inAngle, outAngle)
+  if (angle < 1e-6) return Number.POSITIVE_INFINITY
+  const radius = arc.length / angle
+  return Math.sqrt(latAccel * radius)
+}
+
+/**
  * The pose `dist` metres along the arc.
  *
  * `dist` is clamped to [0, length]: past the end the arc returns the

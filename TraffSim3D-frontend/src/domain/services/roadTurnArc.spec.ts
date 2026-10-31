@@ -10,7 +10,7 @@
 //   5. the collinear case degenerates to a straight line.
 
 import { describe, it, expect } from 'vitest'
-import { buildTurnArc, pointAt, turnAngle } from './roadTurnArc'
+import { buildTurnArc, pointAt, turnAngle, turnSpeedLimit } from './roadTurnArc'
 
 describe('buildTurnArc', () => {
   it('starts at the vehicle pose along its heading', () => {
@@ -82,5 +82,27 @@ describe('buildTurnArc', () => {
     expect(turnAngle(0.1, 0.1)).toBeCloseTo(0, 12)
     // A heading difference that wraps.
     expect(turnAngle(3, -3)).toBeCloseTo(2 * Math.PI - 6, 12)
+  })
+})
+
+describe('turnSpeedLimit', () => {
+  it('a right-angle corner comes out at a city-corner speed', () => {
+    const arc = buildTurnArc({ x: -14, z: 0, heading: 0 }, { x: 0, z: -14, heading: -Math.PI / 2 })
+    const limit = turnSpeedLimit(arc)
+    // R = length / (pi/2); v = sqrt(2.5 * R). For this corner the arc is
+    // ~20 m → R ~12.7 → v ~5.6 m/s (20 km/h) — not 16.67.
+    expect(limit).toBeGreaterThan(4)
+    expect(limit).toBeLessThan(7)
+  })
+
+  it('a straight (collinear) arc has no limit', () => {
+    const arc = buildTurnArc({ x: -14, z: 0, heading: 0 }, { x: 14, z: 0, heading: 0 })
+    expect(turnSpeedLimit(arc)).toBe(Number.POSITIVE_INFINITY)
+  })
+
+  it('a shallower corner is faster than a tight one', () => {
+    const tight = buildTurnArc({ x: -8, z: 0, heading: 0 }, { x: 0, z: -8, heading: -Math.PI / 2 })
+    const wide = buildTurnArc({ x: -20, z: 0, heading: 0 }, { x: 0, z: -20, heading: -Math.PI / 2 })
+    expect(turnSpeedLimit(wide)).toBeGreaterThan(turnSpeedLimit(tight))
   })
 })

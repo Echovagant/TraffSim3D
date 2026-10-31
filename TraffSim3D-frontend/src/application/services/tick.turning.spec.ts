@@ -59,7 +59,10 @@ import type { Vehicle } from '@domain/entities/Vehicle'
 
 const DT = 1 / 60
 
-const makeCtx = (rapierWorld: TickContext['rapierWorld']): TickContext => ({
+const makeCtx = (
+  rapierWorld: TickContext['rapierWorld'],
+  options: { routeNextRoadId?: (vehicleId: string) => string | null } = {},
+): TickContext => ({
   rapierWorld,
   signal: null,
   trajectoryExporter: null,
@@ -71,6 +74,7 @@ const makeCtx = (rapierWorld: TickContext['rapierWorld']): TickContext => ({
   removeVehicle: () => {},
   policy: null,
   replayTargetId: null,
+  routeNextRoadId: options.routeNextRoadId,
 })
 
 // ---------------------------------------------------------------------------
@@ -281,13 +285,14 @@ const runPhysics = async (
   net: RoadNetwork,
   steps: number,
   watchId: string,
+  options: { routeNextRoadId?: (vehicleId: string) => string | null } = {},
 ): Promise<{ frames: Frame[]; world: InstanceType<typeof RapierWorld> }> => {
   const world = new RapierWorld()
   await world.init()
   for (const v of Object.values(net.vehicles)) {
     world.registerVehicle(buildRigidBodySpec(v.id, v.type, v.position, v.heading))
   }
-  const ctx = makeCtx(world)
+  const ctx = makeCtx(world, options)
   const frames: Frame[] = []
   for (let i = 0; i < steps; i++) {
     tick(net, DT, (i + 1) * DT, ctx)
@@ -338,9 +343,13 @@ describe('the grid under the arc turn model (real physics)', () => {
     const steps = Math.round(90 / DT)
     let overlapFrames = 0
     let worst = 0
+    let firstOverlapStep = -1
+    let firstOverlapDetail = ''
+    let crashedAtEnd = 0
     for (let i = 0; i < steps; i += 1) {
       tick(net, DT, (i + 1) * DT, ctx)
       const vehicles = Object.values(net.vehicles)
+      crashedAtEnd = vehicles.filter((v) => v.status === 'crashed').length
       for (let a = 0; a < vehicles.length; a += 1) {
         for (let b = a + 1; b < vehicles.length; b += 1) {
           const va = vehicles[a]!
@@ -348,16 +357,104 @@ describe('the grid under the arc turn model (real physics)', () => {
           const distance = Math.hypot(va.position.x - vb.position.x, va.position.z - vb.position.z)
           if (distance < 2.5) {
             overlapFrames += 1
-            worst = Math.max(worst, 2.5 - distance)
+            const depth = 2.5 - distance
+            if (depth > worst) {
+              worst = depth
+              firstOverlapStep = i
+              firstOverlapDetail =
+                va.id +
+                '@' +
+                va.roadId +
+                '(' +
+                va.status +
+                ') vs ' +
+                vb.id +
+                '@' +
+                vb.roadId +
+                '(' +
+                vb.status +
+                ')'
+            }
           }
         }
       }
     }
+    console.log(
+      'OVERLAP-DIAG: frames',
+      overlapFrames,
+      'worst',
+      worst.toFixed(3),
+      '| first at step',
+      firstOverlapStep,
+      firstOverlapDetail,
+      '| crashed at end',
+      crashedAtEnd,
+    )
     expect(
       overlapFrames,
       'worst overlap ' + worst.toFixed(3) + ' m over ' + steps + ' frames',
     ).toBe(0)
   }, 600_000)
+})
+
+// ---------------------------------------------------------------------------
+// 0.5 the corner speed: the arc is taken at sqrt(a_lat * R), not at the
+//     road's speed limit
+// ---------------------------------------------------------------------------
+
+describe('the corner speed on the arc (real physics)', () => {
+  beforeEach(() => {
+    clearOobEvents()
+  })
+
+  it('a turning vehicle slows through the corner and speeds up after', async () => {
+    // The tie network's two candidates are BOTH 90 degrees away — the
+    // continuation is a real turn (the end-junction network's hash picks
+    // the STRAIGHT road, which has no arc and no limit). The route seam
+    // names the turn road, which arms the APPROACH pre-brake as well.
+    const net = buildTieNetwork()
+    addVehicle(net, 'v-1', 'r-in', 0, 60, 14)
+    // 600 frames: the pre-brake stretches the approach (14 -> 5.4 m/s
+    // over ~40 m) AND the arc itself is taken at the corner speed — the
+    // turn spans several seconds, so the window must cover the exit and
+    // the re-acceleration.
+    const { frames } = await runPhysics(net, 600, 'v-1', {
+      routeNextRoadId: () => 'r-next',
+    })
+    const changeAt = roadChangeFrame(frames)
+    if (changeAt <= 0) {
+      console.log(
+        'TRACE:',
+        frames
+          .map((f, i) => ({ i, road: f.roadId, s: +f.s.toFixed(1), speed: +f.speed.toFixed(2) }))
+          .filter((f, i) => i % 20 === 0 || f.speed < 1 || i > frames.length - 4),
+      )
+    }
+    expect(changeAt).toBeGreaterThan(0)
+
+    // The approach already brakes BEFORE the junction: the speed at the
+    // last frame on the old road must be well under the 16.67 limit.
+    const approach = frames.slice(Math.max(0, changeAt - 10), changeAt).map((f) => f.speed)
+    const maxApproach = Math.max(...approach)
+    expect(maxApproach, `approach speed ${maxApproach.toFixed(2)}`).toBeLessThan(10)
+
+    // Around the turn the speed must have dropped well below the road
+    // limit — the arc's limit is ~5.6 m/s for this corner.
+    const aroundTurn = frames.slice(changeAt, changeAt + 40).map((f) => f.speed)
+    const minAround = Math.min(...aroundTurn)
+    expect(minAround, `min speed around the turn ${minAround.toFixed(2)}`).toBeLessThan(7)
+
+    // And the vehicle accelerates again once it is out of the corner —
+    // relative to its own corner speed. The post-corner window: the
+    // vehicle is on a 100 m road with no exit, so it eventually reaches
+    // the far end — the ACCELERATION is what this pins, not an absolute
+    // speed.
+    const after = frames.slice(changeAt + 340, changeAt + 400).map((f) => f.speed)
+    expect(
+      Math.max(...after),
+      `post-corner max ${Math.max(...after).toFixed(2)} vs corner min ${minAround.toFixed(2)}`,
+    ).toBeGreaterThan(minAround)
+  })
 })
 
 // ---------------------------------------------------------------------------

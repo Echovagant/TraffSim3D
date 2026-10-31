@@ -28,6 +28,7 @@ import {
   roadRight,
   laneForwardSign,
   stopLineSOnRoad,
+  projectIntersectionOnRoad,
 } from '@domain/services/laneGeometry'
 import {
   steerLateralVelocity,
@@ -41,6 +42,8 @@ import {
   pointAt as arcPointAt,
   MIN_ARC_TURN_RAD,
   turnAngle,
+  turnSpeedLimit,
+  TURN_LAT_ACCEL,
 } from '@domain/services/roadTurnArc'
 import { buildDriveObservation } from './driveObservation'
 import { approachAxis } from '@domain/services/approachAxis'
@@ -67,6 +70,7 @@ import {
   VEHICLE_PURE_PURSUIT,
   PYTHON_SIM_SPEED_LIMIT,
   LATERAL_DRIFT_THRESHOLD_M,
+  MAX_DECEL_COMFY,
 } from '@shared/constants/simulation'
 import type { RapierWorld, ContactEvent, Vec3 } from '@infrastructure/physics'
 import { findNearestLane } from './laneFrameSync'
@@ -211,6 +215,69 @@ const isReplayDriven = (ctx: TickContext, v: Vehicle): boolean =>
  */
 const isDriveDriven = (ctx: TickContext, v: Vehicle): boolean =>
   ctx.drivePolicy?.ids.includes(v.id) ?? false
+
+/**
+ * The corner speed a vehicle must slow to for its ROUTE's next turn
+ * (m/s), or `null` when there is nothing to slow for.
+ *
+ * Route-driven vehicles know their next road BEFORE they reach the
+ * junction — that is the whole point of the seam — so they can brake on
+ * the approach instead of halfway through the corner. The limit is the
+ * junction's own corner speed √(a_lat · R), with the junction radius as
+ * the characteristic radius; the braking distance uses the comfortable
+ * deceleration, and the cap only arms inside it (a driver far from the
+ * junction keeps the road speed).
+ *
+ * Straight-on continuations (angle below `MIN_ARC_TURN_RAD`) return
+ * `null` — there is no corner to slow for.
+ */
+const routeTurnSpeedLimit = (
+  network: RoadNetwork,
+  junctions: JunctionIndex,
+  v: Vehicle,
+  nextRoadId: string | null,
+): number | null => {
+  if (nextRoadId === null || v.turn) return null
+  const junction = junctions.sharedJunctionOf(v.roadId, nextRoadId)
+  if (!junction) return null
+  const road = network.roads[v.roadId]
+  const nextRoad = network.roads[nextRoadId]
+  if (!road || !nextRoad) return null
+
+  // The angle between the two roads' directions at the junction: the
+  // current lane's heading against the next road's travel direction
+  // THROUGH the junction (from the junction end toward the far end).
+  const lp = lanePoint(road, v.laneIndex, v.s)
+  const entryProjection = projectIntersectionOnRoad(nextRoad, junction)
+  if (!entryProjection.projected) return null
+  const atStart = entryProjection.s <= 1.0
+  const dirX = atStart
+    ? nextRoad.endNode.x - nextRoad.startNode.x
+    : nextRoad.startNode.x - nextRoad.endNode.x
+  const dirZ = atStart
+    ? nextRoad.endNode.z - nextRoad.startNode.z
+    : nextRoad.startNode.z - nextRoad.endNode.z
+  const nextHeading = Math.atan2(dirZ, dirX)
+  let delta = nextHeading - lp.heading
+  delta = (delta + Math.PI) % (2 * Math.PI) - Math.PI
+  if (Math.abs(delta) < MIN_ARC_TURN_RAD) return null
+
+  const limit = Math.sqrt(TURN_LAT_ACCEL * (junction.intersectionRadius || 11.5))
+
+  // Inside the braking distance? (The comfortable decel — an
+  // emergency-brake distance would arm the cap from 40 m away and slow
+  // the whole approach.)
+  const approachProjection = projectIntersectionOnRoad(road, junction)
+  if (!approachProjection.projected) return null
+  const sign = laneForwardSign(v.laneIndex, road.laneCount)
+  const distanceToJunction =
+    sign === 1 ? approachProjection.s - v.s : v.s - approachProjection.s
+  if (distanceToJunction <= 0) return null
+  const vNow = Math.max(v.speed, limit)
+  const brakeDistance = (vNow * vNow - limit * limit) / (2 * MAX_DECEL_COMFY)
+  if (distanceToJunction > brakeDistance + 2) return null
+  return limit
+}
 
 const GREEN_LIKE = new Set<LightPhase>([LightPhase.Green, LightPhase.GreenLeft])
 const YELLOW_LIKE = new Set<LightPhase>([LightPhase.Yellow, LightPhase.YellowLeft])
@@ -460,6 +527,21 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // Python: clip(action[0], -1, 1) * 3.0, then speed + accel * dt —
       // the same kernel the ego replay runs.
       driven.targetSpeed = pythonSpeedStep(driven.speed, action[0], dt)
+      // The corner speed is a ceiling the policy drives under — the arc
+      // has a lateral-acceleration limit the way the road has a speed
+      // limit. Mid-turn it caps the arc's own limit; on the approach it
+      // arms the pre-brake (route-driven vehicles know their turn).
+      {
+        const arcLimit = driven.turn
+          ? turnSpeedLimit({
+              p0: { x: driven.turn.p0x, z: driven.turn.p0z },
+              p1: { x: driven.turn.p1x, z: driven.turn.p1z },
+              p2: { x: driven.turn.p2x, z: driven.turn.p2z },
+              length: driven.turn.length,
+            })
+          : routeTurnSpeedLimit(network, junctions, driven, ctx.routeNextRoadId?.(driven.id) ?? null)
+        if (arcLimit !== null) driven.targetSpeed = Math.min(driven.targetSpeed, arcLimit)
+      }
       if (typeof window !== 'undefined') {
         const w = window as unknown as {
           __driveLast?: { id: string; obs: number[]; action: PolicyAction }
@@ -486,7 +568,32 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     // still zeroes the speed). Cosmetic — the vehicle was already stuck
     // there before this change.
     if (isReplayDriven(ctx, v) || isDriveDriven(ctx, v)) continue
-    v.targetSpeed = road.speedLimit
+    // The corner speed: a vehicle ON a turn arc takes the arc's own
+    // limit (√(a_lat · R) — no more whipping around corners at the
+    // road's speed); a vehicle whose ROUTE turns at the junction ahead
+    // brakes on the approach. Both are ceilings — the constraints below
+    // can still lower the target further.
+    let speedLimit = road.speedLimit
+    if (v.turn) {
+      speedLimit = Math.min(
+        speedLimit,
+        turnSpeedLimit({
+          p0: { x: v.turn.p0x, z: v.turn.p0z },
+          p1: { x: v.turn.p1x, z: v.turn.p1z },
+          p2: { x: v.turn.p2x, z: v.turn.p2z },
+          length: v.turn.length,
+        }),
+      )
+    } else {
+      const routeLimit = routeTurnSpeedLimit(
+        network,
+        junctions,
+        v,
+        ctx.routeNextRoadId?.(v.id) ?? null,
+      )
+      if (routeLimit !== null) speedLimit = Math.min(speedLimit, routeLimit)
+    }
+    v.targetSpeed = speedLimit
     applyTrafficLightConstraint(v, road, network, ctx)
     applyCarFollowingConstraint(v, road, network, ctx)
     // NOTE: there is deliberately **no** "road end" clamp here any
@@ -623,7 +730,13 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       v.position.y = pose.position.y
       v.position.z = pose.position.z
       v.heading = pose.heading
-      v.speed = pose.speed
+      // A vehicle ON a turn arc keeps its entity speed: the body is a
+      // passenger (linvel zeroed at turn start), so the pose carries
+      // speed 0 — reading it here would zero the ramp's input every
+      // frame and freeze the arc (measured: the speed collapsed to
+      // 0.03 and the arc never advanced). The arc branch below ramps
+      // the entity speed and advances the arc by it.
+      if (!v.turn) v.speed = pose.speed
       // ===== the turn in progress (pivot→arc, ADR-012) =====
       //
       // The arc is advanced HERE, before `findNearestLane`: mid-turn
@@ -1602,6 +1715,29 @@ const applyCarFollowingConstraint = (
     // road and is braking to a stop) is not a leader: it is not on the
     // lane any more, so nobody behind it has to brake for it.
     if (isOobExiting(other)) continue
+    // A vehicle ON a turn arc is BETWEEN roads: its roadId already
+    // names the destination, so the same-lane filter below would hide
+    // it from the follower behind it — and the follower drives into
+    // the corner the arc is sweeping (measured on the grid with the
+    // corner speed: 110 overlap frames, the first pair both "waiting"
+    // on the SAME road). Spatial cone instead: ahead of me within a
+    // lane width counts as a leader, whatever road it names.
+    if (other.turn) {
+      const dx = other.position.x - v.position.x
+      const dz = other.position.z - v.position.z
+      const distance = Math.hypot(dx, dz)
+      if (distance > 80) continue
+      const cosH = Math.cos(v.heading)
+      const sinH = Math.sin(v.heading)
+      const longitudinal = dx * cosH + dz * sinH
+      if (longitudinal <= 0) continue
+      if (Math.abs(-dx * sinH + dz * cosH) > 3.5) continue
+      if (longitudinal < bestGap) {
+        bestGap = longitudinal
+        leader = other
+      }
+      continue
+    }
     if (other.roadId !== road.id) continue
     if (other.laneIndex !== v.laneIndex) continue
     const ds = sign === 1 ? other.s - v.s : v.s - other.s
