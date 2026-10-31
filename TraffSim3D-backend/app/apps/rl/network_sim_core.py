@@ -174,7 +174,21 @@ class NetworkSimCore:
         dx = target_pt[0] - self.ego.x
         dz = target_pt[1] - self.ego.z
         target_angle = math.atan2(dz, dx)
-        alpha = self.ego.heading - target_angle
+        # The **textbook** Pure Pursuit alpha: the angle from the ego's
+        # heading to the target (`target_angle - heading`), so the steer
+        # turns *towards* it. This is the same convention as the
+        # contract core (`sim_core.py`), the browser's `purePursuit.ts`
+        # and `egoKernel.ts` — all three use the textbook sign.
+        #
+        # The opposite sign was wrong here: it makes the steering
+        # **diverge** (the heading error grows every step), so an ego
+        # that had to turn at a junction drove straight past it.
+        # Measured on an L-shaped road (the ego arrives along +X and
+        # must continue onto +Z): after 80 steps it was 52 m off the
+        # road with the route progress stuck at 0.500. Straight roads
+        # hid it (the target is dead ahead, so alpha stays ~0) — which
+        # is why the module's tests never caught it.
+        alpha = target_angle - self.ego.heading
         alpha = (alpha + math.pi) % (2 * math.pi) - math.pi
         steer = math.atan2(2.0 * EGO_WHEELBASE * math.sin(alpha), LOOKAHEAD_DISTANCE)
         steer = float(np.clip(steer, -MAX_STEER, MAX_STEER))

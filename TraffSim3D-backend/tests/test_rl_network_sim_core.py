@@ -171,6 +171,68 @@ def test_an_empty_network_terminates_immediately() -> None:
     assert info["reason"] == "no_roads"
 
 
+def test_the_ego_turns_at_a_junction_instead_of_driving_past_it() -> None:
+    """The Pure Pursuit alpha sign — a regression test for a real defect.
+
+    The alpha was `heading - target_angle`, the opposite of the
+    textbook sign (and of the contract core's), which makes the
+    steering **diverge**: the heading error grows every step. Measured
+    on an L-shaped road, an ego that had to turn at the junction drove
+    straight past it and ended 52 m off the road with its route progress
+    stuck at 0.500. Straight roads hid it — the target is dead ahead
+    there, so the alpha stays near zero — which is why the other tests
+    never caught it.
+    """
+    graph = build_network_graph(
+        {
+            "roads": [
+                {
+                    "id": "r-a",
+                    "startNode": {"x": 0, "y": 0, "z": 0},
+                    "endNode": {"x": 100, "y": 0, "z": 0},
+                    "waypoints": [{"x": 0, "y": 0, "z": 0}, {"x": 100, "y": 0, "z": 0}],
+                    "laneCount": 2,
+                    "speedLimit": 16.67,
+                },
+                {
+                    "id": "r-b",
+                    "startNode": {"x": 100, "y": 0, "z": 0},
+                    "endNode": {"x": 100, "y": 0, "z": 100},
+                    "waypoints": [{"x": 100, "y": 0, "z": 0}, {"x": 100, "y": 0, "z": 100}],
+                    "laneCount": 2,
+                    "speedLimit": 16.67,
+                },
+            ],
+            "intersections": [
+                {
+                    "id": "i-1",
+                    "position": {"x": 100, "y": 0, "z": 0},
+                    "connectedRoads": ["r-a", "r-b"],
+                }
+            ],
+            "vehicles": [],
+            "spawnPoints": [],
+        }
+    )
+    core = NetworkSimCore(graph)
+    core.reset(seed=0)
+    core.ego.route.segment_ids = ["r-a", "r-b"]
+    core.ego.current_seg_idx = 0
+    core.ego.x, core.ego.z, core.ego.heading = 40.0, 0.0, 0.0
+    core.ego.speed = 8.0
+    core.ego.seg_t = 40.0
+
+    for _ in range(80):
+        core.step(np.array([1.0, 0.0]))
+
+    # The ego turned (its heading left the road's direction) and it got
+    # further along its route.
+    assert abs(core.ego.heading) > 0.3, "the ego never turned"
+    assert (
+        core.ego.route_progress > 0.6
+    ), f"the route progress is still {core.ego.route_progress:.3f}"
+
+
 def test_the_network_core_does_not_import_the_contract_core() -> None:
     """The two cores must stay decoupled.
 
