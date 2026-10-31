@@ -28,6 +28,19 @@ export {
   createRLTrainingClient,
 } from './rlTrainingClient'
 export type { NetworkPayload, RLTrainingClient, ValidateResult } from './rlTrainingClient'
+export {
+  ROUTE_API_PREFIX,
+  ROUTE_PLAN_PATH,
+  ROUTE_PLAN_TIMEOUT_MS,
+  createRouteClient,
+} from './routeClient'
+export type {
+  RouteClient,
+  RouteEndpoint,
+  RouteLeg,
+  RouteNetworkPayload,
+  RoutePlanResponse,
+} from './routeClient'
 export { parseRLStatus, RLStatusContractError } from './rlStatus'
 export type { RLStatusCore } from './rlStatus'
 // Types generated from the backend's committed OpenAPI schema

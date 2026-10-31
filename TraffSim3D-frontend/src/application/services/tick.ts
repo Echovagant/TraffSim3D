@@ -142,6 +142,16 @@ export interface TickContext {
    * product replay path deterministically, with no trained checkpoint.
    */
   replayAction?: readonly [number, number]
+  /**
+   * The road a vehicle's planned route says it takes next, or `null`.
+   *
+   * Only the vehicle that is *following* a route gets an answer; every
+   * other vehicle keeps the ordinary hash-based turn rule, which is
+   * what the RL environment models (and what the measured browser-side
+   * delay baseline was measured with). A route that cannot be followed
+   * falls back to that rule too — see `roadContinuation`.
+   */
+  routeNextRoadId?: (vehicleId: string) => string | null
 }
 
 /**
@@ -547,7 +557,14 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
           // makes at this junction (straight on, or a right / left turn)
           // is a hash of it, so the decision is reproducible and the two
           // motion paths below cannot disagree about it.
-          const turn = roadContinuation(network, vRoad, v.laneIndex, v.heading, v.id)
+          const turn = roadContinuation(
+            network,
+            vRoad,
+            v.laneIndex,
+            v.heading,
+            v.id,
+            ctx.routeNextRoadId?.(v.id),
+          )
           const turnedRoad = turn ? network.roads[turn.roadId] : undefined
           if (turn && turnedRoad) {
             applyRoadTurn(v, turnedRoad, turn, ctx)
@@ -725,7 +742,14 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // vehicle goes next.
       const pastTravelEnd = sign === 1 ? v.s > len : v.s < 0
       if (pastTravelEnd) {
-        const turn = roadContinuation(network, road, v.laneIndex, v.heading, v.id)
+        const turn = roadContinuation(
+          network,
+          road,
+          v.laneIndex,
+          v.heading,
+          v.id,
+          ctx.routeNextRoadId?.(v.id),
+        )
         const turnedRoad = turn ? network.roads[turn.roadId] : undefined
         if (turn && turnedRoad) {
           v.roadId = turn.roadId

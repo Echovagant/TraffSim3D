@@ -27,6 +27,8 @@
 
 在浏览器里搭路网：双向车道、停止线、信号灯、生成点。拖拽摆放车辆与设施，实时看到它们在路网上跑起来。场景可存本地、可导出成 JSON、可再导入。
 
+**路线规划 + 第一人称跟随**：选一辆车和终点路口，后端按路网算最省路径（单行道只能顺行），路线画在车实际行驶的车道上，那辆车按计划走 —— 切到第一人称视角，你就坐在车里。
+
 ### ⚙️ SimulationLab · 仿真实验室
 
 基于 **Rapier WASM** 的刚体物理，车辆有质量、转向半径、制动距离和轮胎侧滑。固定步长推进，仿真结果不随机器性能漂移。
@@ -203,7 +205,7 @@ app/
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 系统结构：每个断言都给出代码出处 |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | 部署与运行（含镜像源与依赖安装） |
 | [`docs/contracts/sim-snapshot.md`](docs/contracts/sim-snapshot.md) | 跨语言仿真契约 |
-| [`docs/adr/`](docs/adr/) | 架构决策记录（ADR-001 ~ ADR-009） |
+| [`docs/adr/`](docs/adr/) | 架构决策记录（ADR-001 ~ ADR-010） |
 | [`docs/openapi.json`](docs/openapi.json) | 后端 API 定义 |
 
 ---

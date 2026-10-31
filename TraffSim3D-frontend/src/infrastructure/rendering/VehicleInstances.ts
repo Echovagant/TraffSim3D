@@ -54,6 +54,12 @@ export interface VehicleInstances {
   allocate: (v: Vehicle) => void
   remove: (entityId: string) => void
   update: (v: Vehicle) => void
+  /** Stop drawing a vehicle without releasing its slot. */
+  hide: (entityId: string) => void
+  /** Draw a hidden vehicle again. */
+  show: (entityId: string) => void
+  /** Is this vehicle currently hidden? */
+  isHidden: (entityId: string) => boolean
   getPosition: (entityId: string) => THREE.Vector3 | null
   /** Map an InstancedMesh hit back to the vehicle entity ID. */
   pickByInstance: (mesh: THREE.InstancedMesh, instanceId: number) => string | null
@@ -126,6 +132,9 @@ export const createVehicleInstances = (): VehicleInstances => {
 
   const trails = new Map<string, VehicleTrail>()
 
+  /** Vehicles that are allocated but not drawn (the followed car). */
+  const hiddenIds = new Set<string>()
+
   const allocate = (v: Vehicle): void => {
     const type = v.type
     const free = freeSlots[type]
@@ -194,10 +203,55 @@ export const createVehicleInstances = (): VehicleInstances => {
     }
   }
 
+  /**
+   * Stop drawing a vehicle without releasing its slot.
+   *
+   * The first-person camera sits inside the car it rides in, so the
+   * car's own body would fill the frame. Hiding it keeps the slot (and
+   * its trail) intact, so switching the camera back restores the car
+   * exactly where it was.
+   */
+  const hide = (entityId: string): void => {
+    if (hiddenIds.has(entityId)) return
+    const type = typeOf(entityId)
+    if (!type) return
+    const slotIdx = entityToSlot[type].get(entityId)
+    if (slotIdx === undefined) return
+    meshes[type].setMatrixAt(slotIdx, _zeroMatrix)
+    meshes[type].instanceMatrix.needsUpdate = true
+    hiddenIds.add(entityId)
+  }
+
+  /** Draw a hidden vehicle again, at its last known pose. */
+  const show = (entityId: string): void => {
+    if (!hiddenIds.delete(entityId)) return
+    const type = typeOf(entityId)
+    if (!type) return
+    const slotIdx = entityToSlot[type].get(entityId)
+    if (slotIdx === undefined) return
+    const slot = slots[type][slotIdx]
+    meshes[type].setMatrixAt(slotIdx, slot.matrix)
+    meshes[type].instanceMatrix.needsUpdate = true
+  }
+
+  const isHidden = (entityId: string): boolean => hiddenIds.has(entityId)
+
+  /** The vehicle type an entity id was allocated under. */
+  const typeOf = (entityId: string): VehicleType | null => {
+    for (const type of types) {
+      if (entityToSlot[type].has(entityId)) return type
+    }
+    return null
+  }
+
   const update = (v: Vehicle): void => {
     const type = v.type
     const slotIdx = entityToSlot[type].get(v.id)
     if (slotIdx === undefined) return
+    // A hidden vehicle keeps its slot but is not drawn: the first-person
+    // camera sits inside the car it rides in, and the car's own body
+    // would fill the frame.
+    if (hiddenIds.has(v.id)) return
 
     const mesh = meshes[type]
     const slot = slots[type][slotIdx]
@@ -289,7 +343,19 @@ export const createVehicleInstances = (): VehicleInstances => {
     trails.clear()
   }
 
-  return { meshes, trails, allocate, remove, update, getPosition, pickByInstance, dispose }
+  return {
+    meshes,
+    trails,
+    allocate,
+    remove,
+    update,
+    hide,
+    show,
+    isHidden,
+    getPosition,
+    pickByInstance,
+    dispose,
+  }
 }
 
 const WRAP_THRESHOLD = 20

@@ -423,6 +423,16 @@ export const LIDAR_MOUNT_HEIGHT: Record<'car' | 'truck' | 'bus', number> = {
   truck: 2.2,
   bus: 2.6,
 }
+
+/**
+ * The driver's eye height above the road (m).
+ *
+ * The first-person camera rides at this height. It belongs to the
+ * *viewer*, not to the vehicle it rides in — a sedan's roof is lower and
+ * a truck's cab is higher, but one height keeps the view comparable
+ * between the cars of a scene.
+ */
+export const DRIVER_EYE_HEIGHT_M = 1.35
 /** Horizontal rays. 360 → 90 (4× fewer rays per scan;
  *  mitigation C). 90° 前向扇形 符合主流车载 LiDAR
  *  (Waymo / Mobileye). 32/64-line + 360° 升级留待后续. */

@@ -65,6 +65,11 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
       paused: !store.isRunning,
       rate: store.tickRate,
     }))
+    // The first-person camera and the route ribbon are read every
+    // frame: the camera rides with the follower, and the ribbon is
+    // rebuilt whenever the planned route changes.
+    renderer.setFollowTargetGetter(() => store.followCameraTarget())
+    renderer.setRouteGetter(() => store.routeRenderPath())
     renderer.start()
 
     const container = canvas.parentElement

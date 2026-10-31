@@ -142,3 +142,86 @@ describe('roadContinuation', () => {
     expect(roadContinuation(net, roadA, 0, HEADING_EAST)).toBeNull()
   })
 })
+
+// A crossroads: the vehicle may go straight on (r-straight), turn right
+// (r-right) or turn left (r-left). The planned route names one of them.
+const crossroads = (): { net: RoadNetwork; roadA: Road } => {
+  const net = createRoadNetwork()
+  const roadA: Road = {
+    id: 'r-a',
+    startNode: { x: -60, y: 0, z: 0 },
+    endNode: { x: 0, y: 0, z: 0 },
+    laneCount: 4,
+    speedLimit: 20,
+    level: 0,
+  }
+  const straight: Road = {
+    id: 'r-straight',
+    startNode: { x: 0, y: 0, z: 0 },
+    endNode: { x: 60, y: 0, z: 0 },
+    laneCount: 4,
+    speedLimit: 20,
+    level: 0,
+  }
+  const right: Road = {
+    id: 'r-right',
+    startNode: { x: 0, y: 0, z: 0 },
+    endNode: { x: 0, y: 0, z: 60 },
+    laneCount: 4,
+    speedLimit: 20,
+    level: 0,
+  }
+  const left: Road = {
+    id: 'r-left',
+    startNode: { x: 0, y: 0, z: 60 },
+    endNode: { x: 0, y: 0, z: 0 },
+    laneCount: 4,
+    speedLimit: 20,
+    level: 0,
+  }
+  net.roads[roadA.id] = roadA
+  net.roads[straight.id] = straight
+  net.roads[right.id] = right
+  net.roads[left.id] = left
+  net.intersections['i-1'] = {
+    id: 'i-1',
+    position: { x: 0, y: 0, z: 0 },
+    trafficLights: [],
+    connectedRoads: ['r-a', 'r-straight', 'r-right', 'r-left'],
+    intersectionRadius: 11.5,
+  }
+  return { net, roadA }
+}
+
+describe('roadContinuation — a planned route wins over the hash', () => {
+  it('takes the road the route names', () => {
+    const { net, roadA } = crossroads()
+    // The seed would otherwise decide; the route overrides it.
+    const turn = roadContinuation(net, roadA, 0, HEADING_EAST, 'v-1', 'r-right')
+    expect(turn?.roadId).toBe('r-right')
+  })
+
+  it('takes the route’s road whatever the seed would have chosen', () => {
+    const { net, roadA } = crossroads()
+    for (const seed of ['v-1', 'v-2', 'v-3', 'v-4', 'v-5']) {
+      const turn = roadContinuation(net, roadA, 0, HEADING_EAST, seed, 'r-left')
+      expect(turn?.roadId).toBe('r-left')
+    }
+  })
+
+  it('falls back to the ordinary rule when the route names a road that cannot be entered here', () => {
+    const { net, roadA } = crossroads()
+    // 'r-nowhere' is not one of the junction's roads — the vehicle is
+    // off its route, so it turns the way it always would.
+    const turn = roadContinuation(net, roadA, 0, HEADING_EAST, 'v-1', 'r-nowhere')
+    expect(turn).not.toBeNull()
+    expect(turn?.roadId).not.toBe('r-nowhere')
+  })
+
+  it('falls back to the ordinary rule when there is no route at all', () => {
+    const { net, roadA } = crossroads()
+    const withSeed = roadContinuation(net, roadA, 0, HEADING_EAST, 'v-1')
+    const withoutRoute = roadContinuation(net, roadA, 0, HEADING_EAST, 'v-1', null)
+    expect(withoutRoute?.roadId).toBe(withSeed?.roadId)
+  })
+})

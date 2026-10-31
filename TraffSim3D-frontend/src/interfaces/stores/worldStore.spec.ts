@@ -351,3 +351,123 @@ describe('worldStore signal policy', () => {
     expect(world.signalPolicyDecision).toBeNull()
   })
 })
+
+describe('worldStore planned route', () => {
+  let fetchSpy: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    fetchSpy = vi.fn()
+    ;(globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const mockResponse = (body: unknown, status = 200): Response => {
+    const text = JSON.stringify(body)
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? 'OK' : 'Err',
+      text: async () => text,
+      json: async () => body,
+    } as unknown as Response
+  }
+
+  /** The backend's answer for a two-leg route. */
+  const ROUTE_RESPONSE = {
+    found: true,
+    roads: ['r-b'],
+    legs: [
+      { road_id: 'r-b', from: { x: 100, y: 0, z: 0 }, to: { x: 100, y: 0, z: 100 }, cost_m: 100 },
+    ],
+    cost_m: 100,
+    start_node: 'n-1',
+    end_node: 'n-3',
+  }
+
+  it('planRoute stores the route and names the follower', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(ROUTE_RESPONSE))
+    const world = useWorldStore()
+    const vehicleId = Object.keys(world.network.vehicles)[0]!
+    const junctionId = Object.keys(world.network.intersections)[0]!
+
+    const result = await world.planRoute(vehicleId, junctionId)
+
+    expect(result.ok).toBe(true)
+    expect(world.plannedRoute).not.toBeNull()
+    expect(world.routeFollowerId).toBe(vehicleId)
+    // The route starts with the road the follower is on.
+    expect(world.plannedRoute?.roads[0]).toBe(world.network.vehicles[vehicleId]!.roadId)
+  })
+
+  it('planRoute rejects a vehicle or junction that is not there', async () => {
+    const world = useWorldStore()
+    expect((await world.planRoute('v-nope', 'i-1')).ok).toBe(false)
+    expect((await world.planRoute(Object.keys(world.network.vehicles)[0]!, 'i-nope')).ok).toBe(
+      false,
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('planRoute reports a backend that found no path', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      mockResponse({ ...ROUTE_RESPONSE, found: false, roads: [], legs: [] }),
+    )
+    const world = useWorldStore()
+    const vehicleId = Object.keys(world.network.vehicles)[0]!
+    const junctionId = Object.keys(world.network.intersections)[0]!
+
+    const result = await world.planRoute(vehicleId, junctionId)
+
+    expect(result.ok).toBe(false)
+    expect(world.plannedRoute).toBeNull()
+  })
+
+  it('only the follower is told which road comes next', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(ROUTE_RESPONSE))
+    const world = useWorldStore()
+    const vehicleId = Object.keys(world.network.vehicles)[0]!
+    const junctionId = Object.keys(world.network.intersections)[0]!
+    await world.planRoute(vehicleId, junctionId)
+
+    const follower = world.network.vehicles[vehicleId]!
+    const other = Object.values(world.network.vehicles).find((v) => v.id !== vehicleId)
+
+    // The follower's next road is the route's second entry.
+    const next = world.plannedRoute!.roads[1]
+    expect(next).toBeDefined()
+    // Another vehicle is not on the route, so it keeps the ordinary rule.
+    if (other) expect(world.routeNextRoadId(other.id)).toBeNull()
+  })
+
+  it('clearRoute drops the route and leaves the follow camera', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(ROUTE_RESPONSE))
+    const world = useWorldStore()
+    const vehicleId = Object.keys(world.network.vehicles)[0]!
+    const junctionId = Object.keys(world.network.intersections)[0]!
+    await world.planRoute(vehicleId, junctionId)
+    world.followCamera = true
+
+    world.clearRoute()
+
+    expect(world.plannedRoute).toBeNull()
+    expect(world.routeFollowerId).toBeNull()
+    expect(world.followCamera).toBe(false)
+  })
+
+  it('a new scene drops the route — it described the old one', async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse(ROUTE_RESPONSE))
+    const world = useWorldStore()
+    const vehicleId = Object.keys(world.network.vehicles)[0]!
+    const junctionId = Object.keys(world.network.intersections)[0]!
+    await world.planRoute(vehicleId, junctionId)
+
+    world.switchScene('t')
+
+    expect(world.plannedRoute).toBeNull()
+    expect(world.routeFollowerId).toBeNull()
+  })
+})

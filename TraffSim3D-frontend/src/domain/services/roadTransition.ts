@@ -180,6 +180,14 @@ interface Candidate extends RoadContinuation {
  * probabilistic one above; without it the choice falls back to "straight
  * on when that is possible", which is the rule the topology tests use.
  *
+ * `routeNextRoadId` is a **planned** route's next road. When it names
+ * one of the candidates, that candidate is taken — the vehicle follows
+ * its plan instead of its hash. It is honoured only when the road is
+ * genuinely enterable here (one of the candidates): a route that cannot
+ * be followed (the vehicle left it, or the plan says something illegal)
+ * falls back to the probabilistic rule rather than teleporting the
+ * vehicle onto a road it cannot enter.
+ *
  * **The pivot's sideways jump — a known limitation.** The junction sits
  * on the roads' centre lines, while the lane the vehicle lands in sits
  * `laneOffset(lane)` to the side of it, so the pivot moves the body
@@ -225,6 +233,7 @@ export const roadContinuation = (
   laneIndex: number,
   heading: number,
   turnSeed?: string,
+  routeNextRoadId?: string | null,
 ): RoadContinuation | null => {
   const len = roadLength(road)
   if (len < 1e-6) return null
@@ -329,10 +338,20 @@ export const roadContinuation = (
 
   // 3. The movement the vehicle makes.
   //
-  //    The candidates are grouped by the movement they represent, and a
-  //    hash of (vehicle, junction, road) decides which movement it
-  //    takes. A junction with no straight continuation — a corner, a
-  //    T-junction — has no choice to make, so it forces a turn.
+  //    A planned route wins over the hash: if the route says the next
+  //    road is X, and X is one of the candidates (genuinely enterable
+  //    here), the vehicle takes X. A route that names something else —
+  //    the vehicle left the route, or the plan is not drivable from
+  //    here — falls through to the ordinary probabilistic rule.
+  if (routeNextRoadId) {
+    const planned = candidates.find((c) => c.roadId === routeNextRoadId)
+    if (planned) return planned
+  }
+
+  //    Otherwise the candidates are grouped by the movement they
+  //    represent, and a hash of (vehicle, junction, road) decides which
+  //    movement it takes. A junction with no straight continuation — a
+  //    corner, a T-junction — has no choice to make, so it forces a turn.
   const straights = candidates.filter((c) => c.movement === 'straight')
   const rights = candidates.filter((c) => c.movement === 'right')
   const lefts = candidates.filter((c) => c.movement === 'left')

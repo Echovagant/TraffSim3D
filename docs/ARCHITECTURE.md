@@ -258,6 +258,45 @@ flowchart TB
   迁移成功的两份是 10–12 %）。选优窗口、rollout 长度这些训练参数的影响记录在
   `network_mappo.py` 与 `network_signal_env.py` 的注释里。
 
+### 5.5 交付面：路线规划与第一人称相机
+
+**产品故事**：规划一条路线 → 坐在车里把它开完。
+**决策记录**：[ADR-010](adr/ADR-010-route-planning-and-the-first-person-camera.md)。
+
+```
+browser (RoutePanel)
+  │ POST /api/v1/routes/plan  {network, start{road_id,direction}, end{junction_id}}
+  ▼
+app/api/v1/routes.py  →  app/apps/maps/road_graph.py（节点级有向图 · A*）
+  │  legs: [{road_id, from, to, cost_m}]
+  ▼
+routePlanner.ts（纯逻辑）→ store.plannedRoute {roads[], points[], lengthM}
+  │                              │
+  │                              ├→ RouteMesh.ts：路线带画在**车行驶的车道**上
+  │                              └→ roadTransition.ts：跟车按路线的下一条路转向
+  ▼
+ThreeJSRenderer：跟随时相机接管（眼高 1.35 m · 前视 14 m），跟车自身不绘制
+```
+
+三条要点：
+
+- **起点带方向**：车不在路口上，它在一条路上、正朝那头去。起点是「这条路、
+  这个方向的那一头」，路径从车**下一个到达的节点**开始算 ⇒ 返回的 leg
+  序列从车所在的位置就是可开的。单行道只能顺行，每条 leg 说清驶入方向。
+- **只有跟车按路线走**：`roadContinuation` 多一个参数，路线指定的下一条路
+  **在该路口确实是候选**时才采用，否则回落到哈希概率规则。**其余车辆一字
+  未动** ⇒ 浏览器的总延误基线（4626.8 veh·s）与 RL 迁移结论（−5.0 %）仍然
+  有效 —— 这条由「NPC 转向分布零变化」守住。
+- **路线带画在车道上，不是路中线**：leg 是路段级的（路口到路口），节点落在
+  中线上，离车 5.25 m。keep-right 规则让偏移统一：无论往哪个方向开，车都在
+  **行进方向右侧** `laneOffset(0, laneCount)` 处（实测车到路线带的横向距离
+  **0.00 m**）。
+
+**枢轴碰撞没有被这条路线修掉**：转向车横扫路口角的几何（实测最多 7.4 m）
+不变，路线消除的是「转向与计划矛盾」这一类错误。真正的修法是弧线，属于模型
+改动（见 [ADR-010](adr/ADR-010-route-planning-and-the-first-person-camera.md)
+的 Decision 末段）。
+
 ---
 
 ## 6. 跨语言契约边界
@@ -529,7 +568,7 @@ npm run test:e2e:headed   # 有头模式
 
 | 文档 | 内容 |
 |---|---|
-| [adr/ADR-001 … ADR-009](adr/) | 决策记录。001 前端框架 · 002 后端框架 · 003 物理引擎 · 004 RL 框架 · 005 DDD + 前后端切分 · 006 OSM → 内部图 · 007 部署方式（Rejected）· 008 契约的两个 oracle · 009 契约的相等判定与 libm 噪声地板。 |
+| [adr/ADR-001 … ADR-010](adr/) | 决策记录。001 前端框架 · 002 后端框架 · 003 物理引擎 · 004 RL 框架 · 005 DDD + 前后端切分 · 006 OSM → 内部图 · 007 部署方式（Rejected）· 008 契约的两个 oracle · 009 契约的相等判定与 libm 噪声地板 · 010 路线规划与第一人称相机。 |
 | [contracts/sim-snapshot.md](contracts/sim-snapshot.md) | 跨语言契约：**覆盖什么**、**不覆盖什么**（含具名盲区表）、向量清单、跨语言差异状态表。 |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | 部署：镜像配置、安装、端口、运行时数据目录、故障排查。 |
 | [USER-GUIDE.md](USER-GUIDE.md) | 用户向：四个模块的界面用法与术语表。 |

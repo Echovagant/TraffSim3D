@@ -33,6 +33,17 @@ import {
   type SignalPolicyDecision,
 } from '@application/services/signalPolicySource'
 import { requestLaneChange as requestLaneChangeFn } from '@domain/services/laneChange'
+import {
+  nextRouteRoad,
+  plannedRouteFrom,
+  routeNetworkPayload,
+  routeStartFor,
+  type PlannedRoute,
+} from '@application/services/routePlanner'
+import { defaultRouteClient } from '@infrastructure/api/routeClient'
+import type { FollowCameraTarget } from '@infrastructure/rendering/ThreeJSRenderer'
+import type { RouteRenderPath } from '@infrastructure/rendering/RouteMesh'
+import { DRIVER_EYE_HEIGHT_M } from '@shared/constants/simulation'
 import { SensorRegistry, type HostPoseLookup } from '@application/services/sensors'
 import {
   LidarSensor,
@@ -320,6 +331,138 @@ export const useWorldStore = defineStore('world', () => {
     signalPolicyDecision.value = null
     controllers = new Map()
     bumpTick()
+  }
+
+  // ===== the planned route =====
+  //
+  // A route is a plan for **one** vehicle: it drives the route's roads
+  // in order, and the camera can ride along with it. Every other
+  // vehicle keeps the ordinary hash-based turn rule — that rule is what
+  // the RL environment models, and the browser's measured delay
+  // baseline was measured with it.
+  //
+  // The route's road list starts with the road the follower is on when
+  // the plan was made, so "the next road" is the entry after the
+  // vehicle's current one.
+
+  /** The planned route (null when none is planned). */
+  const plannedRoute = ref<PlannedRoute | null>(null)
+  /** The vehicle that follows the route (null when none does). */
+  const routeFollowerId = ref<string | null>(null)
+  /** Where the follower is along the route's road list. */
+  const routeProgressIndex = ref(0)
+  /** First-person camera: ride along with the follower. */
+  const followCamera = ref(false)
+
+  /**
+   * Plan a route for a vehicle to a junction.
+   *
+   * The backend owns the search (it has the directed graph over the
+   * network's waypoints); the browser owns the bookkeeping: which
+   * vehicle follows, and how far along the route it is.
+   */
+  const planRoute = async (
+    vehicleId: string,
+    junctionId: string,
+  ): Promise<{ ok: true; route: PlannedRoute } | { ok: false; reason: string }> => {
+    const vehicle = network.value.vehicles[vehicleId]
+    if (!vehicle) return { ok: false, reason: `no such vehicle: ${vehicleId}` }
+    if (!network.value.intersections[junctionId]) {
+      return { ok: false, reason: `no such junction: ${junctionId}` }
+    }
+    const result = await defaultRouteClient.planRoute(
+      routeNetworkPayload(network.value),
+      routeStartFor(network.value, vehicle),
+      { junctionId },
+    )
+    if (!result.ok) return { ok: false, reason: result.error }
+    const route = plannedRouteFrom(network.value, result.route, vehicle, junctionId)
+    if (!route) return { ok: false, reason: 'no route connects that vehicle to the junction' }
+    plannedRoute.value = route
+    routeFollowerId.value = vehicleId
+    routeProgressIndex.value = 0
+    bumpTick()
+    return { ok: true, route }
+  }
+
+  /** Drop the planned route and leave the follow camera. */
+  const clearRoute = (): void => {
+    plannedRoute.value = null
+    routeFollowerId.value = null
+    routeProgressIndex.value = 0
+    followCamera.value = false
+    bumpTick()
+  }
+
+  /**
+   * The road the follower takes next, or null.
+   *
+   * Read by `tick()` for the vehicle that is following the route. It is
+   * null for every other vehicle, and for the follower once it has left
+   * the route (or reached its end) — in which case the vehicle falls
+   * back to the ordinary turn rule.
+   */
+  const routeNextRoadId = (vehicleId: string): string | null => {
+    const route = plannedRoute.value
+    if (!route) return null
+    if (routeFollowerId.value !== vehicleId) return null
+    const vehicle = network.value.vehicles[vehicleId]
+    if (!vehicle) return null
+    const next = nextRouteRoad(route, vehicle.roadId, routeProgressIndex.value)
+    routeProgressIndex.value = next.index
+    return next.roadId
+  }
+
+  /** How far along the route the follower is, in [0, 1]. */
+  const routeProgress = (): number => {
+    const route = plannedRoute.value
+    if (!route) return 0
+    const vehicle = routeFollowerId.value
+      ? network.value.vehicles[routeFollowerId.value]
+      : undefined
+    if (!vehicle) return 0
+    const index = route.roads.indexOf(vehicle.roadId)
+    if (index < 0 || route.roads.length <= 1) return 0
+    return Math.min(1, index / (route.roads.length - 1))
+  }
+
+  /**
+   * The first-person camera's target — the follower's eye and heading.
+   *
+   * Null while the follow camera is off, or when there is nobody to
+   * follow. The renderer asks for it every frame.
+   */
+  const followCameraTarget = (): FollowCameraTarget | null => {
+    if (!followCamera.value) return null
+    const id = routeFollowerId.value
+    if (!id) return null
+    const vehicle = network.value.vehicles[id]
+    if (!vehicle) return null
+    return {
+      position: {
+        x: vehicle.position.x,
+        y: vehicle.position.y + DRIVER_EYE_HEIGHT_M,
+        z: vehicle.position.z,
+      },
+      heading: vehicle.heading,
+      vehicleId: id,
+    }
+  }
+
+  /**
+   * The route as the renderer draws it (null when there is none).
+   *
+   * The same object is handed out for the same route — the renderer
+   * compares by identity to know whether the ribbon has to be rebuilt.
+   */
+  let routeRenderPathCache: { route: PlannedRoute; path: RouteRenderPath } | null = null
+  const routeRenderPath = (): RouteRenderPath | null => {
+    const route = plannedRoute.value
+    if (!route) return null
+    if (!routeRenderPathCache || routeRenderPathCache.route !== route) {
+      routeRenderPathCache = { route, path: { points: route.points } }
+    }
+    return routeRenderPathCache.path
   }
 
   /** Bump the fit tick so the editor view asks the camera
@@ -745,6 +888,9 @@ export const useWorldStore = defineStore('world', () => {
       // takes effect on the very next tick.
       policy: policy.value,
       replayTargetId: replayActive.value ? replayTargetId.value : null,
+      // The follower of a planned route drives the route's roads; every
+      // other vehicle keeps the ordinary turn rule.
+      routeNextRoadId,
     })
     // Re-apply the user's speed pins. `tick()` owns the speed
     // computation and always re-derives it from the road limit, so
@@ -1181,6 +1327,8 @@ export const useWorldStore = defineStore('world', () => {
     // new network's vehicles. The user's selected replay target id may
     // not even exist in the loaded scene.
     clearPolicy()
+    // A route over the old network means nothing in the new one.
+    clearRoute()
     // Assign via .value so Pinia's auto-unwrap on the store
     // surfaces the new network to EntityOutline, InspectorPanel, etc.
     network.value = next
@@ -1424,6 +1572,16 @@ export const useWorldStore = defineStore('world', () => {
     loadSignalPolicy,
     loadShippedGridPolicy,
     clearSignalPolicy,
+    // the planned-route surface
+    plannedRoute,
+    routeFollowerId,
+    followCamera,
+    planRoute,
+    clearRoute,
+    routeProgress,
+    routeNextRoadId,
+    followCameraTarget,
+    routeRenderPath,
     // sensor + exporter surface
     sensorRegistry,
     trajectoryExporter,

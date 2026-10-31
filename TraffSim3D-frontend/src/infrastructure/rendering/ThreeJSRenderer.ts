@@ -8,7 +8,34 @@ import {
   type BuiltScene,
   type RenderMode,
 } from './SceneBuilder'
+import { buildRouteMesh, type RouteRenderPath } from './RouteMesh'
 import { MAX_DPR } from '@shared/constants/simulation'
+
+/** How far ahead of the car the first-person camera looks (m). */
+export const FOLLOW_LOOK_AHEAD_M = 14
+
+/** How far below the driver's eye the camera's look-at point sits (m). */
+export const FOLLOW_LOOK_DOWN_M = 1.6
+
+/**
+ * What the first-person camera rides with.
+ *
+ * Structural on purpose — the render layer must not depend on the
+ * application layer's types.
+ */
+export interface FollowCameraTarget {
+  /** The eye position, already at the driver's eye height. */
+  position: { x: number; y: number; z: number }
+  /** The direction of travel, in radians (world XZ plane). */
+  heading: number
+  /**
+   * The vehicle the camera rides in.
+   *
+   * It is **not drawn** while the camera rides: the camera sits inside
+   * the car, so the car's own body would fill the frame.
+   */
+  vehicleId?: string
+}
 
 export interface RendererCallbacks {
   /**
@@ -45,7 +72,17 @@ export class ThreeJSRenderer {
   private getNetwork: (() => RoadNetwork) | null = null
   private getSelection: SelectionGetter | null = null
   private getTickPolicy: TickPolicyGetter | null = null
-  private controls: { update: () => void } | null = null
+  private controls: { update: () => void; target?: THREE.Vector3 } | null = null
+  /** The first-person camera's target, when one is set. */
+  private getFollowTarget: (() => FollowCameraTarget | null) | null = null
+  /** The planned route, read every frame. */
+  private getRoute: (() => RouteRenderPath | null) | null = null
+  /** The route ribbon currently in the scene (null when none). */
+  private routeMesh: THREE.Mesh | null = null
+  /** The route the ribbon was built from — a change rebuilds it. */
+  private routeRef: RouteRenderPath | null = null
+  /** The vehicle currently hidden because the camera rides in it. */
+  private hiddenFollowerId: string | null = null
   // 'flat' (default) renders ground + road meshes (used by
   // /scene-editor). 'smart-city' skips both because Cesium provides
   // the basemap underneath. Setting this calls `buildScene` again
@@ -155,9 +192,33 @@ export class ThreeJSRenderer {
   }
 
   /** Attach external controls by exposing the camera. OrbitControls wraps this. */
-  attachControls(controls: { update: () => void }): void {
+  attachControls(controls: { update: () => void; target?: THREE.Vector3 }): void {
     this.controls = controls
     this.controls.update()
+  }
+
+  /**
+   * Provide a getter for the first-person camera's target.
+   *
+   * While a target is returned, the renderer drives the camera itself:
+   * the camera sits at the target's position, looks along its heading,
+   * and the orbit controls stand down. When the getter returns `null`
+   * the orbit camera takes over again, starting from where the first
+   * person left off.
+   */
+  setFollowTargetGetter(getter: () => FollowCameraTarget | null): void {
+    this.getFollowTarget = getter
+  }
+
+  /**
+   * Provide a getter for the planned route.
+   *
+   * The ribbon is rebuilt whenever the route changes. It lives in the
+   * scene root (not in the built scene) so it survives a network
+   * rebuild — a route is drawn over the scene, it is not part of it.
+   */
+  setRouteGetter(getter: () => RouteRenderPath | null): void {
+    this.getRoute = getter
   }
 
   /**
@@ -326,11 +387,87 @@ export class ThreeJSRenderer {
       if (this.built && this.getSelection) {
         syncSelection(this.built, this.getSelection())
       }
-      this.controls?.update()
+      this.syncRouteMesh()
+      // The first-person camera owns the camera while it rides; the
+      // orbit controls stand down (their damping would fight the
+      // per-frame placement).
+      const follow = this.getFollowTarget?.() ?? null
+      if (follow) {
+        this.applyFollowCamera(follow)
+      } else {
+        this.controls?.update()
+      }
+      this.syncFollowerVisibility(follow)
       this.renderer.render(this.scene, this.camera)
       this.rafId = requestAnimationFrame(loop)
     }
     this.rafId = requestAnimationFrame(loop)
+  }
+
+  /**
+   * Place the camera at the driver's eye, looking along the heading.
+   *
+   * The look-at point is ahead of the car and slightly below the eye,
+   * which is what a driver actually looks at — a level horizon puts the
+   * road surface exactly at the middle of the frame and the far end of
+   * the street exactly at the middle of the screen, with nothing in
+   * between.
+   */
+  private applyFollowCamera(target: FollowCameraTarget): void {
+    const eye = new THREE.Vector3(target.position.x, target.position.y, target.position.z)
+    const forward = new THREE.Vector3(Math.cos(target.heading), 0, Math.sin(target.heading))
+    const look = eye.clone().add(forward.multiplyScalar(FOLLOW_LOOK_AHEAD_M))
+    look.y = target.position.y - FOLLOW_LOOK_DOWN_M
+    this.camera.position.copy(eye)
+    this.camera.lookAt(look)
+    // Keep the orbit controls' target on the look-at point, so leaving
+    // the first-person camera starts the orbit from where the user was
+    // looking rather than from wherever the orbit camera was parked.
+    this.controls?.target?.copy(look)
+  }
+
+  /**
+   * Hide the vehicle the camera rides in, and show it again when the
+   * camera leaves.
+   *
+   * The camera sits inside the car, so the car's own body would fill
+   * the frame. The vehicle keeps its slot — switching the camera back
+   * restores it exactly where it was.
+   */
+  private syncFollowerVisibility(follow: FollowCameraTarget | null): void {
+    const vehicles = this.built?.vehicles
+    if (!vehicles) return
+    const wanted = follow?.vehicleId ?? null
+    if (wanted === this.hiddenFollowerId) return
+    if (this.hiddenFollowerId) {
+      vehicles.show(this.hiddenFollowerId)
+      this.hiddenFollowerId = null
+    }
+    if (wanted) {
+      vehicles.hide(wanted)
+      this.hiddenFollowerId = wanted
+    }
+  }
+
+  /** Rebuild the route ribbon when the route changed. */
+  private syncRouteMesh(): void {
+    const route = this.getRoute?.() ?? null
+    // The comparison is by **identity**: the store hands out the same
+    // object for the same route, so an unchanged route costs one pointer
+    // comparison per frame — not a string rebuild of the whole polyline.
+    if (route === this.routeRef) return
+    this.routeRef = route
+    if (this.routeMesh) {
+      this.scene.remove(this.routeMesh)
+      this.routeMesh.geometry.dispose()
+      ;(this.routeMesh.material as THREE.Material).dispose()
+      this.routeMesh = null
+    }
+    if (!route) return
+    const mesh = buildRouteMesh(route)
+    if (!mesh) return
+    this.routeMesh = mesh
+    this.scene.add(mesh)
   }
 
   stop(): void {

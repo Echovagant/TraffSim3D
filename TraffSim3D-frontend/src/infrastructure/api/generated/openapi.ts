@@ -28,6 +28,20 @@ export interface HTTPValidationError {
   detail?: Array<ValidationError>
 }
 
+/** `RouteEndpoint` — from the OpenAPI `components.schemas`. */
+export interface RouteEndpoint {
+  junction_id?: string | null
+  road_id?: string | null
+  direction?: "forward" | "backward"
+}
+
+/** `RouteRequest` — from the OpenAPI `components.schemas`. */
+export interface RouteRequest {
+  network?: Record<string, unknown>
+  start: RouteEndpoint
+  end: RouteEndpoint
+}
+
 /** `SignalTrainRequest` — from the OpenAPI `components.schemas`. */
 export interface SignalTrainRequest {
   steps?: number
@@ -119,6 +133,9 @@ export type PathsApiV1RlTrainingConfigGetResponse = Record<string, unknown>
 /** `GET /api/v1/rl/checkpoints/{name}/weights` → 200 */
 export type PathsApiV1RlCheckpointsNameWeightsGetResponse = Record<string, unknown>
 
+/** `POST /api/v1/routes/plan` → 200 */
+export type PathsApiV1RoutesPlanPostResponse = Record<string, unknown>
+
 /** `GET /health` → 200 */
 export type PathsHealthGetResponse = Record<string, string>
 
@@ -146,6 +163,7 @@ export interface OpenApiPaths {
   "/api/v1/rl/validate-network": { post: PathsApiV1RlValidateNetworkPostResponse }
   "/api/v1/rl/training-config": { get: PathsApiV1RlTrainingConfigGetResponse }
   "/api/v1/rl/checkpoints/{name}/weights": { get: PathsApiV1RlCheckpointsNameWeightsGetResponse }
+  "/api/v1/routes/plan": { post: PathsApiV1RoutesPlanPostResponse }
   "/health": { get: PathsHealthGetResponse }
 }
 
