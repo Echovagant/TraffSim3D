@@ -80,6 +80,33 @@ from .network_graph import NetworkGraph, Route, point_on_road
 #: there when I do.
 OBS_DIM_DRIVE = 29
 
+#: The observation dimension of a driver on a POI TASK: the plain
+#: observation plus four numbers about its destination (the offset in
+#: the ego's frame, the distance, and whether it has arrived).
+#:
+#: A **separate** dimension on purpose: the shipped policy's weights
+#: (29 numbers per step) must keep working, and an observation's
+#: length is part of the weight's shape.
+OBS_DIM_DRIVE_POI = 33
+
+#: The reward for getting closer to the destination (per metre).
+#:
+#: The scale is what makes the objective say the right thing: driving
+#: 60 m to the destination earns 12, arriving earns another 20, while a
+#: collision costs 50 — so crashing is never worth it, and a conflict
+#: (2.0) has to be worth avoiding.
+TARGET_PROGRESS_REWARD = 0.2
+
+#: The reward for arriving at the destination.
+TARGET_REACH_BONUS = 20.0
+
+#: How close (m) a driver has to be to its destination to have arrived.
+#: A POI is an ADDRESS (a shop, a hospital), so "arrived" means "close
+#: enough to have stopped there" — the POI sits at the kerb, a few
+#: metres off the centre line, and the driver passes in the keep-right
+#: lane: 10 m covers that gap plus the car's own width.
+TARGET_ARRIVAL_RADIUS_M = 10.0
+
 #: The number of other vehicles each agent perceives (nearest first).
 NEAREST_OTHERS = 3
 
@@ -214,6 +241,20 @@ class DriveVehicle:
     #: This step's route progress gain (reward input; the grid env's
     #: progress reward consumes it).
     progress_gain: float = 0.0
+    #: The destination (a POI's position in the scene's metres), or
+    #: `None` when the driver has no task.
+    target_poi: tuple[float, float] | None = None
+    #: The distance to the destination now, and at the last step (the
+    #: difference is the progress the reward pays for).
+    target_distance: float = 0.0
+    prev_target_distance: float = 0.0
+    #: This step's distance-closing gain (metres; negative when the
+    #: driver moved AWAY).
+    target_gain: float = 0.0
+    #: Whether the driver arrived this step.
+    target_reached_increment: int = 0
+    #: Whether the driver has arrived at all.
+    target_reached: bool = False
     #: Whether the vehicle FINISHED on this step (reward input).
     finished_increment: int = 0
     #: The route progress at the end of the previous step.
@@ -257,6 +298,7 @@ class DriveCore:
         max_steps: int = 400,
         progress_reward: bool = False,
         conflict_penalty: float = CONFLICT_PENALTY,
+        poi_tasks: bool = False,
     ) -> None:
         if n_agents < 1:
             raise ValueError(f"n_agents must be >= 1, got {n_agents}")
@@ -271,6 +313,13 @@ class DriveCore:
         # opt-in, enabled by the GRID scenario where the standstill
         # equilibrium was measured.
         self.progress_reward = progress_reward
+        # The POI TASK mode: every agent gets a destination (a point of
+        # interest) and its observation carries the four numbers that
+        # describe it. The observation is LONGER in this mode — the
+        # shipped policy's weights (29 numbers) must keep working.
+        self.poi_tasks = poi_tasks
+        if poi_tasks:
+            self.obs_dim = OBS_DIM_DRIVE_POI
         # The conflict penalty is recalibratable per scenario: the grid
         # measures MORE conflict events per route (a route crosses
         # several junctions), so the same 1.0/event that worked for one
@@ -509,6 +558,7 @@ class DriveCore:
 
         for vehicle in self.vehicles:
             self._advance_route_progress(vehicle)
+            self._update_target_progress(vehicle)
 
         self._detect_collisions()
         self._accumulate_delay()
@@ -523,16 +573,43 @@ class DriveCore:
         return observations, rewards, terminated, truncated, info
 
     def _drive_agent(self, vehicle: DriveVehicle, action: Sequence[float]) -> None:
-        """An agent: the policy's acceleration, Pure Pursuit + a residual."""
+        """An agent: the policy's acceleration, Pure Pursuit + a residual.
+
+        The speed is **capped at the road's limit**, like the browser's
+        model (the browser clamps the vehicle to its road's speed limit).
+        Without the cap a policy that keeps accelerating runs away: the
+        measured baseline reached **120 m/s** (the road's limit is
+        16.67), which is not a driver, it is a bug - and it made the
+        scripted baselines incomparable.
+        """
         accel = max(-MAX_ACCEL, min(MAX_ACCEL, float(action[0]) * MAX_ACCEL))
         steer_residual = max(-1.0, min(1.0, float(action[1]))) * MAX_STEER
 
-        vehicle.speed = max(0.0, vehicle.speed + accel * DT)
+        if vehicle.finished:
+            # A driver that has run out of route stops at its end
+            # instead of circling the block (it would otherwise drive
+            # past the end, be projected back, and drive again).
+            vehicle.speed = 0.0
+            return
+        vehicle.speed = max(0.0, min(SPEED_LIMIT_DRIVE, vehicle.speed + accel * DT))
+        # The heading is the Pure Pursuit's (plus the policy's residual) —
+        # it is what the driver *faces* and what the observation
+        # reports.
         steer = self._pure_pursuit_steer(vehicle) + steer_residual
         steer = max(-MAX_STEER, min(MAX_STEER, steer))
         vehicle.heading += steer * DT
-        vehicle.x += vehicle.speed * math.cos(vehicle.heading) * DT
-        vehicle.z += vehicle.speed * math.sin(vehicle.heading) * DT
+        # The POSITION is lane-locked: the driver advances along its own
+        # lane and sits on the lane's line.
+        #
+        # The free integration this replaces was the source of a long
+        # chain of defects: a driver that turned even slightly wrong
+        # drifted a metre or two sideways per turn, and after the
+        # junction it was metres off its lane (measured 18 m), so it
+        # could not reach a POI that sat at the kerb and it could not
+        # hold a lane at all. The browser's model is lane-locked too
+        # (`laneGeometry.lanePoint` + the drift guard), so this is the
+        # same model, not a simplification of it.
+        self._advance_agent_along_lane(vehicle)
 
     def _drive_npc(self, vehicle: DriveVehicle) -> None:
         """Scripted traffic: IDM for the speed, Pure Pursuit for the line."""
@@ -585,6 +662,26 @@ class DriveCore:
                 best_distance = distance
         return best
 
+    def _advance_agent_along_lane(self, vehicle: DriveVehicle) -> None:
+        """Move the driver along its lane, and put it ON the lane.
+
+        The lane is the keep-right one (the agents drive in lane 0),
+        the same lane the browser's replay vehicles use.
+        """
+        route = vehicle.route
+        if not route.segment_ids:
+            return
+        idx = min(vehicle.current_seg_idx, len(route.segment_ids) - 1)
+        seg_id = route.segment_ids[idx]
+        segment = self.graph.segments.get(seg_id)
+        if segment is None:
+            return
+        vehicle.seg_t = max(0.0, min(segment.length, vehicle.seg_t + vehicle.speed * DT))
+        heading = self._segment_heading(segment, vehicle.seg_t)
+        x, z = self._lane_point(segment, vehicle.seg_t, heading)
+        vehicle.x = x
+        vehicle.z = z
+
     def _pure_pursuit_steer(self, vehicle: DriveVehicle) -> float:
         """The steering that keeps a vehicle on its route."""
         if not vehicle.route.segment_ids:
@@ -603,6 +700,12 @@ class DriveCore:
                 target = self._lane_point(next_segment, LOOKAHEAD_DISTANCE * 0.5, next_heading)
                 return self._steer_towards(vehicle, target)
         clamped = min(target_t, segment.length)
+        # The target is the vehicle's **lane** ahead, not the road's
+        # centre line: aiming at the centre line made the driver cut
+        # the corner and leave its lane (measured on the POI task: the
+        # driver drifted 18 m sideways across the carriageway and
+        # stopped 20 m short of its destination). The browser's model
+        # aims at the lane point too (`laneGeometry.lanePoint`).
         target = self._lane_point(segment, clamped, self._segment_heading(segment, clamped))
         return self._steer_towards(vehicle, target)
 
@@ -788,6 +891,27 @@ class DriveCore:
         ]
         return zones or [self.conflict_point]
 
+    def _update_target_progress(self, vehicle: DriveVehicle) -> None:
+        """The distance to the destination, and whether it has arrived.
+
+        The arrival test is a **radius**, not a waypoint: a POI is an
+        address (a shop, a hospital), so "arrived" means "close
+        enough to have stopped there" — 10 m, which covers the gap
+        between the keep-right lane and the kerb plus the car's own
+        width.
+        """
+        if vehicle.target_poi is None:
+            vehicle.target_gain = 0.0
+            return
+        target_x, target_z = vehicle.target_poi
+        distance = math.hypot(vehicle.x - target_x, vehicle.z - target_z)
+        vehicle.prev_target_distance = vehicle.target_distance
+        vehicle.target_distance = distance
+        vehicle.target_gain = vehicle.prev_target_distance - distance
+        if distance <= TARGET_ARRIVAL_RADIUS_M and not vehicle.target_reached:
+            vehicle.target_reached = True
+            vehicle.target_reached_increment = 1
+
     def _detect_collisions(self) -> None:
         """Count the overlaps and the conflicts.
 
@@ -891,7 +1015,10 @@ class DriveCore:
 
     def _termination(self) -> tuple[bool, bool, dict[str, Any]]:
         all_finished = all(v.finished for v in self.agents)
-        if all_finished:
+        # In POI-task mode the route's end is NOT the goal — the
+        # destination is. The env ends the round when every driver has
+        # ARRIVED (or the clock runs out).
+        if all_finished and not self.poi_tasks:
             self._terminated = True
             self._terminated_reason = "success"
         truncated = self.step_count >= self.max_steps and not self._terminated
@@ -926,6 +1053,11 @@ class DriveCore:
                 # stops the bleed for good.
                 reward += PROGRESS_REWARD * agent.progress_gain
                 reward += FINISH_BONUS * agent.finished_increment
+            if self.poi_tasks:
+                # Closing on the destination earns what waiting costs; the
+                # arrival itself pays more than the drive.
+                reward += TARGET_PROGRESS_REWARD * agent.target_gain
+                reward += TARGET_REACH_BONUS * agent.target_reached_increment
             rewards.append(reward)
         return rewards
 
@@ -942,7 +1074,7 @@ class DriveCore:
         return self.conflict_point
 
     def _observation(self, agent: DriveVehicle) -> np.ndarray:
-        obs = np.zeros(OBS_DIM_DRIVE, dtype=np.float32)
+        obs = np.zeros(self.obs_dim, dtype=np.float32)
         conflict_x, conflict_z = self._conflict_point_for(agent)
 
         own_distance = math.hypot(agent.x - conflict_x, agent.z - conflict_z)
@@ -990,6 +1122,21 @@ class DriveCore:
             obs[base + 6] = (
                 1.0 if other.speed < WAITING_SPEED and other_distance > CONFLICT_RADIUS else 0.0
             )
+
+        if self.poi_tasks:
+            # The destination, in the EGO's frame: "which way is it, and
+            # how far is it". Without these the policy cannot know where
+            # it is going — it would be driving the negotiation with no
+            # idea of the objective.
+            target_x, target_z = agent.target_poi or (agent.x, agent.z)
+            dx = target_x - agent.x
+            dz = target_z - agent.z
+            cos_h = math.cos(-agent.heading)
+            sin_h = math.sin(-agent.heading)
+            obs[OBS_DIM_DRIVE] = (dx * cos_h - dz * sin_h) / 50.0
+            obs[OBS_DIM_DRIVE + 1] = (dx * sin_h + dz * cos_h) / 50.0
+            obs[OBS_DIM_DRIVE + 2] = min(agent.target_distance / 100.0, 1.0)
+            obs[OBS_DIM_DRIVE + 3] = 1.0 if agent.target_reached else 0.0
 
         return obs
 

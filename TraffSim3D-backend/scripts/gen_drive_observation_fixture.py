@@ -302,7 +302,7 @@ def build_fixture() -> dict[str, Any]:
         "_comment": (
             "The cooperative-driving policy's OBSERVATION contract. Each "
             "scenario is a deterministic scene state around the unsignalised "
-            "junction; expected[] is the 23-dim observation "
+            "junction; expected[] is the 29-dim observation "
             "app.apps.rl.drive_core computes for each agent, computed in "
             "float64 (the same arithmetic the browser runs) and cross-checked "
             "against the core's own float32 output. The frontend's "
@@ -325,7 +325,11 @@ def build_fixture() -> dict[str, Any]:
 def main() -> None:
     fixture = build_fixture()
     FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    FIXTURE_PATH.write_text(json.dumps(fixture, indent=2) + "\n", encoding="utf-8")
+    # LF, always: the frontend's prettier gate (`endOfLine: lf`) checks
+    # this file, and `write_text` would otherwise write CRLF on Windows —
+    # the regenerated file would then fail the gate on the developer's
+    # machine while passing in CI.
+    FIXTURE_PATH.write_text(json.dumps(fixture, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {FIXTURE_PATH}")
     print(
         f"scenarios: {len(fixture['scenarios'])} · expected observations: {len(fixture['expected'])}"

@@ -61,17 +61,29 @@ def test_a_step_returns_one_reward_per_driver() -> None:
 
 def test_the_reward_charges_the_blocker_for_the_wait_it_causes() -> None:
     """The cooperation gradient, measured on the reward itself."""
-    env = IntersectionEnv(n_agents=1, n_npcs=1)
+    # Two AGENTS: the scripted traffic (the NPCs) is not lane-locked —
+    # only the learned drivers are — so the scenario has to be set up
+    # between two of them.
+    env = IntersectionEnv(n_agents=2, n_npcs=0)
     env.reset(seed=0)
     leader = env.core.agents[0]
-    follower = env.core.npcs[0]
-    follower.x = leader.x + 8.0
-    follower.z = leader.z
+    follower = env.core.agents[1]
+    # The follower is 8 m BEHIND the leader on the same arm.
+    #
+    # The position cannot simply be written: the drivers are
+    # **lane-locked** (their position IS their lane point), so the
+    # scenario is set up through the route and the arc length.
+    follower.route = leader.route
+    follower.current_seg_idx = leader.current_seg_idx
+    follower.seg_t = max(0.0, leader.seg_t - 8.0)
+    # The heading too: the blocker's search is a SPATIAL cone ahead of
+    # the waiting driver, and the follower's heading still pointed along
+    # the arm it was born on.
     follower.heading = leader.heading
     follower.speed = 0.0
     leader.speed = 0.0
 
-    _obs, rewards, _term, _trunc, _info = env.step(np.zeros((1, 2), np.float32))
+    _obs, rewards, _term, _trunc, _info = env.step(np.zeros((2, 2), np.float32))
 
     # The follower pays for its own wait ...
     assert follower.delay_increment > 0.0
@@ -83,12 +95,17 @@ def test_the_reward_charges_the_blocker_for_the_wait_it_causes() -> None:
 def test_a_conflict_is_penalised() -> None:
     env = IntersectionEnv(n_agents=2, n_npcs=0)
     env.reset(seed=0)
-    first, second = env.core.agents[0], env.core.agents[1]
-    first.x = first.z = 0.0
-    second.x = second.z = 0.0
-    first.speed = second.speed = 0.0
+    first = env.core.agents[0]
+    second = env.core.agents[1]
+    # Both drivers AT the junction. Their positions are lane-locked, so
+    # the scenario is set up by putting them at the end of their
+    # approach (the junction's box reaches 6 m).
+    for agent in (first, second):
+        segment = env.core.graph.segments[agent.route.segment_ids[0]]
+        agent.seg_t = segment.length - 2.0
+        agent.speed = 0.0
 
-    _obs, rewards, _term, _trunc, info = env.step(np.zeros((2, 2), np.float32))
+    _obs, rewards, _term, _tr, info = env.step(np.zeros((2, 2), np.float32))
 
     assert info["conflicts"] >= 1
     assert rewards[0] < 0.0 and rewards[1] < 0.0

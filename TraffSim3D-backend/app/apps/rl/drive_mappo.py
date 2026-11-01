@@ -179,6 +179,10 @@ class TrainingConfig:
     #: The seeds the evaluation runs on.
     eval_seeds: tuple[int, ...] = (0, 1, 2)
     hidden_sizes: tuple[int, ...] = HIDDEN_SIZES
+    #: The observation dimension the actor reads. The POI-navigation
+    #: task observes 33 numbers (the plain 29 plus four about the
+    #: destination); the negotiation task observes 29.
+    obs_dim: int = OBS_DIM_DRIVE
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -401,6 +405,7 @@ def evaluate_policy(
     finished: list[int] = []
     deadlock: list[int] = []
     steps: list[int] = []
+    arrived: list[int] = []
 
     for seed in config.eval_seeds:
         observation, _info = evaluation_env.reset(seed=seed)
@@ -422,8 +427,10 @@ def evaluate_policy(
         finished.append(int(info.get("finished", 0)))
         deadlock.append(int(info.get("deadlock_steps", 0)))
         steps.append(step_count)
+        if "arrived" in info:
+            arrived.append(int(info["arrived"]))
 
-    return {
+    metrics: dict[str, Any] = {
         "return": float(np.mean(returns)),
         "return_std": float(np.std(returns)),
         "conflicts": float(np.mean(conflicts)),
@@ -434,6 +441,15 @@ def evaluate_policy(
         "steps": float(np.mean(steps)),
         "seeds": len(config.eval_seeds),
     }
+    if arrived:
+        # The task's own metric: how many drivers got to their
+        # destination. The accumulated return is NOT a substitute — it
+        # pays for every metre closed, so a driver that dawdles
+        # accumulates more of it than one that arrives (measured: the
+        # "best" checkpoint by return was a dawdler, 2287 vs 577 for the
+        # last one).
+        metrics["arrived"] = float(np.mean(arrived))
+    return metrics
 
 
 def export_weights(actor: DriveActor, name: str) -> dict[str, Any]:
@@ -528,7 +544,7 @@ def train_drive_mappo(
     generator = torch.Generator().manual_seed(config.seed)
 
     actor = DriveActor(
-        obs_dim=OBS_DIM_DRIVE,
+        obs_dim=config.obs_dim,
         action_dim=ACTION_DIM_DRIVE,
         hidden=config.hidden_sizes,
     ).to(device)
@@ -537,7 +553,7 @@ def train_drive_mappo(
     if init_weights is not None:
         actor.load_state_dict(load_exported_weights(Path(init_weights)), strict=True)
     critic = DriveCritic(
-        state_dim=OBS_DIM_DRIVE * config.n_agents,
+        state_dim=config.obs_dim * config.n_agents,
         n_agents=config.n_agents,
         hidden=config.hidden_sizes,
     ).to(device)
@@ -558,6 +574,7 @@ def train_drive_mappo(
 
     curve: list[dict[str, Any]] = []
     best_return = -math.inf
+    best_key = (-math.inf, -math.inf)
     best_step = 0
     best_weights: dict[str, Any] | None = None
     best_metrics: dict[str, Any] = {}
@@ -594,7 +611,18 @@ def train_drive_mappo(
             metrics = evaluate_policy(actor, config, env=env)  # the run's own env
             metrics.update({"step": step_count, **stats})
             curve.append(metrics)
-            if metrics["return"] > best_return:
+            # The selection follows the TASK, not the accumulated
+            # return: on a POI task the drivers' arrivals are what the
+            # run is for, and the return pays for every metre closed —
+            # so it ranks a dawdler above a driver that arrives.
+            arrivals = metrics.get("arrived")
+            key = (
+                (arrivals, metrics["return"])
+                if arrivals is not None
+                else (metrics["return"], metrics["return"])
+            )
+            if key > best_key:
+                best_key = key
                 best_return = metrics["return"]
                 best_step = step_count
                 best_metrics = dict(metrics)

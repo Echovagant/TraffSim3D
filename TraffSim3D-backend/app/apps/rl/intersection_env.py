@@ -84,10 +84,19 @@ def build_unsignalised_junction_network(arm_length: float = ARM_LENGTH_M) -> dic
     roads: list[dict[str, Any]] = []
     connected: list[str] = []
     # The four directions, in the order north / east / south / west.
+    #
+    # **North is -Z** — the scene's frame is X = east, Z = south (see
+    # `RoadNetwork`'s own note). The mapping used to be the other way
+    # round ("n" at +Z), which put the arm's NAME against the
+    # coordinate: the browser's own grid scene builds "n" at -Z (it was
+    # written from the same frame note), so the two sides' grids were
+    # **not the same map** — the same arms, mirrored. It cost the POI
+    # navigation task its destinations: a driver drove north while its
+    # POI sat south of it, and never arrived.
     directions = [
-        ("n", 0.0, 1.0),
+        ("n", 0.0, -1.0),
         ("e", 1.0, 0.0),
-        ("s", 0.0, -1.0),
+        ("s", 0.0, 1.0),
         ("w", -1.0, 0.0),
     ]
     for name, dx, dz in directions:
