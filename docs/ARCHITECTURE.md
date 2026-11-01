@@ -683,6 +683,29 @@ flowchart LR
 - 前端侧还有 Cesium 底图路径：`src/infrastructure/cesium/viewer.ts`、`src/infrastructure/cesium/cameraSync.ts`、`src/infrastructure/cesium/loadOSMScene.ts`，
   以及按需注入的 Cesium 运行时 `src/infrastructure/cesium/loadCesiumRuntime.ts`。
 
+**底图与路网必须同源同基准**（2026-11-01 换源，ADR-015）。底图现在用
+**OpenStreetMap 的瓦片**（社区镜像 `tile.openstreetmap.de` 的 a/b/c 三个子域），
+**和路网数据同源、同样是 WGS84** ⇒ 底图上的道路与叠加的 OSM 道路折线**严丝合缝**。
+原来的高德瓦片是 **GCJ-02**（火星坐标），在项目自己的原点处偏
+**东 525 m / 南 301 m（|d| = 605 m）**——同一批道路折线画在底图上时整体错开
+半公里（实测截图：高德底图下画面中心是人民大会堂、OSM 折线在天安门广场西侧；
+OSM 底图下画面中心正是天安门、折线贴着底图的道路走）。官方
+`tile.openstreetmap.org` 在本网络不通（21 s 连接超时），所以用社区镜像；OSMF 的
+瓦片政策仍然适用（轻量使用、不得批量下载、应用要自报身份），因此署名
+（`© OpenStreetMap contributors`）**显示在画面上**。
+
+代价是**慢**：镜像每张瓦片 1–4 s，Cesium 的 LOD 链从 z1 一路铺到 z16 实测约 **90 s**
+才铺满（高德瓦片 1.5 s/张但错位）。另外 Cesium 的相机读数是**弧度**
+（`positionCartographic` 返回 radians，不是 degrees）——排查时差点因此误判
+「相机跑到了几内亚湾」。
+
+**底图此前从未可见过**（既有缺陷，已修）：渲染器虽然用 `alpha: true` +
+`setClearColor(0x000000, 0)` 清成透明，但 Three.js 会**先铺满 `scene.background`**
+（0x0b1220）——透明清屏救不了它，整个 Cesium 底图被挡在下面。修法是
+`ThreeJSRenderer.setTransparentBackground(true)`（`scene.background = null`），
+**只在 Smart City 视图里开**（场景编辑器要的就是那个深色背景）。
+实测：把 Three.js 画布隐藏后底图立刻完整出现——它一直都在那儿，只是被挡住了。
+
 ---
 
 ## 8. 可复现的门禁
@@ -844,7 +867,7 @@ npm run test:e2e:headed   # 有头模式
 
 | 文档 | 内容 |
 |---|---|
-| [adr/ADR-001 … ADR-014](adr/) | 决策记录。001 前端框架 · 002 后端框架 · 003 物理引擎 · 004 RL 框架 · 005 DDD + 前后端切分 · 006 OSM → 内部图 · 007 部署方式（Rejected）· 008 契约的两个 oracle · 009 契约的相等判定与 libm 噪声地板 · 010 路线规划与第一人称相机 · 011 无信号路口的多车协商 · 012 转弯从枢轴改为弧线 · 013 POI 作为导航终点 · 014 兴趣点来自 OpenStreetMap（不用需要 Key 的商业服务）。 |
+| [adr/ADR-001 … ADR-015](adr/) | 决策记录。001 前端框架 · 002 后端框架 · 003 物理引擎 · 004 RL 框架 · 005 DDD + 前后端切分 · 006 OSM → 内部图 · 007 部署方式（Rejected）· 008 契约的两个 oracle · 009 契约的相等判定与 libm 噪声地板 · 010 路线规划与第一人称相机 · 011 无信号路口的多车协商 · 012 转弯从枢轴改为弧线 · 013 POI 作为导航终点 · 014 兴趣点来自 OpenStreetMap（不用需要 Key 的商业服务）· 015 底图也来自 OpenStreetMap（与路网同源同基准）。 |
 | [contracts/sim-snapshot.md](contracts/sim-snapshot.md) | 跨语言契约：**覆盖什么**、**不覆盖什么**（含具名盲区表）、向量清单、跨语言差异状态表。 |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | 部署：镜像配置、安装、端口、运行时数据目录、故障排查。 |
 | [USER-GUIDE.md](USER-GUIDE.md) | 用户向：四个模块的界面用法与术语表。 |
