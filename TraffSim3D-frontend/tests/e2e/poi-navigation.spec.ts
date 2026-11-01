@@ -1,0 +1,140 @@
+/**
+ * Driving to a POI — the browser-side loop.
+ *
+ * The story this spec tells: a POI is fetched for the map, the driver
+ * picks one as the **destination**, the browser routes the scene's
+ * first car to the road it stands beside, the first-person camera
+ * rides along, and the car **arrives**.
+ *
+ * The POI fetch is stubbed (the real one is a public Overpass call
+ * that takes a minute), but the **route endpoint is not**: a stubbed
+ * plan would prove nothing about the real thing — the backend plans
+ * over the scene's own directed graph.
+ *
+ * The scene is the 5×5 **grid**, not the default cross scene: the
+ * cross scene's roads carry no waypoints, so its route graph has no
+ * intermediate nodes and the arms do not connect (a route there is
+ * honestly "not found").
+ */
+import { test, expect } from '@playwright/test'
+import { waitForSceneReady, switchScene } from './helpers/wait'
+
+interface PoiWorld {
+  network: {
+    origin?: { lat: number; lon: number } | null
+    roads: Record<string, { id: string; waypoints?: { x: number; z: number }[] }>
+    vehicles: Record<string, { roadId: string; position: { x: number; y: number; z: number } }>
+  }
+  plannedRoute: { roads: string[]; lengthM: number } | null
+  routeFollowerId: string | null
+  followCamera: boolean
+  poiDestinationId: string | null
+  poiDistanceM: number | null
+  poiArrived: boolean
+}
+
+const world = (page: import('@playwright/test').Page): Promise<PoiWorld> =>
+  page.evaluate(() => (window as unknown as { __world: PoiWorld }).__world)
+
+/**
+ * A POI beside one of the grid's roads.
+ *
+ * NOT the driver's own road: the planner forbids a route that starts
+ * with the road the car is on (that would be a U-turn at the
+ * junction it is about to reach), so a POI there sends the car
+ * around the block — measured: the journey took **twice** as long.
+ */
+const poiNextToARoad = async (page: import('@playwright/test').Page) =>
+  page.evaluate(() => {
+    const w = (window as unknown as { __world: PoiWorld }).__world
+    const road = Object.values(w.network.roads)[0]!
+    const line = road.waypoints ?? []
+    const middle = line[Math.floor(line.length / 2)] ?? { x: 0, z: 0 }
+    return { x: middle.x + 5, z: middle.z + 5 }
+  })
+
+test.describe('Driving to a point of interest', () => {
+  // The car really drives: the journey is wall-clock time at the
+  // simulation's own pace (a few tens of seconds), so the spec needs
+  // more than the suite's default 60 s.
+  test.setTimeout(240_000)
+
+  test('the car routes to the POI and arrives', async ({ page }) => {
+    await waitForSceneReady(page)
+    await switchScene(page, 'grid')
+    await page.waitForTimeout(1500)
+
+    // The grid is a busy city (67 vehicles): at 1× the drive takes
+    // minutes, so the sim runs at 4× — the journey is the same, the
+    // waiting is not.
+    await page.evaluate(() => {
+      const w = (window as unknown as { __world: PoiWorld & { setTickRate?: (r: number) => void } })
+        .__world
+      w.setTickRate?.(4)
+    })
+
+    // A POI belongs to a map: the scene needs a geographic anchor.
+    await page.evaluate(() => {
+      const w = (window as unknown as { __world: PoiWorld }).__world
+      w.network.origin = { lat: 22.54297, lon: 114.06865 }
+    })
+
+    const spot = await poiNextToARoad(page)
+    await page.route('**/api/v1/maps/poi', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          source: 'osm',
+          count: 1,
+          pois: [
+            {
+              id: 'osm-node-1',
+              name: '示例咖啡',
+              type: 'amenity=cafe',
+              typeCode: 'amenity',
+              category: '餐饮',
+              address: '',
+              lon: 114.069,
+              lat: 22.543,
+              x: spot.x,
+              z: spot.z,
+            },
+          ],
+        }),
+      })
+    })
+
+    await page.click('[data-testid="poi-load-button"]')
+    await expect(page.locator('[data-testid="poi-item"]')).toHaveCount(1)
+    await page.locator('[data-testid="poi-item"]').first().click()
+
+    // "开过去": the POI becomes the destination.
+    await page.click('[data-testid="poi-go-button"]')
+    await expect(page.locator('[data-testid="route-hud"]')).toBeVisible()
+
+    const planned = await world(page)
+    expect(planned.poiDestinationId).toBe('osm-node-1')
+    expect(planned.plannedRoute).not.toBeNull()
+    expect(planned.plannedRoute!.roads.length).toBeGreaterThan(1)
+    expect(planned.plannedRoute!.lengthM).toBeGreaterThan(0)
+    // The first-person camera is switched on: choosing a destination
+    // is about riding to it.
+    expect(planned.followCamera).toBe(true)
+    expect(planned.routeFollowerId).toBeTruthy()
+
+    // The instrument panel names the destination and the distance.
+    await expect(page.locator('[data-testid="route-hud-destination"]')).toContainText('示例咖啡')
+    await expect(page.locator('[data-testid="route-hud-distance"]')).toBeVisible()
+
+    // The car drives there: the distance shrinks.
+    await expect
+      .poll(async () => (await world(page)).poiDistanceM ?? Infinity, { timeout: 60_000 })
+      .toBeLessThan(planned.poiDistanceM ?? Infinity)
+
+    // And it arrives.
+    await expect.poll(async () => (await world(page)).poiArrived, { timeout: 120_000 }).toBe(true)
+    await expect(page.locator('[data-testid="poi-arrived"]')).toContainText('已到达')
+    await expect(page.locator('[data-testid="route-hud-distance"]')).toContainText('已到达')
+  })
+})

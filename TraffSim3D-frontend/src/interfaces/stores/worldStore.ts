@@ -47,6 +47,11 @@ import {
 } from '@application/services/routePlanner'
 import { defaultRouteClient } from '@infrastructure/api/routeClient'
 import { defaultPoiClient, boundsToDegrees, type Poi } from '@infrastructure/api/poiClient'
+import {
+  distanceToPoi,
+  nearestRoadToPoi,
+  POI_ARRIVAL_RADIUS_M,
+} from '@application/services/poiNavigation'
 import type { FollowCameraTarget } from '@infrastructure/rendering/ThreeJSRenderer'
 import type { RouteRenderPath } from '@infrastructure/rendering/RouteMesh'
 import { DRIVER_EYE_HEIGHT_M } from '@shared/constants/simulation'
@@ -422,6 +427,75 @@ export const useWorldStore = defineStore('world', () => {
   const clearPois = (): void => {
     pois.value = []
     poiSelectedId.value = null
+    poiDestinationId.value = null
+    poiArrived.value = false
+    bumpTick()
+  }
+
+  // ===== driving to a POI =====
+  //
+  // The POI as a **destination**: the driver is routed to it and the
+  // first-person camera rides along. The route itself is the ordinary
+  // planned route (the backend plans it over the same directed graph
+  // the junction routes use) — the only difference is where it ends:
+  // at a POI beside a road rather than at a junction.
+  /** The POI the driver is heading for (null when there is none). */
+  const poiDestinationId = ref<string | null>(null)
+  /** Whether the driver has reached that POI. */
+  const poiArrived = ref(false)
+  /** The distance still to go, in metres (null when there is no destination). */
+  const poiDistanceM = ref<number | null>(null)
+
+  /**
+   * Plan a route to a POI and start driving there.
+   *
+   * The POI is addressed by the road it stands next to (see
+   * `poiNavigation`), because that is what the route planner
+   * understands. The first-person camera is switched on: the point of
+   * choosing a destination is to ride to it.
+   */
+  const planRouteToPoi = async (
+    poiId: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    const poi = pois.value.find((entry) => entry.id === poiId)
+    if (!poi) return { ok: false, reason: `没有这个兴趣点：${poiId}` }
+    const driverId = poiDriverId()
+    const vehicle = driverId ? network.value.vehicles[driverId] : undefined
+    if (!vehicle) return { ok: false, reason: '这个场景里没有车可以出发' }
+    const end = nearestRoadToPoi(network.value, poi)
+    if (!end) return { ok: false, reason: '这个兴趣点附近没有道路' }
+
+    const result = await defaultRouteClient.planRoute(
+      routeNetworkPayload(network.value),
+      routeStartFor(network.value, vehicle),
+      end,
+    )
+    if (!result.ok) return { ok: false, reason: result.error }
+    const route = plannedRouteFrom(network.value, result.route, vehicle, poi.id)
+    if (!route) return { ok: false, reason: '没有一条路能开到那个兴趣点' }
+
+    plannedRoute.value = route
+    routeFollowerId.value = vehicle.id
+    routeProgressIndex.value = 0
+    poiDestinationId.value = poi.id
+    poiArrived.value = false
+    poiDistanceM.value = distanceToPoi(vehicle, poi)
+    followCamera.value = true
+    bumpTick()
+    return { ok: true }
+  }
+
+  /** The car that drives to a POI: the first one, by id (deterministic). */
+  const poiDriverId = (): string | null => {
+    const ids = Object.keys(network.value.vehicles).sort()
+    return ids[0] ?? null
+  }
+
+  /** Forget the POI destination (the route stays; the arrival does not). */
+  const clearPoiDestination = (): void => {
+    poiDestinationId.value = null
+    poiArrived.value = false
+    poiDistanceM.value = null
     bumpTick()
   }
 
@@ -1087,6 +1161,23 @@ export const useWorldStore = defineStore('world', () => {
     // the pins have to be re-applied *after* it — otherwise a pin
     // would last exactly one frame (the bug this replaces).
     applySpeedOverrides()
+
+    // The arrival at a POI destination. The driver passes the POI
+    // while driving the last road — the route ends at the road's
+    // node, which can be a little before or after the POI itself —
+    // so the test is the DISTANCE, not the route's end.
+    if (poiDestinationId.value && routeFollowerId.value && !poiArrived.value) {
+      const poi = pois.value.find((entry) => entry.id === poiDestinationId.value)
+      const driver = network.value.vehicles[routeFollowerId.value]
+      if (poi && driver) {
+        const distance = distanceToPoi(driver, poi)
+        poiDistanceM.value = distance
+        if (distance <= POI_ARRIVAL_RADIUS_M) {
+          poiArrived.value = true
+          bumpTick()
+        }
+      }
+    }
     // Update LiDAR frame counter from sensorRegistry's actual scan count
     // (not per-tick). The registry tracks frames produced (throttled scans only).
     if (lidarEnabled.value) {
@@ -1775,6 +1866,13 @@ export const useWorldStore = defineStore('world', () => {
     loadPois,
     selectPoi,
     clearPois,
+    // driving to a POI
+    poiDestinationId,
+    poiArrived,
+    poiDistanceM,
+    planRouteToPoi,
+    clearPoiDestination,
+    poiDriverId,
     // the planned-route surface
     plannedRoute,
     routeFollowerId,

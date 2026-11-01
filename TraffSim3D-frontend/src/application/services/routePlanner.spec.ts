@@ -12,6 +12,8 @@ import {
   routeNetworkPayload,
   routeProgress,
   routeStartFor,
+  routeTurnHint,
+  type PlannedRoute,
 } from './routePlanner'
 import type { RoutePlanResponse } from '@infrastructure/api/routeClient'
 import { createRoadNetwork } from '@domain/entities/RoadNetwork'
@@ -222,5 +224,47 @@ describe('routeNetworkPayload', () => {
     expect(Array.isArray(payload.roads)).toBe(true)
     expect(Array.isArray(payload.intersections)).toBe(true)
     expect(Array.isArray(payload.vehicles)).toBe(true)
+  })
+})
+
+describe('routeTurnHint', () => {
+  /** A route whose first leg runs east and whose second runs south. */
+  const eastThenSouth = (): PlannedRoute => ({
+    roads: ['r-a', 'r-b', 'r-c'],
+    // The polyline is [vehicle, leg0.from, leg0.to, leg1.from, leg1.to].
+    points: [
+      { x: 0, y: 0, z: 0 },
+      { x: 0, y: 0, z: 0 },
+      { x: 100, y: 0, z: 0 },
+      { x: 100, y: 0, z: 0 },
+      { x: 100, y: 0, z: 100 },
+    ],
+    lengthM: 200,
+    legs: [],
+    destinationId: 'r-c',
+  })
+
+  it('says right when the route turns east→south', () => {
+    // The scene's frame: x east, z south. Turning from east to south
+    // is a turn to the driver's right.
+    expect(routeTurnHint(eastThenSouth(), 'r-a', 0)).toBe('右转')
+  })
+
+  it('says left when the route turns the other way', () => {
+    const route = eastThenSouth()
+    route.points[3] = { x: 100, y: 0, z: 0 }
+    route.points[4] = { x: 100, y: 0, z: -100 }
+    expect(routeTurnHint(route, 'r-a', 0)).toBe('左转')
+  })
+
+  it('says straight when the route carries on', () => {
+    const route = eastThenSouth()
+    route.points[3] = { x: 100, y: 0, z: 0 }
+    route.points[4] = { x: 200, y: 0, z: 0 }
+    expect(routeTurnHint(route, 'r-a', 0)).toBe('直行')
+  })
+
+  it('says arrived at the end of the route', () => {
+    expect(routeTurnHint(eastThenSouth(), 'r-c', 0)).toBe('到达')
   })
 })

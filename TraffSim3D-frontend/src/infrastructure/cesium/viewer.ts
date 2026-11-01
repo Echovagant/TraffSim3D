@@ -17,12 +17,13 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import type { GeoOrigin } from '@domain/entities/RoadNetwork'
 import type { TangentOrigin } from './cameraSync'
+import { ancestorTiles, prefetchTiles, tileZoomForHeight } from './tilePrefetch'
 
 export interface CesiumSceneOptions {
   /**
    * World-space center (WGS84). Defaults to the payload's projection
    * origin when the scene carries one, else to `DEFAULT_TANGENT_ORIGIN`
-   * (天安门广场中央) — see `resolveTangentOrigin`.
+   * (深圳福田中心) — see `resolveTangentOrigin`.
    */
   center?: TangentOrigin
   /** Initial camera height in meters (default 1500m = bird's-eye). */
@@ -130,23 +131,72 @@ export const createCesiumViewer = (
   // without `orientation` is pitch=-90° (straight down), heading=0
   // (north), roll=0. Matches the user's prior project behaviour.
   const center = opts.center ?? DEFAULT_TANGENT_ORIGIN
-  viewer.camera.flyTo({
+  viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(center.lng, center.lat, opts.zoomLevel),
-    duration: 2,
   })
+
+  // ---- Warm the tile cache for the ancestors ----
+  //
+  // Cesium walks its quadtree downwards, one level at a time, and a
+  // level may only be requested once its parent is loaded — so a
+  // camera 1 500 m above a city pulls fifteen levels (z1 … z16) one
+  // after the other, and the basemap takes **90–190 s** to fill
+  // (measured). The ancestors are tiny (about 25 tiles, a few kB
+  // each), so fetching them **in parallel** here puts them in the
+  // browser's cache before Cesium asks for them; the chain then
+  // costs Cesium's processing time only.
+  //
+  // This is a pure optimisation: it touches no quality setting, and a
+  // tile that fails to prefetch is simply fetched the slow way.
+  const tileZoom = tileZoomForHeight(opts.zoomLevel, center.lat, {
+    maxZoom: imagery.maximumLevel ?? 19,
+  })
+  void prefetchTiles(ancestorTiles(center.lng, center.lat, tileZoom), (tile) =>
+    buildTileUrl(imagery, tile),
+  )
 
   return viewer
 }
 
-/** Default Tangent origin for ENU projection (天安门广场中央).
- *  All Three.js world coordinates are computed relative to this
- *  point via `eastNorthUpToFixedFrame` inverse.
+/**
+ * The URL of one tile of an imagery service.
  *
- *  This is a **fallback**: it only applies to scenes without a
- *  geographic anchor (the built-in demo scenes, or an OSM payload that
- *  carries no `originLat`/`originLon`). An imported map always uses
- *  its own projection origin. */
-export const DEFAULT_TANGENT_ORIGIN = { lng: 116.3976, lat: 39.9055 }
+ * Cesium's own template filling is not public API, so the two
+ * placeholders the OSM template uses (`{s}` and `{z}/{x}/{y}`) are
+ * filled here — the prefetch has to produce byte-identical URLs for
+ * the cache to hit.
+ */
+const buildTileUrl = (
+  imagery: { urlTemplate: string; subdomains: readonly string[] },
+  tile: { x: number; y: number; z: number },
+): string => {
+  const subdomain =
+    imagery.subdomains[tile.x % imagery.subdomains.length] ?? imagery.subdomains[0] ?? ''
+  return imagery.urlTemplate
+    .replace('{s}', subdomain)
+    .replace('{z}', String(tile.z))
+    .replace('{x}', String(tile.x))
+    .replace('{y}', String(tile.y))
+}
+
+/**
+ * Default Tangent origin for ENU projection (**深圳福田中心**).
+ * All Three.js world coordinates are computed relative to this point
+ * via `eastNorthUpToFixedFrame` inverse.
+ *
+ * This is a **fallback**: it only applies to scenes without a
+ * geographic anchor (the built-in demo scenes, or an OSM payload that
+ * carries no `originLat`/`originLon`). An imported map always uses
+ * its own projection origin.
+ *
+ * Why 深圳: it is the city the project's own map data comes from
+ * (`geojson/福田中心(深圳).osm` — 51 715 nodes, and the centroid is
+ * exactly these coordinates), so the Smart City view, the POI layer
+ * and the imported maps all talk about the same place. The previous
+ * anchor (天安门) was a placeholder that had nothing to do with the
+ * data.
+ */
+export const DEFAULT_TANGENT_ORIGIN = { lng: 114.06865, lat: 22.54297 }
 
 /**
  * Resolve the ENU tangent origin of a scene.
@@ -156,7 +206,7 @@ export const DEFAULT_TANGENT_ORIGIN = { lng: 116.3976, lat: 39.9055 }
  *   simulation and the basemap describe the same place.
  * - A scene without one (demo scenes, or an OSM payload that predates
  *   the origin fields) falls back to `DEFAULT_TANGENT_ORIGIN`
- *   (天安门广场中央). The fallback is a *display* anchor only: the
+ *   (深圳福田中心). The fallback is a *display* anchor only: the
  *   simulation still runs, it is just not pinned to a real place.
  */
 export const resolveTangentOrigin = (origin?: GeoOrigin | null): TangentOrigin => {

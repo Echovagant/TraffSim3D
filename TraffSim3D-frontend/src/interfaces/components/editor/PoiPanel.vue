@@ -61,6 +61,30 @@
     <p v-if="selectedPoi" class="detail" data-testid="poi-detail">
       <b>{{ selectedPoi.name }}</b>
       <span class="muted small">{{ selectedPoi.address || '无地址' }}</span>
+      <button
+        class="primary go"
+        :disabled="planning"
+        data-testid="poi-go-button"
+        @click="driveThere"
+      >
+        {{ planning ? '规划中…' : '开过去（第一人称）' }}
+      </button>
+      <span v-if="planError" class="err" data-testid="poi-go-error">{{ planError }}</span>
+    </p>
+
+    <!-- The destination, once it is set: what the driver is heading
+         for, how far it still is, and whether it has been reached. -->
+    <p
+      v-if="destination"
+      class="destination"
+      :class="{ arrived: store.poiArrived }"
+      data-testid="poi-destination"
+    >
+      <b>{{ destination.name || '(无名)' }}</b>
+      <span v-if="store.poiArrived" class="muted small" data-testid="poi-arrived">已到达</span>
+      <span v-else-if="store.poiDistanceM !== null" class="muted small" data-testid="poi-distance">
+        还剩 {{ Math.round(store.poiDistanceM) }} m
+      </span>
     </p>
   </div>
 </template>
@@ -77,6 +101,9 @@ import { poiColor } from '@infrastructure/rendering/PoiLayer'
  * OpenStreetMap, which needs no key and no account. The source is a
  * public service and it is slow the first time — the backend caches
  * the answer, so the second load of the same rectangle is instant.
+ *
+ * A POI can also be a **destination**: "开过去" routes the scene's
+ * first car to it and switches the camera into the first person.
  */
 const store = useWorldStore()
 
@@ -87,11 +114,31 @@ const POI_ITEM_TESTID = 'poi-item'
 /** The optional name filter — only the POIs whose name contains it. */
 const keyword = ref('')
 
+const planning = ref(false)
+const planError = ref('')
+
 const load = async (): Promise<void> => {
   await store.loadPois(keyword.value.trim())
 }
 
+/** Route the car to the selected POI and ride there. */
+const driveThere = async (): Promise<void> => {
+  if (!selectedPoi.value) return
+  planning.value = true
+  planError.value = ''
+  try {
+    const result = await store.planRouteToPoi(selectedPoi.value.id)
+    if (!result.ok) planError.value = result.reason
+  } finally {
+    planning.value = false
+  }
+}
+
 const selectedPoi = computed(() => store.pois.find((poi) => poi.id === store.poiSelectedId) ?? null)
+
+const destination = computed(
+  () => store.pois.find((poi) => poi.id === store.poiDestinationId) ?? null,
+)
 
 const colorOf = (category: string): string => `#${poiColor(category).toString(16).padStart(6, '0')}`
 </script>
@@ -226,5 +273,35 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
   margin: 6px 0 0;
   padding-top: 6px;
   border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+/* "开过去" — the action that turns a POI into a destination. */
+.poi-panel button.go {
+  margin-top: 6px;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #f8fafc;
+  font-size: 12px;
+  cursor: pointer;
+}
+.poi-panel button.go:disabled {
+  background: #334155;
+  cursor: not-allowed;
+}
+/* The destination line: what the driver is heading for. */
+.poi-panel .destination {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.22);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+}
+.poi-panel .destination.arrived {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(74, 222, 128, 0.4);
 }
 </style>

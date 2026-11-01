@@ -289,13 +289,18 @@ export const loadOSMScene = async (
   }
 }
 
-/** Default bbox around 天安门广场 (~2km × 2km). Same as the user's
- *  prior SmartCity.vue project. */
+/**
+ * Default bbox around **深圳福田中心** (~4.4 km × 4.1 km).
+ *
+ * It is the city the project's own map data comes from
+ * (`geojson/福田中心(深圳).osm`), so the Smart City view, the POI
+ * layer and the imported maps are all about the same place.
+ */
 export const DEFAULT_BBOX: Bbox = {
-  south: 39.885,
-  west: 116.38,
-  north: 39.925,
-  east: 116.42,
+  south: 22.52297,
+  west: 114.04865,
+  north: 22.56297,
+  east: 114.08865,
 }
 
 /**

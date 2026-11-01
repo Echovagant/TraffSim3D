@@ -68,19 +68,27 @@
     <div v-if="store.plannedRoute" class="hud" data-testid="route-hud">
       <div class="row">
         <span>目标</span>
-        <b>{{ store.plannedRoute.destinationJunctionId }}</b>
+        <b data-testid="route-hud-destination">{{ destinationLabel }}</b>
       </div>
       <div class="row">
         <span>速度</span>
         <b data-testid="route-hud-speed">{{ speedKmh }} km/h</b>
       </div>
-      <div class="row">
+      <!-- A POI destination has a distance and an arrival; a junction
+           one has a percentage. The driver wants the first pair. -->
+      <div v-if="store.poiDestinationId" class="row">
+        <span>剩余</span>
+        <b data-testid="route-hud-distance">
+          {{ store.poiArrived ? '已到达' : `${Math.round(store.poiDistanceM ?? 0)} m` }}
+        </b>
+      </div>
+      <div v-else class="row">
         <span>进度</span>
         <b data-testid="route-hud-progress">{{ Math.round(progress * 100) }} %</b>
       </div>
       <div class="row">
-        <span>下一段</span>
-        <b data-testid="route-hud-next">{{ nextRoad ?? '已到达' }}</b>
+        <span>下一步</span>
+        <b data-testid="route-hud-next" :title="nextRoad ?? '已到达'">{{ turnHint }}</b>
       </div>
       <label class="ctrl toggle">
         <input
@@ -98,6 +106,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useWorldStore } from '@interfaces/stores/worldStore'
+import { routeTurnHint } from '@application/services/routePlanner'
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
 
 /**
@@ -208,6 +217,19 @@ const speedKmh = computed(() => {
 /** How far along the route the follower is, in [0, 1]. */
 const progress = computed(() => store.routeProgress())
 
+/**
+ * What the driver is heading for: the POI's name when the destination
+ * is a point of interest, the junction's id otherwise.
+ */
+const destinationLabel = computed(() => {
+  const poiId = store.poiDestinationId
+  if (poiId) {
+    const poi = store.pois.find((entry) => entry.id === poiId)
+    return poi ? poi.name || '(无名兴趣点)' : poiId
+  }
+  return store.plannedRoute?.destinationId ?? ''
+})
+
 /** The road the follower takes next (null at the end of the route). */
 const nextRoad = computed(() => {
   const route = store.plannedRoute
@@ -218,6 +240,19 @@ const nextRoad = computed(() => {
   const index = route.roads.indexOf(vehicle.roadId)
   if (index < 0) return null
   return route.roads[index + 1] ?? null
+})
+
+/**
+ * What the driver does at the next junction — the instrument panel's
+ * business. A road id ("r-ew-0-240.4") tells a driver nothing.
+ */
+const turnHint = computed(() => {
+  const route = store.plannedRoute
+  const id = store.routeFollowerId
+  if (!route || !id) return '到达'
+  const vehicle = store.network.vehicles[id]
+  if (!vehicle) return '到达'
+  return routeTurnHint(route, vehicle.roadId, 0)
 })
 </script>
 

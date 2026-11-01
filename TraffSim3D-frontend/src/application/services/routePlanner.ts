@@ -45,8 +45,11 @@ export interface PlannedRoute {
   lengthM: number
   /** The legs, as the backend returned them. */
   legs: RouteLeg[]
-  /** The junction the route was planned to. */
-  destinationJunctionId: string
+  /**
+   * Where the route was planned to: a **junction** id, or — for a
+   * route that ends at a point of interest — that POI's id.
+   */
+  destinationId: string
 }
 
 /**
@@ -107,7 +110,7 @@ export const plannedRouteFrom = (
   network: RoadNetwork,
   response: RoutePlanResponse,
   vehicle: Vehicle,
-  destinationJunctionId: string,
+  destinationId: string,
 ): PlannedRoute | null => {
   if (!response.found || response.legs.length === 0) return null
 
@@ -142,7 +145,7 @@ export const plannedRouteFrom = (
     points,
     lengthM: response.cost_m,
     legs: response.legs,
-    destinationJunctionId,
+    destinationId,
   }
 }
 
@@ -218,4 +221,54 @@ export const routeProgress = (route: PlannedRoute, currentRoadId: string, hint: 
   const { index } = nextRouteRoad(route, currentRoadId, hint)
   if (route.roads.length <= 1) return index >= 0 ? 1 : 0
   return Math.min(1, Math.max(0, index / (route.roads.length - 1)))
+}
+
+/** What the driver does at the next junction. */
+export type TurnHint = '直行' | '左转' | '右转' | '掉头' | '到达'
+
+/**
+ * The turn the follower makes at the next junction.
+ *
+ * The route's polyline is the answer: the angle between the leg the
+ * driver is on and the leg after it. In the scene's frame (x east,
+ * z south) a **positive** cross product means turning east→south,
+ * which is a turn to the driver's **right** (the screen's x is east
+ * and its z is south).
+ *
+ * The road ids themselves are useless to a driver ("r-ew-0-240.4"),
+ * so the instrument panel says what the turn IS.
+ */
+export const routeTurnHint = (
+  route: PlannedRoute,
+  currentRoadId: string,
+  hint: number,
+): TurnHint => {
+  const { index } = nextRouteRoad(route, currentRoadId, hint)
+  if (index < 0) return '到达'
+  const nextRoadId = route.roads[index + 1]
+  if (!nextRoadId) return '到达'
+
+  // The polyline is [vehicle, leg0.from, leg0.to, leg1.from, leg1.to, …].
+  // The junction between two legs is written **twice** — once on the
+  // outgoing leg's lane, once on the incoming one — so the turn is
+  // the angle between the two legs' own directions, not between the
+  // two copies of the junction point.
+  const legFrom = route.points[index * 2 + 1]
+  const legTo = route.points[index * 2 + 2]
+  const nextFrom = route.points[index * 2 + 3]
+  const nextTo = route.points[index * 2 + 4]
+  if (!legFrom || !legTo || !nextFrom || !nextTo) return '直行'
+
+  const inX = legTo.x - legFrom.x
+  const inZ = legTo.z - legFrom.z
+  const outX = nextTo.x - nextFrom.x
+  const outZ = nextTo.z - nextFrom.z
+  if (Math.hypot(inX, inZ) < 1e-6 || Math.hypot(outX, outZ) < 1e-6) return '直行'
+
+  const cross = inX * outZ - inZ * outX
+  const dot = inX * outX + inZ * outZ
+  const angle = (Math.atan2(cross, dot) * 180) / Math.PI
+  if (Math.abs(angle) < 20) return '直行'
+  if (Math.abs(angle) > 150) return '掉头'
+  return angle > 0 ? '右转' : '左转'
 }

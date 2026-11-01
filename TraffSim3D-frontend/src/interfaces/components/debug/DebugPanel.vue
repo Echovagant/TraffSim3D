@@ -255,6 +255,11 @@ const backendTooltip = computed(() => {
   top: 12px;
   right: 12px;
   min-width: 220px;
+  /* The panel is absolutely positioned, so its width is shrink-to-fit:
+     one long readout — the per-lane vehicle distribution of a big
+     scene — used to stretch it across the whole screen (1 268 px
+     measured) and its text ran over the route panel. */
+  max-width: 340px;
   padding: 10px 12px;
   background: rgba(15, 23, 42, 0.85);
   color: #f1f5f9;
@@ -269,9 +274,16 @@ const backendTooltip = computed(() => {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+  min-width: 0;
 }
 .debug .row b {
   font-weight: 600;
+  /* A long value is cut off, not allowed to push the panel wide.
+     The row's `title` keeps the full text reachable. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .debug .row b.ok {
   color: #22c55e;
