@@ -626,14 +626,29 @@ bbox 与文件同系）。GCJ-02 无公开精确反演——实现是标准的�
 （对境外数据应用偏移反而是几百米的错误）。边界内拒绝解析未知的 datum
 （静默当 WGS84 会让地图偏 300–600 米且无任何信号）。
 
-**兴趣点叠加**（`POST /maps/poi` → `app/apps/maps/poi.py`）：高德的 POI 数据
-（GCJ-02）经同一条转换管线转到 WGS84，再按**路网自己的投影原点**投影到本地米制
+**兴趣点叠加**（`POST /maps/poi` → `app/apps/maps/poi.py`）：POI 来自
+**OpenStreetMap**（经公共 Overpass API），按**路网自己的投影原点**投影到本地米制
 （`x = (lon − origin_lon)·111000·cos_lat`、`z = (lat − origin_lat)·111000`，
-与 `osm_parser` 同一个公式）——POI 因而落在它所属的路口上。Key 优先取请求里的
-（用户自带的、配额归用户），回落到部署方的 `TRAFFIC_AMAP_KEY`；两者皆无时明确
-拒绝（400），因为空 Key 调用只会得到 provider 的隐晦错误。前端的图层是**一个
-InstancedMesh**（`PoiLayer.ts`，整批 POI 一次 draw call），标记按类别着色、
-选中时高亮；POI 不可被编辑器的拾取命中（它们是信息，不是场景物件）。
+与 `osm_parser` 同一个公式）——POI 因而落在它所属的路口上。**没有 Key**：
+OSM 不需要账号、不需要配额、不产生账单。OSM 的坐标本来就是 WGS84（与路网同系），
+所以这一条路径上**没有任何基准转换**（高德/百度的 GCJ-02/BD-09 需要先反解，
+那个偏移是几百米）。前端的图层是**一个 InstancedMesh**（`PoiLayer.ts`，整批 POI
+一次 draw call），标记按类别着色、选中时高亮；POI 不可被编辑器的拾取命中
+（它们是信息，不是场景物件）。
+
+选择 OSM 而不是商业 provider 的代价是**速度与稳定性**：Overpass 是志愿者运营的
+公共服务，实测一个场景尺度的矩形要 **50–73 s**（服务繁忙时），繁忙时还会 502/504
+（实测同一个查询在 1 分钟内先 200、再 502、再 504）。因此：抓取走**实例链**
+（`overpass-api.de` → `kumi.systems` → `private.coffee`，共享一个 **100 s 总预算**，
+后面的实例只拿到剩下的额度，避免不可达的镜像把等待乘三），响应**写磁盘缓存**
+（同一个矩形第二次加载是瞬时的），浏览器的超时是 **120 s**。
+类别由 tag 的**取值**决定（`amenity=restaurant` → 餐饮、`amenity=hospital` → 医疗、
+`shop=*` → 购物），未列出的取值回落到 tag 的类别；约四分之一的 POI **没有名字**
+（面板显示「(无名)」），OSM 在中国的 `addr:*` 门牌数据也很少（多显示「无地址」）。
+查询只取 **node**——输出配额本来就先被 node 填满（实测 node-only 与 node+way 的
+查询返回了**完全相同**的 300 个要素），多要 way 只会更慢。
+关键词过滤是**同一个语句上的 AND**（`node["amenity"]["name"~"咖啡",i]`），
+不是独立语句——Overpass 的 union 语法是 OR，独立语句会把查询**放宽**而不是收窄。
 
 ```mermaid
 flowchart LR
@@ -829,7 +844,7 @@ npm run test:e2e:headed   # 有头模式
 
 | 文档 | 内容 |
 |---|---|
-| [adr/ADR-001 … ADR-013](adr/) | 决策记录。001 前端框架 · 002 后端框架 · 003 物理引擎 · 004 RL 框架 · 005 DDD + 前后端切分 · 006 OSM → 内部图 · 007 部署方式（Rejected）· 008 契约的两个 oracle · 009 契约的相等判定与 libm 噪声地板 · 010 路线规划与第一人称相机 · 011 无信号路口的多车协商 · 012 转弯从枢轴改为弧线 · 013 POI 作为导航终点。 |
+| [adr/ADR-001 … ADR-014](adr/) | 决策记录。001 前端框架 · 002 后端框架 · 003 物理引擎 · 004 RL 框架 · 005 DDD + 前后端切分 · 006 OSM → 内部图 · 007 部署方式（Rejected）· 008 契约的两个 oracle · 009 契约的相等判定与 libm 噪声地板 · 010 路线规划与第一人称相机 · 011 无信号路口的多车协商 · 012 转弯从枢轴改为弧线 · 013 POI 作为导航终点 · 014 兴趣点来自 OpenStreetMap（不用需要 Key 的商业服务）。 |
 | [contracts/sim-snapshot.md](contracts/sim-snapshot.md) | 跨语言契约：**覆盖什么**、**不覆盖什么**（含具名盲区表）、向量清单、跨语言差异状态表。 |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | 部署：镜像配置、安装、端口、运行时数据目录、故障排查。 |
 | [USER-GUIDE.md](USER-GUIDE.md) | 用户向：四个模块的界面用法与术语表。 |
