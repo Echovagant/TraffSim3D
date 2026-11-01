@@ -169,6 +169,28 @@ export class ThreeJSRenderer {
     this.camera.updateProjectionMatrix()
   }
 
+  /**
+   * Let the basemap show through the canvas.
+   *
+   * The renderer clears with a **transparent** colour (`alpha: true` +
+   * `setClearColor(0x000000, 0)`) — but Three.js paints
+   * `scene.background` over the whole canvas *first*, so the default
+   * opaque background (0x0b1220) hid the Cesium basemap completely,
+   * no matter how transparent the clear was. Measured: hiding the
+   * Three.js canvas in the Smart City view revealed a fully rendered
+   * basemap underneath — the whole thing was there all along.
+   *
+   * `null` is Three.js's "no background": the canvas keeps its alpha,
+   * and whatever is behind it (the basemap) shows through. The fog
+   * colour stays, so distant geometry still fades into the dark.
+   *
+   * The scene editor does NOT want this — there the dark background IS
+   * the design — so it stays opt-in.
+   */
+  setTransparentBackground(enabled: boolean): void {
+    this.scene.background = enabled ? null : new THREE.Color(0x0b1220)
+  }
+
   /** Public camera accessor so external controls (e.g. OrbitControls) can be attached. */
   getCamera(): THREE.PerspectiveCamera {
     return this.camera

@@ -34,7 +34,7 @@
           </p>
           <p class="hero-sub gsap-hero-sub">
             场景编辑器、物理仿真、OSM 地图导入、智能体 RL 训练，另附 SmartCity 3D 底图(基于 Cesium +
-            高德瓦片 + 真实建筑 3D 拉伸)。
+            OSM 瓦片 + 真实建筑 3D 拉伸)。
           </p>
           <div class="hero-ctas gsap-hero-ctas">
             <router-link to="/scene-editor" class="btn">进入 SceneLab</router-link>
@@ -109,9 +109,9 @@
                 <h3>SmartCity 3D</h3>
                 <span class="badge badge-new">New</span>
               </div>
-              <p class="module-sub">智慧城市 3D 底图（Cesium + 高德瓦片）</p>
+              <p class="module-sub">智慧城市 3D 底图（Cesium + OSM 瓦片）</p>
               <p class="module-desc">
-                Cesium 1.134 渲染高德瓦片 + OSM 3D 拉伸建筑 + 道路多段线,Three.js 透明 overlay
+                Cesium 1.134 渲染 OSM 瓦片 + OSM 3D 拉伸建筑 + 道路多段线,Three.js 透明 overlay
                 渲染车辆 + 信号灯 + LiDAR。 鸟瞰 / 平视 / 自由 切换;Overpass
                 数据经后端缓存,首次冷启动 &lt; 100ms。
               </p>

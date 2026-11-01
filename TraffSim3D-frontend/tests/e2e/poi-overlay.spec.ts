@@ -64,18 +64,21 @@ test.describe('the POI overlay', () => {
       w.network.origin = { lat: 39.90625, lon: 116.3917 }
     })
 
+    await page.fill('[data-testid="poi-keyword-input"]', '咖啡')
     await page.click('[data-testid="poi-load-button"]')
 
     await expect(page.locator('[data-testid="poi-count"]')).toContainText('2')
     await expect(page.locator('[data-testid="poi-item"]')).toHaveCount(2)
 
     // The request carried the scene's origin and the rectangle around
-    // it — the POIs are projected around that origin. There is no key:
-    // the source is OpenStreetMap.
+    // it — the POIs are projected around that origin — plus the name
+    // filter from the panel's input. There is no key: the source is
+    // OpenStreetMap.
     expect(requests).toHaveLength(1)
     const request = requests[0]!
     expect(request.origin_lat).toBeCloseTo(39.90625, 6)
     expect(request.key).toBeUndefined()
+    expect(request.keywords).toBe('咖啡')
     expect(typeof request.south).toBe('number')
 
     // The markers are in the scene (one instanced mesh, two instances).

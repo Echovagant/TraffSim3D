@@ -375,10 +375,13 @@ export const useWorldStore = defineStore('world', () => {
    *
    * The source is OpenStreetMap (through the backend's Overpass
    * proxy): no key, no account — and a slow first call, because the
-   * public service answers a scene-sized rectangle in 20–70 s when it
+   * public service answers a scene-sized rectangle in 50–70 s when it
    * is not busy. The backend caches the answer on disk.
+   *
+   * `keywords` narrows the set to the POIs whose NAME contains it (the
+   * server filters on the name; an empty string means "all of them").
    */
-  const loadPois = async (): Promise<{ ok: boolean; error?: string }> => {
+  const loadPois = async (keywords = ''): Promise<{ ok: boolean; error?: string }> => {
     const origin = network.value.origin
     if (!origin) {
       poiError.value = '这个场景没有地理锚点 — POI 需要一张真实地图'
@@ -393,6 +396,7 @@ export const useWorldStore = defineStore('world', () => {
         ...rectangle,
         originLat: origin.lat,
         originLon: origin.lon,
+        keywords,
         limit: 25,
       })
       if (!result.ok) {

@@ -170,6 +170,18 @@ describe('ThreeJSRenderer — construction', () => {
     expect(fog.far).toBe(4000)
   })
 
+  it('can drop the background so the basemap underneath shows through', () => {
+    // The Smart City view IS the basemap: the Cesium layer under the
+    // simulation overlay has to be visible, and Three.js paints
+    // `scene.background` over the whole canvas — a transparent clear
+    // colour alone is not enough.
+    const scene = r.getScene()
+    r.setTransparentBackground(true)
+    expect(scene.background).toBeNull()
+    r.setTransparentBackground(false)
+    expect((scene.background as THREE.Color).getHex()).toBe(0x0b1220)
+  })
+
   it('installs an ambient 0.6 + directional 0.8 light', () => {
     const lights = r.getScene().children.filter((c) => (c as THREE.Light).isLight)
     const ambient = lights.find(

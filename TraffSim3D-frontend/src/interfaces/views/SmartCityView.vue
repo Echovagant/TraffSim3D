@@ -178,6 +178,11 @@ watch(isReady, (ready) => {
     const r = getRenderer()
     if (!r) return
     r.setRenderMode('smart-city')
+    // This view IS the basemap: the Cesium layer underneath has to
+    // show through the simulation overlay (the viewer's own comment
+    // says the canvas must be transparent for that). The scene editor
+    // keeps its opaque dark background.
+    r.setTransparentBackground(true)
     rendererRef.value = r
   }
 })
@@ -230,6 +235,12 @@ onMounted(async () => {
 
   // 2) Async load OSM buildings + roads.
   status.value = { kind: 'info', text: '正在从 Overpass 加载 OSM 数据...' }
+  // Dev-only handle on the viewer, for the e2e specs (the basemap's
+  // tile URL is the thing they assert) — same pattern as the store's
+  // `window.__world`, and tree-shaken out of the production bundle.
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    ;(window as unknown as { __cesium?: Cesium.Viewer }).__cesium = cesiumViewer
+  }
   try {
     const loaded: LoadedOSMScene = await loadOSMScene(cesiumViewer, osmBbox)
     osmStats.value = {

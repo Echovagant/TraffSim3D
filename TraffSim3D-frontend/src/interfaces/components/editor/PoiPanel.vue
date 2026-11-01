@@ -12,6 +12,17 @@
       </button>
     </div>
 
+    <label class="ctrl">
+      按名称筛选
+      <input
+        v-model="keyword"
+        type="text"
+        placeholder="留空则取全部；如「咖啡」"
+        data-testid="poi-keyword-input"
+        @keyup.enter="load"
+      />
+    </label>
+
     <div class="actions">
       <button
         class="primary"
@@ -55,17 +66,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 import { poiColor } from '@infrastructure/rendering/PoiLayer'
 
 /**
  * The POI panel.
  *
- * There is nothing to configure: the POIs come from OpenStreetMap,
- * which needs no key and no account. The source is a public service
- * and it is slow the first time — the backend caches the answer, so
- * the second load of the same rectangle is instant.
+ * There is nothing to configure but the filter: the POIs come from
+ * OpenStreetMap, which needs no key and no account. The source is a
+ * public service and it is slow the first time — the backend caches
+ * the answer, so the second load of the same rectangle is instant.
  */
 const store = useWorldStore()
 
@@ -73,8 +84,11 @@ const store = useWorldStore()
  *  position is parsed as an expression by the template compiler. */
 const POI_ITEM_TESTID = 'poi-item'
 
+/** The optional name filter — only the POIs whose name contains it. */
+const keyword = ref('')
+
 const load = async (): Promise<void> => {
-  await store.loadPois()
+  await store.loadPois(keyword.value.trim())
 }
 
 const selectedPoi = computed(() => store.pois.find((poi) => poi.id === store.poiSelectedId) ?? null)

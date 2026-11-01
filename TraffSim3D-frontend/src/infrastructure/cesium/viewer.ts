@@ -4,7 +4,7 @@
 //
 // Reuses the same approach as the user's prior SmartCity.vue project:
 //   - Zero Ion dependency (`baseLayer: false`, no access token)
-//   - Gaode tile imagery (Chinese map service, no Ion, no API key)
+//   - OpenStreetMap's own tiles (no Ion, no API key, no account)
 //   - Scene-level fog for far-distance performance
 //   - FXAA + frame-rate cap for stable 60fps on big cities
 //
@@ -27,22 +27,48 @@ export interface CesiumSceneOptions {
   center?: TangentOrigin
   /** Initial camera height in meters (default 1500m = bird's-eye). */
   zoomLevel: number
-  /** Tile service — defaults to Gaode (国内访问稳定, 无 token). */
+  /** Tile service — defaults to OpenStreetMap's own tiles. */
   imagery?: {
     urlTemplate: string
     subdomains: readonly string[]
     maximumLevel?: number
+    /** The attribution shown on screen (the tile service's own terms
+     *  require it — OSM's data is ODbL). */
+    credit?: string
   }
 }
 
+/**
+ * The basemap: **OpenStreetMap's own tiles** (the "standard"
+ * cartography), served by the community mirror that answers from this
+ * network.
+ *
+ * Why not a Chinese provider's tiles: those are **GCJ-02** ("火星坐标"),
+ * a state-mandated offset datum — hundreds of metres from WGS84
+ * (measured at the project's own origin: **605 m**, 525 m east and
+ * 301 m north). The scene's roads come from OSM, which is WGS84, so a
+ * GCJ-02 basemap put the drawn network visibly **off the basemap's
+ * own roads**. The tiles themselves were the only part of the view
+ * that was in the wrong datum.
+ *
+ * With OSM's tiles the basemap and the road network are **the same
+ * data in the same datum**, so they line up by construction — no
+ * offset to correct, and the buildings and roads you see are the ones
+ * the simulation runs on.
+ *
+ * Which host: `tile.openstreetmap.org` is **unreachable from this
+ * network** (measured: a 21 s connect timeout), so the default is the
+ * well-known community mirror `tile.openstreetmap.de` (FOSSGIS), whose
+ * subdomains a/b/c all answered in 0.9–4.3 s. The OSMF tile policy
+ * still applies — light use, no bulk downloading, and the app has to
+ * identify itself (the browser's Referer does that) — so the credit
+ * below is **on screen**.
+ */
 export const DEFAULT_IMAGERY = {
-  // Gaode Web Tile (高德地图瓦片 API) — 国内稳定, no API key.
-  // Note: 高德 tiles require Chinese locale (`lang=zh_cn`) for label
-  // rendering; we keep the official defaults.
-  urlTemplate:
-    'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
-  subdomains: ['1', '2', '3', '4'] as const,
-  maximumLevel: 18,
+  urlTemplate: 'https://{s}.tile.openstreetmap.de/{z}/{x}/{y}.png',
+  subdomains: ['a', 'b', 'c'] as const,
+  maximumLevel: 19,
+  credit: '© OpenStreetMap contributors',
 }
 
 export const createCesiumViewer = (
@@ -74,7 +100,11 @@ export const createCesiumViewer = (
     new Cesium.UrlTemplateImageryProvider({
       url: imagery.urlTemplate,
       subdomains: [...imagery.subdomains],
-      maximumLevel: imagery.maximumLevel ?? 18,
+      maximumLevel: imagery.maximumLevel ?? 19,
+      // The tile service's own terms require the attribution on
+      // screen (OSM's data is ODbL) — `showOnScreen: true` puts it in
+      // the widget's credit line instead of only the info box.
+      credit: imagery.credit ? new Cesium.Credit(imagery.credit, true) : undefined,
     }),
   )
 

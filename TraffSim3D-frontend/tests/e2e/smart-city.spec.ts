@@ -98,6 +98,25 @@ test('Smart City: route mounts Cesium + Three.js canvases', async ({ page }) => 
   // Status panel (right) shows vehicle + light counts.
   await expect(page.locator('[data-testid="status-panel"]')).toBeVisible()
 
+  // The basemap comes from OpenStreetMap — the same source (and the
+  // same datum, WGS84) as the scene's roads. A Chinese provider's
+  // tiles are GCJ-02 and sit hundreds of metres from the data
+  // (measured at the project's own origin: 605 m). The attribution the
+  // tile terms require rides along on the imagery layer.
+  const attribution = await page.evaluate(() => {
+    const viewer = (
+      window as unknown as {
+        __cesium?: {
+          imageryLayers: {
+            get: (i: number) => { imageryProvider?: { credit?: { html?: string } } }
+          }
+        }
+      }
+    ).__cesium
+    return viewer?.imageryLayers.get(0).imageryProvider?.credit?.html ?? null
+  })
+  expect(attribution).toContain('OpenStreetMap')
+
   // NOTE: the basemap container is deliberately NOT screenshot-asserted.
   //
   // Attempted 2026-10-17 and removed as unviable rather than merely failing:
