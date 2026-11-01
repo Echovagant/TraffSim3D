@@ -36,10 +36,9 @@ export interface PoiRequest {
   east: number
   origin_lat: number
   origin_lon: number
-  types?: string
+  tags?: string
   keywords?: string
   limit?: number
-  key?: string
 }
 
 /** `RouteEndpoint` — from the OpenAPI `components.schemas`. */

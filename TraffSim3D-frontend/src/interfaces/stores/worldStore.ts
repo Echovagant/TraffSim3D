@@ -373,10 +373,12 @@ export const useWorldStore = defineStore('world', () => {
   /**
    * Fetch the POIs around the current scene.
    *
-   * `key` is the provider's Web-service key; empty means the
-   * deployment's own (`TRAFFIC_AMAP_KEY` on the backend).
+   * The source is OpenStreetMap (through the backend's Overpass
+   * proxy): no key, no account — and a slow first call, because the
+   * public service answers a scene-sized rectangle in 20–70 s when it
+   * is not busy. The backend caches the answer on disk.
    */
-  const loadPois = async (key = ''): Promise<{ ok: boolean; error?: string }> => {
+  const loadPois = async (): Promise<{ ok: boolean; error?: string }> => {
     const origin = network.value.origin
     if (!origin) {
       poiError.value = '这个场景没有地理锚点 — POI 需要一张真实地图'
@@ -391,7 +393,6 @@ export const useWorldStore = defineStore('world', () => {
         ...rectangle,
         originLat: origin.lat,
         originLon: origin.lon,
-        key,
         limit: 25,
       })
       if (!result.ok) {

@@ -12,20 +12,6 @@
       </button>
     </div>
 
-    <!-- The provider's key. AMap's Web-service API needs one, and the
-         quota is whoever's key it is — so it is the user's (or the
-         deployment's, when the field is left empty). -->
-    <label class="ctrl">
-      高德 Key
-      <input
-        v-model="key"
-        type="text"
-        placeholder="留空则用服务端配置的 Key"
-        data-testid="poi-key-input"
-        @change="saveKey"
-      />
-    </label>
-
     <div class="actions">
       <button
         class="primary"
@@ -36,6 +22,10 @@
         {{ store.poisLoading ? '加载中…' : '加载兴趣点' }}
       </button>
     </div>
+
+    <p v-if="store.pois.length === 0 && !store.poisLoading" class="muted small hint">
+      来自 OpenStreetMap，无需 Key；首次加载约一分钟（之后走缓存）。
+    </p>
 
     <p v-if="store.poiError" class="err" data-testid="poi-error">{{ store.poiError }}</p>
 
@@ -65,16 +55,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 import { poiColor } from '@infrastructure/rendering/PoiLayer'
 
 /**
  * The POI panel.
  *
- * The provider's key belongs to whoever runs the deployment (the quota
- * is theirs), so it is entered here and kept in the browser; an empty
- * field means the backend's own key is used.
+ * There is nothing to configure: the POIs come from OpenStreetMap,
+ * which needs no key and no account. The source is a public service
+ * and it is slow the first time — the backend caches the answer, so
+ * the second load of the same rectangle is instant.
  */
 const store = useWorldStore()
 
@@ -82,29 +73,8 @@ const store = useWorldStore()
  *  position is parsed as an expression by the template compiler. */
 const POI_ITEM_TESTID = 'poi-item'
 
-const KEY_STORAGE = 'traffsim3d.amap.key'
-const key = ref(readStoredKey())
-
-function readStoredKey(): string {
-  try {
-    return window.localStorage.getItem(KEY_STORAGE) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function saveKey(): void {
-  try {
-    window.localStorage.setItem(KEY_STORAGE, key.value)
-  } catch {
-    // A private-mode browser refuses localStorage — the key then lives
-    // for this session only.
-  }
-}
-
 const load = async (): Promise<void> => {
-  saveKey()
-  await store.loadPois(key.value)
+  await store.loadPois()
 }
 
 const selectedPoi = computed(() => store.pois.find((poi) => poi.id === store.poiSelectedId) ?? null)
@@ -190,6 +160,15 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
 }
 .poi-panel .small {
   font-size: 11px;
+}
+/* The hint's own width cap.
+   The panel is absolutely positioned, so its width is shrink-to-fit: a
+   long sentence would push the panel to its max-width (320 px) and
+   cover more of the scene. Capping the paragraph keeps the panel at
+   its min-width (measured: 344 px → 264 px). */
+.poi-panel .hint {
+  max-width: 240px;
+  margin: 6px 0 0;
 }
 .poi-panel .poi-list {
   list-style: none;

@@ -19,8 +19,7 @@ from app.apps.maps.overpass_cache import cached_overpass_fetch, list_cached_quer
 from app.apps.maps.poi import (
     PoiQuery,
     PoiUnavailableError,
-    fetch_amap_pois,
-    resolve_amap_key,
+    fetch_osm_pois,
 )
 
 router = APIRouter()
@@ -176,34 +175,28 @@ class PoiRequest(BaseModel):
     #: The scene's origin (the roads were projected around it).
     origin_lat: float = Field(..., ge=-90, le=90)
     origin_lon: float = Field(..., ge=-180, le=180)
-    #: The provider's category filter (its own type codes).
-    types: str = ""
-    #: A free-text filter.
+    #: The OSM tags to fetch (comma-separated). Empty = the default set.
+    tags: str = ""
+    #: A free-text filter — only the POIs whose name contains it.
     keywords: str = ""
     #: How many POIs to ask for.
-    limit: int = Field(default=25, ge=1, le=25)
-    #: The provider's Web-service key. Optional: the deployment's
-    #: `TRAFFIC_AMAP_KEY` is the fallback.
-    key: str = ""
+    limit: int = Field(default=25, ge=1, le=200)
 
 
 @router.post("/maps/poi", tags=["maps"])
 def fetch_pois(req: PoiRequest) -> dict[str, Any]:
     """Fetch the real-world points of interest inside a rectangle.
 
-    The POIs come from 高德 (AMap) — whose data is GCJ-02 — and are
-    converted to WGS84 and projected around the scene's origin, so a POI
+    The POIs come from **OpenStreetMap** (through the public Overpass
+    API), whose data is WGS84 — the same datum as the scene's roads —
+    so they are only projected around the scene's origin, and a POI
     lands on the corner of the roads it belongs to.
 
-    Errors:
-      - 400: no key (neither in the request nor in the environment)
-      - 502: the provider was unreachable or refused
-    """
-    try:
-        key = resolve_amap_key(req.key)
-    except PoiUnavailableError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    There is no key: the source is a public, volunteer-run service.
 
+    Errors:
+      - 502: Overpass was unreachable or refused
+    """
     query = PoiQuery(
         south=req.south,
         west=req.west,
@@ -211,16 +204,16 @@ def fetch_pois(req: PoiRequest) -> dict[str, Any]:
         east=req.east,
         origin_lat=req.origin_lat,
         origin_lon=req.origin_lon,
-        types=req.types,
+        tags=req.tags,
         keywords=req.keywords,
         limit=req.limit,
     )
     try:
-        pois = fetch_amap_pois(key, query)
+        pois = fetch_osm_pois(query)
     except PoiUnavailableError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {
-        "source": "amap",
+        "source": "osm",
         "count": len(pois),
         "pois": pois,
     }

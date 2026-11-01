@@ -55,6 +55,9 @@ const CATEGORY_COLORS: Record<string, number> = {
   汽车服务: 0xf97316,
   商务: 0x2dd4bf,
   公共设施: 0xf472b6,
+  景点: 0xfb923c,
+  休闲: 0x4ade80,
+  住宿: 0xc084fc,
 }
 
 const DEFAULT_COLOR = 0x94a3b8

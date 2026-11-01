@@ -7,14 +7,25 @@ the traffic around it goes on as usual.
 
 Why the destinations are synthetic
 ----------------------------------
-The real POI data is not usable for training: the OSM extract of a
-Shenzhen district carries **ten** `amenity` nodes against 7 320 roads
-(measured on the project's own file), and the provider's POIs would
-need a key on every training run. So the training env **places its own
-POIs** — on the road network, at a category's typical offset from the
-carriageway — and the shape of the problem (a destination across a
-junction, other traffic in the way) is the same either way. The
-product's real POIs come from the provider (`app/apps/maps/poi.py`).
+Two reasons, and the second one is the decisive one.
+
+**The local file does not carry them.** The OSM extract of a Shenzhen
+district in this repository has **ten** `amenity` nodes against 7 320
+roads — because that extract was generated from `roads.geojson`, so
+it only kept the roads. (The OSM *database* does have them: a live
+query for the same district returns 4 516 `amenity` elements. The
+product's POIs come from there — `app/apps/maps/poi.py`.)
+
+**Training must not depend on the network.** The product's POI source
+is a public, volunteer-run service: it answers a scene-sized
+rectangle in 50-73 s and refuses outright when it is busy. A training
+run cannot depend on that, and it must not spend minutes per episode
+waiting for it.
+
+So the training env **places its own POIs** — on the road network, at
+a category's typical offset from the carriageway — and the shape of
+the problem (a destination across a junction, other traffic in the
+way) is the same either way.
 
 What the driver has to see
 --------------------------

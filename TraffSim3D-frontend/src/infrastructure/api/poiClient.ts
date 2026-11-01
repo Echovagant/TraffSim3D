@@ -1,26 +1,29 @@
 /**
  * The POI client — fetch the real-world points of interest around a map.
  *
- * The backend does the provider call (AMap's Web-service API needs a
- * key, and the key belongs to whoever runs the deployment), the datum
- * conversion (the provider's data is GCJ-02) and the projection into
- * the scene's local metres. What arrives here is ready to draw: a list
- * of POIs at scene coordinates.
+ * The backend does the Overpass call (the public API is slow and
+ * flaky, and its CORS behaviour is not worth relying on), and the
+ * projection into the scene's local metres. What arrives here is ready
+ * to draw: a list of POIs at scene coordinates.
+ *
+ * There is no key: the source is OpenStreetMap, whose data is ODbL
+ * and whose coordinates are WGS84 — the same datum the scene's roads
+ * are in, so the POIs need no conversion, only the projection.
  */
 
 /** One POI, as the backend returns it (already in scene metres). */
 export interface Poi {
-  /** The provider's id. */
+  /** The source's id ("osm-node-123456"). */
   id: string
-  /** The name. */
+  /** The name — often empty (a quarter of OSM's POIs carry none). */
   name: string
-  /** The provider's full type path ("餐饮服务;咖啡厅"). */
+  /** The tag that made it a POI ("amenity=cafe"). */
   type: string
-  /** The provider's type code. */
+  /** The OSM tag key ("amenity"). */
   typeCode: string
   /** The plain-language category ("餐饮"). */
   category: string
-  /** The street address. */
+  /** The street address — usually empty in OSM. */
   address: string
   /** The WGS84 longitude. */
   lon: number
@@ -42,14 +45,12 @@ export interface PoiQuery {
   /** The scene's projection origin. */
   originLat: number
   originLon: number
-  /** The provider's category filter (its own type codes). */
-  types?: string
-  /** A free-text filter. */
+  /** The OSM tags to fetch (comma-separated). Empty = the default set. */
+  tags?: string
+  /** A free-text filter — only the POIs whose name contains it. */
   keywords?: string
-  /** How many POIs to ask for (the provider's page size is 25). */
+  /** How many POIs to ask for. */
   limit?: number
-  /** The provider's Web-service key. Empty = use the deployment's. */
-  key?: string
 }
 
 export interface PoiResponse {
@@ -70,11 +71,15 @@ export const POI_PATH = '/maps/poi'
 /**
  * How long the request may take, in milliseconds.
  *
- * The provider is a third party on the far side of the network: the
- * backend's own timeout is 15 s, so the browser's must be a little
- * longer — but not unbounded (a hung provider must not hang the page).
+ * Overpass is a volunteer-run public service: it answers a
+ * scene-sized rectangle in 50–73 s when it is not busy (measured), and
+ * it refuses outright when it is. The backend's own budget is 100 s
+ * (the whole instance chain shares it), so the browser's has to be a
+ * little longer. The backend caches every answer on disk, so the
+ * second load of the same rectangle is instant — the first one is the
+ * slow one.
  */
-export const POI_TIMEOUT_MS = 20000
+export const POI_TIMEOUT_MS = 120000
 
 /**
  * The rectangle around a scene, in degrees.
@@ -112,10 +117,9 @@ export const createPoiClient = (baseUrl = '/api/v1'): PoiClient => ({
           east: query.east,
           origin_lat: query.originLat,
           origin_lon: query.originLon,
-          types: query.types ?? '',
+          tags: query.tags ?? '',
           keywords: query.keywords ?? '',
           limit: query.limit ?? 25,
-          key: query.key ?? '',
         }),
         signal: controller.signal,
       })

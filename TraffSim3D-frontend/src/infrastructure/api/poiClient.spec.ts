@@ -1,7 +1,8 @@
 // The POI client's tests.
 //
 // What is pinned here:
-//   1. the request carries the scene's origin and rectangle;
+//   1. the request carries the scene's origin and rectangle — and NO
+//      key (the source is OpenStreetMap: no account, no quota);
 //   2. the answer's POIs come through as they are;
 //   3. a provider refusal is an ERROR, not an empty list — "no POIs here"
 //      and "the provider said no" must not look the same;
@@ -11,12 +12,12 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { boundsToDegrees, createPoiClient, POI_PATH, POI_TIMEOUT_MS, type Poi } from './poiClient'
 
 const POI: Poi = {
-  id: 'B0FF',
+  id: 'osm-node-123456',
   name: '示例咖啡',
-  type: '餐饮服务;咖啡厅',
-  typeCode: '050100',
+  type: 'amenity=cafe',
+  typeCode: 'amenity',
   category: '餐饮',
-  address: '示例路 1 号',
+  address: '',
   lon: 116.3913,
   lat: 39.9073,
   x: -29.1,
@@ -40,8 +41,8 @@ describe('the POI client', () => {
     vi.restoreAllMocks()
   })
 
-  it('posts the rectangle and the scene origin', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(mockResponse({ source: 'amap', pois: [POI] }))
+  it('posts the rectangle and the scene origin — and no key', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse({ source: 'osm', pois: [POI] }))
     vi.stubGlobal('fetch', fetchMock)
 
     const client = createPoiClient('/api/v1')
@@ -52,7 +53,6 @@ describe('the POI client', () => {
       east: 116.41,
       originLat: 39.90625,
       originLon: 116.3917,
-      key: 'my-key',
     })
 
     expect(result.ok).toBe(true)
@@ -62,14 +62,38 @@ describe('the POI client', () => {
     expect(body.south).toBe(39.9)
     expect(body.origin_lat).toBe(39.90625)
     expect(body.origin_lon).toBe(116.3917)
-    expect(body.key).toBe('my-key')
+    // No key: OpenStreetMap needs no account.
+    expect(body.key).toBeUndefined()
     expect((init as RequestInit).method).toBe('POST')
+  })
+
+  it('carries the tag and keyword filters', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse({ source: 'osm', pois: [POI] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const client = createPoiClient('/api/v1')
+    await client.fetchPois({
+      south: 39.9,
+      west: 116.39,
+      north: 39.92,
+      east: 116.41,
+      originLat: 39.90625,
+      originLon: 116.3917,
+      tags: 'amenity,shop',
+      keywords: '咖啡',
+      limit: 50,
+    })
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))
+    expect(body.tags).toBe('amenity,shop')
+    expect(body.keywords).toBe('咖啡')
+    expect(body.limit).toBe(50)
   })
 
   it('returns the POIs', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(mockResponse({ source: 'amap', count: 1, pois: [POI] })),
+      vi.fn().mockResolvedValue(mockResponse({ source: 'osm', count: 1, pois: [POI] })),
     )
     const result = await createPoiClient().fetchPois({
       south: 0,
@@ -89,7 +113,7 @@ describe('the POI client', () => {
   it('a provider refusal is an error, not an empty list', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(mockResponse({ detail: 'no AMap key: ...' }, 400)),
+      vi.fn().mockResolvedValue(mockResponse({ detail: 'Overpass is unreachable: ...' }, 502)),
     )
     const result = await createPoiClient().fetchPois({
       south: 0,
@@ -100,7 +124,7 @@ describe('the POI client', () => {
       originLon: 0,
     })
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toContain('no AMap key')
+    if (!result.ok) expect(result.error).toContain('Overpass')
   })
 
   it('a network failure is an error', async () => {

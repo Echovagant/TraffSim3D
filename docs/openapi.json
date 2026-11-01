@@ -296,7 +296,7 @@
           "maps"
         ],
         "summary": "Fetch Pois",
-        "description": "Fetch the real-world points of interest inside a rectangle.\n\nThe POIs come from 高德 (AMap) — whose data is GCJ-02 — and are\nconverted to WGS84 and projected around the scene's origin, so a POI\nlands on the corner of the roads it belongs to.\n\nErrors:\n  - 400: no key (neither in the request nor in the environment)\n  - 502: the provider was unreachable or refused",
+        "description": "Fetch the real-world points of interest inside a rectangle.\n\nThe POIs come from **OpenStreetMap** (through the public Overpass\nAPI), whose data is WGS84 — the same datum as the scene's roads —\nso they are only projected around the scene's origin, and a POI\nlands on the corner of the roads it belongs to.\n\nThere is no key: the source is a public, volunteer-run service.\n\nErrors:\n  - 502: Overpass was unreachable or refused",
         "operationId": "fetch_pois_api_v1_maps_poi_post",
         "requestBody": {
           "content": {
@@ -988,9 +988,9 @@
             "minimum": -180.0,
             "title": "Origin Lon"
           },
-          "types": {
+          "tags": {
             "type": "string",
-            "title": "Types",
+            "title": "Tags",
             "default": ""
           },
           "keywords": {
@@ -1000,15 +1000,10 @@
           },
           "limit": {
             "type": "integer",
-            "maximum": 25.0,
+            "maximum": 200.0,
             "minimum": 1.0,
             "title": "Limit",
             "default": 25
-          },
-          "key": {
-            "type": "string",
-            "title": "Key",
-            "default": ""
           }
         },
         "type": "object",
