@@ -12,6 +12,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+  addIntersectionWaypoints,
   buildCrossIntersectionNetwork,
   buildTJunctionNetwork,
   buildRectangularLoopNetwork,
@@ -22,6 +23,7 @@ import {
   GRID_SIZE,
 } from './defaultScene'
 import { CORNER_TURN_ENVELOPE_M } from '@domain/services/junctionRadius'
+import { intersectionCenterS, intersectionSRange } from '@domain/services/laneGeometry'
 import { approachAxisGroups } from '@domain/services/approachAxis'
 import { INTERSECTION_CLEARANCE_M, ROAD_LANE_WIDTH } from '@shared/constants/simulation'
 import { LightPhase } from '@domain/value-objects/Phase'
@@ -266,5 +268,59 @@ describe('every built-in scene follows the one junction-box rule', () => {
         expect(net.intersections[id]!.intersectionRadius, `${name}/${id}`).toBe(radius)
       }
     }
+  })
+})
+
+describe('addIntersectionWaypoints', () => {
+  /**
+   * A road built as two nodes carries no node at the intersections it
+   * crosses — and two roads only share a node if one of them has it.
+   * The cross scene is the case that bites: its four arms all run
+   * through the centre, which is neither arm's endpoint, so the arms
+   * shared NO node and the route graph was four disconnected lines.
+   */
+  it('gives a road that passes through an intersection a waypoint there', () => {
+    const net = buildCrossIntersectionNetwork()
+    const road = net.roads['r-ew']!
+    expect(road.waypoints).toHaveLength(3)
+    expect(road.waypoints![1]).toEqual({ x: 0, y: 0, z: 0 })
+    // The invariant: the polyline starts and ends at the road's nodes.
+    expect(road.waypoints![0]).toEqual(road.startNode)
+    expect(road.waypoints![2]).toEqual(road.endNode)
+  })
+
+  it('puts the intersection where it already is, so nothing moves', () => {
+    const net = buildCrossIntersectionNetwork()
+    const road = net.roads['r-ns']!
+    const inter = net.intersections['i-center']!
+    // The projection must still find the junction at the road's middle
+    // (30 m of 60) — NOT at the end. The polyline lengths are cached
+    // per Road object, and this road is mutated in place: without
+    // dropping the stale entry the projection answered 60.
+    expect(intersectionCenterS(road, inter)).toBe(30)
+    expect(intersectionSRange(road, inter.intersectionRadius, inter)).toEqual([15, 45])
+  })
+
+  it('leaves a road whose endpoints are already junctions alone', () => {
+    const net = buildGridNetwork()
+    // The grid's link roads end ON junctions; nothing to insert.
+    for (const road of Object.values(net.roads)) {
+      if (road.waypoints) {
+        // An inserted point is never a duplicate of an existing one.
+        const seen = new Set<string>()
+        for (const point of road.waypoints) {
+          const key = `${point.x},${point.z}`
+          expect(seen.has(key)).toBe(false)
+          seen.add(key)
+        }
+      }
+    }
+  })
+
+  it('is idempotent', () => {
+    const net = buildCrossIntersectionNetwork()
+    addIntersectionWaypoints(net)
+    const road = net.roads['r-ew']!
+    expect(road.waypoints).toHaveLength(3)
   })
 })

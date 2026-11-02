@@ -17,6 +17,7 @@ import {
   distanceToPoi,
   hasArrivedAtPoi,
   nearestRoadToPoi,
+  poiAheadOrBehind,
   POI_ARRIVAL_RADIUS_M,
 } from './poiNavigation'
 
@@ -95,5 +96,73 @@ describe('the arrival at a POI', () => {
   it('has a radius that covers the kerb gap', () => {
     // The POI stands at the kerb, ~5 m from the lane the car drives in.
     expect(POI_ARRIVAL_RADIUS_M).toBeGreaterThan(5)
+  })
+})
+
+describe('poiAheadOrBehind', () => {
+  /**
+   * The driver is on r1 (z = 0, west→east), in lane 0 — a forward lane,
+   * so it travels towards larger x.
+   */
+  const network = (): RoadNetwork =>
+    ({
+      roads: {
+        r1: {
+          id: 'r1',
+          startNode: { x: -50, y: 0, z: 0 },
+          endNode: { x: 50, y: 0, z: 0 },
+          waypoints: [
+            { x: -50, y: 0, z: 0 },
+            { x: 50, y: 0, z: 0 },
+          ],
+          laneCount: 2,
+          speedLimit: 16.67,
+          level: 0,
+        },
+        // A second road, so a POI can be somewhere else entirely.
+        r2: {
+          id: 'r2',
+          startNode: { x: 100, y: 0, z: -50 },
+          endNode: { x: 100, y: 0, z: 50 },
+          waypoints: [
+            { x: 100, y: 0, z: -50 },
+            { x: 100, y: 0, z: 50 },
+          ],
+          laneCount: 2,
+          speedLimit: 16.67,
+          level: 0,
+        },
+      },
+      intersections: {},
+      vehicles: {},
+      spawnPoints: {},
+    }) as unknown as RoadNetwork
+
+  const driver = (): Vehicle =>
+    ({
+      id: 'v-1',
+      roadId: 'r1',
+      laneIndex: 0,
+      heading: 0,
+      speed: 8,
+      position: { x: 0, y: 0, z: 0 },
+    }) as unknown as Vehicle
+
+  it('says the POI is ahead when it is further along the road', () => {
+    const placement = poiAheadOrBehind(network(), driver(), { x: 30, z: 4 })
+    expect(placement.sameRoad).toBe(true)
+    expect(placement.behind).toBe(false)
+  })
+
+  it('says the POI is behind when it is on the far side of the driver', () => {
+    const placement = poiAheadOrBehind(network(), driver(), { x: -30, z: 4 })
+    expect(placement.sameRoad).toBe(true)
+    expect(placement.behind).toBe(true)
+  })
+
+  it('says nothing when the POI is on another road', () => {
+    const placement = poiAheadOrBehind(network(), driver(), { x: 100, z: 10 })
+    expect(placement.sameRoad).toBe(false)
+    expect(placement.behind).toBe(false)
   })
 })

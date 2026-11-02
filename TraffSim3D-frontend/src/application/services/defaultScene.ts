@@ -7,6 +7,7 @@ import type { Road } from '@domain/entities/Road'
 import { LightPhase } from '@domain/value-objects/Phase'
 import { LaneId } from '@domain/value-objects/LaneId'
 import {
+  invalidateRoadPolylineCache,
   lanePoint,
   laneForwardSign,
   roadLength,
@@ -139,6 +140,103 @@ const at = (
  * when the road is just a single segment. The `level` parameter
  * defaults to 0 (ground). High-level roads pass `level: 1` etc.
  */
+// ---------------------------------------------------------------------------
+// Roads whose polyline passes through an intersection
+// ---------------------------------------------------------------------------
+//
+// A road built as two nodes carries the straight line between them. That
+// is fine on its own, but a road that passes **through** an
+// intersection has no node there — and two roads only share a node if
+// one of them has it as an endpoint or a waypoint.
+//
+// The cross scene is the case that bites: its four arms all run through
+// the centre (0, 0), and (0, 0) is neither arm's endpoint, so the four
+// arms shared NO node — the route graph was four disconnected lines and
+// the planner honestly answered "no path" on a scene that is nothing
+// but roads. The grid scene never had the problem because there every
+// road's endpoints ARE the junctions.
+
+/**
+ * How close (m) a point may be to a road's polyline to be considered
+ * ON it. Far below the spacing of two junctions, generous for a
+ * rounding difference.
+ */
+const SNAP_EPS = 0.5
+
+/**
+ * The closest point on a polyline, and the segment it falls on.
+ *
+ * The distance is 3D: an elevated road and a ground intersection are
+ * not the same place even when their (x, z) coincide, and joining
+ * them would put a kink in the road.
+ */
+const closestPointOnPolyline = (
+  pos: { x: number; y: number; z: number },
+  polyline: { x: number; y: number; z: number }[],
+): { index: number; distance: number } | null => {
+  let best: { index: number; distance: number } | null = null
+  for (let i = 0; i + 1 < polyline.length; i += 1) {
+    const a = polyline[i]!
+    const b = polyline[i + 1]!
+    const dx = b.x - a.x
+    const dz = b.z - a.z
+    const lengthSquared = dx * dx + dz * dz
+    if (lengthSquared < 1e-9) {
+      const distance = Math.hypot(pos.x - a.x, pos.y - a.y, pos.z - a.z)
+      if (best === null || distance < best.distance) best = { index: i, distance }
+      continue
+    }
+    let t = ((pos.x - a.x) * dx + (pos.z - a.z) * dz) / lengthSquared
+    t = Math.max(0, Math.min(1, t))
+    const px = a.x + t * dx
+    const py = a.y
+    const pz = a.z + t * dz
+    const distance = Math.hypot(pos.x - px, pos.y - py, pos.z - pz)
+    if (best === null || distance < best.distance) best = { index: i, distance }
+  }
+  return best
+}
+
+/**
+ * Give every road a polyline that passes through the intersections it
+ * already crosses.
+ *
+ * The intersection's own position is inserted as a waypoint — exactly
+ * the shared node the crossing roads need. Geometrically it already
+ * lies on the road's line, so nothing moves; the invariant
+ * (`waypoints[0] === startNode`, `waypoints[N-1] === endNode`) holds
+ * because only interior points are inserted.
+ */
+export const addIntersectionWaypoints = (net: RoadNetwork): void => {
+  const intersections = Object.values(net.intersections)
+  for (const road of Object.values(net.roads)) {
+    if (!road.startNode || !road.endNode) continue
+    const polyline: { x: number; y: number; z: number }[] =
+      road.waypoints && road.waypoints.length >= 2
+        ? [...road.waypoints]
+        : [road.startNode, road.endNode]
+    let changed = false
+    for (const inter of intersections) {
+      const pos = inter.position
+      if (!pos) continue
+      const hit = closestPointOnPolyline(pos, polyline)
+      if (!hit || hit.distance > SNAP_EPS) continue
+      if (polyline.some((p) => Math.hypot(p.x - pos.x, p.z - pos.z) < SNAP_EPS)) continue
+      polyline.splice(hit.index + 1, 0, pos)
+      changed = true
+    }
+    if (changed) {
+      road.waypoints = polyline
+      // The polyline lengths are cached per Road object, and this road
+      // is being mutated in place — without dropping the stale entry
+      // the projection would read the geometry it had BEFORE the
+      // waypoint was added (measured: `worldToCenterlineS(0, 0)`
+      // answered s = 60, the road's end, instead of 30, the junction).
+      invalidateRoadPolylineCache(road)
+    }
+  }
+}
+
 const roadStraight = (
   id: string,
   start: { x: number; y?: number; z: number },
@@ -390,6 +488,9 @@ export const buildCrossIntersectionNetwork = (): RoadNetwork => {
     const sp = defaultSpawnPoint(road)
     net.spawnPoints[sp.id] = sp
   }
+  // A road built as two nodes carries no node at the intersections it
+  // crosses - and two roads only share a node if one of them has it.
+  addIntersectionWaypoints(net)
   return net
 }
 
@@ -473,6 +574,9 @@ export const buildTJunctionNetwork = (): RoadNetwork => {
     const sp = defaultSpawnPoint(road)
     net.spawnPoints[sp.id] = sp
   }
+  // A road built as two nodes carries no node at the intersections it
+  // crosses - and two roads only share a node if one of them has it.
+  addIntersectionWaypoints(net)
   return net
 }
 
@@ -566,6 +670,9 @@ export const buildRectangularLoopNetwork = (): RoadNetwork => {
     const sp = defaultSpawnPoint(road)
     net.spawnPoints[sp.id] = sp
   }
+  // A road built as two nodes carries no node at the intersections it
+  // crosses - and two roads only share a node if one of them has it.
+  addIntersectionWaypoints(net)
   return net
 }
 
@@ -748,6 +855,9 @@ export const buildElevatedScene = (): RoadNetwork => {
     net.spawnPoints[sp.id] = sp
   }
 
+  // A road built as two nodes carries no node at the intersections it
+  // crosses - and two roads only share a node if one of them has it.
+  addIntersectionWaypoints(net)
   return net
 }
 /**
@@ -947,6 +1057,9 @@ export const buildCorridorScene = (): RoadNetwork => {
     net.spawnPoints[sp.id] = sp
   }
 
+  // A road built as two nodes carries no node at the intersections it
+  // crosses - and two roads only share a node if one of them has it.
+  addIntersectionWaypoints(net)
   return net
 }
 
@@ -1283,6 +1396,9 @@ export const buildGridNetwork = (queueLengthPerJunction = 3): RoadNetwork => {
     net.spawnPoints[sp.id] = sp
   }
 
+  // A road built as two nodes carries no node at the intersections it
+  // crosses - and two roads only share a node if one of them has it.
+  addIntersectionWaypoints(net)
   return net
 }
 
@@ -1385,6 +1501,9 @@ export const buildUnsignalisedJunctionScene = (): RoadNetwork => {
     })
   }
 
+  // A road built as two nodes carries no node at the intersections it
+  // crosses - and two roads only share a node if one of them has it.
+  addIntersectionWaypoints(net)
   return net
 }
 
@@ -1537,6 +1656,9 @@ export const buildUnsignalisedGridScene = (): RoadNetwork => {
     })
   }
 
+  // A road built as two nodes carries no node at the intersections it
+  // crosses - and two roads only share a node if one of them has it.
+  addIntersectionWaypoints(net)
   return net
 }
 

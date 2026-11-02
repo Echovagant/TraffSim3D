@@ -55,9 +55,10 @@ const poiNextToARoad = async (page: import('@playwright/test').Page) =>
 
 test.describe('Driving to a point of interest', () => {
   // The car really drives: the journey is wall-clock time at the
-  // simulation's own pace (a few tens of seconds), so the spec needs
-  // more than the suite's default 60 s.
-  test.setTimeout(240_000)
+  // simulation's own pace. Measured: about two minutes from "开过去" to
+  // the arrival on a busy grid, so the arrival poll needs more than the
+  // suite's default 60 s — and the test itself more than the poll.
+  test.setTimeout(300_000)
 
   test('the car routes to the POI and arrives', async ({ page }) => {
     await waitForSceneReady(page)
@@ -133,8 +134,65 @@ test.describe('Driving to a point of interest', () => {
       .toBeLessThan(planned.poiDistanceM ?? Infinity)
 
     // And it arrives.
-    await expect.poll(async () => (await world(page)).poiArrived, { timeout: 120_000 }).toBe(true)
+    await expect.poll(async () => (await world(page)).poiArrived, { timeout: 240_000 }).toBe(true)
     await expect(page.locator('[data-testid="poi-arrived"]')).toContainText('已到达')
     await expect(page.locator('[data-testid="route-hud-distance"]')).toContainText('已到达')
   })
+})
+
+test('a destination behind the driver on its own road turns the car around', async ({ page }) => {
+  // The cross scene used to be unusable here: its roads were built as
+  // two nodes, so the four arms shared NO node at the junction and the
+  // route graph was four disconnected lines. They carry the intersection
+  // as a waypoint now, and the planner is asked to allow the U-turn that
+  // a destination behind the driver on its own road needs.
+  await waitForSceneReady(page)
+  await switchScene(page, 'cross')
+  await page.waitForTimeout(1500)
+
+  await page.evaluate(() => {
+    const w = (window as unknown as { __world: PoiWorld }).__world
+    w.network.origin = { lat: 22.54297, lon: 114.06865 }
+  })
+
+  // The driver (v-1) starts on the north arm heading for the junction,
+  // so a POI further up that arm is BEHIND it.
+  await page.route('**/api/v1/maps/poi', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        source: 'osm',
+        count: 1,
+        pois: [
+          {
+            id: 'osm-node-1',
+            name: '身后咖啡',
+            type: 'amenity=cafe',
+            typeCode: 'amenity',
+            category: '餐饮',
+            address: '',
+            lon: 114.069,
+            lat: 22.543,
+            x: 5,
+            z: -25,
+          },
+        ],
+      }),
+    })
+  })
+
+  await page.click('[data-testid="poi-load-button"]')
+  await expect(page.locator('[data-testid="poi-item"]')).toHaveCount(1)
+  await page.locator('[data-testid="poi-item"]').first().click()
+  await page.click('[data-testid="poi-go-button"]')
+
+  await expect(page.locator('[data-testid="route-hud"]')).toBeVisible()
+  const planned = await world(page)
+  expect(planned.poiDestinationId).toBe('osm-node-1')
+  // The route turns the car around: its own road, then that road again
+  // — the U-turn at the end of the block.
+  expect(planned.plannedRoute!.roads).toHaveLength(3)
+  expect(planned.plannedRoute!.roads[0]).toBe(planned.plannedRoute!.roads[1])
+  expect(planned.plannedRoute!.roads[2]).toBe(planned.plannedRoute!.roads[0])
 })

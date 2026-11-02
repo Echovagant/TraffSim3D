@@ -21,6 +21,7 @@
 
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
 import type { Vehicle } from '@domain/entities/Vehicle'
+import { laneForwardSign } from '@domain/services/laneGeometry'
 
 /** A POI, as far as the navigation cares. */
 export interface PoiTarget {
@@ -142,3 +143,30 @@ export const distanceToPoi = (vehicle: Vehicle, poi: { x: number; z: number }): 
 /** Whether a vehicle has reached the POI. */
 export const hasArrivedAtPoi = (vehicle: Vehicle, poi: { x: number; z: number }): boolean =>
   distanceToPoi(vehicle, poi) <= POI_ARRIVAL_RADIUS_M
+
+/**
+ * Is this POI on the DRIVER's own road — and if so, ahead of it or
+ * behind it?
+ *
+ * Behind is the case that needs a U-turn: the driver is committed to
+ * the end of their road, and the only way to a destination on that
+ * road behind them is to drive to the end and turn around. Ahead needs
+ * nothing — the route to the road's end passes the POI on the way, and
+ * the arrival is the distance.
+ *
+ * `laneForwardSign` gives which way the car is actually travelling on
+ * its road (`forward` = the road's start→end direction).
+ */
+export const poiAheadOrBehind = (
+  network: RoadNetwork,
+  vehicle: Vehicle,
+  poi: { x: number; z: number },
+): { sameRoad: boolean; behind: boolean } => {
+  const snap = nearestRoadToPoi(network, poi)
+  if (!snap || snap.roadId !== vehicle.roadId) return { sameRoad: false, behind: false }
+  const road = network.roads[vehicle.roadId]
+  const laneCount = road?.laneCount ?? vehicle.laneIndex + 1
+  const driverDirection: 'forward' | 'backward' =
+    laneForwardSign(vehicle.laneIndex, laneCount) === 1 ? 'forward' : 'backward'
+  return { sameRoad: true, behind: snap.direction !== driverDirection }
+}

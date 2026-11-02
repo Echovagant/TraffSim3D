@@ -111,10 +111,20 @@ export const plannedRouteFrom = (
   response: RoutePlanResponse,
   vehicle: Vehicle,
   destinationId: string,
+  options: { keepFirstRoad?: boolean } = {},
 ): PlannedRoute | null => {
   if (!response.found || response.legs.length === 0) return null
 
-  const roads = [vehicle.roadId, ...response.roads.filter((id) => id !== vehicle.roadId)]
+  // The planner's first leg is the road the car reaches *next*; the road
+  // it is on right now is prepended here.
+  //
+  // The exception is a U-turn (`keepFirstRoad`): the response's first leg
+  // IS the car's own road, and dropping it would lose the turn at the
+  // end of the block — the road list would read [R, next] when the car
+  // has to drive R to its end and drive it back.
+  const roads = options.keepFirstRoad
+    ? [vehicle.roadId, ...response.roads]
+    : [vehicle.roadId, ...response.roads.filter((id) => id !== vehicle.roadId)]
 
   const points: Position[] = [
     { x: vehicle.position.x, y: vehicle.position.y, z: vehicle.position.z },

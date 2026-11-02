@@ -68,6 +68,20 @@ class RouteRequest(BaseModel):
     network: dict[str, Any] = Field(default_factory=dict)
     start: RouteEndpoint
     end: RouteEndpoint
+    #: Allow the route's FIRST leg to be the car's own road — a U-turn at
+    #: the end of the road it is on.
+    #:
+    #: Forbidden by default: a car on a road is committed to reaching its
+    #: end, and a route whose first leg is that road would send it there
+    #: and back (with equal-length alternatives the search happily picks
+    #: the U-turn, and the A* heap order decides which).
+    #:
+    #: The exception is a destination **on the driver's own road behind
+    #: them** — a driver who took the wrong road has no way out except
+    #: to turn around. The browser asks for this flag exactly there; the
+    #: road's own intersection still has to permit the turn, which is the
+    #: scene's business, not this endpoint's.
+    allow_u_turn: bool = False
 
 
 @router.post("/routes/plan", tags=["routes"])
@@ -103,7 +117,11 @@ def plan_route(req: RouteRequest) -> dict[str, Any]:
     # would be a U-turn at the junction it is about to reach. (With equal
     # lengths the search happily picks it: a square grid has two ways
     # round, and the A* heap order decides which one comes first.)
-    forbid_first_road = req.start.road_id
+    #
+    # `allow_u_turn` is the exception the caller asks for: a driver whose
+    # destination is on its own road behind them has to turn around, and
+    # no other route reaches it.
+    forbid_first_road = None if req.allow_u_turn else req.start.road_id
 
     path = _shortest_path_avoiding_first_road(graph, start_node.id, end_node.id, forbid_first_road)
     if path is None:

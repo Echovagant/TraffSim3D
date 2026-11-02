@@ -59,6 +59,22 @@ export const roadPolylineLengths = (road: Road): ReadonlyArray<number> => {
   return cum
 }
 
+/**
+ * Drop the cached polyline lengths of one road.
+ *
+ * The cache is keyed on the Road **object**, so mutating a road's
+ * `waypoints` in place — which the scene builders do when they add the
+ * intersections a road passes through — leaves a stale entry behind and
+ * the projection would read the OLD geometry. Measured: after the cross
+ * scene's road grew a third waypoint its cache still held `[60]`, and
+ * `worldToCenterlineS(0, 0)` answered s = 60 (the road's end) instead
+ * of 30 (the junction) — the intersection box moved to the end of the
+ * road and the stop lines followed it.
+ */
+export const invalidateRoadPolylineCache = (road: Road): void => {
+  CUM_LENGTHS_CACHE.delete(road)
+}
+
 /** Find the polyline segment that contains arc-length `s`, plus
  *  the local normalized parameter `t` within that segment (0..1). */
 export interface PolylineSegment {

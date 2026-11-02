@@ -297,3 +297,38 @@ async def test_a_route_across_the_real_5x5_grid(client: AsyncClient) -> None:
     # The legs chain: each leg's `to` is the next leg's `from`.
     for first, second in zip(body["legs"], body["legs"][1:], strict=False):
         assert first["to"] == second["from"]
+
+
+@pytest.mark.asyncio
+async def test_allow_u_turn_lets_the_car_turn_around_at_the_end_of_its_road(
+    client: AsyncClient,
+) -> None:
+    """A destination on the car's own road behind it.
+
+    The car is committed to the end of its road, so a destination behind
+    it is reachable only by driving to the end and coming back. The
+    planner forbids that by default — it would otherwise happily pick the
+    U-turn over the block's longer way round — and `allow_u_turn` is the
+    caller's explicit exception.
+    """
+    network = _grid_network()
+    body = {
+        "network": network,
+        "start": {"road_id": "r0", "direction": "forward"},
+        "end": {"road_id": "r0", "direction": "backward"},
+    }
+
+    without = await client.post("/api/v1/routes/plan", json=body)
+    with_flag = await client.post("/api/v1/routes/plan", json={**body, "allow_u_turn": True})
+    assert without.status_code == 200
+    assert with_flag.status_code == 200
+
+    # Without the flag the car goes the long way round the block: three
+    # legs of 100 m instead of one U-turn of 100 m.
+    assert without.json()["found"] is True
+    assert without.json()["roads"] == ["r3", "r1", "r2"]
+
+    # With it, the U-turn wins — and it is the car's own road, which is
+    # exactly what the flag is for.
+    assert with_flag.json()["found"] is True
+    assert with_flag.json()["roads"] == ["r0"]

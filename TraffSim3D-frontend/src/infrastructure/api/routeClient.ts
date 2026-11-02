@@ -66,6 +66,7 @@ export interface RouteClient {
     network: RouteNetworkPayload,
     start: RouteEndpoint,
     end: RouteEndpoint,
+    options?: { allowUTurn?: boolean },
   ): Promise<{ ok: true; route: RoutePlanResponse } | { ok: false; error: string }>
 }
 
@@ -102,7 +103,7 @@ const safeJsonParse = (text: string): unknown => {
 }
 
 export const createRouteClient = (baseUrl: string = ROUTE_API_PREFIX): RouteClient => ({
-  planRoute: async (network, start, end) => {
+  planRoute: async (network, start, end, options) => {
     const prefix = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
     const url = `${prefix}${ROUTE_PLAN_PATH}`
     const controller = new AbortController()
@@ -113,6 +114,10 @@ export const createRouteClient = (baseUrl: string = ROUTE_API_PREFIX): RouteClie
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           network,
+          // The planner forbids a route whose first leg is the car's own
+          // road (that is a U-turn at the junction it is about to reach);
+          // `allowUTurn` is the exception the caller asks for.
+          ...(options?.allowUTurn ? { allow_u_turn: true } : {}),
           start: {
             ...(start.junctionId ? { junction_id: start.junctionId } : {}),
             ...(start.roadId ? { road_id: start.roadId } : {}),

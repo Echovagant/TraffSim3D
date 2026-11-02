@@ -137,6 +137,15 @@ export const useWorldSimulation = (canvasRef: Ref<HTMLCanvasElement | null>) => 
       },
     )
 
+    // The destination's marker: bigger and brighter, because in the
+    // first-person view it is the thing the driver is driving at.
+    watch(
+      () => store.poiDestinationId,
+      (id) => {
+        renderer?.setPoiDestination(id)
+      },
+    )
+
     watch(
       () => Object.keys(store.getNetwork().vehicles).length,
       () => {

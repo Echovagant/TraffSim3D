@@ -53,6 +53,7 @@ export interface RouteRequest {
   network?: Record<string, unknown>
   start: RouteEndpoint
   end: RouteEndpoint
+  allow_u_turn?: boolean
 }
 
 /** `SignalTrainRequest` — from the OpenAPI `components.schemas`. */

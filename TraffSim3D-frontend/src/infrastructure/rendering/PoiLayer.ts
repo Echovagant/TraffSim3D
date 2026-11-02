@@ -42,6 +42,15 @@ export const POI_MARKER_HEIGHT_M = 7.0
 export const POI_MARKER_LIFT_M = 0.2
 
 /**
+ * How much larger the DESTINATION's marker is than the others.
+ *
+ * In the first-person view the destination is the thing the driver is
+ * driving at: it has to be findable at a glance, and a bigger column
+ * is the cheapest way to say so (the palette stays the same).
+ */
+export const DESTINATION_MARKER_SCALE = 1.6
+
+/**
  * The category colours — the same restrained palette the rest of the
  * scene uses (the signals are amber/green/red; the road is grey).
  */
@@ -75,6 +84,11 @@ export interface PoiLayer {
   set: (pois: Poi[]) => void
   /** Brighten one POI (the selected one). */
   select: (id: string | null) => void
+  /**
+   * Make one POI the DESTINATION: its marker is drawn larger and
+   * brighter (see `DESTINATION_MARKER_SCALE`).
+   */
+  setDestination: (id: string | null) => void
   /** Release the GPU resources. */
   dispose: () => void
 }
@@ -114,20 +128,38 @@ export const createPoiLayer = (): PoiLayer => {
 
   const pois: Poi[] = []
   const matrix = new THREE.Matrix4()
+  /** The destination's scale matrix, built once per draw. */
+  const destinationScale = new THREE.Matrix4()
   const color = new THREE.Color()
   let selectedId: string | null = null
+  let destinationId: string | null = null
 
   const draw = (): void => {
     mesh.count = Math.min(pois.length, MAX_POIS)
     for (let index = 0; index < mesh.count; index += 1) {
       const poi = pois[index]!
       matrix.makeTranslation(poi.x, 0, poi.z)
+      // The destination marker stands out by SIZE: it is the thing the
+      // driver is driving at, and at the end of a first-person view it
+      // is the only landmark worth looking for.
+      //
+      // The matrix is built as T · S: `makeScale` REPLACES the matrix,
+      // so the scale goes into its own and is multiplied in. (Measured:
+      // calling `matrix.scale(...)` after `makeTranslation` left the
+      // rotation part ZERO — a collapsed column.) The geometry is
+      // already raised, so only x and z are scaled: a taller marker
+      // would float higher off the road.
+      if (poi.id === destinationId) {
+        destinationScale.makeScale(DESTINATION_MARKER_SCALE, 1, DESTINATION_MARKER_SCALE)
+        matrix.multiply(destinationScale)
+      }
       mesh.setMatrixAt(index, matrix)
       const isSelected = poi.id === selectedId
       color.setHex(poiColor(poi.category))
       // The selected marker is brighter and larger — the only per-POI
       // emphasis the layer has.
       if (isSelected) color.multiplyScalar(1.8)
+      if (poi.id === destinationId) color.multiplyScalar(1.5)
       mesh.setColorAt(index, color)
     }
     mesh.instanceMatrix.needsUpdate = true
@@ -146,11 +178,17 @@ export const createPoiLayer = (): PoiLayer => {
     draw()
   }
 
+  const setDestination = (id: string | null): void => {
+    if (id === destinationId) return
+    destinationId = id
+    draw()
+  }
+
   const dispose = (): void => {
     geometry.dispose()
     material.dispose()
     mesh.dispose()
   }
 
-  return { mesh, pois, set, select, dispose }
+  return { mesh, pois, set, select, setDestination, dispose }
 }

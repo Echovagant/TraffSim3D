@@ -50,6 +50,7 @@ import { defaultPoiClient, boundsToDegrees, type Poi } from '@infrastructure/api
 import {
   distanceToPoi,
   nearestRoadToPoi,
+  poiAheadOrBehind,
   POI_ARRIVAL_RADIUS_M,
 } from '@application/services/poiNavigation'
 import type { FollowCameraTarget } from '@infrastructure/rendering/ThreeJSRenderer'
@@ -465,13 +466,25 @@ export const useWorldStore = defineStore('world', () => {
     const end = nearestRoadToPoi(network.value, poi)
     if (!end) return { ok: false, reason: '这个兴趣点附近没有道路' }
 
+    // The U-turn exception: a destination on the driver's own road
+    // BEHIND them. The driver is committed to the end of their road and
+    // the only way there is to drive to the end and turn around — so
+    // the planner is asked to allow a route whose first leg is the car's
+    // own road. Ahead needs nothing: the route to the road's end passes
+    // the POI on the way.
+    const placement = poiAheadOrBehind(network.value, vehicle, poi)
+    const allowUTurn = placement.sameRoad && placement.behind
+
     const result = await defaultRouteClient.planRoute(
       routeNetworkPayload(network.value),
       routeStartFor(network.value, vehicle),
       end,
+      { allowUTurn },
     )
     if (!result.ok) return { ok: false, reason: result.error }
-    const route = plannedRouteFrom(network.value, result.route, vehicle, poi.id)
+    const route = plannedRouteFrom(network.value, result.route, vehicle, poi.id, {
+      keepFirstRoad: allowUTurn,
+    })
     if (!route) return { ok: false, reason: '没有一条路能开到那个兴趣点' }
 
     plannedRoute.value = route
@@ -496,6 +509,8 @@ export const useWorldStore = defineStore('world', () => {
     poiDestinationId.value = null
     poiArrived.value = false
     poiDistanceM.value = null
+    // Let the car drive again: the stop was part of the arrival.
+    if (routeFollowerId.value) speedOverrides.delete(routeFollowerId.value)
     bumpTick()
   }
 
@@ -1174,6 +1189,12 @@ export const useWorldStore = defineStore('world', () => {
         poiDistanceM.value = distance
         if (distance <= POI_ARRIVAL_RADIUS_M) {
           poiArrived.value = true
+          // Stop AT the destination. The route itself ends at the
+          // road's node, and a POI in the middle of a block is not a
+          // node the planner can be handed — so without this the car
+          // would drive past its destination and carry on to the end
+          // of the road, which is not what "arrived" means.
+          pinFollowerSpeed(routeFollowerId.value, 0)
           bumpTick()
         }
       }
@@ -1413,6 +1434,25 @@ export const useWorldStore = defineStore('world', () => {
    * in, so the overrides are suspended for the duration of a replay
    * and re-applied once it stops.
    */
+  /**
+   * Pin a vehicle's speed WITHOUT recording it as a user edit.
+   *
+   * The pin is a plain override — `applySpeedOverrides` re-applies it
+   * every tick, so it survives the tick that computes the speed — and
+   * it is cleared when the destination is forgotten. The arrival at a
+   * POI uses this to stop the car where it reached.
+   */
+  const pinFollowerSpeed = (vehicleId: string, mps: number): void => {
+    const v = network.value.vehicles[vehicleId]
+    if (!v) return
+    speedOverrides.set(vehicleId, mps)
+    v.targetSpeed = mps
+    v.speed = mps
+    if (rapierWorld) {
+      rapierWorld.setVehicleSpeed(vehicleId, mps, v.heading)
+    }
+  }
+
   const applySpeedOverrides = (): void => {
     if (speedOverrides.size === 0) return
     if (replayActive.value) return

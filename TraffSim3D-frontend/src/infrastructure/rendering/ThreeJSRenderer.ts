@@ -19,6 +19,17 @@ export const FOLLOW_LOOK_AHEAD_M = 14
 export const FOLLOW_LOOK_DOWN_M = 1.6
 
 /**
+ * How many frames the camera takes to arrive at the driver's eye.
+ *
+ * The entry is an ease-out over this many frames (~0.7 s at 60 fps),
+ * after which the camera tracks the eye **exactly**. A lerp that never
+ * converges would leave the view a few metres behind the car forever,
+ * and the first-person camera is supposed to be IN the car — the
+ * existing spec asserts the eye position, so the move has to finish.
+ */
+export const FOLLOW_ENTRY_FRAMES = 40
+
+/**
  * What the first-person camera rides with.
  *
  * Structural on purpose — the render layer must not depend on the
@@ -84,6 +95,12 @@ export class ThreeJSRenderer {
   private routeRef: RouteRenderPath | null = null
   /** The vehicle currently hidden because the camera rides in it. */
   private hiddenFollowerId: string | null = null
+  /** Whether the camera is currently easing into / riding the car. */
+  private following = false
+  /** Frames spent easing into the first-person view (capped). */
+  private followFrames = 0
+  /** Where the camera is steering its look-at point toward. */
+  private followLook = new THREE.Vector3()
   /** The POI markers (one draw call for the whole set). */
   private poiLayer: PoiLayer | null = null
   // 'flat' (default) renders ground + road meshes (used by
@@ -254,6 +271,15 @@ export class ThreeJSRenderer {
   /** Brighten the selected POI (null clears the selection). */
   selectPoi(id: string | null): void {
     this.poiLayer?.select(id)
+  }
+
+  /**
+   * Draw one POI as the DESTINATION — its marker is larger and
+   * brighter, because in the first-person view it is what the driver
+   * is driving at.
+   */
+  setPoiDestination(id: string | null): void {
+    this.poiLayer?.setDestination(id)
   }
 
   /** Drop the POI markers (a new scene, or the user cleared them). */
@@ -450,6 +476,9 @@ export class ThreeJSRenderer {
       if (follow) {
         this.applyFollowCamera(follow)
       } else {
+        // Leaving the first-person view: the next entry eases in again
+        // from wherever the camera is now.
+        this.following = false
         this.controls?.update()
       }
       this.syncFollowerVisibility(follow)
@@ -473,8 +502,31 @@ export class ThreeJSRenderer {
     const forward = new THREE.Vector3(Math.cos(target.heading), 0, Math.sin(target.heading))
     const look = eye.clone().add(forward.multiplyScalar(FOLLOW_LOOK_AHEAD_M))
     look.y = target.position.y - FOLLOW_LOOK_DOWN_M
-    this.camera.position.copy(eye)
-    this.camera.lookAt(look)
+
+    // The camera eases toward the driver's eye instead of snapping: a
+    // snap puts the whole view at the car in one frame, and the road
+    // swinging around the screen reads as a glitch rather than a move.
+    //
+    // The ease-out runs over `FOLLOW_ENTRY_FRAMES` frames and then
+    // finishes exactly — a lerp that never converges would leave the
+    // view a metre or two behind the car forever.
+    if (!this.following) {
+      // Entering: seed the look-at point from where the camera already
+      // points, so the ease-out starts from the user's view rather than
+      // from a point somewhere in the sky.
+      this.following = true
+      this.followFrames = 0
+      this.followLook.copy(this.camera.position)
+      const direction = new THREE.Vector3()
+      this.camera.getWorldDirection(direction)
+      this.followLook.add(direction.multiplyScalar(FOLLOW_LOOK_AHEAD_M))
+    }
+    this.followFrames = Math.min(FOLLOW_ENTRY_FRAMES, this.followFrames + 1)
+    const t = this.followFrames / FOLLOW_ENTRY_FRAMES
+    const eased = 1 - Math.pow(1 - t, 3) // ease-out cubic
+    this.camera.position.lerp(eye, eased)
+    this.followLook.lerp(look, eased)
+    this.camera.lookAt(this.followLook)
     // Keep the orbit controls' target on the look-at point, so leaving
     // the first-person camera starts the orbit from where the user was
     // looking rather than from wherever the orbit camera was parked.
