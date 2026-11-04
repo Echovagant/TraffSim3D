@@ -212,7 +212,12 @@ describe('queue lookup — an imported OSM map is no longer structurally 0', () 
     const net = buildImportedNetwork()
     const ew = importedEwLight(net)
     expect(legacyAxisQueueLength(ew, net)).toBe(0)
-    expectBothPaths(ew, net, 2)
+    // 1, not 2: the branch car sits at s = 10 on a road whose junction
+    // is at its START — it has already PASSED i-osm-1 and is driving
+    // away. The old midpoint window counted it against an imaginary
+    // stop line at the road's middle; the per-junction window (the stop
+    // line the light actually holds vehicles at) correctly excludes it.
+    expectBothPaths(ew, net, 1)
   })
 
   it('decides the axis by geometry: the NS light ignores the EW roads', () => {
@@ -228,8 +233,9 @@ describe('queue lookup — an imported OSM map is no longer structurally 0', () 
     expect(net.vehicles['v-osm-ew-1']).toBeDefined()
     expect(net.vehicles['v-osm-branch-1']).toBeDefined()
 
-    // ... while the EW light sees both EW roads.
-    expectBothPaths(importedEwLight(net), net, 2)
+    // ... while the EW light sees the EW main road's car — and not the
+    // branch car, which is past the junction (see the count above).
+    expectBothPaths(importedEwLight(net), net, 1)
   })
 
   it('controlledLane narrows getQueueLength but not getAxisQueueLength', () => {

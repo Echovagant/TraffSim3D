@@ -116,7 +116,7 @@ export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): Bui
     }
     // The intersections go along so the painted stop lines land where the
     // traffic logic stops a vehicle (same projection, same source).
-    roadMarkings = createRoadMarkings(roads, { intersections })
+    roadMarkings = createRoadMarkings(roads, { intersections, network })
     root.add(roadMarkings)
   }
 

@@ -295,4 +295,152 @@ test.describe('driving behaviour (live scene)', () => {
       }
     }
   })
+
+  test('micro-city: no travel-end wrap anywhere on the map', async ({ page }) => {
+    // The micro city is fully networked: every segment runs
+    // junction-to-junction, so a vehicle at its travel end always turns
+    // — the edge-to-edge teleport of the cross scene cannot happen. The
+    // sample window covers multiple junction passages per vehicle.
+    test.setTimeout(WALL_SAMPLE_MS + 120_000)
+    await waitForSceneReady(page)
+    await switchScene(page, 'micro-city')
+    // 4x sim clock: the light cycles (up to a 60 s actuated green) put
+    // only one or two junction passages per vehicle into a wall-clock
+    // window, and the lane-arrows contract needs interior turns to
+    // observe. The grid specs use the same trick.
+    await page.evaluate(() => {
+      const w = window as unknown as { __world?: { setTickRate?: (r: number) => void } }
+      w.__world?.setTickRate?.(4)
+    })
+    await startSampler(page, SAMPLE_MS)
+    await page.waitForTimeout(WALL_SAMPLE_MS)
+    const samples = await collectSamples(page)
+    const series = seriesOf(samples)
+    // The scene opens with 14 vehicles and none despawn.
+    expect(series.size).toBeGreaterThanOrEqual(14)
+    let turns = 0
+    for (const [id, rs] of series) {
+      for (let i = 1; i < rs.length; i++) {
+        const a = rs[i - 1]!
+        const b = rs[i]!
+        const d = Math.hypot(b.x - a.x, b.z - a.z)
+        // The sampler runs on wall clock; a page hiccup stretches one
+        // sample's wall gap, and the sim advances with it — so the
+        // distance bound scales with the measured wall time. The 4x
+        // sim clock multiplies how far a wall second carries the sim.
+        const wallS = ((b.wt - a.wt) / 1000) * 4
+        if (a.road === b.road) {
+          // Same road: motion is continuous — no teleport, no jump of
+          // two lanes.
+          const bound = (a.sp || 16) * wallS * 1.5 + 5
+          expect(d, `${id} moved ${d.toFixed(1)} m in ${wallS.toFixed(2)} s`).toBeLessThan(bound)
+          expect(Math.abs(b.lane - a.lane), `${id} laneIndex jump at wt=${b.wt}`).toBeLessThan(2)
+        } else {
+          turns += 1
+          // A junction continuation is a small hop: the turn may fire
+          // up to fireLeadM (~4.75 m) before the end and the arc lands
+          // ~3 m into the new road, plus one sample of driving — under
+          // ~18 m of geometry, never the 57 m of a cross-scene wrap.
+          const bound = (a.sp || 16) * wallS * 1.5 + 18
+          expect(d, `${id} junction hop of ${d.toFixed(1)} m`).toBeLessThan(bound)
+        }
+      }
+    }
+    // The map actually produces junction traffic in the window.
+    expect(turns, 'junction turns occurred').toBeGreaterThan(5)
+  })
+
+  test('micro-city: turns follow the lane arrows', async ({ page }) => {
+    // The lane-semantics contract, verified live: a LEFT turn only from
+    // the leftmost travel lane, a RIGHT turn only from the rightmost,
+    // straight from anywhere. The movement is classified from the
+    // vehicle's heading change across the junction (sampled before and
+    // after the arc, so the mid-turn heading noise does not matter).
+    // The window is the long one: interior-to-interior turns are a
+    // minority of the road changes (most traffic circulates the ring),
+    // and the turn hash fires a quarter of the time.
+    const MICRO_SAMPLE_MS = 60_000
+    test.setTimeout(MICRO_SAMPLE_MS + 120_000)
+    await waitForSceneReady(page)
+    await switchScene(page, 'micro-city')
+    // 4x sim clock: the light cycles (up to a 60 s actuated green) put
+    // only one or two junction passages per vehicle into a wall-clock
+    // window, and the lane-arrows contract needs interior turns to
+    // observe. The grid specs use the same trick.
+    await page.evaluate(() => {
+      const w = window as unknown as { __world?: { setTickRate?: (r: number) => void } }
+      w.__world?.setTickRate?.(4)
+    })
+    await startSampler(page, SAMPLE_MS)
+    await page.waitForTimeout(MICRO_SAMPLE_MS)
+    const samples = await collectSamples(page)
+
+    const movementOf = (from: number, to: number): 'straight' | 'left' | 'right' | 'uturn' => {
+      let d = (to - from) % (2 * Math.PI)
+      if (d > Math.PI) d -= 2 * Math.PI
+      if (d < -Math.PI) d += 2 * Math.PI
+      const mag = Math.abs(d)
+      if (mag > (3 * Math.PI) / 4) return 'uturn'
+      if (mag <= Math.PI / 4) return 'straight'
+      return d < 0 ? 'right' : 'left'
+    }
+    // The lane-position helpers mirror the domain's convention: the
+    // forward half travels s upwards, the backward half downwards, and
+    // "position from right" is 0 for the keep-right lane of whichever
+    // half the vehicle is in.
+    const travelLanes = (laneIndex: number, laneCount: number): number => {
+      const backward = Math.floor(laneCount / 2)
+      return laneIndex < backward ? laneCount - backward : backward
+    }
+    const positionFromRight = (laneIndex: number, laneCount: number): number =>
+      laneIndex < Math.floor(laneCount / 2) ? laneIndex : laneCount - 1 - laneIndex
+
+    let lefts = 0
+    let rights = 0
+    for (const [, rs] of seriesOf(samples)) {
+      for (let i = 1; i < rs.length; i++) {
+        if (rs[i]!.road === rs[i - 1]!.road) continue
+        const before = rs[i - 1]!
+        // The `after` heading must be past the arc: at i+2 (0.4 s) the
+        // body can still be mid-sweep, and a 90° turn then classifies as
+        // straight. Four samples (0.8 s) clear an arc at scene speeds.
+        const after = rs[Math.min(rs.length - 1, i + 4)]!
+        if (after.road !== rs[i]!.road) continue // next junction already reached — skip this one
+        const movement = movementOf(before.h, after.h)
+        if (movement === 'uturn' || movement === 'straight') continue
+        // Turns onto a one-way RING road are exempt: at a ring junction
+        // the ring's flow leaves exactly one movement open (measured:
+        // the southbound arterial at the SW corner can only turn west),
+        // so the arrows paint that single movement and every lane takes
+        // it. The lane-position rule is asserted where the junction
+        // actually offers a choice — interior-to-interior turns.
+        const target = rs[i]!.road
+        const isRing = /mc-(ew-r0|ew-r2|ns-c0|ns-c3)/.test(target)
+        if (isRing) continue
+        // The lane count of the road the vehicle was ON. The sampler
+        // stores per-row lane data only, so infer it from the road id
+        // convention (mc-*): the middle EW row is the 6-lane arterial,
+        // the one-way couplet and the NS arterial are 4-lane, the rest
+        // of the columns are 2-lane locals.
+        const laneCount = before.road.startsWith('mc-ew-r1')
+          ? 6
+          : before.road.startsWith('mc-ns-c1')
+            ? 4
+            : 2 // the one-way ring streets and the local column
+        const pos = positionFromRight(before.lane, laneCount)
+        const last = travelLanes(before.lane, laneCount) - 1
+        if (movement === 'left') {
+          lefts += 1
+          expect(pos, `left turn from lane position ${pos}/${last} on ${before.road}`).toBe(last)
+        } else {
+          rights += 1
+          expect(pos, `right turn from lane position ${pos} on ${before.road}`).toBe(0)
+        }
+      }
+    }
+    // The window saw both kinds of turn — the rule is exercised, not
+    // vacuously true.
+    expect(lefts, `lefts=${lefts} rights=${rights}`).toBeGreaterThan(0)
+    expect(rights, `lefts=${lefts} rights=${rights}`).toBeGreaterThan(0)
+  })
 })

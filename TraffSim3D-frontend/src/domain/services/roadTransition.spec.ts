@@ -14,7 +14,8 @@
 //     entering it means driving FORWARD along it, which is the direction
 //     a one-way road's traffic runs, so it is legal.
 import { describe, it, expect } from 'vitest'
-import { roadContinuation } from './roadTransition'
+import { laneMovementRule, roadContinuation } from './roadTransition'
+import type { Movement } from './roadTransition'
 import { laneForwardSign } from './laneGeometry'
 import { createRoadNetwork } from '@domain/entities/RoadNetwork'
 import type { Road } from '@domain/entities/Road'
@@ -253,5 +254,90 @@ describe('roadContinuation — a planned route wins over the hash', () => {
     const withSeed = roadContinuation(net, roadA, 0, HEADING_EAST, 'v-1')
     const withoutRoute = roadContinuation(net, roadA, 0, HEADING_EAST, 'v-1', null)
     expect(withoutRoute?.roadId).toBe(withSeed?.roadId)
+  })
+})
+
+describe('lane semantics (the painted arrows decide)', () => {
+  it('the rule: outer lanes turn + straight, middle lanes straight, single lane everything', () => {
+    const all = new Set<Movement>(['straight', 'left', 'right'])
+    // Single travel lane: everything on offer.
+    expect(laneMovementRule(0, 1, all)).toEqual(['straight', 'left', 'right'])
+    // Rightmost of three: right + straight. Leftmost: left + straight.
+    expect(laneMovementRule(0, 3, all)).toEqual(['right', 'straight'])
+    expect(laneMovementRule(2, 3, all)).toEqual(['left', 'straight'])
+    // Middle: straight only.
+    expect(laneMovementRule(1, 3, all)).toEqual(['straight'])
+    // A movement the junction does not offer is dropped from the lane's
+    // set — never painted, never chosen.
+    const noRight = new Set<Movement>(['straight', 'left'])
+    expect(laneMovementRule(0, 3, noRight)).toEqual(['straight'])
+    // A middle lane at a junction with no straight (a wide T) falls back
+    // to what is on offer instead of stranding the vehicle.
+    const noStraight = new Set<Movement>(['left', 'right'])
+    expect(laneMovementRule(1, 3, noStraight)).toEqual(['left', 'right'])
+  })
+
+  it('a crossroads: lane 0 never turns left, lane 1 never turns right', () => {
+    const { net, roadA } = crossroads()
+    // The fixture's `r-right` / `r-left` both head NORTH from the
+    // junction (the latter re-entered backward) — for an east-bound
+    // vehicle they are both LEFT turns. Add a real right-turn road
+    // heading south so both prohibitions are testable.
+    const south: Road = {
+      id: 'r-south',
+      startNode: { x: 0, y: 0, z: 0 },
+      endNode: { x: 0, y: 0, z: -60 },
+      laneCount: 4,
+      speedLimit: 20,
+      level: 0,
+    }
+    net.roads[south.id] = south
+    net.intersections['i-1']!.connectedRoads.push('r-south')
+
+    // Lane 0 is the rightmost travel lane (allowed: right + straight),
+    // lane 1 the leftmost (allowed: left + straight). Whatever the turn
+    // hash wants, the arrows hold.
+    for (let seed = 0; seed < 40; seed++) {
+      const id = `v-sem-${seed}`
+      const fromRight = roadContinuation(net, roadA, 0, HEADING_EAST, id)
+      const fromLeft = roadContinuation(net, roadA, 1, HEADING_EAST, id)
+      expect(fromRight?.roadId, `${id} from lane 0 must not go north (left turns)`).not.toBe(
+        'r-right',
+      )
+      expect(fromRight?.roadId, `${id} from lane 0 must not go north (left turns)`).not.toBe(
+        'r-left',
+      )
+      expect(fromLeft?.roadId, `${id} from lane 1 must not go south (right turns)`).not.toBe(
+        'r-south',
+      )
+    }
+    // The semantics narrow the choice; they do not remove it: straight
+    // stays reachable from both lanes, right turns still happen from the
+    // right lane, left turns from the left one.
+    const lane0 = new Set(
+      Array.from(
+        { length: 200 },
+        (_, i) => roadContinuation(net, roadA, 0, HEADING_EAST, `v-sem-${i}`)?.roadId,
+      ),
+    )
+    const lane1 = new Set(
+      Array.from(
+        { length: 200 },
+        (_, i) => roadContinuation(net, roadA, 1, HEADING_EAST, `v-sem-${i}`)?.roadId,
+      ),
+    )
+    expect(lane0.has('r-straight')).toBe(true)
+    expect(lane0.has('r-south')).toBe(true)
+    expect(lane1.has('r-straight')).toBe(true)
+    expect(lane1.has('r-right') || lane1.has('r-left')).toBe(true)
+  })
+
+  it('a planned route wins over the lane arrows', () => {
+    const { net, roadA } = crossroads()
+    // The route names the left road; the vehicle is on the RIGHTMOST
+    // lane, whose arrow says right + straight. The route is
+    // authoritative until approach lane changes exist.
+    const turn = roadContinuation(net, roadA, 0, HEADING_EAST, 'v-1', 'r-left')
+    expect(turn?.roadId).toBe('r-left')
   })
 })

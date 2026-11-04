@@ -32,6 +32,7 @@
 
 import type { Road } from '@domain/entities/Road'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
+import type { Intersection } from '@domain/entities/Intersection'
 import {
   laneForwardSign,
   laneOffset,
@@ -108,7 +109,7 @@ const SAME_HEADING_EPS = 1e-9
  * vehicle heading north (pi/2) that ends up heading east (0) has turned
  * by -pi/2 — which, in right-hand traffic, is a **right** turn.
  */
-type Movement = 'straight' | 'right' | 'left' | 'uturn'
+export type Movement = 'straight' | 'right' | 'left' | 'uturn'
 
 /** Up to this angle the movement is "straight on" (45 degrees). */
 const STRAIGHT_LIMIT_RAD = Math.PI / 4
@@ -266,15 +267,112 @@ export const roadContinuation = (
   const len = roadLength(road)
   if (len < 1e-6) return null
 
-  // Which end of the road does this lane run into?
+  // 1. The junction AT this lane's travel end. A junction in the middle
+  //    of the road is not at the travel end, so no turn happens there.
+  const junction = junctionAtTravelEnd(network, road, laneIndex)
+  if (!junction) return null
+
+  // 2. The candidate roads: the junction's other roads. The road the
+  //    vehicle came from is never a candidate.
+  const candidates = buildCandidates(network, road, laneIndex, junction, heading)
+  if (candidates.length === 0) return null
+
+  // 2.5. Lane semantics — the painted arrows decide. The rightmost
+  //    travel lane turns right or goes straight, the leftmost turns
+  //    left or goes straight, the lanes between go straight (see
+  //    `laneMovementRule`). The painted arrows come from the SAME rule
+  //    (`movementsAtTravelEnd`), so what the surface promises is what
+  //    the decision does. A planned route wins over the arrows: the
+  //    route names a road, and the vehicle takes it even from a lane
+  //    whose arrow says otherwise (lane changes on approach are future
+  //    work).
+  let selectable = candidates
+  if (!routeNextRoadId) {
+    const available = new Set(candidates.map((c) => c.movement))
+    const allowed = new Set(
+      laneMovementRule(
+        lanePositionFromRight(road, laneIndex),
+        laneTravelLaneCount(road, laneIndex),
+        available,
+      ),
+    )
+    selectable = candidates.filter((c) => allowed.has(c.movement))
+    if (selectable.length === 0) selectable = candidates
+  }
+
+  // 3. The movement the vehicle makes.
+  //
+  //    A planned route wins over the hash: if the route says the next
+  //    road is X, and X is one of the candidates (genuinely enterable
+  //    here), the vehicle takes X. A route that names something else —
+  //    the vehicle left the route, or the plan is not drivable from
+  //    here — falls through to the ordinary probabilistic rule.
+  if (routeNextRoadId) {
+    const planned = candidates.find((c) => c.roadId === routeNextRoadId)
+    if (planned) return planned
+  }
+
+  //    Otherwise the candidates are grouped by the movement they
+  //    represent, and a hash of (vehicle, junction, road) decides which
+  //    movement it takes. A junction with no straight continuation — a
+  //    corner, a T-junction — has no choice to make, so it forces a turn.
+  const straights = selectable.filter((c) => c.movement === 'straight')
+  const rights = selectable.filter((c) => c.movement === 'right')
+  const lefts = selectable.filter((c) => c.movement === 'left')
+  const uturns = selectable.filter((c) => c.movement === 'uturn')
+
+  let pool: Candidate[]
+  if (turnSeed === undefined) {
+    // No vehicle identity: the historical rule — straight on when that
+    // is possible, and the best of the rest otherwise.
+    pool = straights.length > 0 ? straights : [...rights, ...lefts, ...uturns]
+  } else {
+    const key = `${turnSeed}|${junction.id}|${road.id}`
+    const wantsTurn = hash01(`${key}|turn`) < TURN_PROBABILITY
+    const preferRight = hash01(`${key}|side`) < RIGHT_TURN_SHARE
+    if (wantsTurn || straights.length === 0) {
+      const preferred = preferRight ? rights : lefts
+      const other = preferRight ? lefts : rights
+      pool = preferred.length > 0 ? preferred : other.length > 0 ? other : [...straights, ...uturns]
+    } else {
+      pool = straights
+    }
+  }
+  if (pool.length === 0) return null
+
+  // 4. The candidate that best carries that movement. Ties go to the
+  //    lexicographically smaller road id, so the result does not depend
+  //    on the order the junction lists its roads in.
+  let best = pool[0]!
+  let bestDelta = Math.abs(best.delta)
+  for (let i = 1; i < pool.length; i++) {
+    const candidate = pool[i]!
+    const delta = Math.abs(candidate.delta)
+    const better =
+      delta < bestDelta - SAME_HEADING_EPS ||
+      (Math.abs(delta - bestDelta) <= SAME_HEADING_EPS && candidate.roadId < best.roadId)
+    if (!better) continue
+    best = candidate
+    bestDelta = delta
+  }
+  return best
+}
+
+/**
+ * The junction that sits at `road` / `laneIndex`'s TRAVEL end, or `null`.
+ * A junction in the middle of the road does not count — the travel end
+ * only.
+ */
+const junctionAtTravelEnd = (
+  network: RoadNetwork,
+  road: Road,
+  laneIndex: number,
+): Intersection | null => {
+  const len = roadLength(road)
+  if (len < 1e-6) return null
   const sign = laneForwardSign(laneIndex, road.laneCount)
   const endS = sign === 1 ? len : 0
-
   const junctions = junctionIndex(network)
-
-  // 1. The junction AT that end. A junction in the middle of the road is
-  //    not at the travel end, so no turn happens there.
-  let junction = null
   for (const inter of junctions.on(road.id)) {
     const projection = projectIntersectionOnRoad(road, inter)
     // A rejected projection means "we do not know where this junction
@@ -282,13 +380,112 @@ export const roadContinuation = (
     // which says nothing about the travel end.
     if (!projection.projected) continue
     if (Math.abs(projection.s - endS) > JUNCTION_END_TOLERANCE_M) continue
-    junction = inter
-    break
+    return inter
   }
-  if (!junction) return null
+  return null
+}
 
-  // 2. The candidate roads: the junction's other roads. The road the
-  //    vehicle came from is never a candidate.
+/**
+ * How many lanes travel in `laneIndex`'s direction: the forward half of
+ * the lane count for a forward lane, the backward half for a backward
+ * one (an odd lane count gives the forward half the extra lane —
+ * `laneForwardSign`'s convention).
+ */
+const laneTravelLaneCount = (road: Road, laneIndex: number): number => {
+  const backwardLanes = Math.floor(road.laneCount / 2)
+  return laneForwardSign(laneIndex, road.laneCount) === 1
+    ? road.laneCount - backwardLanes
+    : backwardLanes
+}
+
+/**
+ * How far from the RIGHT edge of the carriageway this travel lane sits
+ * (0 = the keep-right lane). The input to the lane-semantics rule.
+ */
+const lanePositionFromRight = (road: Road, laneIndex: number): number =>
+  laneForwardSign(laneIndex, road.laneCount) === 1 ? laneIndex : road.laneCount - 1 - laneIndex
+
+/**
+ * The lane-semantics rule — which movements a travel lane MAY make at
+ * the junction ahead of it, given the movements the junction actually
+ * offers. This is the rule the painted arrows show:
+ *
+ *   - the rightmost travel lane: right + straight (the bus/turn lane of
+ *     Chinese intersections);
+ *   - the leftmost travel lane: left + straight;
+ *   - every lane in between: straight;
+ *   - a carriageway with a single travel lane: everything on offer.
+ *
+ * A preferred movement the junction does not offer is dropped; a lane
+ * whose whole preferred set is unavailable falls back to everything on
+ * offer (never strand a vehicle behind a rule). The result order is
+ * meaningful only as a stable enumeration — the caller picks by hash or
+ * by route.
+ */
+export const laneMovementRule = (
+  positionFromRight: number,
+  travelLanes: number,
+  available: ReadonlySet<Movement>,
+): Movement[] => {
+  const last = travelLanes - 1
+  let preferred: Movement[]
+  if (travelLanes <= 1) {
+    preferred = ['straight', 'left', 'right']
+  } else if (positionFromRight <= 0) {
+    preferred = ['right', 'straight']
+  } else if (positionFromRight >= last) {
+    preferred = ['left', 'straight']
+  } else {
+    preferred = ['straight']
+  }
+  const allowed = preferred.filter((m) => available.has(m))
+  return allowed.length > 0 ? allowed : [...available]
+}
+
+/**
+ * The movements `road` / `laneIndex` may make at the junction ahead of
+ * it — the same candidates `roadContinuation` builds, filtered by the
+ * same rule. The road-surface painter calls this so the arrow it paints
+ * in a lane is exactly the choice the tick will make there.
+ */
+export const movementsAtTravelEnd = (
+  network: RoadNetwork,
+  road: Road,
+  laneIndex: number,
+): Movement[] => {
+  const junction = junctionAtTravelEnd(network, road, laneIndex)
+  if (!junction) return []
+  const sign = laneForwardSign(laneIndex, road.laneCount)
+  const endS = sign === 1 ? roadLength(road) : 0
+  const heading = lanePoint(road, laneIndex, endS).heading
+  const candidates = buildCandidates(network, road, laneIndex, junction, heading)
+  if (candidates.length === 0) return []
+  const available = new Set(candidates.map((c) => c.movement))
+  return laneMovementRule(
+    lanePositionFromRight(road, laneIndex),
+    laneTravelLaneCount(road, laneIndex),
+    available,
+  )
+}
+
+/**
+ * The enterable candidates at `junction` for a vehicle arriving on
+ * `road` / `laneIndex` with `heading` — the junction's other roads,
+ * entered at the end nearest the junction on the keep-right lane of the
+ * travel direction that works there.
+ */
+const buildCandidates = (
+  network: RoadNetwork,
+  road: Road,
+  laneIndex: number,
+  junction: Intersection,
+  heading: number,
+): Candidate[] => {
+  const len = roadLength(road)
+  if (len < 1e-6) return []
+  const sign = laneForwardSign(laneIndex, road.laneCount)
+  const endS = sign === 1 ? len : 0
+
   const candidates: Candidate[] = []
   for (const otherId of junction.connectedRoads) {
     if (otherId === road.id) continue
@@ -401,62 +598,5 @@ export const roadContinuation = (
       fireLeadM,
     })
   }
-  if (candidates.length === 0) return null
-
-  // 3. The movement the vehicle makes.
-  //
-  //    A planned route wins over the hash: if the route says the next
-  //    road is X, and X is one of the candidates (genuinely enterable
-  //    here), the vehicle takes X. A route that names something else —
-  //    the vehicle left the route, or the plan is not drivable from
-  //    here — falls through to the ordinary probabilistic rule.
-  if (routeNextRoadId) {
-    const planned = candidates.find((c) => c.roadId === routeNextRoadId)
-    if (planned) return planned
-  }
-
-  //    Otherwise the candidates are grouped by the movement they
-  //    represent, and a hash of (vehicle, junction, road) decides which
-  //    movement it takes. A junction with no straight continuation — a
-  //    corner, a T-junction — has no choice to make, so it forces a turn.
-  const straights = candidates.filter((c) => c.movement === 'straight')
-  const rights = candidates.filter((c) => c.movement === 'right')
-  const lefts = candidates.filter((c) => c.movement === 'left')
-  const uturns = candidates.filter((c) => c.movement === 'uturn')
-
-  let pool: Candidate[]
-  if (turnSeed === undefined) {
-    // No vehicle identity: the historical rule — straight on when that
-    // is possible, and the best of the rest otherwise.
-    pool = straights.length > 0 ? straights : [...rights, ...lefts, ...uturns]
-  } else {
-    const key = `${turnSeed}|${junction.id}|${road.id}`
-    const wantsTurn = hash01(`${key}|turn`) < TURN_PROBABILITY
-    const preferRight = hash01(`${key}|side`) < RIGHT_TURN_SHARE
-    if (wantsTurn || straights.length === 0) {
-      const preferred = preferRight ? rights : lefts
-      const other = preferRight ? lefts : rights
-      pool = preferred.length > 0 ? preferred : other.length > 0 ? other : [...straights, ...uturns]
-    } else {
-      pool = straights
-    }
-  }
-  if (pool.length === 0) return null
-
-  // 4. The candidate that best carries that movement. Ties go to the
-  //    lexicographically smaller road id, so the result does not depend
-  //    on the order the junction lists its roads in.
-  let best = pool[0]!
-  let bestDelta = Math.abs(best.delta)
-  for (let i = 1; i < pool.length; i++) {
-    const candidate = pool[i]!
-    const delta = Math.abs(candidate.delta)
-    const better =
-      delta < bestDelta - SAME_HEADING_EPS ||
-      (Math.abs(delta - bestDelta) <= SAME_HEADING_EPS && candidate.roadId < best.roadId)
-    if (!better) continue
-    best = candidate
-    bestDelta = delta
-  }
-  return best
+  return candidates
 }

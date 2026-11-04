@@ -320,37 +320,6 @@ export const axisRoadsForLight = (light: TrafficLight, network: RoadNetwork): Ro
 }
 
 /**
- * The intersection a road forms its queue against: the one **closest to
- * the road's middle** that the road actually passes through.
- *
- * The stop line is the edge of the intersection box on the side the
- * vehicle comes from, so the queue forms against the junction the road
- * approaches — not against every junction on the road. For a road that
- * crosses several junctions (the corridor scene), the middle one is the
- * one the traffic queues at; for a road that passes a junction near its
- * end, that junction is still the relevant one.
- *
- * `null` when the road meets no intersection — the caller then falls
- * back to the road's midpoint, which is what the built-in scenes use
- * exactly.
- */
-const nearestIntersectionOnRoad = (road: Road, network: RoadNetwork): Intersection | null => {
-  const midX = (road.startNode.x + road.endNode.x) / 2
-  const midZ = (road.startNode.z + road.endNode.z) / 2
-  let best: Intersection | null = null
-  let bestDistance = Infinity
-  for (const intersection of Object.values(network.intersections)) {
-    if (!intersection.connectedRoads.includes(road.id)) continue
-    const distance = Math.hypot(intersection.position.x - midX, intersection.position.z - midZ)
-    if (distance < bestDistance) {
-      bestDistance = distance
-      best = intersection
-    }
-  }
-  return best
-}
-
-/**
  * The queued vehicles of a whole tick, counted in **one** pass.
  *
  * Every light of a tick is decided before any vehicle moves (the signal
@@ -370,30 +339,32 @@ const nearestIntersectionOnRoad = (road: Road, network: RoadNetwork): Intersecti
 interface TickQueueIndex {
   simTime: number
   network: RoadNetwork
-  /** road id → the queued vehicles of that road, per lane index. */
-  byRoadLane: Map<string, number[]>
+  /** `${roadId}@${junctionId}` → the queued vehicles of that road
+   *  approaching that junction, per lane index. */
+  byRoadJunction: Map<string, number[]>
 }
 
 let tickQueueIndex: TickQueueIndex | null = null
 
 const buildTickQueueIndex = (network: RoadNetwork): Map<string, number[]> => {
-  const byRoadLane = new Map<string, number[]>()
-  // The stop line of each road, resolved from the intersection the road
-  // actually passes through. A road can pass through several junctions,
-  // so the *nearest* one along the road is the one the queue forms
-  // against. `stopLineSOnRoad` returns `null` when the junction is not
-  // on this approach (e.g. it sits at the road's start node), in which
-  // case the road's midpoint is the fallback — the same assumption the
-  // built-in scenes satisfy exactly.
-  const stopLineByRoadLane = new Map<string, number>()
-  for (const road of Object.values(network.roads)) {
-    const intersection = nearestIntersectionOnRoad(road, network)
-    for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
-      const stopS = intersection ? stopLineSOnRoad(road, intersection, laneIndex) : null
-      stopLineByRoadLane.set(
-        `${road.id}#${laneIndex}`,
-        stopS ?? roadLength(road) / 2 - STOP_LINE_DISTANCE,
-      )
+  const byRoadJunction = new Map<string, number[]>()
+  // The stop lines are resolved per (road, junction): a segment runs
+  // junction-to-junction, so its queue forms against the junction at its
+  // travel end — and BOTH ends of a segment have queues, one per
+  // direction. Resolving ONE junction per road (the old midpoint-nearest
+  // rule) made the queue at the other end invisible to that junction's
+  // controller: an actuated green on the perpendicular axis then
+  // extended to its 60 s cap while the invisible queue starved
+  // (measured 2026-11-05 on the micro city: the arterial's east–west
+  // axis stayed red for the whole sample window at every junction whose
+  // first-inserted connected road resolved elsewhere).
+  const junctionsOfRoad = new Map<string, Intersection[]>()
+  for (const inter of Object.values(network.intersections)) {
+    for (const roadId of inter.connectedRoads) {
+      if (!network.roads[roadId]) continue
+      const list = junctionsOfRoad.get(roadId)
+      if (list) list.push(inter)
+      else junctionsOfRoad.set(roadId, [inter])
     }
   }
   for (const v of Object.values(network.vehicles)) {
@@ -407,21 +378,24 @@ const buildTickQueueIndex = (network: RoadNetwork): Map<string, number[]> => {
     // lane at `centerS + radius`. Using the road's midpoint instead
     // would put the queue window on the wrong side of the junction for
     // half the lanes.
-    const stopLineS = stopLineByRoadLane.get(`${road.id}#${v.laneIndex}`)
-    if (stopLineS === undefined) continue
     const sign = laneForwardSign(v.laneIndex, road.laneCount)
-    // `distToStopLine` is positive while the vehicle is still approaching
-    // the line, negative once it has crossed it.
-    const distToStopLine = sign === 1 ? stopLineS - v.s : v.s - stopLineS
-    if (distToStopLine < 0) continue // 过了 stop line
-    let lanes = byRoadLane.get(v.roadId)
-    if (lanes === undefined) {
-      lanes = []
-      byRoadLane.set(v.roadId, lanes)
+    for (const inter of junctionsOfRoad.get(v.roadId) ?? []) {
+      const stopLineS = stopLineSOnRoad(road, inter, v.laneIndex)
+      if (stopLineS === null) continue // not a stop line for this approach
+      // `distToStopLine` is positive while the vehicle is still approaching
+      // the line, negative once it has crossed it.
+      const distToStopLine = sign === 1 ? stopLineS - v.s : v.s - stopLineS
+      if (distToStopLine < 0) continue // 过了 stop line
+      const key = `${v.roadId}@${inter.id}`
+      let lanes = byRoadJunction.get(key)
+      if (lanes === undefined) {
+        lanes = []
+        byRoadJunction.set(key, lanes)
+      }
+      lanes[v.laneIndex] = (lanes[v.laneIndex] ?? 0) + 1
     }
-    lanes[v.laneIndex] = (lanes[v.laneIndex] ?? 0) + 1
   }
-  return byRoadLane
+  return byRoadJunction
 }
 
 const queueIndexFor = (
@@ -434,11 +408,11 @@ const queueIndexFor = (
     tickQueueIndex.network === network &&
     tickQueueIndex.simTime === simTime
   ) {
-    return tickQueueIndex.byRoadLane
+    return tickQueueIndex.byRoadJunction
   }
-  const byRoadLane = buildTickQueueIndex(network)
-  tickQueueIndex = { simTime, network, byRoadLane }
-  return byRoadLane
+  const byRoadJunction = buildTickQueueIndex(network)
+  tickQueueIndex = { simTime, network, byRoadJunction }
+  return byRoadJunction
 }
 
 /**
@@ -464,12 +438,61 @@ const countQueuedVehicles = (
 ): number => {
   const roads = axisRoadsForLight(light, network)
   if (roads.length === 0) return 0
+  // The queue is resolved against the light's OWN junction — the same
+  // per-(road, junction) rule the tick index uses (see
+  // `buildTickQueueIndex`).
+  const lightJunction = findLightIntersection(light, network)
+  if (!lightJunction) {
+    // A synthesised axis-only light (the Simulation Lab's readout)
+    // belongs to no junction. The honest aggregate is the sum over every
+    // junction's own stop lines — the old whole-network midpoint window
+    // counted vehicles that had already passed their junction.
+    let total = 0
+    for (const inter of Object.values(network.intersections)) {
+      total += countQueueAtJunction(
+        light,
+        inter,
+        network,
+        laneScoped,
+        queueIndexFor(network, simTime),
+      )
+    }
+    return total
+  }
 
-  const index = queueIndexFor(network, simTime)
+  return countQueueAtJunction(
+    light,
+    lightJunction,
+    network,
+    laneScoped,
+    queueIndexFor(network, simTime),
+  )
+}
+
+/**
+ * The queued vehicles on `junction`'s axis roads for `light`'s axis —
+ * the per-(road, junction) stop-line window both counting paths share.
+ */
+const countQueueAtJunction = (
+  light: TrafficLight,
+  junction: Intersection,
+  network: RoadNetwork,
+  laneScoped: boolean,
+  index: Map<string, number[]> | null,
+): number => {
+  let count = 0
+  const roads: Road[] = []
+  for (const roadId of junction.connectedRoads) {
+    const road = network.roads[roadId]
+    if (!road) continue
+    if (approachAxis(road, junction) !== light.axis) continue
+    roads.push(road)
+  }
+  if (roads.length === 0) return 0
+
   if (index !== null) {
-    let count = 0
     for (const road of roads) {
-      const lanes = index.get(road.id)
+      const lanes = index.get(`${road.id}@${junction.id}`)
       if (lanes === undefined) continue
       if (laneScoped && light.controlledLane !== undefined) {
         count += lanes[light.controlledLane] ?? 0
@@ -487,16 +510,12 @@ const countQueuedVehicles = (
   // reasons about is the queue that actually forms.
   const stopLineByRoadLane = new Map<string, number>()
   for (const road of roads) {
-    const intersection = nearestIntersectionOnRoad(road, network)
     for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
-      const stopS = intersection ? stopLineSOnRoad(road, intersection, laneIndex) : null
-      stopLineByRoadLane.set(
-        `${road.id}#${laneIndex}`,
-        stopS ?? roadLength(road) / 2 - STOP_LINE_DISTANCE,
-      )
+      const stopS = stopLineSOnRoad(road, junction, laneIndex)
+      if (stopS === null) continue // not a stop line for this junction
+      stopLineByRoadLane.set(`${road.id}#${laneIndex}`, stopS)
     }
   }
-  let count = 0
   for (const v of Object.values(network.vehicles)) {
     const stopLineS = stopLineByRoadLane.get(`${v.roadId}#${v.laneIndex}`)
     if (stopLineS === undefined) continue // not on a road this light governs

@@ -34,7 +34,7 @@ export const waitForVehicleCount = async (
 /** 切到指定场景，并等场景的车辆就位。 */
 export const switchScene = async (
   page: Page,
-  kind: 'cross' | 't' | 'loop' | 'elevated' | 'corridor' | 'grid' | 'junction',
+  kind: 'cross' | 't' | 'loop' | 'elevated' | 'corridor' | 'grid' | 'junction' | 'micro-city',
 ): Promise<void> => {
   await page.selectOption('[data-testid="scene-kind-select"]', kind)
   await page.waitForTimeout(1500)

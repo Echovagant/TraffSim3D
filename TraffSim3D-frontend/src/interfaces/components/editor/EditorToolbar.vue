@@ -80,6 +80,7 @@
         <option value="grid">5×5 网格</option>
         <option value="junction">无信号路口</option>
         <option value="junction-grid">无信号路网</option>
+        <option value="micro-city">微型城区</option>
       </select>
       <span
         v-else
@@ -249,6 +250,8 @@ const sceneLabel = (k: SceneKind): string => {
       return '无信号路口'
     case 'junction-grid':
       return '无信号路网'
+    case 'micro-city':
+      return '微型城区'
   }
   return k // fallback for imported scenes
 }

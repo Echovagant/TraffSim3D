@@ -14,7 +14,11 @@ import {
   stopLineSOnRoad,
 } from '@domain/services/laneGeometry'
 import { approachAxis, approachAxisGroups, type RoadAxis } from '@domain/services/approachAxis'
-import { cornerRadius, junctionRadius } from '@domain/services/junctionRadius'
+import {
+  cornerRadius,
+  junctionRadius,
+  junctionRadiusForRoads,
+} from '@domain/services/junctionRadius'
 import {
   ALL_RED_CLEARANCE_SECS,
   DEFAULT_CYCLE_SECONDS,
@@ -1398,6 +1402,235 @@ export const buildGridNetwork = (queueLengthPerJunction = 3): RoadNetwork => {
 
   // A road built as two nodes carries no node at the intersections it
   // crosses - and two roads only share a node if one of them has it.
+  addIntersectionWaypoints(net)
+  return net
+}
+
+// ---------------------------------------------------------------------------
+// The micro city — a small mixed-class street network
+// ---------------------------------------------------------------------------
+
+/** Junction spacing along the east–west arterial rows (m). */
+const MC_EW_SPACING_M = 120
+/** Junction spacing along the north–south columns (m). */
+const MC_NS_SPACING_M = 100
+/** Speed limits per road class (m/s): arterial 60 km/h, local 40 km/h. */
+const MC_ARTERIAL_SPEED = 16.67
+const MC_LOCAL_SPEED = 11.11
+
+const mcJunctionX = (col: number): number => (col - 1.5) * MC_EW_SPACING_M
+const mcJunctionZ = (row: number): number => (row - 1) * MC_NS_SPACING_M
+const mcJunctionId = (col: number, row: number): string => `mc-i-${col}-${row}`
+const mcEWRoadId = (row: number, seg: number): string => `mc-ew-r${row}-${seg}`
+const mcNSRoadId = (col: number, seg: number): string => `mc-ns-c${col}-${seg}`
+
+/**
+ * The micro city: a 4 × 3 junction street network with three road
+ * classes, a one-way ring and lane-arrow semantics — the scene the
+ * "the built-ins are too simple" feedback asked for.
+ *
+ * ## Every road ends at junctions — there is no travel-end wrap
+ *
+ * Every segment runs junction-to-junction like the grid's, so a vehicle
+ * that reaches the end of its lane always finds a junction to turn at.
+ * The edge-to-edge teleport of the cross scene (31 wraps in 45 s,
+ * measured 2026-11-05) cannot happen here.
+ *
+ * ## The road classes
+ *
+ *   - the middle east–west row: a 6-lane arterial (60 km/h);
+ *   - the middle north–south column: a 4-lane arterial (60 km/h);
+ *   - the map's edge streets: a **one-way ring** — the west column
+ *     flows north, the north row east, the east column south, the south
+ *     row west (counterclockwise; each one-way's exit end meets the
+ *     next one's entry end at the corner, so no corner is a dead end);
+ *   - the remaining interior column: a 2-lane local street (40 km/h).
+ *
+ * ## The lanes decide the turns
+ *
+ * `roadContinuation` filters its candidates through the lane-semantics
+ * rule (outer lanes turn + straight, inner lanes straight) and the road
+ * surface paints exactly that choice (`movementsAtTravelEnd`), so a
+ * vehicle in a left-turn lane turns left — following the arrow, not a
+ * hash of its id.
+ */
+export const buildMicroCityNetwork = (): RoadNetwork => {
+  const net = createRoadNetwork()
+
+  const COLS = 4
+  const ROWS = 3
+
+  // --- the road classes per row / column --------------------------------
+  //
+  // The one-way ring: col 0 flows NORTH, row 0 flows EAST, col 3 flows
+  // SOUTH, row 2 flows WEST — counterclockwise, each one-way's EXIT end
+  // meeting the next one-way's ENTRY end at the corner, so the ring
+  // corners chain (eastbound traffic turns right south onto the east
+  // column, and so on). The interior streets are two-way.
+  //
+  // WHY a ring: a one-way street's EXIT end is a dead end for any cross
+  // street that meets it there — entering the one-way at its exit means
+  // driving against the flow, which `oneway.ts` rightly refuses. With a
+  // 2-arm corner that cross street has no legal continuation at all, and
+  // the vehicle wrapped (measured 2026-11-05: v-mc-10 teleported 97 m at
+  // the SW corner). The first design (two one-way ROWS flanking the map)
+  // had exactly those 2-arm corners; the ring gives every corner a
+  // chained entry, and every interior junction keeps a two-way road to
+  // turn onto. Every one-way approach at every junction was checked to
+  // have a legal continuation.
+  const EW_CLASS: ReadonlyArray<{ lanes: number; speed: number; oneway?: boolean }> = [
+    { lanes: 2, speed: MC_LOCAL_SPEED, oneway: true },
+    { lanes: 6, speed: MC_ARTERIAL_SPEED },
+    { lanes: 2, speed: MC_LOCAL_SPEED, oneway: true },
+  ]
+  // col 0: one-way northbound (built south → north). col 1: the
+  // north–south arterial. col 2: a local street. col 3: one-way
+  // southbound (the natural north → south build).
+  const NS_CLASS = (col: number): { lanes: number; speed: number; oneway?: boolean } =>
+    col === 1
+      ? { lanes: 4, speed: MC_ARTERIAL_SPEED }
+      : col === 0 || col === 3
+        ? { lanes: 2, speed: MC_LOCAL_SPEED, oneway: true }
+        : { lanes: 2, speed: MC_LOCAL_SPEED }
+
+  // --- the segments ------------------------------------------------------
+  // The one-way streets carry their direction in the road's own
+  // geometry: the reversed ones are built against the grid order so
+  // their FORWARD direction is the flow. Every segment runs
+  // junction-to-junction, so every travel end has a junction — no wrap
+  // anywhere on the map.
+  for (let row = 0; row < ROWS; row++) {
+    const cls = EW_CLASS[row]!
+    for (let seg = 0; seg < COLS - 1; seg++) {
+      const west = { x: mcJunctionX(seg), y: 0, z: mcJunctionZ(row) }
+      const east = { x: mcJunctionX(seg + 1), y: 0, z: mcJunctionZ(row) }
+      const a = cls.oneway && row === 2 ? east : west
+      const b = cls.oneway && row === 2 ? west : east
+      const road = roadStraight(mcEWRoadId(row, seg), a, b, cls.lanes, cls.speed)
+      if (cls.oneway) road.oneway = true
+      net.roads[road.id] = road
+    }
+  }
+  for (let col = 0; col < COLS; col++) {
+    const cls = NS_CLASS(col)
+    const reversed = cls.oneway && col === 0 // northbound: built south → north
+    for (let seg = 0; seg < ROWS - 1; seg++) {
+      const a = { x: mcJunctionX(col), y: 0, z: mcJunctionZ(seg) }
+      const b = { x: mcJunctionX(col), y: 0, z: mcJunctionZ(seg + 1) }
+      const road = roadStraight(
+        mcNSRoadId(col, seg),
+        reversed ? b : a,
+        reversed ? a : b,
+        cls.lanes,
+        cls.speed,
+      )
+      if (cls.oneway) road.oneway = true
+      net.roads[road.id] = road
+    }
+  }
+
+  // --- the 12 junctions --------------------------------------------------
+  for (let col = 0; col < COLS; col++) {
+    for (let row = 0; row < ROWS; row++) {
+      const connectedRoads: string[] = []
+      // East–west neighbours. The one-way rows list both neighbours the
+      // same way — traffic only leaves along the flow, which the one-way
+      // rule in `oneway.ts` decides.
+      if (col > 0) connectedRoads.push(mcEWRoadId(row, col - 1))
+      if (col < COLS - 1) connectedRoads.push(mcEWRoadId(row, col))
+      // North–south neighbours.
+      if (row > 0) connectedRoads.push(mcNSRoadId(col, row - 1))
+      if (row < ROWS - 1) connectedRoads.push(mcNSRoadId(col, row))
+      const laneCounts = connectedRoads.map((id) => net.roads[id]!.laneCount)
+      const inter: Intersection = {
+        id: mcJunctionId(col, row),
+        position: { x: mcJunctionX(col), y: 0, z: mcJunctionZ(row) },
+        trafficLights: [],
+        connectedRoads,
+        intersectionRadius: junctionRadiusForRoads(laneCounts),
+      }
+      inter.trafficLights = lightsForIntersection(inter, net.roads)
+      // Rows start in different phases so the map is not one phase seen
+      // twelve times (the grid's trick).
+      shiftJunctionBy(inter, row * GRID_ROW_PHASE_SECS)
+      net.intersections[inter.id] = inter
+    }
+  }
+
+  // --- the opening traffic ----------------------------------------------
+  // Spread over the map, none sharing an approach: two vehicles on the
+  // main arterial, two per one-way row (its two usable lanes), one on
+  // the north–south arterial, one per local column. 14 in all — the
+  // density the follow model carries without rear-ending a red light
+  // (the grid's measured lesson).
+  const seedVehicles: Vehicle[] = []
+  const push = (
+    roadId: string,
+    laneIndex: number,
+    s: number,
+    id: string,
+    type: Vehicle['type'] = 'car',
+  ): void => {
+    const road = net.roads[roadId]!
+    seedVehicles.push(
+      at(road, laneIndex, s, road.speedLimit * 0.55, {
+        id,
+        type,
+        color: type === 'truck' ? '#f59e0b' : type === 'bus' ? '#8b5cf6' : '#3a86ff',
+        status: 'driving',
+      }),
+    )
+  }
+  // The 6-lane arterial: travel lanes are 0 (right) .. 2 (left).
+  push(mcEWRoadId(1, 0), 0, 40, 'v-mc-1')
+  push(mcEWRoadId(1, 1), 2, 60, 'v-mc-2')
+  push(mcEWRoadId(1, 2), 1, 50, 'v-mc-3', 'truck')
+  // The one-way ring: a 2-lane one-way street has ONE usable lane (0).
+  push(mcEWRoadId(0, 0), 0, 50, 'v-mc-4')
+  push(mcEWRoadId(0, 1), 0, 55, 'v-mc-5')
+  push(mcEWRoadId(2, 1), 0, 45, 'v-mc-6')
+  push(mcEWRoadId(2, 2), 0, 60, 'v-mc-7', 'bus')
+  // The north–south arterial (4 lanes: 0,1 forward — 2,3 backward).
+  push(mcNSRoadId(1, 0), 0, 45, 'v-mc-8')
+  push(mcNSRoadId(1, 1), 3, 55, 'v-mc-9')
+  // The local columns (2 lanes: 0 forward, 1 backward).
+  push(mcNSRoadId(0, 0), 0, 40, 'v-mc-10')
+  push(mcNSRoadId(0, 1), 0, 45, 'v-mc-11')
+  push(mcNSRoadId(2, 0), 1, 40, 'v-mc-12')
+  push(mcNSRoadId(3, 1), 0, 45, 'v-mc-13')
+  push(mcNSRoadId(3, 0), 0, 35, 'v-mc-14', 'truck')
+  // Two more left-capable vehicles (the leftmost travel lanes), so the
+  // lane-arrows contract is exercised often enough to observe.
+  push(mcEWRoadId(1, 0), 2, 90, 'v-mc-15')
+  push(mcEWRoadId(0, 2), 0, 40, 'v-mc-16')
+  // Interior-lane vehicles on the arterial's turn-capable lanes: the
+  // lane-arrows e2e counts interior-to-interior turns, and the ring
+  // corners (which force their single movement) do not exercise it.
+  push(mcEWRoadId(1, 1), 0, 30, 'v-mc-17')
+  push(mcEWRoadId(1, 2), 2, 40, 'v-mc-18')
+  for (const v of seedVehicles) net.vehicles[v.id] = v
+
+  // --- spawn points -------------------------------------------------------
+  // One per class and direction, so added vehicles spread over the map.
+  const spawnRoads = [
+    mcEWRoadId(1, 0),
+    mcEWRoadId(1, 2),
+    mcEWRoadId(0, 1),
+    mcEWRoadId(2, 0),
+    mcNSRoadId(1, 0),
+    mcNSRoadId(1, 1),
+    mcNSRoadId(0, 0),
+    mcNSRoadId(2, 1),
+  ]
+  for (const roadId of spawnRoads) {
+    const road = net.roads[roadId]!
+    // Lane 0 is the keep-right forward lane — the spawn end s=0 is the
+    // start the forward lanes depart from.
+    const sp = defaultSpawnPoint(road, null, 0)
+    net.spawnPoints[sp.id] = sp
+  }
+
+  // Route planning needs the junctions on the polylines (ADR-017).
   addIntersectionWaypoints(net)
   return net
 }

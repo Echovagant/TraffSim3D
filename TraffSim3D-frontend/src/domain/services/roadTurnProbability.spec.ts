@@ -123,21 +123,32 @@ describe('the movement at a junction', () => {
     expect(share).toBeLessThan(TURN_PROBABILITY + 0.05)
   })
 
-  it('turns right more often than left', () => {
+  it('the rightmost lane turns right, the leftmost turns left', () => {
+    // Since the lane-semantics rule (2026-11-05) the painted arrows
+    // decide: the rightmost travel lane may turn right or go straight —
+    // every turn it makes is a RIGHT one — and the leftmost lane is the
+    // mirror. The old 60/40 blend (`RIGHT_TURN_SHARE`) now governs the
+    // hash only where a lane carries both turn options (a single-lane
+    // approach); across a carriageway the split emerges from which lane
+    // a vehicle happens to be in.
     const { net, road } = cross()
-    const samples = 1000
-    let right = 0
-    let left = 0
+    const samples = 500
+    let rightFromLane0 = 0
+    let leftFromLane0 = 0
+    let rightFromLane1 = 0
+    let leftFromLane1 = 0
     for (let i = 0; i < samples; i += 1) {
-      const taken = roadFor(net, road, `v-${i}`)
-      if (taken === 'r-south') right += 1
-      if (taken === 'r-north') left += 1
+      const fromRight = roadContinuation(net, road, 0, HEADING_EAST, `v-${i}`)?.roadId
+      const fromLeft = roadContinuation(net, road, 1, HEADING_EAST, `v-${i}`)?.roadId
+      if (fromRight === 'r-south') rightFromLane0 += 1
+      if (fromRight === 'r-north') leftFromLane0 += 1
+      if (fromLeft === 'r-south') rightFromLane1 += 1
+      if (fromLeft === 'r-north') leftFromLane1 += 1
     }
-    const turnShare = (right + left) / samples
-    const rightShare = right / (right + left)
-    expect(turnShare).toBeGreaterThan(0)
-    expect(rightShare).toBeGreaterThan(RIGHT_TURN_SHARE - 0.08)
-    expect(rightShare).toBeLessThan(RIGHT_TURN_SHARE + 0.08)
+    expect(rightFromLane0).toBeGreaterThan(0)
+    expect(leftFromLane0).toBe(0)
+    expect(leftFromLane1).toBeGreaterThan(0)
+    expect(rightFromLane1).toBe(0)
   })
 
   it('is reproducible: the same vehicle always makes the same movement', () => {

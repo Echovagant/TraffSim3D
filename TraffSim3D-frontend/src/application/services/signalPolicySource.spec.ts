@@ -326,7 +326,11 @@ describe('the observation on an imported OSM map', () => {
 
     const obs = buildSignalObservation(ns, net)
     expect(obs[0]).toBeCloseTo(2 / SIGNAL_MAX_QUEUE, 10) // NS queue = 2
-    expect(obs[1]).toBeCloseTo(2 / SIGNAL_MAX_QUEUE, 10) // EW queue = 2
+    // EW = 1, not 2: the branch car sits past the junction and is not
+    // queueing for it (the old midpoint window counted it against an
+    // imaginary stop line at the road's middle — see the queue-lookup
+    // spec for the full account).
+    expect(obs[1]).toBeCloseTo(1 / SIGNAL_MAX_QUEUE, 10) // EW queue = 1
   })
 
   it('the decision readout carries the same queue lengths', () => {
@@ -336,6 +340,6 @@ describe('the observation on an imported OSM map', () => {
     source.nextAction(ns, net, 0)
     const decision = source.lastDecision
     expect(decision?.queueNs).toBe(2)
-    expect(decision?.queueEw).toBe(2)
+    expect(decision?.queueEw).toBe(1)
   })
 })

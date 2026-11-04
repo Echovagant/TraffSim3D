@@ -13,6 +13,7 @@ import {
   buildGridNetwork,
   buildUnsignalisedJunctionScene,
   buildUnsignalisedGridScene,
+  buildMicroCityNetwork,
   JUNCTION_CONFLICT_POINT,
   JUNCTION_DRIVE_ROUTES,
   GRID_DRIVE_ROUTES,
@@ -98,6 +99,10 @@ export const TICK_RATE_LADDER = [0.25, 0.5, 1, 2, 4] as const
  *   cooperative policy was trained on; NO traffic lights).
  * 'junction-grid' (无信号路网 — the 2×2 unsignalised grid, Scene 4 v2:
  *   routes cross several junctions, so the negotiations repeat).
+ * 'micro-city' (微型城区 — a 4×3 junction mixed-class street network:
+ *   6-lane arterial, a one-way couplet, 2-lane local streets; every road
+ *   ends at a junction, so there is no travel-end wrap; turns follow the
+ *   painted lane arrows).
  * 'imported' (any OSM/PBF file loaded via MapImporter —
  *   shown in the toolbar as a read-only label with the source file name
  *   instead of the dropdown, since there's no factory to "switch back to").
@@ -111,6 +116,7 @@ export type SceneKind =
   | 'corridor'
   | 'grid'
   | 'junction'
+  | 'micro-city'
   | 'junction-grid'
   | 'imported'
 
@@ -132,6 +138,8 @@ const buildNetworkByKind = (kind: SceneKind): RoadNetwork => {
       return buildUnsignalisedJunctionScene()
     case 'junction-grid':
       return buildUnsignalisedGridScene()
+    case 'micro-city':
+      return buildMicroCityNetwork()
     case 'imported':
       // switchScene should never be called with 'imported'
       // (the toolbar hides the dropdown for imported scenes). If a
@@ -161,6 +169,8 @@ const sceneLabelForKind = (kind: SceneKind): string => {
       return '无信号路口'
     case 'junction-grid':
       return '无信号路网'
+    case 'micro-city':
+      return '微型城区'
     case 'imported':
       return '已导入'
   }

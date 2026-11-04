@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import type { Intersection } from '@domain/entities/Intersection'
 import type { Road } from '@domain/entities/Road'
+import type { RoadNetwork } from '@domain/entities/RoadNetwork'
+import { movementsAtTravelEnd, type Movement } from '@domain/services/roadTransition'
 import { ROAD_LANE_WIDTH } from '@shared/constants/simulation'
 import {
   laneOffset,
@@ -36,6 +38,66 @@ const ARROW_SEGMENTS: ReadonlyArray<readonly [number, number, number, number]> =
 const ARROW_SIZE = 0.55
 
 /**
+ * One branch of a turn arrow: a diagonal off the shaft, ending in a
+ * back-swept head. `side` is −1 (left) or +1 (right) in the arrow's own
+ * frame (+z = travel direction).
+ */
+const arrowBranch = (
+  side: 1 | -1,
+  push: (ax: number, az: number, bx: number, bz: number) => void,
+): void => {
+  const tipX = side * 0.85
+  const tipZ = 0.45
+  push(-0.5, 0.1, tipX, tipZ)
+  // The head: two wings swept back from the tip, ±150° off the branch.
+  const len = Math.hypot(tipX + 0.5, tipZ - 0.1)
+  const ux = (tipX + 0.5) / len
+  const uz = (tipZ - 0.1) / len
+  for (const ang of [2.618, -2.618]) {
+    const c = Math.cos(ang)
+    const s = Math.sin(ang)
+    push(tipX, tipZ, tipX + (ux * c - uz * s) * 0.32, tipZ + (ux * s + uz * c) * 0.32)
+  }
+}
+
+/**
+ * The arrow a lane paints, from the movements it may make at the
+ * junction ahead of it (`movementsAtTravelEnd` — the same rule the turn
+ * decision uses, so what the surface promises is what the tick does):
+ *
+ *   - straight only (or no junction ahead): the plain "↑" everyone had
+ *     before — bit-identical, so scenes without turnable ends keep
+ *     their exact paint;
+ *   - straight + a turn: the "↑" plus a branch off the shaft;
+ *   - a turn only: shaft + branch + head, no up-pointing head.
+ *
+ * The shaft sits at x = −0.5 in the arrow's own frame, the same offset
+ * the plain arrow has always used.
+ */
+const arrowSegmentsFor = (
+  movements: readonly Movement[],
+): ReadonlyArray<readonly [number, number, number, number]> => {
+  const has = new Set(movements)
+  const turns = [...has].filter((m) => m === 'left' || m === 'right')
+  if (has.size === 0 || (has.has('straight') && turns.length === 0)) return ARROW_SEGMENTS
+  const segs: Array<readonly [number, number, number, number]> = []
+  const push = (ax: number, az: number, bx: number, bz: number): void => {
+    segs.push([ax, az, bx, bz])
+  }
+  // The shaft, to the height the branches leave from.
+  push(-0.5, -1.0, -0.5, has.has('straight') ? 0.6 : 0.45)
+  if (has.has('straight')) {
+    // The same head the plain arrow carries.
+    push(-0.5, 0.6, 0.5, 0.6)
+    push(-0.7, 0.4, 0.0, 1.0)
+    push(0.0, 1.0, 0.7, 0.4)
+  }
+  if (has.has('left')) arrowBranch(-1, push)
+  if (has.has('right')) arrowBranch(1, push)
+  return segs
+}
+
+/**
  * Polyline-aware road markings. Centerline follows the
  * polyline (N-1 segments). Dashed dividers distribute along the
  * polyline arc length, snapping to the local segment tangent at each
@@ -55,6 +117,13 @@ export interface RoadMarkingsOptions {
    * traffic logic uses.
    */
   intersections?: readonly Intersection[]
+  /**
+   * The whole network, for the lane-arrow semantics: the arrow a lane
+   * paints is the movement set `movementsAtTravelEnd` answers for it —
+   * the same rule `roadContinuation` chooses by. Without the network the
+   * painter falls back to the plain straight arrow everywhere.
+   */
+  network?: RoadNetwork
 }
 
 const _pos = new THREE.Vector3()
@@ -174,6 +243,12 @@ export const createRoadMarkings = (
       for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
         const sign = laneForwardSign(laneIndex, road.laneCount)
         const off = laneOffset(laneIndex, road.laneCount)
+        // The arrow this lane paints = the movements it may make at the
+        // junction ahead of it — the same rule the turn decision uses.
+        // Without the network the paint falls back to the plain arrow.
+        const arrowShape = options.network
+          ? arrowSegmentsFor(movementsAtTravelEnd(options.network, road, laneIndex))
+          : ARROW_SEGMENTS
         for (const s of arrowSlots) {
           const p = pointAt(road, off, s)
           const fwd = roadForward(road, s)
@@ -185,7 +260,7 @@ export const createRoadMarkings = (
           _quat.setFromEuler(_euler)
           _pos.set(p.x, p.y + 0.025, p.z)
           _matrix.compose(_pos, _quat, _scale)
-          for (const [ax, az, bx, bz] of ARROW_SEGMENTS) {
+          for (const [ax, az, bx, bz] of arrowShape) {
             _point.set(ax * ARROW_SIZE, 0, az * ARROW_SIZE).applyMatrix4(_matrix)
             const startX = _point.x
             const startY = _point.y

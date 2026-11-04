@@ -782,6 +782,15 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         } else {
           const p = arcPointAt(turnArc, v.turn.dist)
           v.position.x = p.x
+          // BOTH world axes follow the arc. The z used to be missing
+          // here: the body slid along the old line with x alone, z
+          // frozen at the exit value, and the 5 m lane guard then
+          // snapped it sideways onto the lane the moment the arc ended
+          // (measured 2026-11-05 on the micro city: a 6.4 m lateral
+          // jump at every arc landing — the "corner stutter"). The
+          // physics-free path below always copied both axes, which is
+          // why its tests never saw it.
+          v.position.z = p.z
           v.position.y = lanePoint(network.roads[v.roadId]!, v.laneIndex, v.s).position.y
           v.heading = p.heading
           ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
