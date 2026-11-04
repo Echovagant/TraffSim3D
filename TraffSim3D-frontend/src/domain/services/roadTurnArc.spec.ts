@@ -65,6 +65,31 @@ describe('buildTurnArc', () => {
     expect(mid.heading).toBeCloseTo(0, 6)
   })
 
+  it('falls back to an approach control point when the corner is behind the exit ray', () => {
+    // Measured 2026-11-05 on the rectangular loop: an inner-lane right
+    // turn whose exit pose sat past the lane crossing produced a corner
+    // parameter of −0.7 — the Bézier swept the vehicle BACKWARDS along
+    // its own lane and the post-arc lane re-derivation flipped it onto
+    // the oncoming lane (the corner ping-pong). The control point must
+    // then come from the approach ray, so the arrival tangent stays the
+    // entry heading and the curve never doubles back.
+    const from = { x: -61.2, z: -58.25, heading: Math.PI }
+    const to = { x: -58.25, z: -60, heading: Math.PI / 2 }
+    const arc = buildTurnArc(from, to)
+    // The control point is BEFORE the entry along its approach (south of
+    // it here), never north of it — north would arrive heading SOUTH.
+    expect(arc.p1.z).toBeLessThan(arc.p2.z)
+    // The arrival tangent is the entry heading: p1 → p2 is exactly the
+    // entry direction.
+    const dx = arc.p2.x - arc.p1.x
+    const dz = arc.p2.z - arc.p1.z
+    expect(Math.atan2(dz, dx)).toBeCloseTo(to.heading, 9)
+    // And the arc still starts along the exit heading.
+    const start = pointAt(arc, 0)
+    expect(start.x).toBeCloseTo(from.x, 9)
+    expect(start.z).toBeCloseTo(from.z, 9)
+  })
+
   it('clamps the distance past the ends', () => {
     const arc = buildTurnArc({ x: -14, z: 0, heading: 0 }, { x: 0, z: -14, heading: -Math.PI / 2 })
     const before = pointAt(arc, -5)

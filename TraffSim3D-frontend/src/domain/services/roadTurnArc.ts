@@ -111,7 +111,26 @@ export const buildTurnArc = (
   }
   const s = (dx * -vz - dz * -vx) / denom
   const corner = { x: from.x + ux * s, z: from.z + uz * s }
-  return finalise({ p0: { x: from.x, z: from.z }, p1: corner, p2: { x: to.x, z: to.z } })
+  // The corner is only usable when it sits strictly IN FRONT of the exit
+  // ray (s > 0) and strictly BEFORE the entry along its approach — the
+  // control point must be on the side of `to` the vehicle comes from,
+  // i.e. (to − corner)·v > 0. A corner behind either ray — the exit pose
+  // was pushed past the crossing by a collision response, say — makes
+  // the Bézier sweep the wrong way round: measured 2026-11-05, a
+  // loop-corner turn with a corner parameter of −0.7 carried the vehicle
+  // backwards along its own lane and into a junction ping-pong. Fall
+  // back to a control point on the approach ray, which keeps the arrival
+  // tangent equal to the entry heading.
+  const tParam = (to.x - corner.x) * vx + (to.z - corner.z) * vz
+  if (s > 0 && tParam > 0) {
+    return finalise({ p0: { x: from.x, z: from.z }, p1: corner, p2: { x: to.x, z: to.z } })
+  }
+  const lead = Math.max(1.0, Math.hypot(dx, dz) / 2)
+  return finalise({
+    p0: { x: from.x, z: from.z },
+    p1: { x: to.x - vx * lead, z: to.z - vz * lead },
+    p2: { x: to.x, z: to.z },
+  })
 }
 
 /** Sample the arc length once, at construction. */

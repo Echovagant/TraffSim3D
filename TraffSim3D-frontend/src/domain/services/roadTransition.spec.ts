@@ -74,7 +74,12 @@ describe('roadContinuation', () => {
     expect(turn?.roadId).toBe('r-b')
     // Entered at B's near end, on its keep-right forward lane.
     expect(turn?.laneIndex).toBe(0)
-    expect(turn?.s).toBe(0)
+    // An arc turn lands ENTRY_LEAD_M inside the entry lane, not at the
+    // bare junction end: the Bézier corner must sit in front of both
+    // rays (see the refinement comment in roadContinuation).
+    expect(turn?.s).toBe(3)
+    // The trigger lead: the entry lane's half-width plus the entry lead.
+    expect(turn?.fireLeadM).toBeCloseTo(1.75 + 3, 6)
   })
 
   it('turns onto a two-way road that runs away from the junction, on its backward lane', () => {
@@ -82,9 +87,34 @@ describe('roadContinuation', () => {
     const turn = roadContinuation(net, roadA, 0, HEADING_EAST)
     expect(turn).not.toBeNull()
     expect(turn?.roadId).toBe('r-b')
-    expect(turn?.s).toBe(60)
+    // Led ENTRY_LEAD_M inward from the far end (the backward travel
+    // direction runs s downwards from the junction end).
+    expect(turn?.s).toBe(57)
     // The keep-right lane of the backward travel direction.
     expect(turn?.laneIndex).toBe(1)
+    expect(turn?.fireLeadM).toBeCloseTo(1.75 + 3, 6)
+  })
+
+  it('keeps the raw entry for a straight continuation', () => {
+    // A road that continues straight through the junction lands at the
+    // bare end (s = 0) with no trigger lead: it fires on the overrun and
+    // lands directly, exactly as it always has.
+    const { net, roadA } = corner()
+    const roadC: Road = {
+      id: 'r-c',
+      startNode: { x: 0, y: 0, z: 0 },
+      endNode: { x: 60, y: 0, z: 0 },
+      laneCount: 2,
+      speedLimit: 20,
+      level: 0,
+    }
+    net.roads[roadC.id] = roadC
+    net.intersections['i-1']!.connectedRoads.push('r-c')
+    const turn = roadContinuation(net, roadA, 0, HEADING_EAST)
+    expect(turn).not.toBeNull()
+    expect(turn?.roadId).toBe('r-c')
+    expect(turn?.s).toBe(0)
+    expect(turn?.fireLeadM).toBe(0)
   })
 
   it('refuses a one-way road that runs away from the junction', () => {
@@ -116,7 +146,7 @@ describe('roadContinuation', () => {
     expect(turn).not.toBeNull()
     expect(turn?.roadId).toBe('r-b')
     expect(turn?.laneIndex).toBe(0)
-    expect(turn?.s).toBe(0)
+    expect(turn?.s).toBe(3)
   })
 
   it('never lands on the wrong-way side of a one-way road', () => {

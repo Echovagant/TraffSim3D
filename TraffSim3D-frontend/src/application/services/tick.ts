@@ -818,8 +818,37 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         // cannot tell "standing at the end" from "driven past the
         // end" — the overrun is measured from the body's world
         // position instead (`travelEndOverrun`).
-        const wrappedS = wrappedTravelS(v, vRoad)
-        if (wrappedS !== null) {
+        //
+        // The decision fires BEFORE the overrun when a junction turn
+        // exists (`turn.fireLeadM`): the turn arc needs an exit pose
+        // still in front of the lane crossing, or its Bézier corner
+        // goes behind the exit ray and the arc sweeps the wrong way —
+        // measured 2026-11-05 as a corner ping-pong on the loop scene
+        // (4 of 8 vehicles flipped road twice within ~1 s). Straight
+        // continuations (`fireLeadM = 0`) keep the historical
+        // overrun trigger: they land directly, and firing them early
+        // would teleport the body metres forward.
+        const overrun = travelEndOverrun(v, vRoad)
+        const remaining = -overrun
+        const sticky = isTurnSticky(v, simTime)
+        const decideNow = !sticky && (overrun > 0 || remaining <= TURN_DECIDE_LEAD_M)
+        const turn = decideNow
+          ? roadContinuation(
+              network,
+              vRoad,
+              v.laneIndex,
+              v.heading,
+              v.id,
+              ctx.routeNextRoadId?.(v.id),
+            )
+          : null
+        const turnedRoad = turn ? network.roads[turn.roadId] : undefined
+        const fires =
+          turn !== null &&
+          turnedRoad !== undefined &&
+          (overrun > 0 ||
+            (turnAngle(v.heading, turn.heading) >= MIN_ARC_TURN_RAD && remaining <= turn.fireLeadM))
+        if (turn !== null && turnedRoad !== undefined && fires) {
           // ===== junction turn =====
           //
           // The travel end of a road can be a JUNCTION, and the road
@@ -840,22 +869,26 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
           // makes at this junction (straight on, or a right / left turn)
           // is a hash of it, so the decision is reproducible and the two
           // motion paths below cannot disagree about it.
-          const turn = roadContinuation(
-            network,
-            vRoad,
-            v.laneIndex,
-            v.heading,
-            v.id,
-            ctx.routeNextRoadId?.(v.id),
-          )
-          const turnedRoad = turn ? network.roads[turn.roadId] : undefined
-          if (turn && turnedRoad) {
-            applyRoadTurn(v, turnedRoad, turn, ctx)
-            // The guards below must judge the vehicle against the road
-            // it is on NOW — the old road would snap it straight back.
-            vRoad = turnedRoad
-          } else {
-            applyTravelEndWrap(v, vRoad, wrappedS, ctx)
+          applyRoadTurn(v, turnedRoad!, turn!, ctx)
+          markTurnApplied(v, simTime)
+          // The guards below must judge the vehicle against the road
+          // it is on NOW — the old road would snap it straight back.
+          vRoad = turnedRoad!
+        } else if (overrun > 0) {
+          // Past the travel end with no continuation — the historical
+          // wrap, now gated on the landing being clear: the wrap has no
+          // landing-occupancy check of its own, and a landing on top of
+          // a queue at the other end meant an instant collision
+          // (measured 2026-11-05: v-5 wrapped to within 3.8 m of v-1 on
+          // the cross scene — overlapping bodies). A blocked wrap holds
+          // the vehicle at the end instead; the next tick retries.
+          const wrappedS = wrappedTravelS(v, vRoad)
+          if (wrappedS !== null) {
+            if (sticky || wrapLandingBlocked(network, vRoad, v.laneIndex, wrappedS, v.id)) {
+              holdAtTravelEnd(v, ctx)
+            } else {
+              applyTravelEndWrap(v, vRoad, wrappedS, ctx)
+            }
           }
         } else {
           // Guard: the body is off the lane it is supposed to be on
@@ -1054,60 +1087,76 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // application-layer model, so both paths have to agree on where a
       // vehicle goes next.
       const pastTravelEnd = sign === 1 ? v.s > len : v.s < 0
-      if (pastTravelEnd) {
-        const turn = roadContinuation(
-          network,
-          road,
-          v.laneIndex,
-          v.heading,
-          v.id,
-          ctx.routeNextRoadId?.(v.id),
-        )
-        const turnedRoad = turn ? network.roads[turn.roadId] : undefined
-        if (turn && turnedRoad) {
-          const exitHeading = v.heading
-          const exitX = v.position.x
-          const exitZ = v.position.z
-          const entryLp = lanePoint(turnedRoad, turn.laneIndex, turn.s)
-          v.roadId = turn.roadId
-          v.laneIndex = turn.laneIndex
-          v.s = turn.s
-          v.heading = turn.heading
-          v.lane = LaneId.make(turn.roadId, turn.laneIndex)
-          // A lane change belongs to the lane space of the road the
-          // vehicle was on — it does not carry onto the new road.
-          v.desiredLaneIndex = null
-          v.laneChangeStartedAt = null
-          // Near-straight continuations land directly (see the Rapier
-          // path and MIN_ARC_TURN_RAD); real turns take the arc, exactly
-          // as the Rapier path builds it (ADR-012): the two motion paths
-          // must produce the same turn.
-          if (turnAngle(exitHeading, turn.heading) < MIN_ARC_TURN_RAD) {
-            v.position.x = entryLp.position.x
-            v.position.z = entryLp.position.z
-            road = turnedRoad
-          } else {
-            const arc = buildTurnArc(
-              { x: exitX, z: exitZ, heading: exitHeading },
-              { x: entryLp.position.x, z: entryLp.position.z, heading: turn.heading },
-            )
-            v.turn = {
-              s: turn.s,
-              heading: turn.heading,
-              p0x: arc.p0.x,
-              p0z: arc.p0.z,
-              p1x: arc.p1.x,
-              p1z: arc.p1.z,
-              p2x: arc.p2.x,
-              p2z: arc.p2.z,
-              length: arc.length,
-              dist: 0,
-            }
-          }
+      // The same early trigger the Rapier path uses: an arc turn must
+      // fire while the exit pose is still in front of the lane crossing
+      // (see the Rapier path's decision block and roadContinuation's
+      // entry refinement). Straights keep the overrun trigger.
+      const remainingS = sign === 1 ? len - v.s : v.s
+      const sticky = isTurnSticky(v, simTime)
+      const decideNow = !sticky && (pastTravelEnd || remainingS <= TURN_DECIDE_LEAD_M)
+      const turnEarly = decideNow
+        ? roadContinuation(network, road, v.laneIndex, v.heading, v.id, ctx.routeNextRoadId?.(v.id))
+        : null
+      const turnFires =
+        turnEarly !== null &&
+        (pastTravelEnd ||
+          (turnAngle(v.heading, turnEarly.heading) >= MIN_ARC_TURN_RAD &&
+            remainingS <= turnEarly.fireLeadM))
+      if (turnEarly !== null && turnFires) {
+        const turn = turnEarly
+        const turnedRoad = network.roads[turn.roadId]!
+        const exitHeading = v.heading
+        const exitX = v.position.x
+        const exitZ = v.position.z
+        const entryLp = lanePoint(turnedRoad, turn.laneIndex, turn.s)
+        v.roadId = turn.roadId
+        v.laneIndex = turn.laneIndex
+        v.s = turn.s
+        v.heading = turn.heading
+        v.lane = LaneId.make(turn.roadId, turn.laneIndex)
+        // A lane change belongs to the lane space of the road the
+        // vehicle was on — it does not carry onto the new road.
+        v.desiredLaneIndex = null
+        v.laneChangeStartedAt = null
+        // Near-straight continuations land directly (see the Rapier
+        // path and MIN_ARC_TURN_RAD); real turns take the arc, exactly
+        // as the Rapier path builds it (ADR-012): the two motion paths
+        // must produce the same turn.
+        if (turnAngle(exitHeading, turn.heading) < MIN_ARC_TURN_RAD) {
+          v.position.x = entryLp.position.x
+          v.position.z = entryLp.position.z
           road = turnedRoad
         } else {
-          if (v.s > len) v.s -= len
-          if (v.s < 0) v.s += len
+          const arc = buildTurnArc(
+            { x: exitX, z: exitZ, heading: exitHeading },
+            { x: entryLp.position.x, z: entryLp.position.z, heading: turn.heading },
+          )
+          v.turn = {
+            s: turn.s,
+            heading: turn.heading,
+            p0x: arc.p0.x,
+            p0z: arc.p0.z,
+            p1x: arc.p1.x,
+            p1z: arc.p1.z,
+            p2x: arc.p2.x,
+            p2z: arc.p2.z,
+            length: arc.length,
+            dist: 0,
+          }
+        }
+        road = turnedRoad
+        markTurnApplied(v, simTime)
+      } else if (pastTravelEnd) {
+        // No continuation (or the sticky window suppresses the
+        // decision) — the historical wrap, gated on the landing being
+        // clear: same rule as the Rapier path. A blocked wrap holds
+        // the vehicle at the travel end; the next tick retries.
+        const wrappedS = sign === 1 ? v.s - len : v.s + len
+        if (sticky || wrapLandingBlocked(network, road, v.laneIndex, wrappedS, v.id)) {
+          v.s = sign === 1 ? len : 0
+          v.speed = 0
+        } else {
+          v.s = wrappedS
         }
       }
       const lp = lanePoint(road, v.laneIndex, v.s)
@@ -1397,6 +1446,95 @@ const applyTravelEndWrap = (v: Vehicle, road: Road, newS: number, ctx: TickConte
  * entry point of the new one are the same junction — so the vehicle
  * keeps its momentum and simply changes heading.
  */
+
+// ===== junction-turn stickiness + wrap landing occupancy =====
+// (the applyRoadTurn doc continues below the helpers it shares this
+// section with)
+//
+// Two guards around the travel-end decision, both added 2026-11-05 after
+// the loop-scene corner ping-pong (4 of 8 vehicles flipped road twice
+// within ~1 s at a corner) and the cross-scene wrap landing on top of
+// another vehicle (centres 3.8 m apart — overlapping bodies).
+
+/** How long (s) after a junction turn its decision stays suppressed. */
+const TURN_STICKY_S = 1.0
+/** How far (m) the vehicle must move before the suppression lifts. */
+const TURN_STICKY_M = 5.0
+/**
+ * How far (m) before the travel end the continuation is decided at all.
+ * An upper bound on the per-turn `fireLeadM` (typically ~3.75 m: the
+ * lane half-width plus the entry lead); deciding any earlier would run
+ * `roadContinuation` on vehicles Nowhere near a junction.
+ */
+const TURN_DECIDE_LEAD_M = 10.0
+/**
+ * A wrap landing stays this far (m) from any vehicle on the landing
+ * lane — centres, so 8 m is roughly two vehicle lengths: enough for the
+ * car-following of the vehicle ahead to matter and for the wrapped
+ * vehicle's own brakes to have something to work with.
+ */
+const WRAP_LANDING_CLEAR_M = 8.0
+
+/** The sticky state of a vehicle that just made a junction turn. */
+interface TurnStickyState {
+  at: number
+  x: number
+  z: number
+}
+const turnStickiness = new WeakMap<Vehicle, TurnStickyState>()
+
+const markTurnApplied = (v: Vehicle, simTime: number): void => {
+  turnStickiness.set(v, { at: simTime, x: v.position.x, z: v.position.z })
+}
+
+/**
+ * True while a vehicle's just-made junction turn must not be re-decided:
+ * within `TURN_STICKY_S` of the turn AND still within `TURN_STICKY_M` of
+ * where it happened. The landing of a turn sits a lead distance from the
+ * new road's travel end; floating-point dust at the landing (or a
+ * collision nudge) must not read as "past the end" and re-fire the
+ * decision — that re-fire was the ping-pong.
+ */
+const isTurnSticky = (v: Vehicle, simTime: number): boolean => {
+  const st = turnStickiness.get(v)
+  if (!st) return false
+  if (simTime - st.at >= TURN_STICKY_S) return false
+  return Math.hypot(v.position.x - st.x, v.position.z - st.z) < TURN_STICKY_M
+}
+
+/**
+ * Would wrapping into `landingS` on `road` / `laneIndex` put the vehicle
+ * on top of another one? Only same-lane traffic conflicts: the landing
+ * is the START of the travel direction, so everything on the lane is
+ * ahead and moving away — the question is whether it is far enough away
+ * (centres ≥ `WRAP_LANDING_CLEAR_M`).
+ */
+const wrapLandingBlocked = (
+  network: RoadNetwork,
+  road: Road,
+  laneIndex: number,
+  landingS: number,
+  selfId: string,
+): boolean => {
+  for (const o of Object.values(network.vehicles)) {
+    if (o.id === selfId || o.status === 'crashed') continue
+    if (o.roadId !== road.id || o.laneIndex !== laneIndex) continue
+    if (Math.abs(o.s - landingS) < WRAP_LANDING_CLEAR_M) return true
+  }
+  return false
+}
+
+/**
+ * Park the vehicle at the travel end for this tick: the wrap (or the
+ * re-decision) is suppressed, so the body must not keep integrating
+ * forward — the next tick retries, and the vehicle visibly waits at the
+ * edge until the landing is clear.
+ */
+const holdAtTravelEnd = (v: Vehicle, ctx: TickContext): void => {
+  v.speed = 0
+  ctx.rapierWorld?.setVehicleSpeed(v.id, 0, v.heading)
+}
+
 const applyRoadTurn = (v: Vehicle, road: Road, turn: RoadContinuation, ctx: TickContext): void => {
   const lp = lanePoint(road, turn.laneIndex, turn.s)
   // The EXIT heading is the pose the vehicle has NOW (step 8 re-derived

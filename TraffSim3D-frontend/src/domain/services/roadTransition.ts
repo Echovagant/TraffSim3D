@@ -32,9 +32,16 @@
 
 import type { Road } from '@domain/entities/Road'
 import type { RoadNetwork } from '@domain/entities/RoadNetwork'
-import { laneForwardSign, lanePoint, projectIntersectionOnRoad, roadLength } from './laneGeometry'
+import {
+  laneForwardSign,
+  laneOffset,
+  lanePoint,
+  projectIntersectionOnRoad,
+  roadLength,
+} from './laneGeometry'
 import { isDrivableLane } from './oneway'
 import { junctionIndex } from './roadJunctionIndex'
+import { MIN_ARC_TURN_RAD } from './roadTurnArc'
 import { RIGHT_TURN_SHARE, TURN_PROBABILITY } from '@shared/constants/simulation'
 
 /**
@@ -51,6 +58,15 @@ import { RIGHT_TURN_SHARE, TURN_PROBABILITY } from '@shared/constants/simulation
  */
 export const JUNCTION_END_TOLERANCE_M = 1.0
 
+/**
+ * How far (m) past the junction end an arc turn lands on the entry road,
+ * along the entry's travel direction. The landing has to be strictly
+ * inside the lane for the turn Bézier's corner to sit in front of both
+ * rays; a lane width reads as a natural sweep instead of a pivot at the
+ * road end.
+ */
+export const ENTRY_LEAD_M = 3.0
+
 /** The continuation of a lane that has run past its travel end. */
 export interface RoadContinuation {
   /** The road the vehicle continues onto. */
@@ -62,10 +78,22 @@ export interface RoadContinuation {
    * the road's length).
    */
   laneIndex: number
-  /** The entry arc length on the new road: 0 or the road's length. */
+  /**
+   * The entry arc length on the new road. For a straight continuation
+   * this is the road's end the junction sits at (0 or the length); for
+   * an arc turn it is that end led `ENTRY_LEAD_M` inward along the
+   * entry's travel direction — see the comment at the refinement below.
+   */
   s: number
   /** The new lane's travel heading at the entry point (radians). */
   heading: number
+  /**
+   * How far (m) BEFORE the travel end the turn should fire, so the exit
+   * pose is still in front of the lane crossing and the turn arc's
+   * Bézier corner is positive on both rays. 0 for a straight
+   * continuation (those fire on the overrun, as they always have).
+   */
+  fireLeadM: number
 }
 
 /** Two headings are "the same" for the tie-break below. */
@@ -323,8 +351,46 @@ export const roadContinuation = (
       continue
     }
 
-    const candidateHeading = lanePoint(other, newLane, entryS).heading
-    const delta = signedTurnAngle(heading, candidateHeading)
+    // ===== where the arc can actually land =====
+    //
+    // The raw entry (`0` or the road's length) puts the landing at the
+    // junction end of the new lane. For a corner turn between two lanes
+    // offset toward the SAME side of the corner — an inner-lane right
+    // turn — that point is behind the exit lane's natural path: the exit
+    // lane's extension crosses the entry lane a lane-half-width BEFORE
+    // the end, so a Bézier aimed at the raw entry has its corner behind
+    // the exit ray (negative on both rays) and sweeps the wrong way.
+    // Measured 2026-11-05 on the rectangular loop: the garbage arc made
+    // the post-arc lane re-derivation flip the vehicle onto a forward
+    // lane exactly at ITS travel end, the decision re-fired, and the car
+    // ping-ponged between two roads for about a second (4 of 8
+    // vehicles).
+    //
+    // The fix lands the vehicle `ENTRY_LEAD_M` past the junction end,
+    // along the entry's travel direction — strictly inside the lane, so
+    // the Bézier corner is positive on both rays and the arc is a proper
+    // sweep. Straight continuations keep the raw entry: they land
+    // directly (no arc), and moving their landing would only add a
+    // visible hop.
+    const rawHeading = lanePoint(other, newLane, entryS).heading
+    let delta = signedTurnAngle(heading, rawHeading)
+    let candidateHeading = rawHeading
+    let fireLeadM = 0
+    if (Math.abs(delta) >= MIN_ARC_TURN_RAD) {
+      const entrySign = laneForwardSign(newLane, other.laneCount)
+      const leadS = entryS + entrySign * ENTRY_LEAD_M
+      entryS = Math.max(0.25, Math.min(otherLen - 0.25, leadS))
+      candidateHeading = lanePoint(other, newLane, entryS).heading
+      delta = signedTurnAngle(heading, candidateHeading)
+      // How far before the travel end the turn must fire: the exit pose
+      // has to stay in front of the lane crossing. For a perpendicular
+      // junction the crossing sits the ENTRY lane's half-width away from
+      // the exit travel end along the exit lane — this is that distance
+      // plus the entry lead. Firing any later puts the corner behind
+      // the exit ray again (the guard in buildTurnArc then catches the
+      // pathological remainder).
+      fireLeadM = Math.abs(laneOffset(newLane, other.laneCount)) + ENTRY_LEAD_M
+    }
     candidates.push({
       roadId: other.id,
       laneIndex: newLane,
@@ -332,6 +398,7 @@ export const roadContinuation = (
       heading: candidateHeading,
       delta,
       movement: movementOf(delta),
+      fireLeadM,
     })
   }
   if (candidates.length === 0) return null
