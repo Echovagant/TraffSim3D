@@ -94,6 +94,15 @@ const VEHICLE_COLLIDER_HALF_HEIGHT = ((): number => {
   )
 })()
 
+/**
+ * The physics floor's top surface (one vehicle half-height below the
+ * road plane — see the ground creation in `RapierWorld`). Exported for
+ * consumers that must tell "floor" from "obstacle": the LiDAR drops
+ * floor returns, which otherwise paint radial fans on the bare ground
+ * beyond the road network (measured 2026-11-07).
+ */
+export const GROUND_TOP_Y = -VEHICLE_COLLIDER_HALF_HEIGHT
+
 export class RapierWorld {
   private R: typeof import('@dimforge/rapier3d-compat') | null = null
   private world: World | null = null
@@ -153,7 +162,7 @@ export class RapierWorld {
     // it, and the tick writes it onto the body), so the physics ground
     // only has to sit *below* the road — exactly one collider half-height,
     // so the body rests on it with its centre on the road.
-    const groundTopY = -VEHICLE_COLLIDER_HALF_HEIGHT
+    const groundTopY = GROUND_TOP_Y
     const groundDesc = this.R.RigidBodyDesc.fixed().setTranslation(
       0,
       groundTopY - this.cfg.groundThickness,

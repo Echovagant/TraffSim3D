@@ -16,6 +16,7 @@
 // filtering down for ~10% perf gain).
 
 import type { RapierWorld, Vec3 } from '@infrastructure/physics'
+import { GROUND_TOP_Y } from '@infrastructure/physics'
 import { LIDAR_SCAN_INTERVAL_S, LIDAR_AZIMUTH_DEG } from '@shared/constants/simulation'
 
 export interface LidarConfig {
@@ -126,12 +127,23 @@ export class LidarSensor {
     // Cast + filter self-hits in JS.
     const hits = world.castRayBatch(origins, dirs, this.cfg.maxRange)
     const excludeSet = new Set(this.cfg.excludeColliderHandles)
+    // Floor returns are not obstacles: the physics floor is a substrate
+    // (friction-0 cuboid, top at `GROUND_TOP_Y`, half a vehicle height
+    // BELOW the road plane, extending 500 m in every direction), so its
+    // returns paint radial fans on the bare ground beyond the road
+    // network and read as floating clusters (user report 2026-11-07:
+    // "LiDAR 会无限制上升" — the fan beyond the map edge). A real
+    // obstacle (a vehicle) never reaches that low: its collider rests ON
+    // the floor with its bottom at `GROUND_TOP_Y`, so the 5 cm margin
+    // only ever eats the sliver of a bumper's lowest centimetre.
+    const minHitY = GROUND_TOP_Y + 0.05
     const n = nH * nV
     for (let k = 0; k < n; k++) {
       const hit = hits[k]!
       const baseIdx = k * 3
       const isSelfHit = hit.colliderHandle !== null && excludeSet.has(hit.colliderHandle)
-      if (hit.point && !isSelfHit && hit.distance < this.cfg.maxRange) {
+      const isFloorReturn = hit.point !== null && hit.point.y < minHitY
+      if (hit.point && !isSelfHit && !isFloorReturn && hit.distance < this.cfg.maxRange) {
         // Gaussian noise
         const nx = (Math.random() - 0.5) * 2 * this.cfg.noiseStddev
         const ny = (Math.random() - 0.5) * 2 * this.cfg.noiseStddev
@@ -141,7 +153,7 @@ export class LidarSensor {
         this.points[baseIdx + 2] = hit.point.z + nz
         this.intensities[k] = 1.0 - hit.distance / this.cfg.maxRange
       } else {
-        // No hit (or self-hit) — write NaN sentinel.
+        // No hit (or self-hit, or floor return) — write NaN sentinel.
         this.points[baseIdx] = NaN
         this.points[baseIdx + 1] = NaN
         this.points[baseIdx + 2] = NaN

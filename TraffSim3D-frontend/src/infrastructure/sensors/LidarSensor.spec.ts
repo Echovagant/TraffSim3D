@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { LidarSensor, defaultLidarConfig } from './LidarSensor'
+import { GROUND_TOP_Y } from '@infrastructure/physics'
 import type { RapierWorld, RayHit, Vec3 } from '@infrastructure/physics'
 
 const makeMockWorld = (hits: ReadonlyArray<RayHit | null>): RapierWorld => {
@@ -69,6 +70,31 @@ describe('LidarSensor', () => {
     expect(Number.isNaN(frame.points[0])).toBe(true)
     // Second ray: other hit → not NaN
     expect(Number.isFinite(frame.points[3])).toBe(true)
+  })
+
+  it('floor returns are dropped: hits at the bare-ground level are not obstacles', () => {
+    // The physics floor's top surface sits at GROUND_TOP_Y (one vehicle
+    // half-height below the road plane). Rays that leave the road
+    // network hit it and used to paint radial fans on the bare ground
+    // beyond the map edge — the "floating LiDAR fan" (user report
+    // 2026-11-07). A floor return (point at GROUND_TOP_Y) must read as
+    // no-hit; a real obstacle (a vehicle body, higher up) stays.
+    const cfg = defaultLidarConfig('v-1', [])
+    cfg.horizontalRays = 2
+    cfg.verticalRays = 1
+    cfg.scanIntervalSec = 0
+    const sensor = new LidarSensor(cfg)
+    const world = makeMockWorld([
+      { point: { x: 5, y: GROUND_TOP_Y, z: 2 }, distance: 5, colliderHandle: 'ground' },
+      { point: { x: 2, y: 0.5, z: 1 }, distance: 3, colliderHandle: 'other' },
+    ])
+    const frame = scanOnce(sensor, world)
+    // First ray: floor return → NaN
+    expect(Number.isNaN(frame.points[0])).toBe(true)
+    expect(frame.intensities[0]).toBe(0)
+    // Second ray: vehicle hit → kept
+    expect(Number.isFinite(frame.points[3])).toBe(true)
+    expect(frame.intensities[1]).toBeGreaterThan(0)
   })
 
   it('intensity is inversely proportional to distance', () => {

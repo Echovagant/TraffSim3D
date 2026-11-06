@@ -1,4 +1,4 @@
-export { RapierWorld } from './RapierWorld'
+export { RapierWorld, GROUND_TOP_Y } from './RapierWorld'
 export type {
   ContactEvent,
   WorldStepResult,
