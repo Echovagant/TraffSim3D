@@ -162,7 +162,7 @@
             />
             <span>LiDAR (16线)</span>
             <b :class="world.lidarEnabled ? 'ok' : ''" data-testid="lidar-frames">
-              {{ world.lidarFrameCount }} 帧
+              {{ world.lidarScanRate }} 帧/s
             </b>
           </label>
           <label class="toggle">

@@ -862,6 +862,18 @@ export const useWorldStore = defineStore('world', () => {
   const trajectoryExporter = new TrajectoryExporter(TRAJECTORY_BUFFER_CAP)
   const lidarEnabled = ref(false)
   const lidarFrameCount = ref(0)
+  /**
+   * The LiDAR scan **rate** the HUD shows (frames/s over a 1 s window).
+   *
+   * The cumulative frame count climbs by ~10 frames/s per vehicle — a
+   * 10-vehicle scene produces ~100/s, 6 000/min, never resetting during
+   * a run — and a number climbing like that reads as a leak (user
+   * report 2026-11-07: "LiDAR 会无限制上升"). The rate describes what
+   * the sensor fleet is doing right now and stays bounded.
+   */
+  const lidarScanRate = ref(0)
+  let lidarRateWindowStart: number | null = null
+  let lidarRateLastCount = 0
   const setLidarEnabled = (enabled: boolean): void => {
     lidarEnabled.value = enabled
     if (!enabled) lidarFrameCount.value = 0
@@ -1213,6 +1225,30 @@ export const useWorldStore = defineStore('world', () => {
     // (not per-tick). The registry tracks frames produced (throttled scans only).
     if (lidarEnabled.value) {
       lidarFrameCount.value = sensorRegistry.frameCount
+      // The HUD shows the rate over a 1 s wall-clock window, not the
+      // cumulative total (see lidarScanRate). A stale window (pause,
+      // backgrounded tab) restarts without reporting a bogus spike.
+      const now = performance.now()
+      if (lidarRateWindowStart === null) {
+        lidarRateWindowStart = now
+        lidarRateLastCount = sensorRegistry.frameCount
+      } else {
+        const elapsed = now - lidarRateWindowStart
+        if (elapsed >= 1000) {
+          if (elapsed <= 5000) {
+            lidarScanRate.value = Math.round(
+              ((sensorRegistry.frameCount - lidarRateLastCount) * 1000) / elapsed,
+            )
+          }
+          lidarRateWindowStart = now
+          lidarRateLastCount = sensorRegistry.frameCount
+        }
+      }
+    } else if (lidarScanRate.value !== 0 || lidarRateWindowStart !== null) {
+      // LiDAR off: the rate reads 0 and the window restarts on re-enable.
+      lidarScanRate.value = 0
+      lidarRateWindowStart = null
+      lidarRateLastCount = 0
     }
 
     // Refresh LidarPointCloud meshes from the latest frames
@@ -1298,6 +1334,9 @@ export const useWorldStore = defineStore('world', () => {
     }
     cameraFrameCount.value = 0
     lidarFrameCount.value = 0
+    lidarScanRate.value = 0
+    lidarRateWindowStart = null
+    lidarRateLastCount = 0
     network.value = buildCrossIntersectionNetwork()
     speedOverrides.clear()
     simTime = 0
@@ -1686,6 +1725,9 @@ export const useWorldStore = defineStore('world', () => {
     }
     cameraFrameCount.value = 0
     lidarFrameCount.value = 0
+    lidarScanRate.value = 0
+    lidarRateWindowStart = null
+    lidarRateLastCount = 0
     // Re-register new vehicles
     if (rapierWorld) {
       for (const v of Object.values(network.value.vehicles)) {
@@ -1942,6 +1984,7 @@ export const useWorldStore = defineStore('world', () => {
     trajectoryExporter,
     lidarEnabled,
     lidarFrameCount,
+    lidarScanRate,
     setLidarEnabled,
     toggleLidar,
     // point cloud + camera surface

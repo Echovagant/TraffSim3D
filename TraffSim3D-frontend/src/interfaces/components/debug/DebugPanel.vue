@@ -36,10 +36,13 @@
       <span>仿真</span>
       <b>{{ store.isRunning ? `运行 @ ${formatRate(store.tickRate)}` : '已暂停' }}</b>
     </div>
-    <div class="row" :title="`LiDAR sensors active: ${store.sensorRegistry.sensorCount}`">
+    <div
+      class="row"
+      :title="`LiDAR sensors active: ${store.sensorRegistry.sensorCount} · 累计 ${store.lidarFrameCount} 帧`"
+    >
       <span>LiDAR</span>
       <b :class="store.lidarEnabled ? 'ok' : ''">
-        {{ store.lidarEnabled ? `开 · ${store.lidarFrameCount} 帧` : '关' }}
+        {{ store.lidarEnabled ? `开 · ${store.lidarScanRate} 帧/s` : '关' }}
       </b>
     </div>
     <div class="row" title="按 lane 分布的车辆数">
