@@ -1,7 +1,7 @@
 <template>
   <main class="backend-view" data-reveal>
+    <ShowcaseNav />
     <header class="view-header">
-      <router-link to="/" class="back-link">← 返回首页</router-link>
       <h1>Backend Services</h1>
       <p class="view-sub">FastAPI 服务状态 · 从 OpenAPI schema 动态发现端点</p>
     </header>
@@ -73,6 +73,7 @@
 </template>
 
 <script setup lang="ts">
+import { ShowcaseNav } from '@interfaces/components/showcase'
 import { computed, onMounted, ref } from 'vue'
 import { createHttpClient, BackendError } from '@infrastructure/api'
 

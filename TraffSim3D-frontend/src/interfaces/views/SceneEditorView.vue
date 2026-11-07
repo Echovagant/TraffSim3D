@@ -29,6 +29,7 @@
       folded away — on a narrow viewport the columns fold themselves.
     -->
     <template v-else>
+      <ShowcaseNav variant="minimal" />
       <WorldCanvas />
 
       <header class="deck-top">
@@ -126,6 +127,7 @@
 </template>
 
 <script setup lang="ts">
+import { ShowcaseNav } from '@interfaces/components/showcase'
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import WorldCanvas from '@interfaces/components/scene/WorldCanvas.vue'
@@ -258,7 +260,9 @@ const restorePanels = (): void => {
   line-height: 1;
   cursor: pointer;
   opacity: 0.55;
-  transition: opacity 0.15s ease, color 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease;
 }
 .slot:hover .slot-fold {
   opacity: 1;

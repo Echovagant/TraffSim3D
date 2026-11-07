@@ -1,6 +1,6 @@
 <template>
   <main class="placeholder-view" data-reveal>
-    <router-link to="/" class="back-link">← 返回首页</router-link>
+    <ShowcaseNav />
     <header class="placeholder-header">
       <span class="badge badge-planned">Planned</span>
       <h1>DeliveryLab</h1>

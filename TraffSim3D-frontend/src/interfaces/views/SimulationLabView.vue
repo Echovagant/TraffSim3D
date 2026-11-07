@@ -1,5 +1,6 @@
 <template>
   <main class="sim-lab">
+    <ShowcaseNav />
     <!--
       Live 3D stage.
 
@@ -27,7 +28,6 @@
 
     <div class="lab-panel" data-testid="sim-lab-panel">
       <header class="lab-header">
-        <router-link to="/" class="back-link">← 返回首页</router-link>
         <div class="title-row">
           <span class="badge" :class="world.isRunning ? 'badge-active' : 'badge-paused'">
             {{ world.isRunning ? '运行中' : '已暂停' }}
@@ -279,6 +279,7 @@
 </template>
 
 <script setup lang="ts">
+import { ShowcaseNav } from '@interfaces/components/showcase'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useWorldStore, type SceneKind } from '@interfaces/stores/worldStore'
 import { getAxisQueueLength } from '@application/services/signalController'

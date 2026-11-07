@@ -6,6 +6,7 @@
          light OSM tiles read as a night map — without it a dark
          dashboard sits on a bright map and the whole screen falls
          apart. -->
+    <ShowcaseNav variant="minimal" />
     <div ref="cesiumContainer" class="cesium-container" data-testid="cesium-container" />
 
     <!-- Three.js overlay: transparent background, vehicles + lights
@@ -39,7 +40,12 @@
           >
             {{ world.isRunning ? '⏸ 暂停' : '▶ 播放' }}
           </button>
-          <button class="top-btn" title="重新框选整个场景 (F)" data-testid="fit-scene-button" @click="world.requestFit()">
+          <button
+            class="top-btn"
+            title="重新框选整个场景 (F)"
+            data-testid="fit-scene-button"
+            @click="world.requestFit()"
+          >
             🎯 适配场景
           </button>
           <label class="top-field" title="Cesium 视图模式">
@@ -163,6 +169,7 @@
  * the same tokens for its road/building colours: the dashboard and the
  * city can never disagree about the palette.
  */
+import { ShowcaseNav } from '@interfaces/components/showcase'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as Cesium from 'cesium'
 import { useWorldSimulation } from '@interfaces/composables/useWorldSimulation'
@@ -476,8 +483,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
   background: var(--dc-screen);
   color: var(--dc-text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Microsoft YaHei', sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 /* Cesium container fills the viewport (basemap). */

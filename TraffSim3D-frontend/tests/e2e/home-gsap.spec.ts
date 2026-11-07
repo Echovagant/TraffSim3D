@@ -121,7 +121,9 @@ test('Home: SmartCity 3D card is rendered as featured', async ({ page }) => {
 
 test('Home: SmartCity link in top nav', async ({ page }) => {
   await page.goto('/')
-  const link = page.locator('.nav-link.nav-link-new')
+  // The nav is the shared `ShowcaseNav` component (2026-11-07); the
+  // "New" mark is the `is-accent` class (a glowing dot, not a pill).
+  const link = page.locator('.showcase-nav .nav-link.is-accent')
   await expect(link).toBeVisible()
   await expect(link).toHaveText('SmartCity 3D')
   await expect(link).toHaveAttribute('href', '/smart-city')

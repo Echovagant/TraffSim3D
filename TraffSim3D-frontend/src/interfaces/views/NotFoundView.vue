@@ -1,5 +1,6 @@
 <template>
   <main class="view view--placeholder">
+    <ShowcaseNav />
     <h1>404</h1>
     <p>未找到该页面。</p>
     <router-link to="/" class="back-link">返回首页</router-link>

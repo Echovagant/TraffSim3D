@@ -1,6 +1,6 @@
 <template>
   <main class="ai-playground" data-reveal>
-    <router-link to="/" class="back-link">← 返回首页</router-link>
+    <ShowcaseNav />
 
     <header class="header">
       <span class="badge">PPO</span>
@@ -595,6 +595,7 @@
  * RL replay surface — load a PPO checkpoint and drive one
  *   vehicle in the TS sim from the policy's actions.
  */
+import { ShowcaseNav } from '@interfaces/components/showcase'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
 import { useWorldStore } from '@interfaces/stores/worldStore'

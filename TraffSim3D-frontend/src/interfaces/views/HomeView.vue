@@ -2,27 +2,7 @@
   <div ref="root" class="main-container">
     <EnhancedWebGLBackground />
 
-    <header class="top-nav" role="navigation" aria-label="主导航">
-      <div class="nav-inner">
-        <router-link to="/" class="brand" aria-label="返回首页">
-          <div class="logo" aria-hidden>🛰️</div>
-          <div class="title">
-            <span class="project-name">TraffSim3D</span>
-            <small class="subtitle">3D 智能交通仿真 · 多智能体 RL</small>
-          </div>
-        </router-link>
-
-        <nav class="nav-links" aria-label="模块导航">
-          <router-link to="/scene-editor" class="nav-link">SceneLab</router-link>
-          <router-link to="/simulation-lab" class="nav-link">SimulationLab</router-link>
-          <router-link to="/map-importer" class="nav-link">MapLab</router-link>
-          <router-link to="/smart-city" class="nav-link nav-link-new">SmartCity 3D</router-link>
-          <router-link to="/ai-playground" class="nav-link">AI Proving Ground</router-link>
-          <router-link to="/deliverables" class="nav-link">DeliveryLab</router-link>
-          <router-link to="/backend" class="nav-link">Backend</router-link>
-        </nav>
-      </div>
-    </header>
+    <ShowcaseNav />
 
     <main class="content-wrap">
       <section class="hero">
@@ -37,9 +17,9 @@
           <p class="hero-eyebrow gsap-hero-title">3D 智能交通仿真 · 多智能体 RL</p>
           <h1 class="hero-title gsap-hero-tagline">TraffSim3D</h1>
           <p class="hero-sub gsap-hero-sub">
-            面向智慧城市的 3D 交通仿真平台 — 前端 Vue3 + Three.js，后端 FastAPI + PyTorch，
-            通过 DDD 分层 + 多智能体 RL 引擎联合驱动。场景编辑器、物理仿真、OSM 地图导入、
-            智能体 RL 训练，另附 SmartCity 3D 底图（Cesium + OSM 瓦片 + 真实建筑 3D 拉伸）。
+            面向智慧城市的 3D 交通仿真平台 — 前端 Vue3 + Three.js，后端 FastAPI + PyTorch， 通过 DDD
+            分层 + 多智能体 RL 引擎联合驱动。场景编辑器、物理仿真、OSM 地图导入、 智能体 RL
+            训练，另附 SmartCity 3D 底图（Cesium + OSM 瓦片 + 真实建筑 3D 拉伸）。
           </p>
           <div class="hero-ctas gsap-hero-ctas">
             <router-link to="/scene-editor" class="btn primary">进入 SceneLab</router-link>
@@ -54,11 +34,10 @@
           </ul>
         </div>
         <figure class="hero-shot">
-          <img
-            src="/scene-smartcity.png"
-            alt="SmartCity 3D：OSM 底图上的仿真路网与车辆"
-          />
-          <figcaption>SmartCity 3D — 深圳福田：994 条道路、3 014 栋建筑，仿真车辆跑在同源路网上</figcaption>
+          <img src="/scene-smartcity.png" alt="SmartCity 3D：OSM 底图上的仿真路网与车辆" />
+          <figcaption>
+            SmartCity 3D — 深圳福田：994 条道路、3 014 栋建筑，仿真车辆跑在同源路网上
+          </figcaption>
         </figure>
       </section>
 
@@ -70,7 +49,9 @@
 
         <div class="module-grid gsap-module-grid">
           <router-link to="/scene-editor" class="module-card status-active" data-reveal>
-            <div class="ds-tile-media"><img src="/tiles/tile-scenelab.png" alt="" loading="lazy" /></div>
+            <div class="ds-tile-media">
+              <img src="/tiles/tile-scenelab.png" alt="" loading="lazy" />
+            </div>
             <div class="module-icon" aria-hidden>🚦</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -87,7 +68,9 @@
           </router-link>
 
           <router-link to="/simulation-lab" class="module-card status-active" data-reveal>
-            <div class="ds-tile-media"><img src="/tiles/tile-simulationlab.png" alt="" loading="lazy" /></div>
+            <div class="ds-tile-media">
+              <img src="/tiles/tile-simulationlab.png" alt="" loading="lazy" />
+            </div>
             <div class="module-icon" aria-hidden>🧪</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -103,7 +86,9 @@
           </router-link>
 
           <router-link to="/map-importer" class="module-card status-active" data-reveal>
-            <div class="ds-tile-media"><img src="/tiles/tile-maplab.png" alt="" loading="lazy" /></div>
+            <div class="ds-tile-media">
+              <img src="/tiles/tile-maplab.png" alt="" loading="lazy" />
+            </div>
             <div class="module-icon" aria-hidden>🗺️</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -125,7 +110,9 @@
             data-testid="smart-city-card"
             data-reveal
           >
-            <div class="ds-tile-media"><img src="/tiles/tile-smartcity.png" alt="" loading="lazy" /></div>
+            <div class="ds-tile-media">
+              <img src="/tiles/tile-smartcity.png" alt="" loading="lazy" />
+            </div>
             <div class="module-icon" aria-hidden>🛰️</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -224,6 +211,7 @@
  */
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useReveal } from '@interfaces/composables/useReveal'
+import { ShowcaseNav } from '@interfaces/components/showcase'
 import { gsap } from 'gsap'
 import EnhancedWebGLBackground from '@interfaces/components/showcase/EnhancedWebGLBackground.vue'
 
@@ -322,41 +310,6 @@ html {
   background: transparent;
 }
 
-.top-nav {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  z-index: 2;
-  backdrop-filter: blur(8px);
-  background: linear-gradient(to right, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.6));
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
-}
-.nav-inner {
-  max-width: 1200px;
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 24px;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  text-decoration: none;
-  color: inherit;
-}
-.brand .logo {
-  width: 42px;
-  height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  background: rgba(59, 130, 246, 0.12);
-  border-radius: 10px;
-}
 .title .project-name {
   font-weight: 700;
   font-size: 16px;
@@ -367,30 +320,6 @@ html {
   font-size: 12px;
   color: rgba(15, 23, 42, 0.55);
   display: block;
-}
-
-.nav-links {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.nav-link {
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-size: 13px;
-  color: rgba(15, 23, 42, 0.75);
-  text-decoration: none;
-  transition:
-    background 0.18s,
-    color 0.18s;
-}
-.nav-link:hover {
-  background: rgba(15, 23, 42, 0.06);
-  color: rgba(15, 23, 42, 0.95);
-}
-.nav-link.router-link-active {
-  background: rgba(59, 130, 246, 0.12);
-  color: #1d4ed8;
 }
 
 /* SmartCity link has a violet gradient to signal it's
@@ -722,7 +651,10 @@ html {
   font-size: 13px;
   letter-spacing: 0.06em;
   text-decoration: none;
-  transition: border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
 }
 .hero-ctas .btn:hover {
   border-color: var(--dc-flow);
@@ -805,7 +737,9 @@ html {
   border: 1px solid color-mix(in srgb, var(--dc-accent) 30%, transparent);
   border-radius: var(--dc-radius);
   color: var(--dc-text);
-  transition: border-color 0.18s ease, transform 0.18s ease,
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
     box-shadow 0.18s ease;
 }
 .module-card:hover {
@@ -846,7 +780,6 @@ html {
     order: -1;
   }
 }
-
 
 /* ===================================================================
    The showcase skin (2026-11-07, second pass).
@@ -910,15 +843,7 @@ html {
   box-shadow: 0 4px 14px rgba(43, 108, 255, 0.4);
   font-size: 15px;
 }
-.brand .project-name {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.2px;
-  color: var(--dc-text);
-}
-.brand .subtitle {
-  display: none;
-}
+
 .nav-links {
   display: flex;
   align-items: center;
@@ -945,17 +870,6 @@ html {
   background: rgba(255, 255, 255, 0.12);
 }
 /* The "New" dot keeps its accent but loses the loud pill. */
-.nav-link-new::after {
-  content: '';
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-left: 6px;
-  border-radius: 999px;
-  background: var(--dc-flow);
-  box-shadow: 0 0 10px var(--dc-flow);
-  vertical-align: 2px;
-}
 
 /* ===== the hero ===== */
 .hero {
@@ -1139,5 +1053,4 @@ html {
   text-align: left;
   padding: 28px 0 40px;
 }
-
 </style>

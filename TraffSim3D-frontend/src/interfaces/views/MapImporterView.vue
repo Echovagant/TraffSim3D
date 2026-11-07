@@ -1,6 +1,6 @@
 <template>
   <main class="importer" data-reveal>
-    <router-link to="/" class="back-link">← 返回首页</router-link>
+    <ShowcaseNav />
 
     <header class="header">
       <span class="badge">OSM</span>
@@ -172,6 +172,7 @@
  * (default 8000). The frontend uses the same env var so direct fetches
  * (this upload) target the same port the proxy uses.
  */
+import { ShowcaseNav } from '@interfaces/components/showcase'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWorldStore } from '@interfaces/stores/worldStore'
