@@ -8,6 +8,21 @@
       <p class="sub">Gymnasium + PPO 训练单智能体通过 4-way 路口</p>
     </header>
 
+    <!--
+      The main visual: the training curve, full width, live. The page
+      used to open with a form and a small chart further down — for a
+      portfolio piece the curve IS the product (2026-11-07).
+    -->
+    <TrainingStage
+      :values="stageValues"
+      :baseline="stageBaseline"
+      :episode="status.episode_count"
+      :reward="stageReward"
+      :step="status.step"
+      :running="status.running"
+      :note="stageNote"
+    />
+
     <section class="card" data-reveal>
       <h2>训练控制</h2>
       <div class="control-row">
@@ -178,47 +193,56 @@
       <p v-if="runProvenance" class="prov" :class="runProvenance.tone" data-testid="run-provenance">
         {{ runProvenance.text }}
       </p>
-      <div v-if="status.reward_history.length === 0" class="muted">
-        暂无数据 — 点击"开始训练"以生成样本。
-      </div>
-      <svg
-        v-else
-        :viewBox="`0 0 ${chartW} ${chartH}`"
-        :width="chartW"
-        :height="chartH"
-        class="chart"
-        data-testid="reward-chart"
-        preserveAspectRatio="none"
-      >
-        <!-- When independent_agents, draw one polyline per agent -->
-        <template v-if="hasAgentRewards">
-          <polyline
-            v-for="(color, agentId) in agentColors"
-            :key="`agent-${agentId}`"
-            :points="pointsForAgent(agentId)"
-            fill="none"
-            :stroke="color"
-            stroke-width="2"
-            :data-testid="`reward-line-agent-${agentId}`"
-          />
-        </template>
-        <polyline
+      <!--
+        The per-agent breakdown is a detail in the single-agent mode —
+        the stage above is the headline. In the independent multi-agent
+        mode the per-agent lines ARE the result, so the detail opens
+        itself.
+      -->
+      <details class="chart-detail" :open="hasAgentRewards">
+        <summary>逐 agent 采样曲线</summary>
+        <div v-if="status.reward_history.length === 0" class="muted">
+          暂无数据 — 点击"开始训练"以生成样本。
+        </div>
+        <svg
           v-else
-          :points="rewardPoints"
-          fill="none"
-          stroke="#34d399"
-          stroke-width="2"
-          data-testid="reward-line"
-        />
-        <line
-          :x1="0"
-          :y1="chartH - 1"
-          :x2="chartW"
-          :y2="chartH - 1"
-          stroke="#475569"
-          stroke-width="0.5"
-        />
-      </svg>
+          :viewBox="`0 0 ${chartW} ${chartH}`"
+          :width="chartW"
+          :height="chartH"
+          class="chart"
+          data-testid="reward-chart"
+          preserveAspectRatio="none"
+        >
+          <!-- When independent_agents, draw one polyline per agent -->
+          <template v-if="hasAgentRewards">
+            <polyline
+              v-for="(color, agentId) in agentColors"
+              :key="`agent-${agentId}`"
+              :points="pointsForAgent(agentId)"
+              fill="none"
+              :stroke="color"
+              stroke-width="2"
+              :data-testid="`reward-line-agent-${agentId}`"
+            />
+          </template>
+          <polyline
+            v-else
+            :points="rewardPoints"
+            fill="none"
+            stroke="#34d399"
+            stroke-width="2"
+            data-testid="reward-line"
+          />
+          <line
+            :x1="0"
+            :y1="chartH - 1"
+            :x2="chartW"
+            :y2="chartH - 1"
+            stroke="color-mix(in srgb, var(--dc-text-faint) 45%, transparent)"
+            stroke-width="0.5"
+          />
+        </svg>
+      </details>
       <p v-if="status.reward_history.length > 0" class="muted small">
         {{ status.reward_history.length }} 个 episode · max {{ formatNumber(maxReward, 2) }} · min
         {{ formatNumber(minReward, 2) }}
@@ -271,7 +295,7 @@
         <polyline
           :points="evalGeometry.line"
           fill="none"
-          stroke="#60a5fa"
+          stroke="var(--dc-accent)"
           stroke-width="2"
           data-testid="eval-curve-line"
         />
@@ -291,7 +315,7 @@
         <text
           :x="EVAL_CHART.padLeft"
           :y="EVAL_CHART.height - 8"
-          fill="#94a3b8"
+          fill="var(--dc-text-dim)"
           font-size="10"
           data-testid="eval-axis-step-min"
         >
@@ -300,7 +324,7 @@
         <text
           :x="EVAL_CHART.width - EVAL_CHART.padRight"
           :y="EVAL_CHART.height - 8"
-          fill="#94a3b8"
+          fill="var(--dc-text-dim)"
           font-size="10"
           text-anchor="end"
           data-testid="eval-axis-step-max"
@@ -310,7 +334,7 @@
         <text
           :x="4"
           :y="EVAL_CHART.padTop + 4"
-          fill="#94a3b8"
+          fill="var(--dc-text-dim)"
           font-size="10"
           data-testid="eval-axis-return-max"
         >
@@ -319,7 +343,7 @@
         <text
           :x="4"
           :y="EVAL_CHART.height - EVAL_CHART.padBottom"
-          fill="#94a3b8"
+          fill="var(--dc-text-dim)"
           font-size="10"
           data-testid="eval-axis-return-min"
         >
@@ -611,6 +635,7 @@
  *   vehicle in the TS sim from the policy's actions.
  */
 import { ShowcaseNav } from '@interfaces/components/showcase'
+import TrainingStage from '@interfaces/components/command/TrainingStage.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
 import { useWorldStore } from '@interfaces/stores/worldStore'
@@ -712,6 +737,33 @@ const device = ref<'auto' | 'gpu' | 'cpu'>('auto')
 const dryRun = ref(false)
 const running = ref(false)
 const error = ref<string | null>(null)
+// ===== the training stage =====
+//
+// The stage shows the SAME numbers the page already polls — the
+// evaluation curve (the policy's deterministic return, which is the
+// curve that means something) and the live counters. Nothing here is
+// synthesised: if the backend is quiet, the stage is quiet.
+const stageValues = computed<number[]>(() => {
+  if (evalSeries.value.length > 0) return evalSeries.value.map((p) => p.return)
+  return status.value.reward_history ?? []
+})
+const stageBaseline = computed<number | null>(() =>
+  evalSeries.value.length > 0 ? evalBaseline.value : null,
+)
+const stageReward = computed<number | null>(() => {
+  const v = status.value.last_reward
+  return Number.isFinite(v) ? v : null
+})
+const stageNote = computed<string>(() => {
+  if (isDryRun.value) {
+    return 'dry-run 合成曲线：按构造生成，与策略学习无关。'
+  }
+  if (evalSeries.value.length > 0) {
+    return '评估回报（确定性 argmax）与固定周期基线对照 — 横轴为训练步数。'
+  }
+  return '采样回报：随机策略逐 episode 的回报，噪声大，不能与基线比较。'
+})
+
 const status = ref<Status>({
   running: false,
   step: 0,
@@ -1061,10 +1113,10 @@ const rewardPoints = computed(() => {
 // Per-agent reward history rendering.
 const AGENT_COLOR_PALETTE = [
   '#34d399',
-  '#60a5fa',
-  '#fbbf24',
+  'var(--dc-accent)',
+  'var(--dc-warning)',
   '#f472b6',
-  '#a78bfa',
+  'color-mix(in srgb, var(--dc-accent) 70%, var(--dc-text))',
   '#fb7185',
   '#22d3ee',
   '#facc15',
@@ -1407,7 +1459,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .ai-playground {
   min-height: 100vh;
-  background: #0b1220;
+  background: var(--dc-screen);
   color: #e2e0f0;
   padding: 80px 24px 48px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1431,7 +1483,7 @@ onBeforeUnmount(() => {
 }
 .sub {
   margin: 0;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 14px;
 }
 .badge {
@@ -1447,14 +1499,14 @@ onBeforeUnmount(() => {
   max-width: 880px;
   margin: 0 auto 20px;
   padding: 24px 28px;
-  background: rgba(15, 23, 42, 0.65);
-  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: color-mix(in srgb, var(--dc-panel) 65%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
   border-radius: 12px;
 }
 .card h2 {
   margin: 0 0 12px;
   font-size: 15px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
 }
 .control-row {
   display: flex;
@@ -1466,20 +1518,20 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   font-size: 13px;
 }
 .ctrl input[type='number'] {
-  background: #1e293b;
-  color: #f1f5f9;
-  border: 1px solid #334155;
+  background: var(--dc-panel-2);
+  color: var(--dc-text);
+  border: 1px solid var(--dc-secondary);
   border-radius: 4px;
   padding: 4px 8px;
   width: 100px;
   font-size: 13px;
 }
 button.primary {
-  background: #2563eb;
+  background: var(--dc-accent);
   color: white;
   padding: 8px 16px;
   border: none;
@@ -1488,7 +1540,7 @@ button.primary {
   font-size: 13px;
 }
 button.primary:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--dc-accent);
 }
 button.primary:disabled {
   opacity: 0.4;
@@ -1496,7 +1548,7 @@ button.primary:disabled {
 }
 button.ghost {
   background: transparent;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 30%, transparent);
   color: inherit;
   padding: 8px 14px;
   border-radius: 6px;
@@ -1504,7 +1556,7 @@ button.ghost {
   font-size: 13px;
 }
 button.ghost:hover:not(:disabled) {
-  background: rgba(148, 163, 184, 0.08);
+  background: color-mix(in srgb, var(--dc-text-dim) 10%, transparent);
 }
 button.ghost:disabled {
   opacity: 0.4;
@@ -1516,10 +1568,10 @@ button.ghost:disabled {
   margin: 8px 0 0;
 }
 .cap-note {
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   font-size: 12px;
   margin: 8px 0 0;
-  background: rgba(15, 23, 42, 0.5);
+  background: color-mix(in srgb, var(--dc-panel) 50%, transparent);
   padding: 6px 10px;
   border-radius: 4px;
 }
@@ -1537,15 +1589,15 @@ button.ghost:disabled {
   align-items: baseline;
   font-size: 12px;
   padding: 6px 8px;
-  background: #1e293b;
+  background: var(--dc-panel-2);
   border-radius: 4px;
 }
 .ckpt-list code {
   font-size: 12px;
-  color: #fbbf24;
+  color: var(--dc-warning);
 }
 .ckpt-meta {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 11px;
 }
 .metrics {
@@ -1554,7 +1606,7 @@ button.ghost:disabled {
   gap: 12px;
 }
 .metric {
-  background: #1e293b;
+  background: var(--dc-panel-2);
   padding: 12px;
   border-radius: 6px;
   display: flex;
@@ -1567,7 +1619,7 @@ button.ghost:disabled {
 .metric .reason-text {
   font-size: 13px;
   font-weight: 500;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   word-break: break-all;
 }
 .metric span.dry-badge {
@@ -1596,29 +1648,29 @@ button.ghost:disabled {
   color: #fcd34d;
 }
 .prov.ok {
-  background: rgba(15, 23, 42, 0.5);
-  border-color: rgba(148, 163, 184, 0.25);
-  color: #cbd5e1;
+  background: color-mix(in srgb, var(--dc-panel) 50%, transparent);
+  border-color: color-mix(in srgb, var(--dc-text-dim) 26%, transparent);
+  color: var(--dc-text-dim);
 }
 .metric span {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 .metric strong {
   font-size: 18px;
-  color: #f1f5f9;
+  color: var(--dc-text);
   font-weight: 600;
 }
 .chart {
-  background: #1e293b;
+  background: var(--dc-panel-2);
   border-radius: 6px;
   width: 100%;
   height: auto;
 }
 .muted {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 13px;
   margin: 0;
 }
@@ -1637,16 +1689,16 @@ button.ghost:disabled {
 .seed-table th {
   text-align: left;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 6px 8px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  border-bottom: 1px solid color-mix(in srgb, var(--dc-text-dim) 26%, transparent);
 }
 .seed-table td {
   padding: 6px 8px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  border-bottom: 1px solid color-mix(in srgb, var(--dc-text-dim) 15%, transparent);
   color: #e2e0f0;
 }
 .collapsed-badge {
@@ -1672,11 +1724,11 @@ button.ghost:disabled {
   flex-direction: column;
   gap: 2px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 .metric-row strong {
   font-size: 14px;
-  color: #f1f5f9;
+  color: var(--dc-text);
   font-weight: 600;
 }
 .replay-detail {
@@ -1685,14 +1737,14 @@ button.ghost:disabled {
 }
 .replay-detail summary {
   cursor: pointer;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
 }
 .replay-detail code.obs {
   display: block;
   padding: 8px 10px;
-  background: #1e293b;
+  background: var(--dc-panel-2);
   border-radius: 4px;
-  color: #fbbf24;
+  color: var(--dc-warning);
   font-size: 11px;
   word-break: break-all;
   line-height: 1.5;
@@ -1762,5 +1814,35 @@ button.ghost:disabled {
     box-shadow: 0 0 0 5px transparent;
     opacity: 0.55;
   }
+}
+
+/* The per-agent breakdown is a detail, not the headline. */
+.chart-detail {
+  margin-top: 10px;
+}
+.chart-detail summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--dc-text-faint);
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  transition: color var(--ds-dur-fast) var(--ds-ease-out);
+}
+.chart-detail summary::-webkit-details-marker {
+  display: none;
+}
+.chart-detail summary::before {
+  content: '▸';
+  font-size: 10px;
+  transition: transform var(--ds-dur-fast) var(--ds-ease-out);
+}
+.chart-detail[open] summary::before {
+  transform: rotate(90deg);
+}
+.chart-detail summary:hover {
+  color: var(--dc-text-dim);
 }
 </style>

@@ -138,8 +138,12 @@ export const pauseSimulation = async (page: Page, { resetFirst = true } = {}): P
  * The comparison itself is guarded by the baseline platform — see
  * `helpers/visual.ts` for why (the committed PNGs are Windows-only).
  */
-export const expectSceneScreenshot = async (page: Page, name: string): Promise<void> => {
-  await expectVisualSceneScreenshot(page, name, SCENE_CLIP)
+export const expectSceneScreenshot = async (
+  page: Page,
+  name: string,
+  options?: Parameters<(typeof expect<Page>)['toHaveScreenshot']>[1],
+): Promise<void> => {
+  await expectVisualSceneScreenshot(page, name, SCENE_CLIP, options)
 }
 
 /**

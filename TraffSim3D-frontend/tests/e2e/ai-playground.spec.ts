@@ -61,7 +61,9 @@ test('AI Playground: training chart renders with reward history', async ({ page 
   // Load the AI Playground view.
   await page.goto('/ai-playground')
   await expect(page.locator('[data-testid="start-train-button"]')).toBeVisible()
-  await expect(page.locator('[data-testid="reward-chart"]')).toBeVisible()
+  // The curve is the page's main visual now.
+  await expect(page.locator('[data-testid="training-stage"]')).toBeVisible()
+  await expect(page.locator('[data-testid="reward-chart"]')).toBeAttached()
 
   // The chart's polyline should have ≥ 3 points (10 in our fake history).
   const polylinePoints = await page.locator('[data-testid="reward-line"]').getAttribute('points')

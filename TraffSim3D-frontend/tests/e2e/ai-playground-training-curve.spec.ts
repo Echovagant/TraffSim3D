@@ -228,7 +228,10 @@ test.describe('AI Playground — the training curve', () => {
   test('keeps the raw reward curve, labelled as the noisy sampled return', async ({ page }) => {
     await page.goto('/ai-playground')
 
-    await expect(page.locator('[data-testid="reward-chart"]')).toBeVisible()
+    // The stage draws the curve; the raw per-episode chart is the
+    // detail (attached, not necessarily open).
+    await expect(page.locator('[data-testid="training-stage"]')).toBeVisible()
+    await expect(page.locator('[data-testid="reward-chart"]')).toBeAttached()
     await expect(page.locator('[data-testid="reward-curve-note"]')).toContainText('采样')
     await expect(page.locator('[data-testid="reward-curve-note"]')).toContainText('噪声')
   })

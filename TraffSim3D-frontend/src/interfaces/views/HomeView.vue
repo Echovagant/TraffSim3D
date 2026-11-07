@@ -361,7 +361,7 @@ html {
   letter-spacing: -0.02em;
   margin: 0 0 8px;
   font-weight: 800;
-  background: linear-gradient(135deg, #1d4ed8, #7c3aed);
+  background: linear-gradient(135deg, var(--dc-accent), #7c3aed);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -369,7 +369,7 @@ html {
 .hero-tagline {
   font-size: 16px;
   line-height: 1.65;
-  color: rgba(15, 23, 42, 0.78);
+  color: color-mix(in srgb, var(--dc-panel) 78%, transparent);
   margin: 12px 0 8px;
 }
 .hero-sub {
@@ -396,16 +396,16 @@ html {
     transform 0.15s,
     background 0.18s,
     box-shadow 0.18s;
-  background: #1d4ed8;
+  background: var(--dc-accent);
   color: #fff;
-  border: 1px solid #1d4ed8;
+  border: 1px solid var(--dc-accent);
 }
 .btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 16px -4px rgba(29, 78, 216, 0.4);
 }
 .btn.primary {
-  background: linear-gradient(135deg, #7c3aed, #1d4ed8);
+  background: linear-gradient(135deg, #7c3aed, var(--dc-accent));
   border-color: transparent;
 }
 .btn.primary:hover {
@@ -532,7 +532,7 @@ html {
 .module-desc {
   font-size: 13px;
   line-height: 1.55;
-  color: rgba(15, 23, 42, 0.7);
+  color: color-mix(in srgb, var(--dc-panel) 70%, transparent);
   margin: 0;
 }
 .module-desc code {
@@ -557,7 +557,7 @@ html {
   color: #047857;
 }
 .badge-planned {
-  background: rgba(148, 163, 184, 0.2);
+  background: color-mix(in srgb, var(--dc-text-dim) 22%, transparent);
   color: rgba(15, 23, 42, 0.55);
 }
 /* Badge for the brand-new SmartCity card. Violet gradient
@@ -572,7 +572,7 @@ html {
   text-align: center;
   padding: 24px 16px 36px;
   font-size: 12px;
-  color: rgba(15, 23, 42, 0.5);
+  color: color-mix(in srgb, var(--dc-panel) 50%, transparent);
 }
 
 /* ===================================================================

@@ -102,8 +102,8 @@ const onToggle = (e: Event): void => {
   z-index: 50;
 }
 .modal {
-  background: #0f172a;
-  color: #f1f5f9;
+  background: var(--dc-panel);
+  color: var(--dc-text);
   border-radius: 8px;
   padding: 18px 22px;
   min-width: 420px;
@@ -124,17 +124,17 @@ const onToggle = (e: Event): void => {
 }
 .modal .ghost {
   background: transparent;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   border: none;
   cursor: pointer;
   font-size: 14px;
   padding: 0 4px;
 }
 .modal .ghost:hover {
-  color: #f1f5f9;
+  color: var(--dc-text);
 }
 .modal .hint {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 11px;
   line-height: 1.5;
   margin: 0 0 12px;
@@ -149,19 +149,19 @@ const onToggle = (e: Event): void => {
   padding: 6px 8px;
   text-align: left;
   font-size: 12px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  border-bottom: 1px solid color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
 }
 .modal th {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-weight: 500;
   text-transform: uppercase;
   font-size: 10px;
   letter-spacing: 0.04em;
 }
 .modal input[type='number'] {
-  background: #1e293b;
-  color: #f1f5f9;
-  border: 1px solid #334155;
+  background: var(--dc-panel-2);
+  color: var(--dc-text);
+  border: 1px solid var(--dc-secondary);
   border-radius: 4px;
   padding: 2px 4px;
   font-family: inherit;
@@ -169,13 +169,13 @@ const onToggle = (e: Event): void => {
   width: 70px;
 }
 .modal .empty {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   text-align: center;
   padding: 12px 8px;
   font-size: 11px;
 }
 .modal code {
-  background: rgba(148, 163, 184, 0.15);
+  background: color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 11px;
@@ -183,12 +183,12 @@ const onToggle = (e: Event): void => {
 .modal footer {
   margin-top: 8px;
   font-size: 11px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   display: flex;
   align-items: center;
   gap: 6px;
   padding-top: 10px;
-  border-top: 1px solid rgba(148, 163, 184, 0.15);
+  border-top: 1px solid color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
 }
 .modal .enable-toggle {
   display: inline-flex;

@@ -174,10 +174,10 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
   display: flex;
   flex-direction: column;
   gap: 3px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
 }
 .poi-panel .ctrl input {
-  background: #1e293b;
+  background: var(--dc-panel-2);
   color: var(--dc-text);
   border: 1px solid color-mix(in srgb, var(--dc-accent) 42%, transparent);
   border-radius: 4px;
@@ -192,26 +192,26 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
   padding: 5px 10px;
   border: none;
   border-radius: 4px;
-  background: #2563eb;
-  color: #f8fafc;
+  background: var(--dc-accent);
+  color: var(--dc-text);
   font-size: 12px;
   cursor: pointer;
 }
 .poi-panel button.primary:disabled {
-  background: #334155;
+  background: var(--dc-secondary);
   cursor: not-allowed;
 }
 .poi-panel button.ghost {
   padding: 2px 8px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 30%, transparent);
   border-radius: 4px;
   background: transparent;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   font-size: 11px;
   cursor: pointer;
 }
 .poi-panel .err {
-  color: #f87171;
+  color: var(--dc-alert);
   margin: 6px 0 0;
 }
 .poi-panel .muted {
@@ -270,7 +270,7 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
   gap: 2px;
   margin: 6px 0 0;
   padding-top: 6px;
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  border-top: 1px solid color-mix(in srgb, var(--dc-text-dim) 22%, transparent);
 }
 /* "开过去" — the action that turns a POI into a destination. */
 .poi-panel button.go {
@@ -278,13 +278,13 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
   padding: 5px 10px;
   border: none;
   border-radius: 4px;
-  background: #2563eb;
-  color: #f8fafc;
+  background: var(--dc-accent);
+  color: var(--dc-text);
   font-size: 12px;
   cursor: pointer;
 }
 .poi-panel button.go:disabled {
-  background: #334155;
+  background: var(--dc-secondary);
   cursor: not-allowed;
 }
 /* The destination line: what the driver is heading for. */

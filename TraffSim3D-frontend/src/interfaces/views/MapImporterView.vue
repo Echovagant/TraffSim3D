@@ -699,8 +699,8 @@ const loadFixture = (): void => {
 <style scoped>
 .importer {
   min-height: 100vh;
-  background: #0b1220;
-  color: #e2e8f0;
+  background: var(--dc-screen);
+  color: var(--dc-text);
   padding: 80px 24px 48px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
@@ -723,7 +723,7 @@ const loadFixture = (): void => {
 }
 .sub {
   margin: 0;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 14px;
 }
 .badge {
@@ -739,23 +739,23 @@ const loadFixture = (): void => {
   max-width: 880px;
   margin: 0 auto 20px;
   padding: 24px 28px;
-  background: rgba(15, 23, 42, 0.65);
-  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: color-mix(in srgb, var(--dc-panel) 65%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
   border-radius: 12px;
 }
 .card h2 {
   margin: 0 0 8px;
   font-size: 15px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
 }
 .card p {
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   font-size: 14px;
   line-height: 1.7;
   margin: 0 0 12px;
 }
 .muted {
-  color: #94a3b8 !important;
+  color: var(--dc-text-dim) !important;
   font-size: 13px !important;
 }
 .muted.small {
@@ -772,10 +772,10 @@ input[type='file'] {
   flex: 1;
   min-width: 220px;
   font-size: 13px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
 }
 button.primary {
-  background: #2563eb;
+  background: var(--dc-accent);
   color: white;
   padding: 8px 16px;
   border: none;
@@ -784,7 +784,7 @@ button.primary {
   font-size: 13px;
 }
 button.primary:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--dc-accent);
 }
 button.primary:disabled {
   opacity: 0.4;
@@ -792,7 +792,7 @@ button.primary:disabled {
 }
 button.ghost {
   background: transparent;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 30%, transparent);
   color: inherit;
   padding: 6px 12px;
   border-radius: 6px;
@@ -800,7 +800,7 @@ button.ghost {
   font-size: 12px;
 }
 button.ghost:hover {
-  background: rgba(148, 163, 184, 0.08);
+  background: color-mix(in srgb, var(--dc-text-dim) 10%, transparent);
 }
 .result {
   padding: 8px 12px;
@@ -820,7 +820,7 @@ button.ghost:hover {
   display: flex;
   gap: 16px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   margin-top: 8px;
 }
 
@@ -829,7 +829,7 @@ button.ghost:hover {
   margin: 12px 0;
   padding: 12px 14px;
   background: rgba(30, 41, 59, 0.4);
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 20%, transparent);
   border-radius: 8px;
 }
 .bbox-toggle {
@@ -837,7 +837,7 @@ button.ghost:hover {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   cursor: pointer;
 }
 .bbox-inputs {
@@ -853,15 +853,15 @@ button.ghost:hover {
 }
 .bbox-field-label {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 .bbox-field input {
   width: 120px;
   padding: 5px 8px;
   font-size: 12px;
-  color: #e2e8f0;
-  background: #0f172a;
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: var(--dc-text);
+  background: var(--dc-panel);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 26%, transparent);
   border-radius: 6px;
 }
 .bbox-error {
@@ -872,7 +872,7 @@ button.ghost:hover {
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  background: rgba(2, 6, 23, 0.7);
+  background: color-mix(in srgb, var(--dc-screen) 80%, transparent);
   padding: 1px 6px;
   border-radius: 4px;
   color: #93c5fd;
@@ -887,8 +887,8 @@ code {
 }
 .overpass-tabs .tab {
   background: rgba(30, 41, 59, 0.6);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  color: #cbd5e1;
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 22%, transparent);
+  color: var(--dc-text-dim);
   padding: 5px 12px;
   border-radius: 999px;
   cursor: pointer;
@@ -903,11 +903,11 @@ code {
   color: #86efac;
 }
 .overpass-code {
-  background: #0f172a;
-  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: var(--dc-panel);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
   border-radius: 6px;
   padding: 12px 14px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   font-size: 12px;
   line-height: 1.55;
   overflow-x: auto;
@@ -929,9 +929,9 @@ code {
   margin: 24px auto 0;
   padding: 12px 20px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   text-align: center;
-  border-top: 1px solid rgba(148, 163, 184, 0.15);
+  border-top: 1px solid color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
 }
 .osm-attribution a {
   color: #93c5fd;

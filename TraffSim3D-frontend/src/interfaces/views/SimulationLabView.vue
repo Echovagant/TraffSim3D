@@ -455,8 +455,8 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   inset: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--panel-w);
-  background: #0b1220;
-  color: #e2e8f0;
+  background: var(--dc-screen);
+  color: var(--dc-text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   overflow: hidden;
 }
@@ -465,7 +465,7 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
 .lab-stage {
   position: relative;
   min-width: 0;
-  background: #0b1220;
+  background: var(--dc-screen);
 }
 
 /* The dashboard column — scrolls independently of the stage. */
@@ -475,7 +475,7 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   overflow-x: hidden;
   padding: 24px 20px 40px;
   background: rgba(11, 18, 32, 0.96);
-  border-left: 1px solid rgba(148, 163, 184, 0.18);
+  border-left: 1px solid color-mix(in srgb, var(--dc-text-dim) 20%, transparent);
 }
 
 @media (max-width: 900px) {
@@ -485,7 +485,7 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   }
   .lab-panel {
     border-left: none;
-    border-top: 1px solid rgba(148, 163, 184, 0.18);
+    border-top: 1px solid color-mix(in srgb, var(--dc-text-dim) 20%, transparent);
   }
 }
 
@@ -509,7 +509,7 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
 }
 .title-row .sub {
   margin: 0;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 13px;
 }
 .badge {
@@ -525,7 +525,7 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
 }
 .badge-paused {
   background: rgba(234, 179, 8, 0.2);
-  color: #fde047;
+  color: var(--dc-warning);
 }
 
 .lab-grid {
@@ -534,25 +534,25 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   grid-template-columns: minmax(0, 1fr);
 }
 .card {
-  background: rgba(15, 23, 42, 0.65);
-  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: color-mix(in srgb, var(--dc-panel) 65%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
   border-radius: 12px;
   padding: 16px 18px;
 }
 .card h2 {
   margin: 0 0 12px;
   font-size: 14px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   letter-spacing: 0.01em;
   font-weight: 600;
 }
 .card-note {
   margin: -6px 0 10px;
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 .card-note.paused {
-  color: #fde047;
+  color: var(--dc-warning);
 }
 
 .stat-grid {
@@ -565,27 +565,27 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   justify-content: space-between;
   align-items: center;
   padding: 6px 10px;
-  background: rgba(2, 6, 23, 0.7);
+  background: color-mix(in srgb, var(--dc-screen) 80%, transparent);
   border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
 .stat span {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 .stat b {
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--dc-text);
 }
 .stat b.changing {
   color: #93c5fd;
   animation: changing-pulse 1s ease-in-out infinite;
 }
 .stat.warn b {
-  color: #fbbf24;
+  color: var(--dc-warning);
 }
 .stat.paused b {
-  color: #fde047;
+  color: var(--dc-warning);
 }
 @keyframes changing-pulse {
   0%,
@@ -609,12 +609,12 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
 }
 .ctrl-kind select {
-  background: #1e293b;
-  color: #f1f5f9;
-  border: 1px solid #334155;
+  background: var(--dc-panel-2);
+  color: var(--dc-text);
+  border: 1px solid var(--dc-secondary);
   border-radius: 4px;
   padding: 4px;
   font-size: 12px;
@@ -624,7 +624,7 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   display: inline-block;
   padding: 6px 12px;
   border-radius: 6px;
-  background: #2563eb;
+  background: var(--dc-accent);
   color: white;
   text-decoration: none;
   font-size: 12px;
@@ -634,27 +634,27 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   line-height: 1.4;
 }
 .btn:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--dc-accent);
 }
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 .btn.primary {
-  background: #2563eb;
+  background: var(--dc-accent);
   padding: 8px 16px;
   font-size: 13px;
 }
 .btn.ghost {
   background: transparent;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 30%, transparent);
   color: inherit;
 }
 .btn.danger {
-  background: #7f1d1d;
+  background: color-mix(in srgb, var(--dc-alert) 55%, var(--dc-panel));
 }
 .btn.danger:hover {
-  background: #991b1b;
+  background: var(--dc-alert);
 }
 
 .phase-table {
@@ -664,18 +664,18 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   font-size: 11px;
 }
 .phase-table th {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-weight: 500;
   text-align: left;
   padding: 4px 6px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  border-bottom: 1px solid color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
 }
 .phase-table td {
   padding: 4px 6px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.1);
 }
 .phase-table code {
-  background: rgba(148, 163, 184, 0.15);
+  background: color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
   padding: 1px 4px;
   border-radius: 3px;
 }
@@ -683,7 +683,7 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   color: #fca5a5;
 }
 .phase-yellow {
-  color: #fde047;
+  color: var(--dc-warning);
 }
 .phase-green {
   color: #86efac;
@@ -698,7 +698,7 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   gap: 8px;
   margin-bottom: 8px;
   padding: 6px 10px;
-  background: rgba(2, 6, 23, 0.5);
+  background: color-mix(in srgb, var(--dc-screen) 60%, transparent);
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
@@ -708,7 +708,7 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   cursor: pointer;
 }
 .toggle b.ok {
-  color: #22c55e;
+  color: var(--dc-ok);
   margin-left: auto;
 }
 
@@ -718,13 +718,13 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
   gap: 8px;
   margin-top: 8px;
   padding: 6px 10px;
-  background: rgba(2, 6, 23, 0.5);
+  background: color-mix(in srgb, var(--dc-screen) 60%, transparent);
   border-radius: 4px;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .traj-row b {
-  color: #fbbf24;
+  color: var(--dc-warning);
   margin-left: auto;
 }
 /* The drop counter sits next to the row counter, not pushed to the
@@ -734,7 +734,7 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
 }
 /* Samples were lost: the file the user downloads is incomplete. */
 .traj-row b.warn {
-  color: #f87171;
+  color: var(--dc-alert);
 }
 .traj-row .btn {
   margin-left: 8px;
@@ -755,10 +755,10 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
 .rate-btn {
   width: 22px;
   height: 22px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 30%, transparent);
   border-radius: 4px;
   background: rgba(15, 23, 42, 0.6);
-  color: #e2e8f0;
+  color: var(--dc-text);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -779,10 +779,10 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
 }
 .pause-btn {
   padding: 4px 10px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 30%, transparent);
   border-radius: 4px;
   background: rgba(15, 23, 42, 0.6);
-  color: #e2e8f0;
+  color: var(--dc-text);
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
@@ -794,21 +794,21 @@ const formatRate = (r: number): string => `${Number(r.toFixed(2))}×`
 .scene-switcher {
   margin-bottom: 12px;
   padding-bottom: 10px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  border-bottom: 1px solid color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
 }
 .scene-switcher label {
   display: flex;
   align-items: center;
   gap: 10px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 .scene-switcher select {
   padding: 4px 8px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 30%, transparent);
   border-radius: 4px;
   background: rgba(15, 23, 42, 0.6);
-  color: #e2e8f0;
+  color: var(--dc-text);
   font-size: 12px;
   cursor: pointer;
 }

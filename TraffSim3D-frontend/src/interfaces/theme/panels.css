@@ -68,6 +68,39 @@ textarea {
     border-color var(--ds-dur-fast) var(--ds-ease-out),
     background var(--ds-dur-fast) var(--ds-ease-out);
 }
+
+/* ===== the selects =====
+   A native `<select>` draws its box from the OS theme and paints its
+   OPEN list with system colours — no stylesheet can reach that list, so
+   the control looked like a white card with grey text the moment you
+   opened it (report 2026-11-07). Taking the box over completely and
+   drawing our own chevron fixes the closed state; `color-scheme` is
+   what makes the OPEN list follow the theme. */
+select {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  padding-right: 30px !important;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%) !important;
+  background-position:
+    calc(100% - 15px) 52%,
+    calc(100% - 10px) 52% !important;
+  background-size:
+    5px 5px,
+    5px 5px !important;
+  background-repeat: no-repeat !important;
+  cursor: pointer;
+}
+/* The open list: `color-scheme` tells the browser which palette to use
+   for it. The token layer sets it per theme (dark for the night
+   themes, light for the paper one). */
+select {
+  color-scheme: dark;
+}
+:root[data-theme='paper'] select {
+  color-scheme: light;
+}
 input:focus,
 select:focus,
 textarea:focus {
@@ -248,7 +281,19 @@ pre {
 }
 
 /* ===== the paper theme's chrome =====
-   The toggle's own fill follows the surface it sits on. (This has to
+   The inputs invert with the theme: on the paper surface a 6% white
+   fill is invisible, so it becomes a 4% black one. */
+:root[data-theme='paper'] input,
+:root[data-theme='paper'] select,
+:root[data-theme='paper'] textarea {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+:root[data-theme='paper'] input:focus,
+:root[data-theme='paper'] select:focus,
+:root[data-theme='paper'] textarea:focus {
+  background: rgba(0, 0, 0, 0.06) !important;
+}
+/* The toggle's own fill follows the surface it sits on. (This has to
    live in a GLOBAL stylesheet: a scoped `:global(:root[...])`
    selector compiles into a rule that matches the root element
    itself — measured 2026-11-07, it painted the entire page 8% black.) */

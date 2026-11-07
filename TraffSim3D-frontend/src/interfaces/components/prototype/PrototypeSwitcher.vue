@@ -74,8 +74,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   gap: 10px;
   padding: 3px 8px;
   border-radius: 999px;
-  background: #f8fafc;
-  color: #0f172a;
+  background: var(--dc-text);
+  color: var(--dc-panel);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   font-size: 12px;
 }
@@ -85,12 +85,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   border: none;
   border-radius: 999px;
   cursor: pointer;
-  background: #e2e8f0;
-  color: #0f172a;
+  background: var(--dc-text);
+  color: var(--dc-panel);
   font-size: 13px;
 }
 .arrow:hover {
-  background: #cbd5e1;
+  background: var(--dc-text-dim);
 }
 .label {
   display: flex;

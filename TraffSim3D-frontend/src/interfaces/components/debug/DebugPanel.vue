@@ -289,20 +289,20 @@ const backendTooltip = computed(() => {
   white-space: nowrap;
 }
 .debug .row b.ok {
-  color: #22c55e;
+  color: var(--dc-ok);
 }
 .debug .row b.warn {
-  color: #fbbf24;
+  color: var(--dc-warning);
 }
 .debug .row small {
   opacity: 0.6;
 }
 .debug .row.paused b {
-  color: #fde047;
+  color: var(--dc-warning);
 }
 
 .debug .row.backend {
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  border-top: 1px solid color-mix(in srgb, var(--dc-text-dim) 22%, transparent);
   margin-top: 4px;
   padding-top: 4px;
 }
@@ -318,19 +318,19 @@ const backendTooltip = computed(() => {
   background: var(--dc-text-faint);
 }
 .debug .dot-ok {
-  background: #22c55e;
-  box-shadow: 0 0 4px #22c55e;
+  background: var(--dc-ok);
+  box-shadow: 0 0 4px var(--dc-ok);
 }
 .debug .dot-error {
-  background: #ef4444;
-  box-shadow: 0 0 4px #ef4444;
+  background: var(--dc-alert);
+  box-shadow: 0 0 4px var(--dc-alert);
 }
 
 .debug button.refresh {
   margin-left: 6px;
   padding: 1px 6px;
   font-size: 12px;
-  background: #1e293b;
+  background: var(--dc-panel-2);
   color: var(--dc-text);
   border: none;
   border-radius: 3px;
@@ -339,7 +339,7 @@ const backendTooltip = computed(() => {
   line-height: 1.4;
 }
 .debug button.refresh:hover:not(:disabled) {
-  background: #334155;
+  background: var(--dc-secondary);
 }
 .debug button.refresh:disabled {
   opacity: 0.4;
@@ -350,13 +350,13 @@ const backendTooltip = computed(() => {
   display: inline-block;
   padding: 1px 6px;
   margin-right: 4px;
-  background: #1e3a8a;
+  background: color-mix(in srgb, var(--dc-accent) 55%, var(--dc-panel));
   color: #dbeafe;
   border-radius: 3px;
   font-size: 10px;
 }
 .debug b.warn {
-  color: #fbbf24;
+  color: var(--dc-warning);
 }
 
 .debug .auto-poll {

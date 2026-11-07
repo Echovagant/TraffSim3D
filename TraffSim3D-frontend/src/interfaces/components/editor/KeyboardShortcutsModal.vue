@@ -82,7 +82,7 @@ defineEmits<{ (e: 'update:open', value: boolean): void }>()
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(2, 6, 23, 0.7);
+  background: color-mix(in srgb, var(--dc-screen) 80%, transparent);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -91,12 +91,12 @@ defineEmits<{ (e: 'update:open', value: boolean): void }>()
 }
 .modal-card {
   background: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 26%, transparent);
   border-radius: 12px;
   padding: 24px 28px;
   min-width: 360px;
   max-width: 480px;
-  color: #e2e8f0;
+  color: var(--dc-text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
 }
@@ -114,15 +114,15 @@ defineEmits<{ (e: 'update:open', value: boolean): void }>()
 .close-btn {
   background: transparent;
   border: none;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 16px;
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
 }
 .close-btn:hover {
-  background: rgba(148, 163, 184, 0.15);
-  color: #e2e8f0;
+  background: color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
+  color: var(--dc-text);
 }
 
 .shortcuts {
@@ -135,15 +135,15 @@ defineEmits<{ (e: 'update:open', value: boolean): void }>()
   padding: 6px 12px 6px 0;
   font-size: 12px;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  border-bottom: 1px solid color-mix(in srgb, var(--dc-text-dim) 22%, transparent);
 }
 .shortcuts td {
   padding: 8px 12px 8px 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
-  color: #cbd5e1;
+  border-bottom: 1px solid color-mix(in srgb, var(--dc-text-dim) 10%, transparent);
+  color: var(--dc-text-dim);
 }
 .shortcuts tr:last-child td {
   border-bottom: none;
@@ -153,8 +153,8 @@ kbd {
   padding: 2px 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  background: rgba(2, 6, 23, 0.7);
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: color-mix(in srgb, var(--dc-screen) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 30%, transparent);
   border-bottom-width: 2px;
   border-radius: 4px;
   color: #93c5fd;
@@ -164,6 +164,6 @@ kbd {
 .hint {
   margin: 16px 0 0;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 </style>

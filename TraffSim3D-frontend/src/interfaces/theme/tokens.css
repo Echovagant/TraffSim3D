@@ -136,6 +136,12 @@
 
   color-scheme: dark;
 }
+/* The paper theme tells the browser to draw the native widgets (the
+   select's open list, the scrollbars, the date picker) in the light
+   scheme — without it the open list is a white card in a dark app. */
+:root[data-theme='paper'] {
+  color-scheme: light;
+}
 
 /* ===== 石墨灰 — neutral, low saturation (bright rooms, white walls) ===== */
 :root[data-theme='graphite'] {

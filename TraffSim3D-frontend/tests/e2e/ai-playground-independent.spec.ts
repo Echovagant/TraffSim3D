@@ -98,6 +98,10 @@ test('AI Playground: independent multi-agent renders per-agent polylines', async
   await page.locator('[data-testid="independent-agents-checkbox"]').check()
 
   // Wait for chart to render with per-agent polylines
+  // The stage is the main visual now; the per-agent chart lives in the
+  // detail (it is OPEN in the independent mode, where those lines are
+  // the result).
+  await expect(page.locator('[data-testid="training-stage"]')).toBeVisible()
   await expect(page.locator('[data-testid="reward-chart"]')).toBeVisible()
   // 2 polylines (one per agent)
   await expect(page.locator('[data-testid="reward-line-agent-0"]')).toBeVisible()

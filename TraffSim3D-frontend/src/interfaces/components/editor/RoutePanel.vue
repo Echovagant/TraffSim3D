@@ -282,12 +282,12 @@ const turnHint = computed(() => {
   align-items: center;
   gap: 6px;
   margin-bottom: 4px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
 }
 .route-panel .ctrl select {
   flex: 1;
   min-width: 0;
-  background: #1e293b;
+  background: var(--dc-panel-2);
   color: var(--dc-text);
   border: 1px solid color-mix(in srgb, var(--dc-accent) 42%, transparent);
   border-radius: 4px;
@@ -304,32 +304,32 @@ const turnHint = computed(() => {
   padding: 5px 10px;
   border: none;
   border-radius: 4px;
-  background: #2563eb;
-  color: #f8fafc;
+  background: var(--dc-accent);
+  color: var(--dc-text);
   font-size: 12px;
   cursor: pointer;
 }
 .route-panel button.primary:disabled {
-  background: #334155;
+  background: var(--dc-secondary);
   cursor: not-allowed;
 }
 .route-panel button.ghost {
   padding: 2px 8px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 30%, transparent);
   border-radius: 4px;
   background: transparent;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   font-size: 11px;
   cursor: pointer;
 }
 .route-panel .err {
-  color: #f87171;
+  color: var(--dc-alert);
   margin: 6px 0 0;
 }
 .route-panel .hud {
   margin-top: 8px;
   padding-top: 6px;
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  border-top: 1px solid color-mix(in srgb, var(--dc-text-dim) 22%, transparent);
 }
 .route-panel .hud .row {
   display: flex;
@@ -338,7 +338,7 @@ const turnHint = computed(() => {
 }
 .route-panel .hud .row b {
   font-weight: 600;
-  color: #fbbf24;
+  color: var(--dc-warning);
 }
 .route-panel .toggle {
   margin-top: 6px;
@@ -356,6 +356,6 @@ const turnHint = computed(() => {
   color: var(--dc-text);
 }
 .route-panel .rows .row b.arrived {
-  color: #22c55e;
+  color: var(--dc-ok);
 }
 </style>

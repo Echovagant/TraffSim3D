@@ -324,7 +324,7 @@ const isCoordinatedKind = computed(() => world.controllerKind === 'coordinated')
   gap: 6px;
   align-items: center;
   padding: 6px 8px;
-  background: rgba(15, 23, 42, 0.7);
+  background: color-mix(in srgb, var(--dc-panel) 70%, transparent);
   border-radius: 6px;
   /* Cap width so a tall toolbar wraps cleanly when the window is narrow. */
   max-width: calc(100vw - 24px);
@@ -342,7 +342,7 @@ button,
   padding: 6px 10px;
   border: none;
   border-radius: 4px;
-  background: #1e293b;
+  background: var(--dc-panel-2);
   color: var(--dc-text);
   cursor: pointer;
   font-size: 12px;
@@ -354,26 +354,26 @@ button,
 }
 button:hover:not(:disabled),
 .link-home:hover {
-  background: #334155;
+  background: var(--dc-secondary);
 }
 button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 button.sim.paused {
-  background: #b45309;
+  background: color-mix(in srgb, var(--dc-warning) 65%, var(--dc-panel));
 }
 button.sim.paused:hover {
-  background: #d97706;
+  background: var(--dc-warning);
 }
 button.danger {
-  background: #7f1d1d;
+  background: color-mix(in srgb, var(--dc-alert) 55%, var(--dc-panel));
 }
 button.danger:hover {
-  background: #991b1b;
+  background: var(--dc-alert);
 }
 .link-home {
-  background: #0f172a;
+  background: var(--dc-panel);
 }
 
 /* Coordinated config button: gated to the coordinated controller kind. */
@@ -382,10 +382,10 @@ button.danger:hover {
   cursor: not-allowed;
 }
 .coord-btn:not(:disabled) {
-  background: #1e3a8a;
+  background: color-mix(in srgb, var(--dc-accent) 55%, var(--dc-panel));
 }
 .coord-btn:not(:disabled):hover {
-  background: #1d4ed8;
+  background: var(--dc-accent);
 }
 
 /* Toolbar collapse button: lives at the end of the toolbar row. */
@@ -393,14 +393,14 @@ button.danger:hover {
   padding: 6px 8px;
   background: transparent;
   color: var(--dc-text-dim);
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 22%, transparent);
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
 }
 .toolbar-collapse:hover {
-  background: rgba(148, 163, 184, 0.15);
+  background: color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
   color: var(--dc-text);
 }
 
@@ -410,8 +410,8 @@ button.danger:hover {
   top: 12px;
   left: 12px;
   padding: 6px 12px;
-  background: rgba(15, 23, 42, 0.7);
-  color: #cbd5e1;
+  background: color-mix(in srgb, var(--dc-panel) 70%, transparent);
+  color: var(--dc-text-dim);
   border: 1px solid color-mix(in srgb, var(--dc-accent) 42%, transparent);
   border-radius: 4px;
   cursor: pointer;
@@ -420,7 +420,7 @@ button.danger:hover {
   z-index: 5;
 }
 .toolbar-toggle-collapsed:hover {
-  background: rgba(15, 23, 42, 0.9);
+  background: color-mix(in srgb, var(--dc-panel) 90%, transparent);
   color: var(--dc-text);
 }
 
@@ -428,7 +428,7 @@ button.danger:hover {
 .rate {
   display: inline-flex;
   align-items: center;
-  background: #0f172a;
+  background: var(--dc-panel);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -441,14 +441,14 @@ button.danger:hover {
   justify-content: center;
 }
 .rate-btn:hover:not(:disabled) {
-  background: #334155;
+  background: var(--dc-secondary);
 }
 .rate-value {
   padding: 0 8px;
   font-size: 12px;
   min-width: 44px;
   text-align: center;
-  color: #fbbf24;
+  color: var(--dc-warning);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -458,10 +458,10 @@ button.danger:hover {
   align-items: center;
   gap: 4px;
   padding: 0 6px 0 8px;
-  background: #0f172a;
+  background: var(--dc-panel);
   border-radius: 4px;
   font-size: 12px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .ctrl-kind-label {
@@ -469,7 +469,7 @@ button.danger:hover {
 }
 .ctrl-kind select {
   background: transparent;
-  color: #fbbf24;
+  color: var(--dc-warning);
   border: none;
   font-family: inherit;
   font-size: 12px;
@@ -483,7 +483,7 @@ button.danger:hover {
 /* Scene-kind dropdown: same shell as ctrl-kind but visually distinct so
    the user can tell them apart at a glance. */
 .scene-kind {
-  background: #1e293b;
+  background: var(--dc-panel-2);
 }
 .scene-kind select {
   color: #34d399;
@@ -495,24 +495,24 @@ button.danger:hover {
   align-items: center;
   gap: 4px;
   padding: 6px 10px;
-  background: #1e293b;
+  background: var(--dc-panel-2);
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .lidar-toggle input {
   cursor: pointer;
 }
 .lidar-toggle:hover {
-  background: #334155;
+  background: var(--dc-secondary);
 }
 
 .io-msg {
   margin-left: 6px;
   font-size: 11px;
-  color: #fbbf24;
+  color: var(--dc-warning);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -544,19 +544,19 @@ button.danger:hover {
   animation: flash-in 240ms ease-out;
 }
 .flash-info {
-  background: #1e3a8a;
+  background: color-mix(in srgb, var(--dc-accent) 55%, var(--dc-panel));
   color: #dbeafe;
-  border: 1px solid #3b82f6;
+  border: 1px solid var(--dc-accent);
 }
 .flash-warn {
   background: #78350f;
   color: #fef3c7;
-  border: 1px solid #d97706;
+  border: 1px solid var(--dc-warning);
 }
 .flash-error {
-  background: #7f1d1d;
+  background: color-mix(in srgb, var(--dc-alert) 55%, var(--dc-panel));
   color: #fee2e2;
-  border: 1px solid #ef4444;
+  border: 1px solid var(--dc-alert);
 }
 
 @keyframes flash-in {

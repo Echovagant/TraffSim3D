@@ -447,8 +447,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .backend-view {
   min-height: 100vh;
-  background: #0b1220;
-  color: #e2e8f0;
+  background: var(--dc-screen);
+  color: var(--dc-text);
   padding: 80px 24px 48px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
@@ -464,7 +464,7 @@ onBeforeUnmount(() => {
 }
 .view-header .view-sub {
   margin: 0;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 14px;
 }
 .back-link {
@@ -484,8 +484,8 @@ onBeforeUnmount(() => {
   margin: 0 auto 24px;
   padding: 20px 24px;
   border-radius: 12px;
-  background: rgba(15, 23, 42, 0.7);
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: color-mix(in srgb, var(--dc-panel) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 22%, transparent);
 }
 .status-ok {
   border-color: rgba(34, 197, 94, 0.5);
@@ -505,7 +505,7 @@ onBeforeUnmount(() => {
 .status-detail {
   margin: 6px 0 14px;
   font-size: 13px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .status-actions {
@@ -516,15 +516,15 @@ onBeforeUnmount(() => {
 }
 .status-actions button {
   padding: 6px 14px;
-  background: #1e293b;
-  color: #f1f5f9;
-  border: 1px solid #334155;
+  background: var(--dc-panel-2);
+  color: var(--dc-text);
+  border: 1px solid var(--dc-secondary);
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
 }
 .status-actions button:hover:not(:disabled) {
-  background: #334155;
+  background: var(--dc-secondary);
 }
 .status-actions button:disabled {
   opacity: 0.6;
@@ -532,7 +532,7 @@ onBeforeUnmount(() => {
 }
 .last-checked {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 
 .dot {
@@ -544,19 +544,19 @@ onBeforeUnmount(() => {
   margin-right: 4px;
 }
 .dot-ok {
-  background: #22c55e;
-  box-shadow: 0 0 6px #22c55e;
+  background: var(--dc-ok);
+  box-shadow: 0 0 6px var(--dc-ok);
 }
 .dot-error {
-  background: #ef4444;
-  box-shadow: 0 0 6px #ef4444;
+  background: var(--dc-alert);
+  box-shadow: 0 0 6px var(--dc-alert);
 }
 .dot-unknown {
-  background: #64748b;
+  background: var(--dc-text-faint);
 }
 /* 写操作 / 需要必填参数的端点 —— 与「待检查」同色，表示「本次没有请求它」。 */
 .dot-skipped {
-  background: #64748b;
+  background: var(--dc-text-faint);
 }
 
 /* Endpoints */
@@ -568,7 +568,7 @@ onBeforeUnmount(() => {
 .meta h2 {
   font-size: 16px;
   margin: 0 0 12px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
 }
 .endpoint-list {
   list-style: none;
@@ -581,7 +581,7 @@ onBeforeUnmount(() => {
 .endpoint {
   padding: 14px 16px;
   background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(148, 163, 184, 0.15);
+  border: 1px solid color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
   border-radius: 10px;
 }
 .endpoint-ok {
@@ -602,30 +602,30 @@ onBeforeUnmount(() => {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px;
-  background: #1e3a8a;
+  background: color-mix(in srgb, var(--dc-accent) 55%, var(--dc-panel));
   color: #dbeafe;
   font-weight: 700;
 }
 .endpoint-path {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 14px;
-  color: #f1f5f9;
+  color: var(--dc-text);
 }
 .endpoint-state {
   margin-left: auto;
   font-size: 12px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
 }
 .endpoint-desc {
   margin: 4px 0 8px;
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 .endpoint-note {
   display: block;
   margin-top: 2px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 .endpoint-response {
   margin: 0;
@@ -654,10 +654,10 @@ onBeforeUnmount(() => {
   gap: 8px 16px;
   margin: 0;
   font-size: 13px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
 }
 .meta-list dt {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 .meta-list dd {
   margin: 0;
@@ -668,7 +668,7 @@ onBeforeUnmount(() => {
   background: rgba(15, 23, 42, 0.8);
   padding: 1px 6px;
   border-radius: 4px;
-  color: #f1f5f9;
+  color: var(--dc-text);
 }
 
 @media (max-width: 720px) {

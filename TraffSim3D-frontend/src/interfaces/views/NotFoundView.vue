@@ -14,8 +14,8 @@
 <style scoped>
 .view--placeholder {
   min-height: 100vh;
-  background: #0b1220;
-  color: #e2e8f0;
+  background: var(--dc-screen);
+  color: var(--dc-text);
   padding: 96px 24px;
   text-align: center;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
@@ -25,18 +25,18 @@
   margin: 0 0 12px;
 }
 .view--placeholder p {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   margin: 0 0 24px;
 }
 .back-link {
   display: inline-block;
   padding: 8px 16px;
   border-radius: 6px;
-  background: #1e293b;
-  color: #f1f5f9;
+  background: var(--dc-panel-2);
+  color: var(--dc-text);
   text-decoration: none;
 }
 .back-link:hover {
-  background: #334155;
+  background: var(--dc-secondary);
 }
 </style>

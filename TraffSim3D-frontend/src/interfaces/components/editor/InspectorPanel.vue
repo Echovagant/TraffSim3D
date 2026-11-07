@@ -280,9 +280,9 @@ const deleteSelected = () => {
 }
 .inspector input,
 .inspector select {
-  background: #1e293b;
+  background: var(--dc-panel-2);
   color: var(--dc-text);
-  border: 1px solid #334155;
+  border: 1px solid var(--dc-secondary);
   border-radius: 4px;
   padding: 2px 4px;
   font-family: inherit;
@@ -307,13 +307,13 @@ const deleteSelected = () => {
   padding: 3px 6px;
   border-radius: 4px;
   background: rgba(180, 83, 9, 0.25);
-  border: 1px solid #b45309;
+  border: 1px solid color-mix(in srgb, var(--dc-warning) 65%, var(--dc-panel));
   color: #fde68a;
   font-size: 10px;
 }
 .inspector .override-row button {
   padding: 1px 5px;
-  background: #1e293b;
+  background: var(--dc-panel-2);
 }
 /* Read-only value (the signal controller owns the phase). */
 .inspector .readonly {
@@ -329,7 +329,7 @@ const deleteSelected = () => {
 }
 .inspector button {
   padding: 3px 6px;
-  background: #1e293b;
+  background: var(--dc-panel-2);
   color: var(--dc-text);
   border: none;
   border-radius: 4px;
@@ -343,13 +343,13 @@ const deleteSelected = () => {
   opacity: 0.6;
 }
 .inspector button.ghost:hover {
-  background: rgba(148, 163, 184, 0.15);
+  background: color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
   opacity: 1;
 }
 .inspector button.danger {
-  background: #7f1d1d;
+  background: color-mix(in srgb, var(--dc-alert) 55%, var(--dc-panel));
 }
 .inspector button.danger:hover {
-  background: #991b1b;
+  background: var(--dc-alert);
 }
 </style>

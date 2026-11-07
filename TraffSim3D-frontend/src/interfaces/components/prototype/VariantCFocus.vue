@@ -79,7 +79,7 @@ const dockOpen = ref(true)
 .focus {
   position: fixed;
   inset: 0;
-  background: #0b1220;
+  background: var(--dc-screen);
 }
 .glass {
   background: rgba(15, 23, 42, 0.72);
@@ -126,7 +126,7 @@ const dockOpen = ref(true)
   border-radius: 5px;
   cursor: pointer;
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   background: rgba(148, 163, 184, 0.1);
 }
 .chip.on {
@@ -147,7 +147,7 @@ const dockOpen = ref(true)
   margin: 0 auto 4px;
   border: none;
   background: transparent;
-  color: #64748b;
+  color: var(--dc-text-faint);
   font-size: 11px;
   cursor: pointer;
 }
@@ -157,7 +157,7 @@ const dockOpen = ref(true)
 .toggle {
   border: none;
   background: transparent;
-  color: #64748b;
+  color: var(--dc-text-faint);
   font-size: 11px;
   cursor: pointer;
   padding: 0 0 4px;

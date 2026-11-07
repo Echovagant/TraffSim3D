@@ -28,18 +28,18 @@ const { save, load, clear, lastMessage } = useSceneIO()
   padding: 6px 12px;
   border: none;
   border-radius: 4px;
-  background: #1e293b;
-  color: #f1f5f9;
+  background: var(--dc-panel-2);
+  color: var(--dc-text);
   cursor: pointer;
   font-size: 13px;
 }
 .io-buttons button:hover {
-  background: #334155;
+  background: var(--dc-secondary);
 }
 .io-buttons .msg {
   margin-left: 8px;
   font-size: 12px;
-  color: #fbbf24;
+  color: var(--dc-warning);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 </style>

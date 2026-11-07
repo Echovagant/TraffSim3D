@@ -121,7 +121,7 @@ onUnmounted(() => unsubscribe?.())
   background: rgba(15, 23, 42, 0.86);
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 8px;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   font-size: 11px;
   overflow: hidden;
 }
@@ -138,14 +138,14 @@ onUnmounted(() => unsubscribe?.())
 }
 .stat i {
   font-style: normal;
-  color: #64748b;
+  color: var(--dc-text-faint);
 }
 .stat b {
-  color: #e2e8f0;
+  color: var(--dc-text);
   font-variant-numeric: tabular-nums;
 }
 .stat.hot b {
-  color: #fbbf24;
+  color: var(--dc-warning);
 }
 .phases {
   display: flex;
@@ -161,12 +161,12 @@ onUnmounted(() => unsubscribe?.())
   white-space: nowrap;
 }
 .phase-row code {
-  color: #64748b;
+  color: var(--dc-text-faint);
   font-size: 10px;
 }
 .phase-row em {
   font-style: normal;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-variant-numeric: tabular-nums;
 }
 .phase {
@@ -180,15 +180,15 @@ onUnmounted(() => unsubscribe?.())
 }
 .phase-yellow {
   background: rgba(234, 179, 8, 0.22);
-  color: #fde047;
+  color: var(--dc-warning);
 }
 .phase-red {
   background: rgba(239, 68, 68, 0.22);
   color: #fca5a5;
 }
 .phase-allRed {
-  background: rgba(148, 163, 184, 0.2);
-  color: #cbd5e1;
+  background: color-mix(in srgb, var(--dc-text-dim) 22%, transparent);
+  color: var(--dc-text-dim);
 }
 .sensors {
   display: flex;
@@ -198,8 +198,8 @@ onUnmounted(() => unsubscribe?.())
 .chip {
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(148, 163, 184, 0.12);
-  color: #94a3b8;
+  background: color-mix(in srgb, var(--dc-text-dim) 15%, transparent);
+  color: var(--dc-text-dim);
   white-space: nowrap;
 }
 </style>

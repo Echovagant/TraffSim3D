@@ -240,43 +240,57 @@ const restorePanels = (): void => {
 /* A slot holds one panel plus its fold button. Folded, the panel is
    hidden and only the button remains — a 22 px tab on the column's
    inner edge, so a folded column still says what is in it. */
+/* A slot holds one panel plus its fold control. The control lives in a
+   GUTTER beside the panel (never on top of it — it used to cover the
+   panel's own header controls and read as a stray glyph), and folding
+   the panel leaves the gutter behind, so the column still says what is
+   inside it. */
 .slot {
-  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 4px;
   flex: 0 0 auto;
 }
+.slot-body {
+  min-width: 0;
+}
 .slot-fold {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 2;
   width: 18px;
-  height: 18px;
+  height: 22px;
   padding: 0;
-  border: 1px solid color-mix(in srgb, var(--dc-accent) 40%, transparent);
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
   border-radius: var(--dc-radius);
-  background: color-mix(in srgb, var(--dc-panel-2) 90%, transparent);
-  color: var(--dc-text-dim);
-  font-size: 10px;
+  background: transparent;
+  color: var(--dc-text-faint);
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
-  opacity: 0.55;
   transition:
-    opacity 0.15s ease,
-    color 0.15s ease;
+    color var(--ds-dur-fast) var(--ds-ease-out),
+    background var(--ds-dur-fast) var(--ds-ease-out),
+    border-color var(--ds-dur-fast) var(--ds-ease-out);
 }
 .slot:hover .slot-fold {
-  opacity: 1;
+  color: var(--dc-text-dim);
+  background: color-mix(in srgb, var(--dc-panel-2) 70%, transparent);
 }
 .slot-fold:hover {
   color: var(--dc-flow);
-  border-color: var(--dc-flow);
+  border-color: color-mix(in srgb, var(--dc-flow) 45%, transparent);
+}
+/* Folded: the gutter is the only thing left — a thin rail of tabs. */
+.slot.is-folded {
+  grid-template-columns: 18px;
 }
 .slot.is-folded .slot-fold {
-  position: static;
-  opacity: 1;
+  color: var(--dc-text-dim);
+  background: color-mix(in srgb, var(--dc-panel) 70%, transparent);
+  border-color: var(--dc-hairline);
 }
 
-/* A folded column collapses to a thin strip of fold buttons. */
 .deck-left:has(.slot.is-folded) .slot.is-folded,
 .deck-right:has(.slot.is-folded) .slot.is-folded {
   display: flex;

@@ -29,7 +29,7 @@
               crashed: v.status === 'crashed',
               changing: v.desiredLaneIndex !== null,
             }"
-            :style="{ borderLeftColor: v.status === 'crashed' ? '#ef4444' : v.color }"
+            :style="{ borderLeftColor: v.status === 'crashed' ? 'var(--dc-alert)' : v.color }"
             @click="onSelect('vehicle', v.id)"
           >
             <span class="row-id">{{ v.id }}</span>
@@ -144,7 +144,7 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  border-bottom: 1px solid color-mix(in srgb, var(--dc-text-dim) 22%, transparent);
   flex-shrink: 0;
 }
 .head .title {
@@ -173,7 +173,7 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   padding: 4px 10px;
   background: transparent;
   border: none;
-  color: #cbd5e1;
+  color: var(--dc-text-dim);
   cursor: pointer;
   font-family: inherit;
   font-size: 11px;
@@ -181,7 +181,7 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   letter-spacing: 0.04em;
 }
 .group-head:hover {
-  background: rgba(148, 163, 184, 0.08);
+  background: color-mix(in srgb, var(--dc-text-dim) 10%, transparent);
 }
 .group-head .caret {
   width: 10px;
@@ -211,11 +211,11 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   font-size: 12px;
 }
 .row:hover {
-  background: rgba(148, 163, 184, 0.08);
+  background: color-mix(in srgb, var(--dc-text-dim) 10%, transparent);
 }
 .row.active {
   background: rgba(59, 130, 246, 0.18);
-  color: #f8fafc;
+  color: var(--dc-text);
 }
 .row-id {
   flex: 1;
@@ -229,8 +229,8 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   font-size: 10px;
   padding: 0 4px;
   border-radius: 3px;
-  background: rgba(148, 163, 184, 0.15);
-  color: #cbd5e1;
+  background: color-mix(in srgb, var(--dc-text-dim) 18%, transparent);
+  color: var(--dc-text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .row-status {
@@ -246,7 +246,7 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   color: #fca5a5;
 }
 .row.yellow .row-status {
-  color: #fde047;
+  color: var(--dc-warning);
 }
 .row.green .row-status {
   color: #86efac;
@@ -258,7 +258,7 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
   animation: crash-pulse 1.2s ease-in-out infinite;
 }
 .row.crashed .row-status {
-  color: #ef4444;
+  color: var(--dc-alert);
   font-size: 12px;
   filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.7));
 }

@@ -6,7 +6,7 @@
  * with 4+ roads. Screenshots to baseline.
  */
 import { test, expect } from '@playwright/test'
-import { waitForSceneReady, expectSceneScreenshot } from './helpers/wait'
+import { expectSceneScreenshot, pauseSimulation, waitForCameraIdle } from './helpers/wait'
 
 const FAKE_NETWORK = {
   roads: [
@@ -127,5 +127,22 @@ test('OSM PBF import: routes to parse-pbf endpoint, loads network', async ({ pag
     { timeout: 10_000 },
   )
 
-  await expectSceneScreenshot(page, 'osm-import-pbf.png')
+  // Freeze the scene before the capture: the imported network's
+  // vehicles DRIVE, so the pixels depend on when the shot lands (the
+  // baseline moved 5 % between runs — measured 2026-11-07). The
+  // scene-editor's own screenshot helper pauses the sim for exactly
+  // this reason.
+  // Two things move under a full suite: the sim (the imported network
+  // has no vehicles, but the CAMERA auto-fits to it and the fit
+  // animation is still running when the shot lands — measured 2026-11-07:
+  // 5 % pixel difference, standalone passes). So: pause the sim, wait
+  // for the camera to come to rest, then capture.
+  await pauseSimulation(page)
+  await waitForCameraIdle(page)
+  // The idle check samples every 100 ms and accepts two stable samples;
+  // the fit animation can still be ramping up when it is called, so give
+  // the frame a moment to settle before the capture.
+  await page.waitForTimeout(1200)
+  await waitForCameraIdle(page)
+  await expectSceneScreenshot(page, 'osm-import-pbf.png', { timeout: 30_000 })
 })

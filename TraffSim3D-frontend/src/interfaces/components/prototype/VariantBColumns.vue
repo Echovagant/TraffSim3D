@@ -93,7 +93,7 @@ const tabs: Array<{ key: LeftTab; label: string }> = [
   inset: 0;
   display: grid;
   grid-template-columns: 44px 300px 1fr 300px;
-  background: #0b1220;
+  background: var(--dc-screen);
 }
 .rail {
   display: flex;
@@ -101,8 +101,8 @@ const tabs: Array<{ key: LeftTab; label: string }> = [
   align-items: center;
   gap: 6px;
   padding-top: 10px;
-  background: rgba(15, 23, 42, 0.9);
-  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  background: color-mix(in srgb, var(--dc-panel) 90%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--dc-text-dim) 15%, transparent);
 }
 .rail-btn {
   width: 26px;
@@ -111,9 +111,9 @@ const tabs: Array<{ key: LeftTab; label: string }> = [
   place-items: center;
   border-radius: 5px;
   cursor: pointer;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 12px;
-  background: rgba(148, 163, 184, 0.08);
+  background: color-mix(in srgb, var(--dc-text-dim) 10%, transparent);
 }
 .rail-btn.on {
   background: rgba(59, 130, 246, 0.28);
@@ -123,7 +123,7 @@ const tabs: Array<{ key: LeftTab; label: string }> = [
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  border-right: 1px solid color-mix(in srgb, var(--dc-text-dim) 15%, transparent);
   background: rgba(11, 18, 32, 0.6);
 }
 .tabs {
@@ -138,12 +138,12 @@ const tabs: Array<{ key: LeftTab; label: string }> = [
   border-radius: 5px 5px 0 0;
   cursor: pointer;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   background: transparent;
 }
 .tab.on {
-  color: #e2e8f0;
-  background: rgba(148, 163, 184, 0.12);
+  color: var(--dc-text);
+  background: color-mix(in srgb, var(--dc-text-dim) 15%, transparent);
 }
 .left-body {
   flex: 1 1 auto;
@@ -162,7 +162,7 @@ const tabs: Array<{ key: LeftTab; label: string }> = [
   gap: 8px;
   padding: 8px;
   overflow-y: auto;
-  border-left: 1px solid rgba(148, 163, 184, 0.12);
+  border-left: 1px solid color-mix(in srgb, var(--dc-text-dim) 15%, transparent);
   background: rgba(11, 18, 32, 0.6);
 }
 .readout-vert :deep(.readout) {

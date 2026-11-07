@@ -58,15 +58,23 @@ export const expectVisualScreenshot = async (
   await expect(locator).toHaveScreenshot(name, options)
 }
 
-/** `toHaveScreenshot` for the frozen scene viewport. */
+/**
+ * `toHaveScreenshot` for the frozen scene viewport.
+ *
+ * `options` carries the capture timeout: under a full suite the SwiftShader
+ * capture of a busy canvas can take longer than Playwright's 5 s default
+ * (measured 2026-11-07: the OSM PBF capture timed out in the suite but
+ * passed standalone — the baseline itself was fine).
+ */
 export const expectVisualSceneScreenshot = async (
   page: Page,
   name: string,
   clip?: { x: number; y: number; width: number; height: number },
+  options?: Parameters<(typeof expect<Page>)['toHaveScreenshot']>[1],
 ): Promise<void> => {
   if (!visualBaselinesUsable()) {
     skipVisual(name)
     return
   }
-  await expect(page).toHaveScreenshot(name, clip ? { clip } : undefined)
+  await expect(page).toHaveScreenshot(name, { ...(clip ? { clip } : {}), ...options })
 }

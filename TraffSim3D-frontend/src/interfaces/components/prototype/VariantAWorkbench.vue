@@ -58,11 +58,11 @@ import SimReadoutStrip from './SimReadoutStrip.vue'
   inset: 0;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  background: #0b1220;
+  background: var(--dc-screen);
 }
 .band-top {
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(15, 23, 42, 0.7);
+  background: color-mix(in srgb, var(--dc-panel) 70%, transparent);
 }
 .band-middle {
   display: grid;
@@ -75,7 +75,7 @@ import SimReadoutStrip from './SimReadoutStrip.vue'
   gap: 8px;
   padding: 8px;
   overflow-y: auto;
-  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  border-right: 1px solid color-mix(in srgb, var(--dc-text-dim) 15%, transparent);
   background: rgba(11, 18, 32, 0.55);
 }
 .stage {
@@ -88,7 +88,7 @@ import SimReadoutStrip from './SimReadoutStrip.vue'
      switcher never covers the readout it is meant to help judge. */
   padding: 6px 8px 34px;
   border-top: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(15, 23, 42, 0.7);
+  background: color-mix(in srgb, var(--dc-panel) 70%, transparent);
 }
 
 /* The scene panels are absolutely positioned for the current layout;
