@@ -153,6 +153,18 @@ test.describe('Home: full-page baseline', () => {
 
   test('Home: full-page screenshot baseline', async ({ page }) => {
     await page.goto('/')
+    // The module tiles now reveal on SCROLL (an IntersectionObserver,
+    // 2026-11-07), so the page has to be walked once before the cards
+    // can settle — a tile that has not entered the viewport is still
+    // at opacity 0 and the wait would time out.
+    await page.evaluate(async () => {
+      const step = Math.round(window.innerHeight * 0.7)
+      for (let y = 0; y < document.body.scrollHeight; y += step) {
+        window.scrollTo(0, y)
+        await new Promise((r) => setTimeout(r, 120))
+      }
+      window.scrollTo(0, 0)
+    })
     await waitForSettled(page, [...HERO_SELECTORS, ...CARD_SELECTORS])
 
     // The decorative WebGL background is time-driven (`u_time` is fed from

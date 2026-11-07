@@ -29,27 +29,42 @@
  */
 
 :root {
-  /* ===== the working palette (深空蓝 — the default) ===== */
-  --dc-screen: #04070f;
-  --dc-panel: #0b1526;
-  --dc-panel-2: #101d33;
-  --dc-accent: #1e40af;
-  --dc-flow: #0e7490;
-  --dc-secondary: #24507f;
-  --dc-text: #e0e7f1;
-  --dc-text-dim: #94a3b8;
-  --dc-text-faint: #64748b;
-  --dc-ok: #22c55e;
-  --dc-warning: #f59e0b;
-  --dc-alert: #f43f5e;
+  /* ===== the working palette =====
+     Apple's system palette (SF Pro / Action Blue / the #f5f5f7
+     "parchment" and the near-black tile surfaces), taken from the
+     design-md Apple DESIGN.md — real numbers, not vibes:
+     ink #1d1d1f · canvas #fff · parchment #f5f5f7 · action #0066cc
+     (on dark: #2997ff) · dark tiles #272729 / #2a2a2c / #252527.
 
-  /* chart series — six steps, kept distinguishable in every theme */
-  --dc-series-1: #1e40af;
-  --dc-series-2: #0369a1;
-  --dc-series-3: #0e7490;
-  --dc-series-4: #2b5fa8;
-  --dc-series-5: #38bdf8;
-  --dc-series-6: #60a5fa;
+     The screen is DARK by default: this is a portfolio piece, and the
+     night surface is what lets the 3D scene and the product imagery
+     carry the light. */
+  --dc-screen: #000000;
+  --dc-panel: #1c1c1e;
+  --dc-panel-2: #242426;
+  --dc-accent: #2997ff;
+  --dc-flow: #64d2ff;
+  --dc-secondary: #3a3a3c;
+  --dc-text: #f5f5f7;
+  --dc-text-dim: #a1a1a6;
+  --dc-text-faint: #6e6e73;
+  --dc-ok: #30d158;
+  --dc-warning: #ffd60a;
+  --dc-alert: #ff453a;
+  /* Apple hairline: a 1px rule at 8% white, never a hard border. */
+  --dc-hairline: rgba(255, 255, 255, 0.08);
+  --dc-hairline-strong: rgba(255, 255, 255, 0.16);
+  /* Translucent chrome (the nav, the floating panels). */
+  --dc-chrome: rgba(22, 22, 24, 0.72);
+
+  /* chart series — Apple's system colours, in the order that stays
+     distinguishable on a dark ground */
+  --dc-series-1: #2997ff;
+  --dc-series-2: #64d2ff;
+  --dc-series-3: #30d158;
+  --dc-series-4: #ffd60a;
+  --dc-series-5: #ff9f0a;
+  --dc-series-6: #bf5af2;
 
   /* ===== the scene's own road/building colours ===== */
   --dc-road-main: #2b5fa8;
@@ -61,15 +76,50 @@
   --dc-building-public: #264a6b;
   --dc-building-industrial: #182234;
 
-  /* ===== shape & rhythm ===== */
-  --dc-radius: 3px;
-  --dc-radius-lg: 6px;
-  --dc-panel-padding: 12px;
-  --dc-gap: 10px;
-  --dc-label-size: 11px;
-  --dc-small-size: 10px;
-  --dc-title-size: 15px;
-  --dc-metric-size: 22px;
+  /* ===== shape & rhythm =====
+     Apple's spacing scale (4 / 8 / 12 / 17 / 24 / 32 / 48 / 80) and
+     its type scale with the negative tracking the display sizes carry. */
+  --dc-radius: 12px;
+  --dc-radius-lg: 18px;
+  --dc-radius-xl: 28px;
+  --dc-panel-padding: 17px;
+  --dc-gap: 12px;
+  --dc-label-size: 12px;
+  --dc-small-size: 11px;
+  --dc-title-size: 17px;
+  --dc-metric-size: 28px;
+  --ds-space-1: 4px;
+  --ds-space-2: 8px;
+  --ds-space-3: 12px;
+  --ds-space-4: 17px;
+  --ds-space-5: 24px;
+  --ds-space-6: 32px;
+  --ds-space-7: 48px;
+  --ds-space-8: 80px;
+
+  /* ===== type =====
+     SF Pro is the system font on Apple hardware; the stack falls back
+     to it elsewhere. Display sizes carry Apple's negative tracking. */
+  --ds-font: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --ds-hero-size: 56px;
+  --ds-hero-track: -0.28px;
+  --ds-display-size: 40px;
+  --ds-lead-size: 28px;
+  --ds-body-size: 17px;
+  --ds-body-track: -0.374px;
+  --ds-caption-size: 14px;
+
+  /* ===== motion =====
+     Apple's motion is fast, decelerating and slightly springy. Both
+     curves are hand-tuned (no `linear`, no `ease-in-out`). */
+  --ds-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ds-ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ds-dur-fast: 180ms;
+  --ds-dur: 320ms;
+  --ds-dur-slow: 680ms;
+  /* The one signature shadow: product imagery resting on a surface. */
+  --ds-shadow-product: 0 18px 48px rgba(0, 0, 0, 0.62);
 
   /* ===== elevation =====
      A single z-scale, so "which panel is on top" is a question with

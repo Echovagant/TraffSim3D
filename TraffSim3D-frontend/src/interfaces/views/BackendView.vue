@@ -1,12 +1,12 @@
 <template>
-  <main class="backend-view">
+  <main class="backend-view" data-reveal>
     <header class="view-header">
       <router-link to="/" class="back-link">← 返回首页</router-link>
       <h1>Backend Services</h1>
       <p class="view-sub">FastAPI 服务状态 · 从 OpenAPI schema 动态发现端点</p>
     </header>
 
-    <section class="status-panel" :class="`status-${overallState}`">
+    <section class="status-panel" :class="`status-${overallState}`" data-reveal>
       <div class="status-headline">
         <span class="status-dot" :class="`dot-${overallState}`"></span>
         <span class="status-text">{{ statusHeadline }}</span>

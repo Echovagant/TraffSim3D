@@ -1,5 +1,5 @@
 <template>
-  <main class="ai-playground">
+  <main class="ai-playground" data-reveal>
     <router-link to="/" class="back-link">← 返回首页</router-link>
 
     <header class="header">
@@ -8,7 +8,7 @@
       <p class="sub">Gymnasium + PPO 训练单智能体通过 4-way 路口</p>
     </header>
 
-    <section class="card">
+    <section class="card" data-reveal>
       <h2>训练控制</h2>
       <div class="control-row">
         <label class="ctrl">

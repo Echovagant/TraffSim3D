@@ -10,5 +10,9 @@
 </template>
 
 <script setup>
-// No setup. Views are responsible for their own chrome.
+// No chrome of its own — but the app-wide scroll reveal lives here, so
+// any view can opt in with `data-reveal` on its sections.
+import { useGlobalReveal } from '@interfaces/composables/useGlobalReveal'
+
+useGlobalReveal()
 </script>

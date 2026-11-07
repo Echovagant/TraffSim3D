@@ -9,6 +9,8 @@ import router from '@interfaces/router'
 // so every component reads the same variables — before this, each one
 // hard-coded its own colours and the three views drifted apart.
 import '@interfaces/theme/tokens.css'
+import '@interfaces/theme/motion.css'
+import '@interfaces/theme/panels.css'
 
 // Register GSAP plugins once at app boot. ScrollTrigger is
 // used by HomeView for module-card stagger-on-scroll entrance and

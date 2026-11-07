@@ -1,0 +1,118 @@
+/*
+ * The motion layer.
+ *
+ * Three pieces, all pure CSS so the frames stay on the compositor:
+ *
+ *   1. `reveal-pending` / `is-revealed` — the scroll reveal, wired by
+ *      `useReveal` (an IntersectionObserver, never a scroll listener).
+ *      Only `transform` and `opacity` move.
+ *   2. The hover physics: a card lifts, its image scales a little, and
+ *      the arrow inside slides — the "magnetic" feel.
+ *   3. The ambient loops: a slow drift for the hero's glow and the
+ *      sheen that crosses a card's surface.
+ *
+ * Everything respects `prefers-reduced-motion`.
+ */
+
+.reveal-pending {
+  opacity: 0;
+  transform: translate3d(0, 22px, 0);
+  filter: blur(6px);
+  will-change: transform, opacity;
+}
+.is-revealed {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  filter: blur(0);
+  transition:
+    opacity var(--ds-dur-slow) var(--ds-ease-out) var(--reveal-delay, 0ms),
+    transform var(--ds-dur-slow) var(--ds-ease-spring) var(--reveal-delay, 0ms),
+    filter var(--ds-dur-slow) var(--ds-ease-out) var(--reveal-delay, 0ms);
+}
+
+/* ===== hover physics ===== */
+.ds-lift {
+  transition:
+    transform var(--ds-dur) var(--ds-ease-spring),
+    box-shadow var(--ds-dur) var(--ds-ease-out),
+    border-color var(--ds-dur) var(--ds-ease-out);
+}
+.ds-lift:hover {
+  transform: translate3d(0, -6px, 0);
+  box-shadow: var(--ds-shadow-product);
+}
+.ds-lift:active {
+  transform: translate3d(0, -2px, 0) scale(0.994);
+}
+/* The image inside a card grows a touch — the "product on a surface"
+   zoom, the way Apple's tiles behave. */
+.ds-lift .ds-tile-media img {
+  transition: transform var(--ds-dur-slow) var(--ds-ease-out);
+}
+.ds-lift:hover .ds-tile-media img {
+  transform: scale(1.045);
+}
+
+/* ===== ambient loops ===== */
+@keyframes ds-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(2%, -2%, 0) scale(1.06);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+.ds-drift {
+  animation: ds-drift 24s var(--ds-ease-out) infinite alternate;
+}
+
+@keyframes ds-pulse-ring {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+.ds-pulse-ring {
+  animation: ds-pulse-ring 2.6s var(--ds-ease-out) infinite;
+}
+
+@keyframes ds-sheen {
+  0% {
+    transform: translate3d(-120%, 0, 0);
+  }
+  60%,
+  100% {
+    transform: translate3d(120%, 0, 0);
+  }
+}
+
+/* ===== reduced motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  .reveal-pending {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+  .is-revealed {
+    transition: none;
+  }
+  .ds-lift,
+  .ds-lift .ds-tile-media img {
+    transition: none;
+  }
+  .ds-drift,
+  .ds-pulse-ring {
+    animation: none;
+  }
+}

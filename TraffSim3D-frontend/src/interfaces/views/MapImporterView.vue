@@ -1,5 +1,5 @@
 <template>
-  <main class="importer">
+  <main class="importer" data-reveal>
     <router-link to="/" class="back-link">← 返回首页</router-link>
 
     <header class="header">
@@ -8,7 +8,7 @@
       <p class="sub">OSM 地图导入与路网生成</p>
     </header>
 
-    <section class="card">
+    <section class="card" data-reveal>
       <h2>① 在 Overpass Turbo 导出 .osm</h2>
       <p class="muted">
         打开

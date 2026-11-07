@@ -69,7 +69,8 @@
         </header>
 
         <div class="module-grid gsap-module-grid">
-          <router-link to="/scene-editor" class="module-card status-active">
+          <router-link to="/scene-editor" class="module-card status-active" data-reveal>
+            <div class="ds-tile-media"><img src="/tiles/tile-scenelab.png" alt="" loading="lazy" /></div>
             <div class="module-icon" aria-hidden>🚦</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -85,7 +86,8 @@
             </div>
           </router-link>
 
-          <router-link to="/simulation-lab" class="module-card status-active">
+          <router-link to="/simulation-lab" class="module-card status-active" data-reveal>
+            <div class="ds-tile-media"><img src="/tiles/tile-simulationlab.png" alt="" loading="lazy" /></div>
             <div class="module-icon" aria-hidden>🧪</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -100,7 +102,8 @@
             </div>
           </router-link>
 
-          <router-link to="/map-importer" class="module-card status-active">
+          <router-link to="/map-importer" class="module-card status-active" data-reveal>
+            <div class="ds-tile-media"><img src="/tiles/tile-maplab.png" alt="" loading="lazy" /></div>
             <div class="module-icon" aria-hidden>🗺️</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -120,7 +123,9 @@
             to="/smart-city"
             class="module-card status-active module-card-featured"
             data-testid="smart-city-card"
+            data-reveal
           >
+            <div class="ds-tile-media"><img src="/tiles/tile-smartcity.png" alt="" loading="lazy" /></div>
             <div class="module-icon" aria-hidden>🛰️</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -136,7 +141,8 @@
             </div>
           </router-link>
 
-          <router-link to="/ai-playground" class="module-card status-active">
+          <router-link to="/ai-playground" class="module-card status-active" data-reveal>
+            <div class="ds-tile-media"><img src="/tiles/tile-ai.png" alt="" loading="lazy" /></div>
             <div class="module-icon" aria-hidden>🤖</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -151,7 +157,7 @@
             </div>
           </router-link>
 
-          <router-link to="/deliverables" class="module-card status-planned">
+          <router-link to="/deliverables" class="module-card status-planned" data-reveal>
             <div class="module-icon" aria-hidden>📦</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -166,7 +172,7 @@
             </div>
           </router-link>
 
-          <router-link to="/backend" class="module-card status-active">
+          <router-link to="/backend" class="module-card status-active" data-reveal>
             <div class="module-icon" aria-hidden>⚙️</div>
             <div class="module-body">
               <div class="module-title-row">
@@ -217,6 +223,7 @@
  * during dev (otherwise Vue re-mounts leave dangling ScrollTriggers).
  */
 import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { useReveal } from '@interfaces/composables/useReveal'
 import { gsap } from 'gsap'
 import EnhancedWebGLBackground from '@interfaces/components/showcase/EnhancedWebGLBackground.vue'
 
@@ -267,21 +274,15 @@ onMounted(() => {
         toggleActions: 'play none none reverse',
       },
     })
-    // 3) Module cards — stagger fade-up when grid enters viewport
-    gsap.from('.module-card', {
-      autoAlpha: 0,
-      y: 32,
-      duration: 0.55,
-      ease: 'power3.out',
-      stagger: 0.1,
-      scrollTrigger: {
-        trigger: '.gsap-module-grid',
-        start: 'top 82%',
-        once: true,
-        toggleActions: 'play none none reverse',
-      },
-    })
+    // 3) Module cards — the scroll reveal is CSS + IntersectionObserver
+    //    now (see `useReveal`): the GSAP tween that used to live here
+    //    fought the new `data-reveal` classes, and the observer version
+    //    is cheaper (no scroll listener, no per-frame layout).
   }, root.value)
+
+  // The reveal layer: every `[data-reveal]` inside the page fades up
+  // once, staggered, when it enters the viewport.
+  useReveal(root, { stagger: 80 })
 })
 
 onBeforeUnmount(() => {
@@ -844,6 +845,299 @@ html {
   .hero-shot {
     order: -1;
   }
+}
+
+
+/* ===================================================================
+   The showcase skin (2026-11-07, second pass).
+
+   The brief changed: this is a PORTFOLIO piece — the point is to show
+   design thinking, front-end craft and motion, not to be merely
+   practical. So the page moves to Apple's system language (taken from
+   the design-md Apple DESIGN.md — real type scale with its negative
+   tracking, hairline rules, the near-black tile surfaces, Action Blue)
+   and the cards become TILES: a real screenshot of the product, the
+   icon floating over it, and hover physics (the tile lifts, the
+   image zooms a touch, the arrow slides).
+   =================================================================== */
+
+.main-container {
+  color: var(--dc-text);
+  font-family: var(--ds-font);
+}
+
+/* ===== the floating glass nav ===== */
+.top-nav {
+  background: transparent;
+  border-bottom: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding-top: 14px;
+}
+.nav-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 8px 10px 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--dc-hairline);
+  border-radius: 999px;
+  background: var(--dc-chrome);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5);
+  transition:
+    transform var(--ds-dur) var(--ds-ease-spring),
+    background var(--ds-dur) var(--ds-ease-out);
+}
+.brand {
+  color: var(--dc-text);
+  text-decoration: none;
+  transition: opacity var(--ds-dur-fast) var(--ds-ease-out);
+}
+.brand:hover {
+  opacity: 0.72;
+}
+.brand .logo {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: linear-gradient(160deg, #2b6cff, #7d4bff);
+  box-shadow: 0 4px 14px rgba(43, 108, 255, 0.4);
+  font-size: 15px;
+}
+.brand .project-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--dc-text);
+}
+.brand .subtitle {
+  display: none;
+}
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.nav-link {
+  position: relative;
+  padding: 7px 13px;
+  border-radius: 999px;
+  font-size: 13px;
+  letter-spacing: -0.1px;
+  color: var(--dc-text-dim);
+  text-decoration: none;
+  transition:
+    color var(--ds-dur-fast) var(--ds-ease-out),
+    background var(--ds-dur-fast) var(--ds-ease-out);
+}
+.nav-link:hover {
+  color: var(--dc-text);
+  background: rgba(255, 255, 255, 0.07);
+}
+.nav-link.router-link-active {
+  color: var(--dc-text);
+  background: rgba(255, 255, 255, 0.12);
+}
+/* The "New" dot keeps its accent but loses the loud pill. */
+.nav-link-new::after {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--dc-flow);
+  box-shadow: 0 0 10px var(--dc-flow);
+  vertical-align: 2px;
+}
+
+/* ===== the hero ===== */
+.hero {
+  padding: calc(var(--ds-space-8) + 20px) 0 var(--ds-space-7);
+}
+.hero-title {
+  font-family: var(--ds-font);
+  font-size: clamp(44px, 6.2vw, 76px);
+  font-weight: 600;
+  letter-spacing: -1.6px;
+  line-height: 1.04;
+  background: linear-gradient(180deg, #ffffff 30%, #9aa0ab);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+}
+.hero-eyebrow {
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: var(--dc-flow);
+  text-transform: uppercase;
+}
+.hero-sub {
+  font-size: var(--ds-body-size);
+  letter-spacing: var(--ds-body-track);
+  color: var(--dc-text-dim);
+}
+.hero-shot {
+  background: var(--dc-panel);
+  border: 1px solid var(--dc-hairline);
+  border-radius: var(--dc-radius-xl);
+  box-shadow: var(--ds-shadow-product);
+  padding: 10px;
+}
+
+/* ===== the module tiles ===== */
+.modules {
+  padding-bottom: var(--ds-space-8);
+}
+.modules-header {
+  text-align: left;
+  margin-bottom: var(--ds-space-5);
+}
+.modules-header h2 {
+  font-family: var(--ds-font);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.6px;
+  color: var(--dc-text);
+}
+.modules-header p {
+  font-size: 15px;
+  color: var(--dc-text-faint);
+}
+.module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(272px, 1fr));
+  gap: 16px;
+}
+.module-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 18px;
+  overflow: hidden;
+  border: 1px solid var(--dc-hairline);
+  border-radius: var(--dc-radius-lg);
+  background: var(--dc-panel);
+  color: var(--dc-text);
+  text-decoration: none;
+  transition:
+    transform var(--ds-dur) var(--ds-ease-spring),
+    border-color var(--ds-dur) var(--ds-ease-out),
+    box-shadow var(--ds-dur) var(--ds-ease-out);
+}
+.module-card:hover {
+  transform: translate3d(0, -6px, 0);
+  border-color: var(--dc-hairline-strong);
+  box-shadow: var(--ds-shadow-product);
+}
+/* The screenshot: the product speaks first. */
+.ds-tile-media {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--dc-screen);
+  border-bottom: 1px solid var(--dc-hairline);
+}
+.ds-tile-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transform: scale(1.01);
+  transition: transform var(--ds-dur-slow) var(--ds-ease-out);
+}
+.module-card:hover .ds-tile-media img {
+  transform: scale(1.06);
+}
+/* The icon rides on the media's lower-left corner. */
+.module-card .module-icon {
+  position: absolute;
+  top: calc(50% - 60px);
+  left: 16px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--dc-hairline);
+  font-size: 18px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  transition: transform var(--ds-dur) var(--ds-ease-spring);
+}
+.module-card:hover .module-icon {
+  transform: translate3d(0, -3px, 0) scale(1.06);
+}
+.module-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 16px;
+}
+.module-card h3 {
+  font-family: var(--ds-font);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--dc-text);
+}
+.module-sub {
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  color: var(--dc-flow);
+}
+.module-desc {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--dc-text-dim);
+}
+.module-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.badge {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.badge-active {
+  background: rgba(48, 209, 88, 0.16);
+  color: #30d158;
+}
+.badge-new {
+  background: rgba(100, 210, 255, 0.16);
+  color: #64d2ff;
+}
+.badge-planned {
+  background: rgba(255, 214, 10, 0.14);
+  color: #ffd60a;
+}
+/* The featured tile spans two columns and carries the hero shot. */
+.module-card-featured {
+  grid-column: span 2;
+}
+.module-card-featured .ds-tile-media {
+  aspect-ratio: 21 / 9;
+}
+
+.site-footer {
+  border-top: 1px solid var(--dc-hairline);
+  color: var(--dc-text-faint);
+  text-align: left;
+  padding: 28px 0 40px;
 }
 
 </style>

@@ -1,0 +1,248 @@
+/*
+ * The showcase panel language — global.
+ *
+ * The four secondary screens (MapLab, AI Proving Ground, DeliveryLab,
+ * Backend) were built before the token layer existed, so each of them
+ * carried its own idea of a panel, a button and an input. Rather than
+ * rewriting four views, the shared vocabulary lives here: one skin for
+ * the surfaces, the controls, the tables and the section headers, so
+ * every screen speaks the same language as the home page and the
+ * Smart City board.
+ *
+ * Apple's rules, applied: hairline rules instead of hard borders, the
+ * near-black tile surfaces, Action Blue for the single interactive
+ * accent, the SF Pro stack with its negative tracking, generous radii
+ * (12–18px) and NO shadow on chrome — the one shadow is reserved for
+ * product imagery.
+ *
+ * Everything here is opt-in by CLASS NAME, so nothing can move by
+ * accident: only elements that already carry these classes change.
+ */
+
+/* ===== surfaces ===== */
+.dc-surface,
+.card,
+.panel,
+.panel-card,
+.form-card,
+.status-card {
+  background: var(--dc-panel) !important;
+  border: 1px solid var(--dc-hairline) !important;
+  border-radius: var(--dc-radius-lg) !important;
+  color: var(--dc-text) !important;
+  box-shadow: none !important;
+}
+
+/* ===== section headers ===== */
+.card h2,
+.panel h2,
+.panel-card h2,
+.form-card h2 {
+  font-family: var(--ds-font) !important;
+  font-size: 17px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.2px !important;
+  color: var(--dc-text) !important;
+}
+.card p,
+.panel p {
+  color: var(--dc-text-dim) !important;
+}
+
+/* ===== controls ===== */
+input[type='text'],
+input[type='number'],
+input[type='search'],
+input[type='email'],
+input[type='url'],
+input[type='datetime-local'],
+select,
+textarea {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid var(--dc-hairline) !important;
+  border-radius: 10px !important;
+  color: var(--dc-text) !important;
+  font-family: var(--ds-font) !important;
+  font-size: 14px !important;
+  transition:
+    border-color var(--ds-dur-fast) var(--ds-ease-out),
+    background var(--ds-dur-fast) var(--ds-ease-out);
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none !important;
+  border-color: var(--dc-accent) !important;
+  background: rgba(255, 255, 255, 0.09) !important;
+  box-shadow: 0 0 0 3px rgba(41, 151, 255, 0.22) !important;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--dc-text-faint) !important;
+}
+label {
+  color: var(--dc-text-dim) !important;
+  font-size: 13px !important;
+}
+
+/* ===== buttons ===== */
+.btn,
+button {
+  font-family: var(--ds-font);
+  transition:
+    transform var(--ds-dur-fast) var(--ds-ease-spring),
+    background var(--ds-dur-fast) var(--ds-ease-out),
+    border-color var(--ds-dur-fast) var(--ds-ease-out),
+    color var(--ds-dur-fast) var(--ds-ease-out);
+}
+.btn {
+  border-radius: 999px !important;
+  padding: 7px 16px !important;
+  font-size: 13px !important;
+  letter-spacing: -0.1px !important;
+  border: 1px solid var(--dc-hairline) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: var(--dc-text) !important;
+}
+.btn:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-color: var(--dc-hairline-strong) !important;
+}
+.btn:active {
+  transform: scale(0.975);
+}
+.btn.primary {
+  background: var(--dc-accent) !important;
+  border-color: var(--dc-accent) !important;
+  color: #fff !important;
+}
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+.btn.ghost {
+  background: transparent !important;
+}
+.btn.danger {
+  border-color: rgba(255, 69, 58, 0.45) !important;
+  color: #ff6961 !important;
+  background: rgba(255, 69, 58, 0.12) !important;
+}
+
+/* ===== tables ===== */
+table {
+  border-collapse: collapse !important;
+  width: 100%;
+}
+th {
+  color: var(--dc-text-faint) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.09em !important;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--dc-hairline) !important;
+}
+td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  color: var(--dc-text-dim) !important;
+  font-size: 13px !important;
+}
+tbody tr {
+  transition: background var(--ds-dur-fast) var(--ds-ease-out);
+}
+tbody tr:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+/* ===== misc ===== */
+code,
+pre {
+  font-variant-numeric: tabular-nums;
+}
+hr {
+  border: none;
+  border-top: 1px solid var(--dc-hairline);
+}
+.badge,
+.tag,
+.pill {
+  border-radius: 999px !important;
+}
+
+/* ===== the four secondary screens ===== */
+/* Their own class names, so the shared skin actually reaches them. */
+.importer .card,
+.ai-playground .card,
+.backend-view .card,
+.placeholder-card,
+.placeholder-view,
+.endpoint,
+.endpoint-response,
+.bbox-block,
+.control-row,
+.ckpt-list {
+  background: var(--dc-panel) !important;
+  border: 1px solid var(--dc-hairline) !important;
+  border-radius: var(--dc-radius-lg) !important;
+  color: var(--dc-text) !important;
+  box-shadow: none !important;
+}
+/* The view surfaces themselves: Apple black, not navy. */
+.importer,
+.ai-playground,
+.backend-view,
+.placeholder-view {
+  background: var(--dc-screen) !important;
+  color: var(--dc-text) !important;
+  font-family: var(--ds-font) !important;
+}
+.importer h1,
+.ai-playground h1,
+.backend-view h1,
+.placeholder-header h1 {
+  font-family: var(--ds-font) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.6px !important;
+  color: var(--dc-text) !important;
+}
+.importer p,
+.ai-playground p,
+.backend-view p {
+  color: var(--dc-text-dim) !important;
+}
+.endpoint-path,
+.endpoint-method,
+.endpoint-path code {
+  color: var(--dc-text) !important;
+}
+.endpoint-desc,
+.endpoint-note {
+  color: var(--dc-text-faint) !important;
+}
+.endpoint-response,
+pre {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid var(--dc-hairline) !important;
+  border-radius: 12px !important;
+  color: var(--dc-text-dim) !important;
+}
+.endpoint-state,
+.dot {
+  color: var(--dc-ok) !important;
+}
+.badge,
+.collapsed-badge,
+.dry-badge {
+  border-radius: 999px !important;
+  font-size: 11px !important;
+}
+.back-link {
+  color: var(--dc-accent) !important;
+  text-decoration: none !important;
+  transition: opacity var(--ds-dur-fast) var(--ds-ease-out);
+}
+.back-link:hover {
+  opacity: 0.7;
+}
+.muted {
+  color: var(--dc-text-faint) !important;
+}

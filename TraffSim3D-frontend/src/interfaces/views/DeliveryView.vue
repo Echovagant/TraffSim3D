@@ -1,5 +1,5 @@
 <template>
-  <main class="placeholder-view">
+  <main class="placeholder-view" data-reveal>
     <router-link to="/" class="back-link">← 返回首页</router-link>
     <header class="placeholder-header">
       <span class="badge badge-planned">Planned</span>
@@ -7,7 +7,7 @@
       <p class="placeholder-sub">部署与交付物</p>
     </header>
 
-    <section class="placeholder-card">
+    <section class="placeholder-card" data-reveal>
       <h2>本模块做什么</h2>
       <p>
         DeliveryLab 是交付物总览页 — 本地部署清单、ADR 归档、API 文档、测试覆盖率报告。
