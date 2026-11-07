@@ -100,8 +100,9 @@
   /* ===== type =====
      SF Pro is the system font on Apple hardware; the stack falls back
      to it elsewhere. Display sizes carry Apple's negative tracking. */
-  --ds-font: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont,
-    'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --ds-font:
+    'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
   --ds-hero-size: 56px;
   --ds-hero-track: -0.28px;
   --ds-display-size: 40px;
@@ -201,4 +202,74 @@
    not jitter as they tick. */
 .dc-num {
   font-variant-numeric: tabular-nums;
+}
+
+/* ===================================================================
+   The light theme — 「纸面」(paper).
+
+   Apple's own light surfaces (canvas #ffffff, parchment #f5f5f7,
+   pearl #fafafc, ink #1d1d1f, action blue #0066cc) with the editorial
+   discipline of a document-first interface: hairline rules instead of
+   borders, off-black ink instead of pure black, and colour used only
+   where it means something.
+
+   The typography shifts with the theme: the dark theme is the display
+   face (SF Pro Display, tight tracking), the light theme is the
+   READING face — a serif for the display sizes, which is what makes a
+   document feel like a document rather than an app.
+   =================================================================== */
+:root[data-theme='paper'] {
+  --dc-screen: #f5f5f7;
+  --dc-panel: #ffffff;
+  --dc-panel-2: #fafafc;
+  --dc-accent: #0066cc;
+  --dc-flow: #0e7490;
+  --dc-secondary: #d2d2d7;
+  --dc-text: #1d1d1f;
+  --dc-text-dim: #424245;
+  --dc-text-faint: #7a7a7a;
+  --dc-ok: #1d8a3e;
+  --dc-warning: #a06600;
+  --dc-alert: #c8102e;
+  --dc-hairline: rgba(0, 0, 0, 0.1);
+  --dc-hairline-strong: rgba(0, 0, 0, 0.18);
+  --dc-chrome: rgba(255, 255, 255, 0.76);
+
+  --dc-series-1: #0066cc;
+  --dc-series-2: #0e7490;
+  --dc-series-3: #1d8a3e;
+  --dc-series-4: #a06600;
+  --dc-series-5: #7a4bff;
+  --dc-series-6: #c8102e;
+
+  --dc-road-main: #3f6ea8;
+  --dc-road-local: #6f86a4;
+  --dc-building: #dfe3e8;
+  --dc-building-edge: #9aa7b5;
+  --dc-building-residential: #e6e2da;
+  --dc-building-commercial: #dde5ee;
+  --dc-building-public: #e2ecf2;
+  --dc-building-industrial: #e4e4e6;
+
+  /* The reading face: a serif for the display sizes. */
+  --ds-font:
+    'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+  --ds-font-display: 'New York', 'Songti SC', 'Noto Serif SC', Georgia, 'Times New Roman', serif;
+  --ds-hero-size: 52px;
+  --ds-hero-track: -0.4px;
+
+  /* Chrome on a light ground is a translucent white sheet, and the one
+     shadow is a whisper. */
+  --ds-shadow-product: 0 14px 40px rgba(0, 0, 0, 0.1);
+}
+
+/* The display face follows the theme: the dark theme is the grotesque
+   (an instrument), the light theme the serif (a document). */
+:root {
+  --ds-font-display:
+    'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+}
+:root[data-theme='paper'] {
+  --ds-font-display: 'New York', 'Songti SC', 'Noto Serif SC', Georgia, 'Times New Roman', serif;
 }

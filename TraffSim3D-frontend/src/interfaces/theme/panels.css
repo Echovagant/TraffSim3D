@@ -246,3 +246,21 @@ pre {
 .muted {
   color: var(--dc-text-faint) !important;
 }
+
+/* ===== the paper theme's chrome =====
+   The toggle's own fill follows the surface it sits on. (This has to
+   live in a GLOBAL stylesheet: a scoped `:global(:root[...])`
+   selector compiles into a rule that matches the root element
+   itself — measured 2026-11-07, it painted the entire page 8% black.) */
+:root[data-theme='paper'] .theme-toggle {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+:root[data-theme='paper'] .theme-toggle:hover {
+  background: rgba(0, 0, 0, 0.09);
+}
+/* On the light surface the brand mark keeps its gradient, but the
+   capsule's chrome is a white sheet rather than a dark one. */
+:root[data-theme='paper'] .showcase-nav .capsule {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}

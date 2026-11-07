@@ -108,15 +108,17 @@ test('Home: GSAP hero text reaches final opacity after animation', async ({ page
   await hideBackground(page)
   await expectVisualScreenshot(page.locator('.hero'), 'home-gsap-hero.png')
 })
-test('Home: SmartCity 3D card is rendered as featured', async ({ page }) => {
+test('Home: SmartCity 3D is one of the three feature bands', async ({ page }) => {
   await page.goto('/')
-  await expect(page.locator('[data-testid="smart-city-card"]')).toBeVisible()
-  // Verify it has the featured class (violet border / background).
-  const className = await page.locator('[data-testid="smart-city-card"]').getAttribute('class')
-  expect(className).toContain('module-card-featured')
-  expect(className).toContain('status-active')
-  // Badge says "New".
-  await expect(page.locator('[data-testid="smart-city-card"] .badge-new')).toContainText('New')
+  // The page is no longer a card wall (2026-11-07): the three modules
+  // that carry the story are full-bleed BANDS, the rest are index rows.
+  const bands = page.locator('.feature-band')
+  await expect(bands).toHaveCount(3)
+  await expect(bands.filter({ hasText: 'SmartCity 3D' })).toHaveCount(1)
+  // And the band links where it says it does.
+  const link = page.locator('.feature-band a[href="/smart-city"]')
+  await expect(link).toBeVisible()
+  await expect(link).toContainText('SmartCity 3D')
 })
 
 test('Home: SmartCity link in top nav', async ({ page }) => {
@@ -129,11 +131,29 @@ test('Home: SmartCity link in top nav', async ({ page }) => {
   await expect(link).toHaveAttribute('href', '/smart-city')
 })
 
-test('Home: all 7 module cards present', async ({ page }) => {
+test('Home: every module is reachable — 3 bands + 4 index rows', async ({ page }) => {
   await page.goto('/')
-  await page.waitForTimeout(1200) // let GSAP card entrance settle
-  const cards = page.locator('.module-card')
-  await expect(cards).toHaveCount(7)
+  await page.waitForTimeout(1200)
+  const bands = page.locator('.feature-band a[href]')
+  const rows = page.locator('.module-index a[href]')
+  await expect(bands).toHaveCount(3)
+  await expect(rows).toHaveCount(4)
+  // All seven modules are on the page, each linking to its route.
+  const hrefs = await page
+    .locator('.feature-band a[href], .module-index a[href]')
+    .evaluateAll((els) => els.map((el) => (el as HTMLAnchorElement).getAttribute('href')))
+  expect(new Set(hrefs).size).toBe(7)
+  for (const route of [
+    '/scene-editor',
+    '/smart-city',
+    '/ai-playground',
+    '/simulation-lab',
+    '/map-importer',
+    '/backend',
+    '/deliverables',
+  ]) {
+    expect(hrefs).toContain(route)
+  }
 })
 
 test.describe('Home: full-page baseline', () => {
@@ -202,6 +222,9 @@ test.describe('Home: full-page baseline', () => {
     })
 
     await hideBackground(page)
-    await expectVisualScreenshot(page.locator('main'), 'home-gsap-full.png')
+    // The full page grew (three feature bands with product shots), and
+    // the capture has to scroll through it under SwiftShader — 5 s (the
+    // default) is not enough for the re-record.
+    await expectVisualScreenshot(page.locator('main'), 'home-gsap-full.png', { timeout: 30_000 })
   })
 })

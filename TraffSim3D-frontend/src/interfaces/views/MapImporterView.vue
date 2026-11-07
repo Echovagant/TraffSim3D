@@ -38,6 +38,45 @@
           在 Overpass Turbo 打开 ↗
         </button>
       </div>
+      <!-- The live preflight: the page asks the backend to parse a real
+           OSM document and reports what came back. -->
+      <div class="preflight" data-reveal>
+        <div class="preflight-head">
+          <button
+            class="btn primary"
+            data-testid="preflight-button"
+            :disabled="preflightRunning"
+            @click="runPreflight"
+          >
+            {{ preflightRunning ? '正在解析…' : '实时预检解析器' }}
+          </button>
+          <span class="muted small">上传一段内置 OSM 到后端解析器，走完整条导入链路</span>
+        </div>
+        <div v-if="preflight" class="preflight-readout" data-testid="preflight-readout">
+          <template v-if="preflight.error">
+            <span class="pf-error">预检失败：{{ preflight.error }}</span>
+          </template>
+          <template v-else>
+            <div class="pf-cell">
+              <span>道路</span><b>{{ preflight.roads }}</b>
+            </div>
+            <div class="pf-cell">
+              <span>生成点</span><b>{{ preflight.nodes }}</b>
+            </div>
+            <div class="pf-cell">
+              <span>车道</span><b>{{ preflight.lanes }}</b>
+            </div>
+            <div class="pf-cell">
+              <span>路口</span><b>{{ preflight.intersections }}</b>
+            </div>
+            <div class="pf-cell">
+              <span>耗时</span><b>{{ preflight.ms }}<em>ms</em></b>
+            </div>
+          </template>
+          <span class="pf-time">{{ new Date(preflight.at).toLocaleTimeString() }}</span>
+        </div>
+      </div>
+
       <p class="muted small">
         ⚠ 默认裁剪:不上传裁剪边界时,后端只保留距数据中心的 <code>0.5°</code>
         (~55 km) 内的节点 — 这是<b>内存安全上限</b>,不是按仿真区域裁剪。 要只加载一片区域,请在下方 ②
@@ -173,7 +212,7 @@
  * (this upload) target the same port the proxy uses.
  */
 import { ShowcaseNav } from '@interfaces/components/showcase'
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 import { showFlashMessage } from '@interfaces/composables/useFlashMessage'
@@ -353,6 +392,103 @@ out body;`,
 ]
 const overpassTab = ref(0)
 const overpassCopied = ref(false)
+
+// ===== the live preflight =====
+//
+// The page used to be a FORM: you copy a query and take it elsewhere.
+// A visitor cannot tell whether the importer works until they have
+// Overpass Turbo open in another tab — so the page now proves the
+// PIPELINE on its own: it builds a tiny but real OSM document in
+// memory, posts it to the backend's `/maps/parse-osm` (the very
+// endpoint the importer uses) and reports what came back.
+//
+// It is deliberately self-contained: it does not depend on the
+// Overpass upstream, which is frequently unreachable from this network
+// (measured 2026-11-07: 502 from overpass-api.de, and the disk cache
+// only covers the boxes that were fetched before).
+interface PreflightResult {
+  roads: number
+  nodes: number
+  lanes: number
+  intersections: number
+  ms: number
+  at: number
+  error?: string
+}
+const preflight = ref<PreflightResult | null>(null)
+const preflightRunning = ref(false)
+
+/** Two crossing streets with a signal — real OSM, four nodes + a way. */
+const PREFLIGHT_OSM = `<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="TraffSim3D preflight">
+  <node id="1" lat="22.5400" lon="114.0500" />
+  <node id="2" lat="22.5400" lon="114.0600" />
+  <node id="3" lat="22.5500" lon="114.0500" />
+  <node id="4" lat="22.5500" lon="114.0600" />
+  <node id="5" lat="22.5450" lon="114.0550">
+    <tag k="highway" v="traffic_signals" />
+  </node>
+  <way id="101">
+    <nd ref="1" /><nd ref="5" /><nd ref="3" />
+    <tag k="highway" v="primary" />
+    <tag k="lanes" v="4" />
+  </way>
+  <way id="102">
+    <nd ref="2" /><nd ref="5" /><nd ref="4" />
+    <tag k="highway" v="secondary" />
+    <tag k="oneway" v="yes" />
+  </way>
+</osm>`
+
+const runPreflight = async (): Promise<void> => {
+  if (preflightRunning.value) return
+  preflightRunning.value = true
+  const startedAt = performance.now()
+  const empty = { roads: 0, nodes: 0, lanes: 0, intersections: 0 }
+  try {
+    const body = new FormData()
+    body.append('file', new Blob([PREFLIGHT_OSM], { type: 'application/xml' }), 'preflight.osm')
+    const res = await fetch('/api/v1/maps/parse-osm', { method: 'POST', body })
+    const ms = Math.round(performance.now() - startedAt)
+    if (!res.ok) {
+      preflight.value = { ...empty, ms, at: Date.now(), error: `后端返回 ${res.status}` }
+      return
+    }
+    // The parser answers with a RoadNetwork: roads, intersections,
+    // vehicles, spawnPoints and the projection origin (all LISTS — the
+    // network is the array form, not a keyed dict).
+    const data = (await res.json()) as {
+      roads?: Array<{ laneCount?: number }>
+      intersections?: unknown[]
+      vehicles?: unknown[]
+      spawnPoints?: unknown[]
+    }
+    const roads = data.roads ?? []
+    preflight.value = {
+      roads: roads.length,
+      nodes: (data.spawnPoints ?? []).length,
+      lanes: roads.reduce((n, r) => n + Number(r?.laneCount ?? 0), 0),
+      intersections: (data.intersections ?? []).length,
+      ms,
+      at: Date.now(),
+    }
+  } catch (err) {
+    preflight.value = {
+      ...empty,
+      ms: Math.round(performance.now() - startedAt),
+      at: Date.now(),
+      error: err instanceof Error ? err.message : String(err),
+    }
+  } finally {
+    preflightRunning.value = false
+  }
+}
+
+// The preflight runs on its own when the page opens: a visitor should
+// not have to press anything to see that the pipeline is alive.
+onMounted(() => {
+  void runPreflight()
+})
 
 const onCopyOverpass = async (): Promise<void> => {
   const q = overpassQueries[overpassTab.value]?.query ?? ''
@@ -804,5 +940,61 @@ code {
 }
 .osm-attribution a:hover {
   color: #bfdbfe;
+}
+
+/* ===== the live preflight ===== */
+.preflight {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--dc-hairline);
+  border-radius: var(--dc-radius);
+  background: color-mix(in srgb, var(--dc-panel-2) 55%, transparent);
+}
+.preflight-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.preflight-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.pf-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pf-cell span {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dc-text-faint);
+}
+.pf-cell b {
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--dc-text);
+  font-variant-numeric: tabular-nums;
+}
+.pf-cell em {
+  margin-left: 2px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--dc-text-dim);
+}
+.pf-error {
+  color: var(--dc-alert);
+  font-size: 13px;
+}
+.pf-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dc-text-faint);
+  font-variant-numeric: tabular-nums;
 }
 </style>

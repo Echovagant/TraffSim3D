@@ -366,13 +366,19 @@ onMounted(async () => {
       // hard and nearly desaturated, so the token-coloured vector
       // network (roads/buildings) reads as the city and the OSM
       // building outlines stop shouting in yellow.
-      imageryLayer.brightness = 0.26
-      imageryLayer.contrast = 1.05
-      imageryLayer.saturation = 0.12
-      imageryLayer.gamma = 1.25
+      // The basemap tuning FOLLOWS the theme: on the night themes the
+      // bright OSM raster is dimmed into a substrate (the vector
+      // network is the subject), and on the paper theme it is left at
+      // its natural brightness — a dark map under a white dashboard
+      // would be just as wrong as the other way round.
+      const paper = document.documentElement.dataset.theme === 'paper'
+      imageryLayer.brightness = paper ? 1 : 0.26
+      imageryLayer.contrast = paper ? 1 : 1.05
+      imageryLayer.saturation = paper ? 1 : 0.12
+      imageryLayer.gamma = paper ? 1 : 1.25
       // A third of a turn: any raster road line joins the night
       // palette instead of fighting the blue network.
-      imageryLayer.hue = 0.55
+      imageryLayer.hue = paper ? 0 : 0.55
     }
   } catch (e) {
     status.value = {

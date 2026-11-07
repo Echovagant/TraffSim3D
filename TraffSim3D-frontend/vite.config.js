@@ -71,6 +71,14 @@ export default defineConfig({
         target: `http://localhost:${process.env.VITE_BACKEND_PORT || 8000}`,
         changeOrigin: true,
       },
+      // The OpenAPI schema — the Backend page discovers its endpoints
+      // from it, so it has to travel the same path as the API (the
+      // pages call the backend SAME-ORIGIN, so no port and no CORS has
+      // to be configured — measured 2026-11-07).
+      '/openapi.json': {
+        target: `http://localhost:${process.env.VITE_BACKEND_PORT || 8000}`,
+        changeOrigin: true,
+      },
     },
   },
   optimizeDeps: {

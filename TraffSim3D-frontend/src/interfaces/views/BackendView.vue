@@ -10,8 +10,40 @@
       <div class="status-headline">
         <span class="status-dot" :class="`dot-${overallState}`"></span>
         <span class="status-text">{{ statusHeadline }}</span>
+        <!-- The live pulse: the dot breathes on every poll, so the page
+             reads as connected rather than as a form. -->
+        <span class="pulse" :key="tick" aria-hidden></span>
       </div>
       <p class="status-detail">{{ statusDetail }}</p>
+
+      <!-- The numbers that prove it is alive: uptime over the polling
+           window, the average round trip, and the samples themselves. -->
+      <div class="live-strip">
+        <div class="live-cell">
+          <span class="live-label">在线率</span>
+          <b class="live-value" :class="{ warn: liveUptime < 100 }">{{ liveUptime }}%</b>
+          <span class="live-note">最近 {{ history.length }} 次探活</span>
+        </div>
+        <div class="live-cell">
+          <span class="live-label">平均时延</span>
+          <b class="live-value">{{ avgLatency }}<em>ms</em></b>
+          <span class="live-note">每 4 秒探活一次</span>
+        </div>
+        <div class="live-cell live-spark">
+          <span class="live-label">探活记录</span>
+          <svg viewBox="0 0 100 26" preserveAspectRatio="none" class="spark" aria-hidden>
+            <polyline
+              :points="uptimePoints"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              vector-effect="non-scaling-stroke"
+            />
+          </svg>
+          <span class="live-note">每一段是一次探测</span>
+        </div>
+      </div>
+
       <div class="status-actions">
         <button @click="refresh" :disabled="isRefreshing">
           {{ isRefreshing ? '检查中…' : '🔄 重新检查' }}
@@ -37,6 +69,12 @@
             <span class="endpoint-state">
               <span class="dot" :class="`dot-${epState(ep)}`"></span>
               {{ epStateLabel(ep) }}
+              <span v-if="ep.latencyMs !== undefined" class="latency">
+                {{ ep.latencyMs }}ms
+                <em v-if="(ep.okCount ?? 0) + (ep.failCount ?? 0) > 1">
+                  · {{ ep.okCount }}/{{ (ep.okCount ?? 0) + (ep.failCount ?? 0) }}
+                </em>
+              </span>
             </span>
           </div>
           <p class="endpoint-desc">
@@ -74,7 +112,7 @@
 
 <script setup lang="ts">
 import { ShowcaseNav } from '@interfaces/components/showcase'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { createHttpClient, BackendError } from '@infrastructure/api'
 
 interface EndpointProbe {
@@ -88,14 +126,25 @@ interface EndpointProbe {
   skipReason?: string
   response?: unknown
   error?: string
+  /** The round-trip time of the last probe (ms) — the number that tells
+   *  a visitor the service is ALIVE, not merely reachable. */
+  latencyMs?: number
+  /** How many probes have succeeded / failed since the page opened. */
+  okCount?: number
+  failCount?: number
 }
 
 type ProbeState = 'unknown' | 'ok' | 'error' | 'skipped'
 
 const endpoints = ref<EndpointProbe[]>([])
 
-const BACKEND_URL =
-  (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8000'
+/**
+ * The backend's base URL — the SAME ORIGIN by default, so the vite
+ * proxy forwards `/api` and `/openapi.json` to whichever port the
+ * backend runs on (the old hard-coded `http://localhost:8000` broke
+ * on every other port — measured 2026-11-07).
+ */
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? ''
 const backendPort = (import.meta.env.VITE_BACKEND_PORT as string | undefined) ?? '8000'
 
 /** 请求超时（AbortController）。 */
@@ -291,9 +340,14 @@ const statusDetail = computed(() => {
 const probeOne = async (ep: EndpointProbe): Promise<void> => {
   delete ep.response
   delete ep.error
+  const startedAt = performance.now()
   try {
     ep.response = await probeHttp.get(ep.path)
+    ep.latencyMs = Math.round(performance.now() - startedAt)
+    ep.okCount = (ep.okCount ?? 0) + 1
   } catch (err) {
+    ep.latencyMs = Math.round(performance.now() - startedAt)
+    ep.failCount = (ep.failCount ?? 0) + 1
     if (err instanceof BackendError) {
       // BackendError 的 message 里带着实际请求的 URL，失败时正好给人看。
       ep.error =
@@ -317,9 +371,76 @@ const refresh = async (): Promise<void> => {
   }
 }
 
+// ===== the live layer =====
+//
+// A backend page that only refreshes when you press the button reads as
+// a form, not as a service. The page now polls on its own (every 4 s),
+// measures the round trip, and keeps a short history so the uptime
+// line is a LINE, not a claim.
+const POLL_INTERVAL_MS = 4000
+/** How many poll samples the uptime line keeps. */
+const HISTORY_LEN = 40
+
+interface PollSample {
+  at: number
+  ok: number
+  fail: number
+  avgLatency: number
+}
+
+const history = ref<PollSample[]>([])
+const liveUptime = ref(100)
+let pollTimer: number | null = null
+
+const recordSample = (): void => {
+  const latencies = probed.value
+    .filter((e) => e.probe && e.latencyMs !== undefined)
+    .map((e) => e.latencyMs!)
+  const avgLatency = latencies.length
+    ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+    : 0
+  const ok = probed.value.filter((e) => e.probe && !e.error).length
+  const fail = probed.value.filter((e) => e.probe && e.error).length
+  history.value = [...history.value, { at: Date.now(), ok, fail, avgLatency }].slice(-HISTORY_LEN)
+  const total = history.value.length
+  const good = history.value.reduce((n, s) => n + (s.fail === 0 ? 1 : 0), 0)
+  liveUptime.value = total > 0 ? Math.round((good / total) * 100) : 100
+}
+
+/** The uptime line: the per-sample ok/fail history as a sparkline. */
+const uptimePoints = computed(() => {
+  const h = history.value
+  if (h.length < 2) return ''
+  return h
+    .map((s, i) => {
+      const x = (i / (h.length - 1)) * 100
+      const y = s.fail === 0 ? 4 : 22
+      return `${x.toFixed(1)},${y}`
+    })
+    .join(' ')
+})
+
+const avgLatency = computed(() => {
+  const l = probed.value
+    .filter((e) => e.probe && e.latencyMs !== undefined)
+    .map((e) => e.latencyMs!)
+  return l.length ? Math.round(l.reduce((a, b) => a + b, 0) / l.length) : 0
+})
+
+/** The ticks between polls — the page visibly breathes. */
+const tick = ref(0)
 onMounted(async () => {
   await discoverEndpoints()
   void refresh()
+  pollTimer = window.setInterval(() => {
+    tick.value += 1
+    void refresh()
+    recordSample()
+  }, POLL_INTERVAL_MS)
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer !== null) window.clearInterval(pollTimer)
 })
 </script>
 
@@ -556,6 +677,97 @@ onMounted(async () => {
   }
   .view-header h1 {
     font-size: 22px;
+  }
+}
+
+/* ===== the live layer =====
+   A backend page that only answers when you press a button reads as a
+   form. These bits make the service's state visible WITHOUT a click:
+   the breathing dot, the uptime line, the round-trip numbers. */
+.pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  margin-left: 2px;
+  animation: pulse-out 4s var(--ds-ease-out) infinite;
+}
+@keyframes pulse-out {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 1;
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 9px transparent;
+    opacity: 0.4;
+  }
+}
+.live-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0 4px;
+}
+.live-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--dc-hairline);
+  border-radius: var(--dc-radius);
+  background: color-mix(in srgb, var(--dc-panel-2) 60%, transparent);
+  min-width: 0;
+}
+.live-label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dc-text-faint);
+}
+.live-value {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--dc-text);
+  font-variant-numeric: tabular-nums;
+}
+.live-value.warn {
+  color: var(--dc-warning);
+}
+.live-value em {
+  margin-left: 2px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--dc-text-dim);
+}
+.live-note {
+  font-size: 11px;
+  color: var(--dc-text-faint);
+}
+.live-spark {
+  justify-content: space-between;
+}
+.spark {
+  width: 100%;
+  height: 26px;
+  color: var(--dc-ok);
+  overflow: visible;
+}
+.latency {
+  margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dc-text-faint);
+  font-size: 11px;
+}
+.latency em {
+  font-style: normal;
+  opacity: 0.75;
+}
+@media (max-width: 720px) {
+  .live-strip {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

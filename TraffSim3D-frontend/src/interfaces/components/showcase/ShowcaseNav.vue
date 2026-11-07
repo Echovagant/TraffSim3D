@@ -19,6 +19,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import ThemeToggle from './ThemeToggle.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -99,6 +100,7 @@ const isActive = (to: string): boolean => route?.path === to
         </router-link>
       </nav>
       <router-link v-else to="/" class="back-pill" aria-label="返回首页">← 首页</router-link>
+      <ThemeToggle />
     </div>
   </header>
 </template>

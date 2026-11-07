@@ -13,12 +13,22 @@ test('Deliverables: the page loads and links to the other modules', async ({ pag
 
   await page.goto('/deliverables')
 
-  await expect(page.locator('main.placeholder-view')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'DeliveryLab' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '本模块做什么' })).toBeVisible()
+  // The page is the portfolio view now (2026-11-07): the architecture,
+  // the capability matrix, the screen wall and how to run it.
+  await expect(page.locator('main.delivery')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '架构' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '能力矩阵' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '界面' })).toBeVisible()
 
-  // The two links it offers must point at routes that exist.
-  const sceneLink = page.getByRole('link', { name: '看 SceneLab demo' })
+  // The screen wall links to every module that has a screen.
+  const wall = page.locator('.wall a[href]')
+  await expect(wall).toHaveCount(6)
+  for (const route of ['/scene-editor', '/smart-city', '/ai-playground', '/backend']) {
+    await expect(page.locator(`.wall a[href="${route}"]`)).toBeVisible()
+  }
+
+  // The two calls to action must point at routes that exist.
+  const sceneLink = page.getByRole('link', { name: '进入 SceneLab' })
   await expect(sceneLink).toBeVisible()
   await expect(sceneLink).toHaveAttribute('href', '/scene-editor')
 

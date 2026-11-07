@@ -41,140 +41,60 @@
         </figure>
       </section>
 
-      <section class="modules">
-        <header class="modules-header gsap-modules-header">
-          <h2>产品模块矩阵</h2>
-          <p>每个模块对应一个前端路由和一个后端 app。</p>
+      <!--
+        The modules, presented as a narrative rather than a wall of
+        cards (2026-11-07): the nav already lists them, so repeating
+        them as a grid of equal tiles was wallpaper. The three that
+        carry the story get a full-bleed band — a large screenshot
+        with the copy beside it — and the rest live in a typographic
+        index whose thumbnail arrives on hover.
+      -->
+      <section class="features">
+        <header class="modules-header gsap-modules-header" data-reveal>
+          <h2>能做什么</h2>
+          <p>三条主线：驾驶仿真、真实城区、AI 训练。</p>
         </header>
 
-        <div class="module-grid gsap-module-grid">
-          <router-link to="/scene-editor" class="module-card status-active" data-reveal>
-            <div class="ds-tile-media">
-              <img src="/tiles/tile-scenelab.png" alt="" loading="lazy" />
-            </div>
-            <div class="module-icon" aria-hidden>🚦</div>
-            <div class="module-body">
-              <div class="module-title-row">
-                <h3>SceneLab</h3>
-                <span class="badge badge-active">Active</span>
-              </div>
-              <p class="module-sub">场景编辑器 / SceneEditor</p>
-              <p class="module-desc">
-                3D 场景：车辆、信号灯、道路。已实现车迹、车道线（黄实线 +
-                白虚线）、信号灯相位倒计时条、选中高亮环、LocalStorage 持久化、并通过 Vite proxy
-                调用后端 health/ping。
-              </p>
-            </div>
-          </router-link>
+        <article
+          v-for="(m, i) in featured"
+          :key="m.to"
+          class="feature-band"
+          :class="{ 'is-flipped': i % 2 === 1 }"
+          data-reveal
+        >
+          <figure class="band-media">
+            <img :src="m.tile" :alt="`${m.name} 界面`" loading="lazy" />
+          </figure>
+          <div class="band-copy">
+            <span class="band-index">{{ String(i + 1).padStart(2, '0') }}</span>
+            <h3>{{ m.name }}</h3>
+            <p class="band-sub">{{ m.sub }}</p>
+            <p class="band-desc">{{ m.desc }}</p>
+            <router-link :to="m.to" class="band-link">
+              打开 {{ m.name }}
+              <span class="band-arrow" aria-hidden>→</span>
+            </router-link>
+          </div>
+        </article>
+      </section>
 
-          <router-link to="/simulation-lab" class="module-card status-active" data-reveal>
-            <div class="ds-tile-media">
-              <img src="/tiles/tile-simulationlab.png" alt="" loading="lazy" />
-            </div>
-            <div class="module-icon" aria-hidden>🧪</div>
-            <div class="module-body">
-              <div class="module-title-row">
-                <h3>SimulationLab</h3>
-                <span class="badge badge-active">Active</span>
-              </div>
-              <p class="module-sub">物理 + 传感器仿真</p>
-              <p class="module-desc">
-                接入 Rapier WASM 做车辆动力学、碰撞检测；叠加 lidar / camera / IMU 传感器仿真，为 RL
-                训练提供真实可微的观测空间。
-              </p>
-            </div>
-          </router-link>
-
-          <router-link to="/map-importer" class="module-card status-active" data-reveal>
-            <div class="ds-tile-media">
-              <img src="/tiles/tile-maplab.png" alt="" loading="lazy" />
-            </div>
-            <div class="module-icon" aria-hidden>🗺️</div>
-            <div class="module-body">
-              <div class="module-title-row">
-                <h3>MapLab</h3>
-                <span class="badge badge-active">Active</span>
-              </div>
-              <p class="module-sub">OSM 地图导入与路网生成</p>
-              <p class="module-desc">
-                解析 OpenStreetMap 的 <code>.osm</code> / <code>.pbf</code> 文件 → 路网 graph →
-                SceneLab 加载。 通过后端 <code>apps/maps</code> (PostGIS) 持久化, 前端拉取并渲染。
-              </p>
-            </div>
-          </router-link>
-
-          <!-- SmartCity 3D basemap (Cesium + Three.js overlay) -->
-          <router-link
-            to="/smart-city"
-            class="module-card status-active module-card-featured"
-            data-testid="smart-city-card"
-            data-reveal
-          >
-            <div class="ds-tile-media">
-              <img src="/tiles/tile-smartcity.png" alt="" loading="lazy" />
-            </div>
-            <div class="module-icon" aria-hidden>🛰️</div>
-            <div class="module-body">
-              <div class="module-title-row">
-                <h3>SmartCity 3D</h3>
-                <span class="badge badge-new">New</span>
-              </div>
-              <p class="module-sub">智慧城市 3D 底图（Cesium + OSM 瓦片）</p>
-              <p class="module-desc">
-                Cesium 1.134 渲染 OSM 瓦片 + OSM 3D 拉伸建筑 + 道路多段线,Three.js 透明 overlay
-                渲染车辆 + 信号灯 + LiDAR。 鸟瞰 / 平视 / 自由 切换;Overpass
-                数据经后端缓存,首次冷启动 &lt; 100ms。
-              </p>
-            </div>
-          </router-link>
-
-          <router-link to="/ai-playground" class="module-card status-active" data-reveal>
-            <div class="ds-tile-media"><img src="/tiles/tile-ai.png" alt="" loading="lazy" /></div>
-            <div class="module-icon" aria-hidden>🤖</div>
-            <div class="module-body">
-              <div class="module-title-row">
-                <h3>AI Proving Ground</h3>
-                <span class="badge badge-active">Active</span>
-              </div>
-              <p class="module-sub">RL 训练 + 回放</p>
-              <p class="module-desc">
-                与后端 apps/rl (PyTorch + Gymnasium) 联动:多智能体策略训练、回放 buffer
-                可视化、学到策略的影子车在 SceneLab 里 replay。
-              </p>
-            </div>
-          </router-link>
-
-          <router-link to="/deliverables" class="module-card status-planned" data-reveal>
-            <div class="module-icon" aria-hidden>📦</div>
-            <div class="module-body">
-              <div class="module-title-row">
-                <h3>DeliveryLab</h3>
-                <span class="badge badge-planned">Planned</span>
-              </div>
-              <p class="module-sub">部署与交付物总览</p>
-              <p class="module-desc">
-                本地部署清单、ADR 归档、API 文档、测试覆盖率报告的目录页。 不引入新功能, 只把
-                已可用的交付物集中展示给项目接手人。
-              </p>
-            </div>
-          </router-link>
-
-          <router-link to="/backend" class="module-card status-active" data-reveal>
-            <div class="module-icon" aria-hidden>⚙️</div>
-            <div class="module-body">
-              <div class="module-title-row">
-                <h3>Backend Services</h3>
-                <span class="badge badge-active">Active</span>
-              </div>
-              <p class="module-sub">FastAPI 服务面</p>
-              <p class="module-desc">
-                所有模块的统一 API 入口。当前已暴露 <code>GET /health</code> 与
-                <code>GET /api/v1/ping</code> 两个 smoke 端点;scene sync、tick stream、RL control
-                等接口尚未开放。
-              </p>
-            </div>
-          </router-link>
-        </div>
+      <section class="modules">
+        <header class="modules-header gsap-modules-header" data-reveal>
+          <h2>模块索引</h2>
+          <p>其余模块 — 悬停可预览界面。</p>
+        </header>
+        <ul class="module-index">
+          <li v-for="m in rest" :key="m.to" data-reveal>
+            <router-link :to="m.to" class="index-row">
+              <span class="index-name">{{ m.name }}</span>
+              <span class="index-sub">{{ m.sub }}</span>
+              <span class="index-desc">{{ m.desc }}</span>
+              <span class="index-thumb" aria-hidden>
+                <img :src="m.tile" alt="" loading="lazy" />
+              </span>
+            </router-link>
+          </li>
+        </ul>
       </section>
     </main>
 
@@ -216,6 +136,91 @@ import { gsap } from 'gsap'
 import EnhancedWebGLBackground from '@interfaces/components/showcase/EnhancedWebGLBackground.vue'
 
 const root = ref<HTMLElement | null>(null)
+
+/**
+ * The modules, as data.
+ *
+ * The cards used to be hand-written markup; they are now rendered from
+ * this list, which lets the page present them in two forms: the big
+ * editorial bands (the three that carry the story) and the compact
+ * index (all seven, with the thumbnail arriving on hover).
+ */
+interface ModuleEntry {
+  to: string
+  name: string
+  sub: string
+  desc: string
+  badge: 'Active' | 'New' | 'Planned'
+  tile: string
+  /** Featured modules get a full-bleed band. */
+  feature?: boolean
+}
+
+const MODULES: readonly ModuleEntry[] = [
+  {
+    to: '/scene-editor',
+    name: 'SceneLab',
+    sub: '场景编辑器',
+    desc: '车道级驾驶仿真：按车道语义选择转向、跟车、让行、红灯停车，路口不穿模、不瞬移。',
+    badge: 'Active',
+    tile: '/tiles/tile-scenelab.png',
+    feature: true,
+  },
+  {
+    to: '/smart-city',
+    name: 'SmartCity 3D',
+    sub: '大屏 · Cesium + Three.js',
+    desc: '真实城区底图上跑仿真：994 条道路、3 014 栋建筑，同源同基准，指挥中心读数实时刷新。',
+    badge: 'New',
+    tile: '/tiles/tile-smartcity.png',
+    feature: true,
+  },
+  {
+    to: '/ai-playground',
+    name: 'AI Proving Ground',
+    sub: 'RL 训练 + 回放',
+    desc: '多智能体协商：策略在仿真里试错，训练曲线与回放过程可逐步查看。',
+    badge: 'Active',
+    tile: '/tiles/tile-ai.png',
+    feature: true,
+  },
+  {
+    to: '/simulation-lab',
+    name: 'SimulationLab',
+    sub: '物理 + 传感器仿真',
+    desc: 'Rapier 刚体动力学、碰撞检测，以及 LiDAR / 相机 / IMU 的观测空间。',
+    badge: 'Active',
+    tile: '/tiles/tile-simulationlab.png',
+  },
+  {
+    to: '/map-importer',
+    name: 'MapLab',
+    sub: 'OSM 地图导入与路网生成',
+    desc: '解析 .osm / .pbf，生成可行驶路网，直接送进 SceneLab。',
+    badge: 'Active',
+    tile: '/tiles/tile-maplab.png',
+  },
+  {
+    to: '/backend',
+    name: 'Backend',
+    sub: 'FastAPI 服务状态',
+    desc: '从 OpenAPI schema 动态发现端点，实时探活与时延。',
+    badge: 'Active',
+    tile: '/tiles/tile-backend.png',
+  },
+  {
+    to: '/deliverables',
+    name: 'DeliveryLab',
+    sub: '部署与交付物总览',
+    desc: '架构、契约、交付清单与验收口径。',
+    badge: 'Planned',
+    tile: '/tiles/tile-deliverables.png',
+  },
+]
+
+const featured = MODULES.filter((m) => m.feature)
+const rest = MODULES.filter((m) => !m.feature)
+
 let ctx: gsap.Context | null = null
 
 onMounted(() => {
@@ -876,16 +881,24 @@ html {
   padding: calc(var(--ds-space-8) + 20px) 0 var(--ds-space-7);
 }
 .hero-title {
-  font-family: var(--ds-font);
+  font-family: var(--ds-font-display);
   font-size: clamp(44px, 6.2vw, 76px);
   font-weight: 600;
   letter-spacing: -1.6px;
   line-height: 1.04;
+  /* The display face is a gradient on the night theme; on the paper
+     theme a white-to-grey gradient would be invisible, so the ink
+     gradient runs the other way. */
   background: linear-gradient(180deg, #ffffff 30%, #9aa0ab);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   text-shadow: none;
+}
+:root[data-theme='paper'] .hero-title {
+  background: linear-gradient(180deg, #1d1d1f 30%, #6b6b70);
+  -webkit-background-clip: text;
+  background-clip: text;
 }
 .hero-eyebrow {
   font-size: 13px;
@@ -915,7 +928,7 @@ html {
   margin-bottom: var(--ds-space-5);
 }
 .modules-header h2 {
-  font-family: var(--ds-font);
+  font-family: var(--ds-font-display);
   font-size: 34px;
   font-weight: 600;
   letter-spacing: -0.6px;
@@ -999,7 +1012,7 @@ html {
   padding: 0 16px;
 }
 .module-card h3 {
-  font-family: var(--ds-font);
+  font-family: var(--ds-font-display);
   font-size: 19px;
   font-weight: 600;
   letter-spacing: -0.3px;
@@ -1052,5 +1065,215 @@ html {
   color: var(--dc-text-faint);
   text-align: left;
   padding: 28px 0 40px;
+}
+
+/* ===================================================================
+   The editorial form (2026-11-07).
+
+   The modules are no longer a grid of equal tiles. The three that
+   carry the story are full-bleed BANDS — a large product shot beside
+   the copy, alternating sides — and the rest are typographic INDEX
+   ROWS whose thumbnail arrives on hover. The nav already lists every
+   module; repeating them as a wall of cards was wallpaper.
+   =================================================================== */
+
+.features {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-8);
+  padding-bottom: var(--ds-space-8);
+}
+.feature-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ds-space-7);
+}
+.feature-band.is-flipped {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+}
+.feature-band.is-flipped .band-media {
+  order: 2;
+}
+.band-media {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--dc-hairline);
+  border-radius: var(--dc-radius-xl);
+  background: var(--dc-panel);
+  box-shadow: var(--ds-shadow-product);
+  overflow: hidden;
+}
+.band-media img {
+  display: block;
+  width: 100%;
+  /* A fixed ratio so the bands line up whatever the screenshot's shape
+     is — a 4:5 shot would otherwise leave the band twice as tall. */
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--dc-radius-lg);
+  background: var(--dc-screen);
+  transform: scale(1.01);
+  transition: transform var(--ds-dur-slow) var(--ds-ease-out);
+}
+.feature-band:hover .band-media img {
+  transform: scale(1.04);
+}
+.band-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.band-index {
+  font-family: var(--ds-font-display);
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: var(--dc-flow);
+}
+.band-copy h3 {
+  margin: 0;
+  font-family: var(--ds-font-display);
+  font-size: clamp(26px, 3vw, 38px);
+  font-weight: 600;
+  letter-spacing: -0.6px;
+  color: var(--dc-text);
+}
+.band-sub {
+  margin: 0;
+  font-size: 14px;
+  color: var(--dc-flow);
+}
+.band-desc {
+  margin: 0;
+  max-width: 46ch;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--dc-text-dim);
+}
+/* The link with its arrow nested in its own disc (Apple's
+   button-in-button). */
+.band-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 9px 8px 9px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--dc-hairline);
+  background: color-mix(in srgb, var(--dc-panel) 70%, transparent);
+  color: var(--dc-text);
+  font-size: 13px;
+  text-decoration: none;
+  width: fit-content;
+  transition:
+    border-color var(--ds-dur-fast) var(--ds-ease-out),
+    transform var(--ds-dur) var(--ds-ease-spring);
+}
+.band-link:hover {
+  border-color: var(--dc-flow);
+  transform: translate3d(0, -2px, 0);
+}
+.band-arrow {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--dc-flow);
+  transition: transform var(--ds-dur) var(--ds-ease-spring);
+}
+.band-link:hover .band-arrow {
+  transform: translate3d(2px, 0, 0);
+}
+:root[data-theme='paper'] .band-arrow {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* ===== the index ===== */
+.modules {
+  padding-bottom: var(--ds-space-8);
+}
+.module-index {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--dc-hairline);
+}
+.module-index li {
+  border-bottom: 1px solid var(--dc-hairline);
+}
+.index-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 260px) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 18px;
+  padding: 18px 4px;
+  color: var(--dc-text);
+  text-decoration: none;
+  transition: background var(--ds-dur-fast) var(--ds-ease-out);
+}
+.index-row:hover {
+  background: color-mix(in srgb, var(--dc-panel) 55%, transparent);
+}
+.index-name {
+  font-family: var(--ds-font-display);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+.index-sub {
+  font-size: 13px;
+  color: var(--dc-flow);
+}
+.index-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--dc-text-faint);
+}
+/* The thumbnail arrives on hover — the preview the cards used to give,
+   without the wall. */
+.index-thumb {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 220px;
+  transform: translate3d(0, -46%, 0) scale(0.96);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--ds-dur) var(--ds-ease-out),
+    transform var(--ds-dur) var(--ds-ease-spring);
+}
+.index-thumb img {
+  display: block;
+  width: 100%;
+  border-radius: var(--dc-radius);
+  border: 1px solid var(--dc-hairline-strong);
+  box-shadow: var(--ds-shadow-product);
+}
+.index-row:hover .index-thumb {
+  opacity: 1;
+  transform: translate3d(0, -50%, 0) scale(1);
+}
+/* On a narrow screen the preview is dropped rather than squeezed. */
+@media (max-width: 900px) {
+  .feature-band,
+  .feature-band.is-flipped {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ds-space-5);
+  }
+  .feature-band.is-flipped .band-media {
+    order: 0;
+  }
+  .index-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .index-thumb {
+    display: none;
+  }
 }
 </style>

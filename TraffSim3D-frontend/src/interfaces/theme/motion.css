@@ -116,3 +116,34 @@
     animation: none;
   }
 }
+
+/* ===== the theme switch =====
+   While the View Transition runs, the OLD theme stays painted until the
+   new one is ready, then the browser cross-fades between them. The
+   wipe itself is animated in JS (a clip-path circle growing from the
+   toggle button); these rules make the cross-fade smooth and keep the
+   scrolling element from popping. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 2;
+}
+/* Without the API the switch is a plain cross-fade of the page. */
+html.theme-fading body {
+  animation: theme-fade 320ms var(--ds-ease-out);
+}
+@keyframes theme-fade {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}

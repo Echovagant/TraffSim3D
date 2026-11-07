@@ -103,7 +103,22 @@
     </section>
 
     <section class="card">
-      <h2>训练指标</h2>
+      <header class="card-head">
+        <h2>训练指标</h2>
+        <!-- The live proof: the page polls the backend every 2 s
+             already, but a visitor could not tell a live run from a
+             stale one. The breathing dot and the age of the last
+             answer say it out loud. -->
+        <span
+          class="live-badge"
+          :class="{ 'is-live': status.running, 'is-stale': statusAgeS > 8 }"
+          data-testid="live-badge"
+          :key="statusTick"
+        >
+          <span class="live-dot" aria-hidden></span>
+          {{ status.running ? '训练中' : '已结束' }} · {{ statusAgeLabel }}
+        </span>
+      </header>
       <div class="metrics">
         <div class="metric">
           <span>总步数</span><strong data-testid="metric-step">{{ status.step }}</strong>
@@ -666,8 +681,21 @@ interface Capabilities {
   device_fallback_reason: string
 }
 
-const BACKEND_URL =
-  (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8000'
+/**
+ * The backend's base URL.
+ *
+ * DEFAULT: the SAME ORIGIN — the request goes to `/api/...` and the
+ * vite proxy forwards it to the backend (the port comes from
+ * `VITE_BACKEND_PORT`). That is correct on every port and needs no
+ * CORS. The old default was a hard-coded `http://localhost:8000`,
+ * which simply did not exist on any machine whose backend runs on
+ * another port — the page then said "Failed to fetch" and the visitor
+ * concluded the training was broken (measured 2026-11-07).
+ *
+ * `VITE_BACKEND_URL` still wins for a genuinely separate origin
+ * (a deployed API).
+ */
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? ''
 
 const steps = ref(200)
 const nAgents = ref(2)
@@ -1212,6 +1240,31 @@ const isCollapsedSeed = (record: SignalSeedResult): boolean => {
   return names.length === 1 && names[0] === 'no_op'
 }
 
+// ===== the live layer =====
+//
+// The page already polls the status every 2 s (`pollHandle` below), so
+// the DATA was live all along — what was missing was the PROOF: a
+// visitor saw a chart that occasionally changed and had no way to tell
+// a live training from a stale one. So the badge below says it out
+// loud: a breathing dot, the state, and how long ago the last
+// answer arrived.
+const statusTick = ref(0)
+/** When the last status came in (ms). */
+const lastStatusAt = ref<number | null>(null)
+
+/** How long ago the last answer arrived (seconds). */
+const statusAgeS = computed(() =>
+  lastStatusAt.value === null ? 0 : Math.round((Date.now() - lastStatusAt.value) / 1000),
+)
+/** The same, phrased for the badge. */
+const statusAgeLabel = computed(() => {
+  if (lastStatusAt.value === null) return '尚未连接'
+  const s = statusAgeS.value
+  if (s < 1) return '刚刚更新'
+  if (s < 60) return `${s} 秒前更新`
+  return `${Math.round(s / 60)} 分钟前更新`
+})
+
 const refreshStatus = async (): Promise<void> => {
   try {
     const r = await fetch(`${BACKEND_URL}/api/v1/rl/status`)
@@ -1221,6 +1274,8 @@ const refreshStatus = async (): Promise<void> => {
     }
     const j = parseRLStatus<Status>(await r.json())
     status.value = j
+    lastStatusAt.value = Date.now()
+    statusTick.value += 1
     if (j.running) {
       running.value = true
     } else if (running.value) {
@@ -1642,5 +1697,70 @@ button.ghost:disabled {
   word-break: break-all;
   line-height: 1.5;
   margin-top: 4px;
+}
+
+/* ===== the live badge ===== */
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.card-head h2 {
+  margin: 0;
+}
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dc-hairline);
+  background: color-mix(in srgb, var(--dc-panel-2) 70%, transparent);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--dc-text-dim);
+  white-space: nowrap;
+  animation: badge-in 320ms var(--ds-ease-out);
+}
+@keyframes badge-in {
+  from {
+    opacity: 0.4;
+    transform: translate3d(0, -3px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--dc-text-faint);
+}
+.live-badge.is-live {
+  color: var(--dc-flow);
+  border-color: color-mix(in srgb, var(--dc-flow) 45%, transparent);
+}
+.live-badge.is-live .live-dot {
+  background: var(--dc-flow);
+  animation: live-breathe 2s var(--ds-ease-out) infinite;
+}
+.live-badge.is-stale {
+  color: var(--dc-warning);
+  border-color: color-mix(in srgb, var(--dc-warning) 45%, transparent);
+}
+@keyframes live-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--dc-flow) 60%, transparent);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+    opacity: 0.55;
+  }
 }
 </style>
