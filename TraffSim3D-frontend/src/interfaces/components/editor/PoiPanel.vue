@@ -149,16 +149,14 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
      already carries the route panel (top) and the scene outline
      (bottom), and a third panel there would cover the outline's
      buttons. */
-  position: absolute;
-  top: 300px;
-  right: 12px;
-  min-width: 240px;
-  max-width: 320px;
+  /* Positioned by the layout (a grid slot). */
+  position: relative;
+  width: 100%;
   max-height: 40vh;
   overflow-y: auto;
   padding: 10px 12px;
-  background: rgba(15, 23, 42, 0.85);
-  color: #f1f5f9;
+  background: color-mix(in srgb, var(--dc-panel) 86%, transparent);
+  color: var(--dc-text);
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
@@ -180,8 +178,8 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
 }
 .poi-panel .ctrl input {
   background: #1e293b;
-  color: #f1f5f9;
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: var(--dc-text);
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 42%, transparent);
   border-radius: 4px;
   padding: 3px 5px;
   font-size: 12px;
@@ -217,7 +215,7 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
   margin: 6px 0 0;
 }
 .poi-panel .muted {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
 }
 .poi-panel .small {
   font-size: 11px;
@@ -245,7 +243,7 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
   cursor: pointer;
 }
 .poi-panel .poi-list li:hover {
-  background: rgba(148, 163, 184, 0.12);
+  background: color-mix(in srgb, var(--dc-accent) 24%, transparent);
 }
 .poi-panel .poi-list li.selected {
   background: rgba(37, 99, 235, 0.28);
@@ -263,7 +261,7 @@ const colorOf = (category: string): string => `#${poiColor(category).toString(16
   white-space: nowrap;
 }
 .poi-panel .cat {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   flex: none;
 }
 .poi-panel .detail {

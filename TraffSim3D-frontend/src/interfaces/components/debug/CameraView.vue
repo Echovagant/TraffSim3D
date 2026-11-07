@@ -127,15 +127,15 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .camera-view {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  background: rgba(15, 23, 42, 0.85);
+  /* Positioned by the layout (a grid slot), not by offsets. */
+  position: relative;
+  width: 100%;
+  background: color-mix(in srgb, var(--dc-panel) 86%, transparent);
   border-radius: 6px;
   padding: 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  color: #f1f5f9;
+  color: var(--dc-text);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
   z-index: 5;
 }

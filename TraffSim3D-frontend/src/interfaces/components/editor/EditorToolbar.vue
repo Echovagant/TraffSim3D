@@ -318,9 +318,8 @@ const isCoordinatedKind = computed(() => world.controllerKind === 'coordinated')
 
 <style scoped>
 .toolbar {
-  position: absolute;
-  top: 12px;
-  left: 12px;
+  /* Positioned by the layout (the toolbar's own grid row). */
+  position: relative;
   display: flex;
   gap: 6px;
   align-items: center;
@@ -335,7 +334,7 @@ const isCoordinatedKind = computed(() => world.controllerKind === 'coordinated')
 .sep {
   width: 1px;
   height: 20px;
-  background: rgba(148, 163, 184, 0.25);
+  background: color-mix(in srgb, var(--dc-accent) 42%, transparent);
   margin: 0 2px;
 }
 button,
@@ -344,7 +343,7 @@ button,
   border: none;
   border-radius: 4px;
   background: #1e293b;
-  color: #f1f5f9;
+  color: var(--dc-text);
   cursor: pointer;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -393,7 +392,7 @@ button.danger:hover {
 .toolbar-collapse {
   padding: 6px 8px;
   background: transparent;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 4px;
   cursor: pointer;
@@ -402,7 +401,7 @@ button.danger:hover {
 }
 .toolbar-collapse:hover {
   background: rgba(148, 163, 184, 0.15);
-  color: #f1f5f9;
+  color: var(--dc-text);
 }
 
 /* Collapsed toolbar pill: replaces the full toolbar when folded. */
@@ -413,7 +412,7 @@ button.danger:hover {
   padding: 6px 12px;
   background: rgba(15, 23, 42, 0.7);
   color: #cbd5e1;
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 42%, transparent);
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
@@ -422,7 +421,7 @@ button.danger:hover {
 }
 .toolbar-toggle-collapsed:hover {
   background: rgba(15, 23, 42, 0.9);
-  color: #f1f5f9;
+  color: var(--dc-text);
 }
 
 /* Rate cluster: [−] [1.00×] [+] sits flush together. */

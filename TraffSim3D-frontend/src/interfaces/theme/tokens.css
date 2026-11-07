@@ -1,0 +1,154 @@
+/*
+ * The design-token layer.
+ *
+ * Until now every component hard-coded its own colours, which is why
+ * the three views drifted apart: the Smart City overlay was a dark box
+ * on a light basemap, the scene editor's panels each picked their own
+ * greys, and the home page had a palette of its own. This file is the
+ * single place the palette lives.
+ *
+ * The vocabulary follows the user's own "智慧城市" project
+ * (`Desktop\vue进阶\smart-city\Data-driven-modeling`): a command-centre
+ * ("大屏") language with four working colours —
+ *
+ *   screen   the void behind everything
+ *   panel    a card's own surface
+ *   accent   structural lines, borders, focus
+ *   flow     the colour of LIVE data (moving things)
+ *
+ * plus two semantic colours that never change with the theme
+ * (warning / alert — a warning must look like a warning in every
+ * theme), and a six-step chart series kept distinguishable on purpose.
+ *
+ * Every derived shade uses `color-mix()` so a component never writes
+ * a hex value: change a token and the whole surface follows.
+ *
+ * Three themes ship: the shapes are identical, only the hue family
+ * and the overall brightness differ, so switching one never moves
+ * anything (the reference project's rule).
+ */
+
+:root {
+  /* ===== the working palette (深空蓝 — the default) ===== */
+  --dc-screen: #04070f;
+  --dc-panel: #0b1526;
+  --dc-panel-2: #101d33;
+  --dc-accent: #1e40af;
+  --dc-flow: #0e7490;
+  --dc-secondary: #24507f;
+  --dc-text: #e0e7f1;
+  --dc-text-dim: #94a3b8;
+  --dc-text-faint: #64748b;
+  --dc-ok: #22c55e;
+  --dc-warning: #f59e0b;
+  --dc-alert: #f43f5e;
+
+  /* chart series — six steps, kept distinguishable in every theme */
+  --dc-series-1: #1e40af;
+  --dc-series-2: #0369a1;
+  --dc-series-3: #0e7490;
+  --dc-series-4: #2b5fa8;
+  --dc-series-5: #38bdf8;
+  --dc-series-6: #60a5fa;
+
+  /* ===== the scene's own road/building colours ===== */
+  --dc-road-main: #2b5fa8;
+  --dc-road-local: #1b3f63;
+  --dc-building: #16243c;
+  --dc-building-edge: #1e40af;
+  --dc-building-residential: #1b2c4a;
+  --dc-building-commercial: #20395c;
+  --dc-building-public: #264a6b;
+  --dc-building-industrial: #182234;
+
+  /* ===== shape & rhythm ===== */
+  --dc-radius: 3px;
+  --dc-radius-lg: 6px;
+  --dc-panel-padding: 12px;
+  --dc-gap: 10px;
+  --dc-label-size: 11px;
+  --dc-small-size: 10px;
+  --dc-title-size: 15px;
+  --dc-metric-size: 22px;
+
+  /* ===== elevation =====
+     A single z-scale, so "which panel is on top" is a question with
+     one answer. (Before this the overlays used 0/1/2/5/10/20/50/100
+     plus five panels with no z-index at all — the DOM order decided.) */
+  --dc-z-base: 0;
+  --dc-z-canvas: 1;
+  --dc-z-overlay: 10;
+  --dc-z-panel: 20;
+  --dc-z-popover: 40;
+  --dc-z-toast: 60;
+  --dc-z-devtools: 90;
+
+  color-scheme: dark;
+}
+
+/* ===== 石墨灰 — neutral, low saturation (bright rooms, white walls) ===== */
+:root[data-theme='graphite'] {
+  --dc-screen: #0a0b0d;
+  --dc-panel: #16181c;
+  --dc-panel-2: #1e2127;
+  --dc-accent: #3f4756;
+  --dc-flow: #4b7f8f;
+  --dc-secondary: #343a44;
+  --dc-text: #e6e8ec;
+  --dc-text-dim: #9aa1ad;
+  --dc-text-faint: #6b7280;
+  --dc-series-1: #4b5563;
+  --dc-series-2: #5b7285;
+  --dc-series-3: #4b7f8f;
+  --dc-series-4: #6b7d8f;
+  --dc-series-5: #8aa3b5;
+  --dc-series-6: #a9bccb;
+  --dc-road-main: #47525f;
+  --dc-road-local: #2f363e;
+  --dc-building: #1b1e23;
+  --dc-building-edge: #3f4756;
+}
+
+/* ===== 城市青 — a cooler, greener night (control rooms) ===== */
+:root[data-theme='cyan'] {
+  --dc-screen: #03090b;
+  --dc-panel: #07202a;
+  --dc-panel-2: #0b2b36;
+  --dc-accent: #0e5f73;
+  --dc-flow: #12a0b8;
+  --dc-secondary: #14515f;
+  --dc-text: #dff1f4;
+  --dc-text-dim: #8fb4bd;
+  --dc-text-faint: #5d8189;
+  --dc-series-1: #0e5f73;
+  --dc-series-2: #0f7c8c;
+  --dc-series-3: #12a0b8;
+  --dc-series-4: #1c7f9b;
+  --dc-series-5: #45c4d6;
+  --dc-series-6: #7fdbe8;
+  --dc-road-main: #16788c;
+  --dc-road-local: #0d4c5a;
+  --dc-building: #062028;
+  --dc-building-edge: #0e7490;
+}
+
+/* ===== shared surface recipes ===== */
+.dc-surface {
+  background: color-mix(in srgb, var(--dc-panel) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 32%, transparent);
+  border-radius: var(--dc-radius);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--dc-accent) 12%, transparent);
+}
+
+.dc-glass {
+  background: color-mix(in srgb, var(--dc-panel) 72%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 26%, transparent);
+}
+
+/* Tabular figures everywhere a number is shown — the readouts must
+   not jitter as they tick. */
+.dc-num {
+  font-variant-numeric: tabular-nums;
+}

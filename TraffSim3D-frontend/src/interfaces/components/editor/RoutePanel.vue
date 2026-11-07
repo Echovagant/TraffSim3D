@@ -258,14 +258,12 @@ const turnHint = computed(() => {
 
 <style scoped>
 .route-panel {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  min-width: 240px;
-  max-width: 300px;
+  /* Positioned by the layout (a grid slot). */
+  position: relative;
+  width: 100%;
   padding: 10px 12px;
-  background: rgba(15, 23, 42, 0.85);
-  color: #f1f5f9;
+  background: color-mix(in srgb, var(--dc-panel) 86%, transparent);
+  color: var(--dc-text);
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
@@ -290,8 +288,8 @@ const turnHint = computed(() => {
   flex: 1;
   min-width: 0;
   background: #1e293b;
-  color: #f1f5f9;
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: var(--dc-text);
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 42%, transparent);
   border-radius: 4px;
   padding: 2px 4px;
   font-size: 12px;
@@ -355,7 +353,7 @@ const turnHint = computed(() => {
 }
 .route-panel .rows .row b {
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--dc-text);
 }
 .route-panel .rows .row b.arrived {
   color: #22c55e;

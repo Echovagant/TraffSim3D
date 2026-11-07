@@ -26,22 +26,40 @@
 
     <main class="content-wrap">
       <section class="hero">
-        <div class="hero-card">
-          <h1 class="gsap-hero-title">TraffSim3D</h1>
-          <p class="hero-tagline gsap-hero-tagline">
-            面向智慧城市的 3D 交通仿真平台 — 前端 Vue3 + Three.js，后端 FastAPI + PyTorch， 通过 DDD
-            分层 + 多智能体 RL 引擎联合驱动。
-          </p>
+        <!--
+          The hero is asymmetric on purpose (2026-11-07): a centred
+          white card with a big title is the landing-page template every
+          generated site has. The copy sits on the left, the evidence on
+          the right — and the evidence is a real screenshot of the
+          product, not a mock-up.
+        -->
+        <div class="hero-copy">
+          <p class="hero-eyebrow gsap-hero-title">3D 智能交通仿真 · 多智能体 RL</p>
+          <h1 class="hero-title gsap-hero-tagline">TraffSim3D</h1>
           <p class="hero-sub gsap-hero-sub">
-            场景编辑器、物理仿真、OSM 地图导入、智能体 RL 训练，另附 SmartCity 3D 底图(基于 Cesium +
-            OSM 瓦片 + 真实建筑 3D 拉伸)。
+            面向智慧城市的 3D 交通仿真平台 — 前端 Vue3 + Three.js，后端 FastAPI + PyTorch，
+            通过 DDD 分层 + 多智能体 RL 引擎联合驱动。场景编辑器、物理仿真、OSM 地图导入、
+            智能体 RL 训练，另附 SmartCity 3D 底图（Cesium + OSM 瓦片 + 真实建筑 3D 拉伸）。
           </p>
           <div class="hero-ctas gsap-hero-ctas">
-            <router-link to="/scene-editor" class="btn">进入 SceneLab</router-link>
-            <router-link to="/smart-city" class="btn primary">🛰️ SmartCity 3D</router-link>
-            <router-link to="/backend" class="btn ghost">查看后端状态</router-link>
+            <router-link to="/scene-editor" class="btn primary">进入 SceneLab</router-link>
+            <router-link to="/smart-city" class="btn">SmartCity 3D</router-link>
+            <router-link to="/backend" class="btn ghost">后端状态</router-link>
           </div>
+          <ul class="hero-facts">
+            <li><b>9</b><span>模块路由</span></li>
+            <li><b>1 233</b><span>前端单测</span></li>
+            <li><b>3 014</b><span>深圳福田建筑</span></li>
+            <li><b>60 s</b><span>信号周期上限</span></li>
+          </ul>
         </div>
+        <figure class="hero-shot">
+          <img
+            src="/scene-smartcity.png"
+            alt="SmartCity 3D：OSM 底图上的仿真路网与车辆"
+          />
+          <figcaption>SmartCity 3D — 深圳福田：994 条道路、3 014 栋建筑，仿真车辆跑在同源路网上</figcaption>
+        </figure>
       </section>
 
       <section class="modules">
@@ -284,14 +302,25 @@ onBeforeUnmount(() => {
   width: 100vw;
   min-height: 100vh;
   overflow-x: hidden;
-  color: rgba(15, 23, 42, 0.92);
+  color: var(--dc-text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
 html {
-  background: #f8fafc;
+  /* The night surface (2026-11-07): the WebGL particle field behind
+     the page blends ADDITIVELY, so it only reads as a glowing network
+     mesh on a dark ground — on the old light page it was a pale tangle. */
+  background: var(--dc-screen);
 }
 
 /* === Top nav === */
+/* The page itself is the night surface — the WebGL particle field
+   behind it uses ADDITIVE blending, so on a dark page the mesh glows
+   instead of washing out (on the old light page it was a pale grey
+   tangle). */
+.content-wrap {
+  background: transparent;
+}
+
 .top-nav {
   position: fixed;
   top: 0;
@@ -610,4 +639,211 @@ html {
   font-size: 12px;
   color: rgba(15, 23, 42, 0.5);
 }
+
+/* ===================================================================
+   The night skin (2026-11-07).
+
+   The page was a light theme: white nav, a big white hero card, pale
+   module cards — the generic landing-page look, and it disagreed with
+   the dark instrument language the editor and the Smart City screen now
+   speak. The animated background stays (it is the only motion on the
+   page and it reads as a network mesh, which is the point); everything
+   ON TOP of it is re-skinned with the `--dc-*` tokens.
+
+   The rules below only restyle; no markup outside the hero changed.
+   =================================================================== */
+
+.top-nav {
+  background: color-mix(in srgb, var(--dc-panel) 78%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid color-mix(in srgb, var(--dc-accent) 40%, transparent);
+  color: var(--dc-text);
+}
+.top-nav .nav-link {
+  color: var(--dc-text-dim);
+}
+.top-nav .nav-link:hover {
+  color: var(--dc-flow);
+}
+.top-nav .brand {
+  color: var(--dc-text);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  align-items: center;
+  gap: 40px;
+  padding: 56px 0 40px;
+}
+.hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.hero-eyebrow {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--dc-flow);
+}
+.hero-title {
+  margin: 0;
+  font-size: clamp(38px, 5vw, 62px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+  color: var(--dc-text);
+  text-shadow: 0 0 34px color-mix(in srgb, var(--dc-flow) 30%, transparent);
+}
+.hero-sub {
+  margin: 0;
+  max-width: 56ch;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--dc-text-dim);
+}
+.hero-ctas {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.hero-ctas .btn {
+  padding: 9px 18px;
+  border-radius: var(--dc-radius);
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--dc-panel) 72%, transparent);
+  color: var(--dc-text);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  transition: border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+.hero-ctas .btn:hover {
+  border-color: var(--dc-flow);
+  color: var(--dc-flow);
+  transform: translateY(-1px);
+}
+.hero-ctas .btn.primary {
+  background: color-mix(in srgb, var(--dc-flow) 26%, transparent);
+  border-color: var(--dc-flow);
+  color: var(--dc-text);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--dc-flow) 22%, transparent);
+}
+.hero-facts {
+  list-style: none;
+  display: flex;
+  gap: 26px;
+  margin: 14px 0 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+.hero-facts li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hero-facts b {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--dc-flow);
+  font-variant-numeric: tabular-nums;
+}
+.hero-facts span {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--dc-text-faint);
+}
+/* The evidence: a real screenshot of the product. */
+.hero-shot {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 38%, transparent);
+  border-radius: var(--dc-radius-lg);
+  background: color-mix(in srgb, var(--dc-panel) 74%, transparent);
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.55);
+}
+.hero-shot img {
+  display: block;
+  width: 100%;
+  border-radius: var(--dc-radius);
+  background: var(--dc-screen);
+}
+.hero-shot figcaption {
+  padding: 8px 4px 2px;
+  font-size: 11px;
+  color: var(--dc-text-faint);
+  letter-spacing: 0.04em;
+}
+
+/* ===== the module matrix ===== */
+.modules-header {
+  text-align: left;
+  margin-bottom: 18px;
+}
+.modules-header h2 {
+  color: var(--dc-text);
+  font-size: 22px;
+  letter-spacing: 0.02em;
+}
+.modules-header p {
+  color: var(--dc-text-faint);
+  font-size: 13px;
+}
+.module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
+  gap: 12px;
+}
+.module-card {
+  background: color-mix(in srgb, var(--dc-panel) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 30%, transparent);
+  border-radius: var(--dc-radius);
+  color: var(--dc-text);
+  transition: border-color 0.18s ease, transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.module-card:hover {
+  border-color: color-mix(in srgb, var(--dc-flow) 55%, transparent);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.45);
+}
+.module-card h3 {
+  color: var(--dc-text);
+}
+.module-sub {
+  color: var(--dc-flow);
+}
+.module-desc {
+  color: var(--dc-text-dim);
+}
+.module-icon {
+  background: color-mix(in srgb, var(--dc-accent) 22%, transparent);
+}
+.badge-active {
+  background: color-mix(in srgb, var(--dc-ok) 18%, transparent);
+  color: color-mix(in srgb, var(--dc-ok) 88%, var(--dc-text));
+}
+
+.site-footer {
+  border-top: 1px solid color-mix(in srgb, var(--dc-accent) 30%, transparent);
+  color: var(--dc-text-faint);
+  text-align: left;
+}
+
+@media (max-width: 980px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding-top: 32px;
+  }
+  .hero-shot {
+    order: -1;
+  }
+}
+
 </style>

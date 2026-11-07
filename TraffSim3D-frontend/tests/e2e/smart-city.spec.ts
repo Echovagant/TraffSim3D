@@ -95,8 +95,16 @@ test('Smart City: route mounts Cesium + Three.js canvases', async ({ page }) => 
   await expect(page.locator('[data-testid="pause-button"]')).toBeVisible()
   await expect(page.locator('[data-testid="view-mode-select"]')).toBeVisible()
 
-  // Status panel (right) shows vehicle + light counts.
-  await expect(page.locator('[data-testid="status-panel"]')).toBeVisible()
+  // The command-centre overlay (2026-11-07): the old single
+  // `status-panel` box became a top bar, two panel columns and an
+  // event feed — the landmarks below are that screen's contract.
+  await expect(page.locator('.dc-topbar')).toBeVisible()
+  await expect(page.locator('[data-testid="col-left"]')).toBeVisible()
+  await expect(page.locator('[data-testid="col-right"]')).toBeVisible()
+  await expect(page.locator('[data-testid="bottom-bar"]')).toBeVisible()
+  // The panels can be folded away, and the theme can be switched.
+  await expect(page.locator('[data-testid="toggle-panels"]')).toBeVisible()
+  await expect(page.locator('.theme-picker')).toBeVisible()
 
   // The basemap comes from OpenStreetMap — the same source (and the
   // same datum, WGS84) as the scene's roads. A Chinese provider's

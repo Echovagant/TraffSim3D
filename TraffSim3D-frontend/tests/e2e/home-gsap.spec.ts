@@ -34,6 +34,23 @@ import { expectVisualScreenshot } from './helpers/visual'
  * trigger fires, then poll until every animated element reports opacity 1 AND
  * has stopped moving.
  */
+/**
+ * Hide the animated background before a pixel comparison.
+ *
+ * The WebGL particle field behind the page is RANDOM (every particle
+ * gets a random position and colour) and it is additive — on the dark
+ * surface it is now bright enough that two runs never agree pixel for
+ * pixel. The comparison is about the LAYOUT, so the background is
+ * hidden for the capture (2026-11-07: the homepage's night skin made
+ * the mesh bright enough to break the baseline).
+ */
+const hideBackground = async (page: Page): Promise<void> => {
+  await page.addStyleTag({
+    content: 'canvas.webgl-background { visibility: hidden !important; }',
+  })
+  await page.waitForTimeout(200)
+}
+
 const waitForSettled = async (page: Page, selectors: string[]): Promise<void> => {
   await page.waitForFunction(
     (sels: string[]) => {
@@ -88,6 +105,7 @@ test('Home: GSAP hero text reaches final opacity after animation', async ({ page
     .evaluate((el) => window.getComputedStyle(el).opacity)
   expect(parseFloat(subOpacity)).toBeGreaterThan(0.95)
 
+  await hideBackground(page)
   await expectVisualScreenshot(page.locator('.hero'), 'home-gsap-hero.png')
 })
 test('Home: SmartCity 3D card is rendered as featured', async ({ page }) => {
@@ -169,6 +187,7 @@ test.describe('Home: full-page baseline', () => {
       })
     })
 
+    await hideBackground(page)
     await expectVisualScreenshot(page.locator('main'), 'home-gsap-full.png')
   })
 })

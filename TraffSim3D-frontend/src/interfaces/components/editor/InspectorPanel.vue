@@ -244,13 +244,12 @@ const deleteSelected = () => {
 .inspector {
   /* Right column, below the DebugPanel. The DebugPanel is ~140px tall;
    * this offset is its top (12) + height + 16 gap, rounded. */
-  position: absolute;
-  top: 168px;
-  right: 12px;
-  width: 240px;
+  /* Positioned by the layout (a grid slot). */
+  position: relative;
+  width: 100%;
   padding: 10px;
-  background: rgba(15, 23, 42, 0.85);
-  color: #f1f5f9;
+  background: color-mix(in srgb, var(--dc-panel) 86%, transparent);
+  color: var(--dc-text);
   border-radius: 6px;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -282,7 +281,7 @@ const deleteSelected = () => {
 .inspector input,
 .inspector select {
   background: #1e293b;
-  color: #f1f5f9;
+  color: var(--dc-text);
   border: 1px solid #334155;
   border-radius: 4px;
   padding: 2px 4px;
@@ -318,7 +317,7 @@ const deleteSelected = () => {
 }
 /* Read-only value (the signal controller owns the phase). */
 .inspector .readonly {
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-weight: 600;
   text-transform: none;
 }
@@ -331,7 +330,7 @@ const deleteSelected = () => {
 .inspector button {
   padding: 3px 6px;
   background: #1e293b;
-  color: #f1f5f9;
+  color: var(--dc-text);
   border: none;
   border-radius: 4px;
   cursor: pointer;

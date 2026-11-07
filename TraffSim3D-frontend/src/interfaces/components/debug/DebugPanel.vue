@@ -254,18 +254,18 @@ const backendTooltip = computed(() => {
 
 <style scoped>
 .debug {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  min-width: 220px;
+  /* The layout owns the position now (a grid slot in the scene
+     editor) — the panel just fills its slot. */
+  position: relative;
+  width: 100%;
   /* The panel is absolutely positioned, so its width is shrink-to-fit:
      one long readout — the per-lane vehicle distribution of a big
      scene — used to stretch it across the whole screen (1 268 px
      measured) and its text ran over the route panel. */
   max-width: 340px;
   padding: 10px 12px;
-  background: rgba(15, 23, 42, 0.85);
-  color: #f1f5f9;
+  background: color-mix(in srgb, var(--dc-panel) 86%, transparent);
+  color: var(--dc-text);
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
@@ -315,7 +315,7 @@ const backendTooltip = computed(() => {
   vertical-align: 1px;
 }
 .debug .dot-unknown {
-  background: #64748b;
+  background: var(--dc-text-faint);
 }
 .debug .dot-ok {
   background: #22c55e;
@@ -331,7 +331,7 @@ const backendTooltip = computed(() => {
   padding: 1px 6px;
   font-size: 12px;
   background: #1e293b;
-  color: #f1f5f9;
+  color: var(--dc-text);
   border: none;
   border-radius: 3px;
   cursor: pointer;

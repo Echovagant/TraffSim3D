@@ -5,6 +5,10 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger'
 
 import App from '@/App.vue'
 import router from '@interfaces/router'
+// The design-token layer (palette, shape, z-scale). Imported once, here,
+// so every component reads the same variables — before this, each one
+// hard-coded its own colours and the three views drifted apart.
+import '@interfaces/theme/tokens.css'
 
 // Register GSAP plugins once at app boot. ScrollTrigger is
 // used by HomeView for module-card stagger-on-scroll entrance and

@@ -332,7 +332,14 @@ test.describe('driving behaviour (live scene)', () => {
         if (a.road === b.road) {
           // Same road: motion is continuous — no teleport, no jump of
           // two lanes.
-          const bound = (a.sp || 16) * wallS * 1.5 + 5
+          // The bound uses the HIGHER of the two samples' speeds plus
+          // an acceleration allowance: a vehicle that starts from a
+          // red light travels much further than its starting speed
+          // suggests over a long sample gap (measured: 11.3 m in 3.2 s
+          // of sim time from 1.2 m/s — physics, not a teleport). A real
+          // teleport happens inside ONE frame, where the gap is tiny
+          // and the bound stays small.
+          const bound = (Math.max(a.sp, b.sp) + 3) * wallS * 1.2 + 5
           expect(d, `${id} moved ${d.toFixed(1)} m in ${wallS.toFixed(2)} s`).toBeLessThan(bound)
           expect(Math.abs(b.lane - a.lane), `${id} laneIndex jump at wt=${b.wt}`).toBeLessThan(2)
         } else {

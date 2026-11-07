@@ -151,7 +151,23 @@ const osmiumToFeatureCollection = (elements: unknown[]): MinimalGeoJSON => {
 
 // ---- Style helpers ----
 
-const ROAD_COLOR = '#fbbf24' // amber, matches the toolbar's road tone
+/**
+ * Read a design token from the document root.
+ *
+ * The 3D city and the dashboard must show the SAME palette — a theme
+ * switch has to move the road network and the panels together. The
+ * palette therefore lives in CSS (`interfaces/theme/tokens.css`) and
+ * the scene reads the resolved values (`getComputedStyle` resolves
+ * `color-mix()` to a concrete colour, so the scene gets exactly what
+ * the screen shows).
+ */
+const token = (name: string, fallback: string): string => {
+  if (typeof document === 'undefined') return fallback
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return raw.length > 0 ? raw : fallback
+}
+
+const ROAD_COLOR = () => token('--dc-road-main', '#2b5fa8')
 const ROAD_WIDTH_PX = 3
 const BUILDING_OPACITY = 0.75
 const DEFAULT_BUILDING_HEIGHT_M = 10
@@ -201,23 +217,25 @@ const PUBLIC_TAGS = new Set([
 ])
 const INDUSTRIAL_TAGS = new Set(['industrial', 'warehouse', 'factory', 'manufacture'])
 
-const COLOR_RESIDENTIAL = '#c4a882' // warm sandstone
-const COLOR_COMMERCIAL = '#7890a8' // cool blue-grey
-const COLOR_PUBLIC = '#88b0d0' // light steel blue
-const COLOR_INDUSTRIAL = '#8a8a90' // dark neutral grey
-const COLOR_DEFAULT = '#a0a0a8' // neutral grey
+// Building tones come from the theme tokens too — the night palette
+// wants dark blocks with a cool edge, not the old daylight sandstones.
+const COLOR_RESIDENTIAL = () => token('--dc-building-residential', '#1b2c4a')
+const COLOR_COMMERCIAL = () => token('--dc-building-commercial', '#20395c')
+const COLOR_PUBLIC = () => token('--dc-building-public', '#264a6b')
+const COLOR_INDUSTRIAL = () => token('--dc-building-industrial', '#182234')
+const COLOR_DEFAULT = () => token('--dc-building', '#16243c')
 
 const getBuildingColor = (tags: Record<string, unknown> | undefined): string => {
-  if (!tags) return COLOR_DEFAULT
+  if (!tags) return COLOR_DEFAULT()
   const buildingTag = (tags['building'] as string | undefined)?.toLowerCase() ?? ''
-  if (RESIDENTIAL_TAGS.has(buildingTag)) return COLOR_RESIDENTIAL
-  if (COMMERCIAL_TAGS.has(buildingTag)) return COLOR_COMMERCIAL
-  if (PUBLIC_TAGS.has(buildingTag)) return COLOR_PUBLIC
-  if (INDUSTRIAL_TAGS.has(buildingTag)) return COLOR_INDUSTRIAL
+  if (RESIDENTIAL_TAGS.has(buildingTag)) return COLOR_RESIDENTIAL()
+  if (COMMERCIAL_TAGS.has(buildingTag)) return COLOR_COMMERCIAL()
+  if (PUBLIC_TAGS.has(buildingTag)) return COLOR_PUBLIC()
+  if (INDUSTRIAL_TAGS.has(buildingTag)) return COLOR_INDUSTRIAL()
   // amenity tag as fallback for public buildings
   const amenity = (tags['amenity'] as string | undefined)?.toLowerCase() ?? ''
-  if (amenity) return COLOR_PUBLIC
-  return COLOR_DEFAULT
+  if (amenity) return COLOR_PUBLIC()
+  return COLOR_DEFAULT()
 }
 
 /** Main entry: load roads + buildings, attach styled GeoJsonDataSources
@@ -238,7 +256,7 @@ export const loadOSMScene = async (
   // terrain (we don't use terrain here yet, but this is forward-compat).
   const roads = await Cesium.GeoJsonDataSource.load(roadsGeo, {
     clampToGround: true,
-    stroke: Cesium.Color.fromCssColorString(ROAD_COLOR),
+    stroke: Cesium.Color.fromCssColorString(ROAD_COLOR()),
     strokeWidth: ROAD_WIDTH_PX,
   })
   viewer.dataSources.add(roads)
@@ -248,9 +266,34 @@ export const loadOSMScene = async (
   // underneath stays visible through them.
   const buildings = await Cesium.GeoJsonDataSource.load(buildingsGeo, {
     clampToGround: true,
+    // The DEFAULT outline colour of a GeoJson polygon is Cesium's own
+    // yellow — and on a ground-clamped polygon the outline survives
+    // every per-entity attempt to switch it off (measured 2026-11-05:
+    // setting `outline = false`, `outlineWidth = 0` and the theme's
+    // outline colour per entity all left 3014 yellow footprints; only
+    // 5 of 3014 entities even kept the per-entity value, because
+    // adding the datasource to the viewer rewrites the polygon
+    // graphics). The styles that DO stick are the ones applied at
+    // creation, so the outline and the fill are set here.
+    stroke: Cesium.Color.fromCssColorString(token('--dc-building-edge', '#1e40af')),
+    fill: Cesium.Color.fromCssColorString(token('--dc-building', '#16243c')).withAlpha(
+      BUILDING_OPACITY,
+    ),
   })
-  for (const entity of buildings.entities.values) {
-    if (!entity.polygon) continue
+  /**
+   * Style one building entity.
+   *
+   * The order matters, and it cost two measured rounds to get right
+   * (2026-11-05): adding a ground-clamped datasource to the viewer
+   * REWRITES the entities' polygon graphics, so a style applied
+   * before the add is thrown away — measured: 5 of 3014 buildings kept
+   * it, the other 3009 came back with Cesium's DEFAULT yellow outline,
+   * which on the night map was the loudest thing on screen. So the
+   * style is applied AFTER the add, and `entityAdded` covers the
+   * entities that arrive later.
+   */
+  const styleBuilding = (entity: Cesium.Entity): void => {
+    if (!entity.polygon) return
     const props = entity.properties
     const getTag = (key: string): string | undefined => {
       const p = props?.[key as keyof typeof props]
@@ -275,11 +318,28 @@ export const loadOSMScene = async (
     entity.polygon.material = new Cesium.ColorMaterialProperty(
       Cesium.Color.fromCssColorString(color).withAlpha(BUILDING_OPACITY),
     )
+    // The outline is the one thing the per-entity flags do NOT settle:
+    // on a ground-clamped polygon Cesium still draws the footprint with
+    // `outlineColor` (its default is YELLOW). So the colour is set to
+    // the theme's edge tone and the width to zero: whichever path
+    // draws it, it is now dark.
     entity.polygon.outline = new Cesium.ConstantProperty(false)
+    entity.polygon.outlineWidth = new Cesium.ConstantProperty(0)
+    entity.polygon.outlineColor = new Cesium.ColorMaterialProperty(
+      Cesium.Color.fromCssColorString(token('--dc-building-edge', '#1e40af')),
+    )
     entity.polygon.closeTop = new Cesium.ConstantProperty(true)
     entity.polygon.closeBottom = new Cesium.ConstantProperty(true)
   }
   viewer.dataSources.add(buildings)
+  for (const entity of buildings.entities.values) styleBuilding(entity)
+  // Entities that arrive later (the datasource keeps creating them for
+  // a while) get the same style — the event is not in this Cesium
+  // build's typings, hence the cast.
+  const addable = buildings as unknown as {
+    entityAdded?: { addEventListener: (fn: (entity: Cesium.Entity) => void) => void }
+  }
+  addable.entityAdded?.addEventListener((entity) => styleBuilding(entity))
 
   return {
     roads,

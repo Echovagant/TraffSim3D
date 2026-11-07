@@ -125,15 +125,14 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
 
 <style scoped>
 .outline {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  width: 240px;
+  /* Positioned by the layout (a grid slot). */
+  position: relative;
+  width: 100%;
   max-height: 320px;
   display: flex;
   flex-direction: column;
-  background: rgba(15, 23, 42, 0.85);
-  color: #f1f5f9;
+  background: color-mix(in srgb, var(--dc-panel) 86%, transparent);
+  color: var(--dc-text);
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
@@ -295,12 +294,12 @@ const statusIcon = (s: 'driving' | 'waiting' | 'crashed'): string => {
 .empty {
   margin: 0;
   padding: 12px 10px;
-  color: #94a3b8;
+  color: var(--dc-text-dim);
   font-size: 11px;
   line-height: 1.5;
 }
 .empty code {
-  background: rgba(148, 163, 184, 0.12);
+  background: color-mix(in srgb, var(--dc-accent) 24%, transparent);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 11px;

@@ -86,6 +86,14 @@ export const createCesiumViewer = (
     geocoder: false,
     infoBox: false,
     selectionIndicator: false,
+    // Cesium's own chrome overlays the dashboard panels (the help widget
+    // and the "Mouse Wheel Scroll" hint both land on top of the right
+    // column). The credit line stays — OSM's data is ODbL and the tile
+    // service requires the attribution on screen.
+    homeButton: false,
+    navigationHelpButton: false,
+    sceneModePicker: false,
+    fullscreenButton: false,
     baseLayer: false,
     terrainProvider: undefined,
     sceneMode: Cesium.SceneMode.SCENE3D,
