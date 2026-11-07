@@ -39,13 +39,12 @@
         </label>
         <label class="ctrl">
           设备
-          <select v-model="device" data-testid="device-select">
-            <option value="auto">自动 (推荐)</option>
-            <option value="gpu" :disabled="!gpuAvailable">
-              GPU ({{ gpuDeviceName || '不可用' }})
-            </option>
-            <option value="cpu">CPU</option>
-          </select>
+          <AppSelect
+            v-model="device"
+            :options="deviceOptions"
+            aria-label="设备"
+            data-testid="device-select"
+          />
         </label>
         <label class="ctrl">
           Agent 数
@@ -60,12 +59,12 @@
         </label>
         <label class="ctrl">
           场景
-          <select v-model="sceneKind" data-testid="scene-kind-select">
-            <option value="cross">单路口</option>
-            <option value="corridor">走廊 (2 路口)</option>
-            <option value="t_junction">T 型路口</option>
-            <option value="roundabout">环形路口</option>
-          </select>
+          <AppSelect
+            v-model="sceneKind"
+            :options="SCENE_OPTIONS"
+            aria-label="场景"
+            data-testid="scene-kind-select"
+          />
         </label>
         <label class="ctrl">
           <input
@@ -449,12 +448,13 @@
       <div class="control-row">
         <label class="ctrl">
           Checkpoint
-          <select v-model="replayCkptName" data-testid="ckpt-replay-select">
-            <option value="">— 选择 —</option>
-            <option v-for="c in egoCheckpoints" :key="c.name" :value="c.name">
-              {{ c.name }} · {{ c.size_kb }}KB
-            </option>
-          </select>
+          <AppSelect
+            v-model="replayCkptName"
+            :options="egoCheckpointOptions"
+            wide
+            aria-label="ego checkpoint"
+            data-testid="ckpt-replay-select"
+          />
         </label>
         <button
           class="ghost"
@@ -484,11 +484,13 @@
       <div class="control-row">
         <label class="ctrl">
           目标车辆
-          <select v-model="replayTarget" data-testid="replay-target-select">
-            <option v-for="vid in availableVehicles" :key="vid" :value="vid">
-              {{ vid }}
-            </option>
-          </select>
+          <AppSelect
+            v-model="replayTarget"
+            :options="availableVehicleOptions"
+            wide
+            aria-label="回放目标"
+            data-testid="replay-target-select"
+          />
         </label>
         <button
           class="primary"
@@ -540,12 +542,13 @@
       <div class="control-row">
         <label class="ctrl">
           信号灯 checkpoint
-          <select v-model="signalCkptName" data-testid="signal-ckpt-select">
-            <option value="">— 选择 —</option>
-            <option v-for="c in signalCheckpoints" :key="c.name" :value="c.name">
-              {{ c.name }} · {{ c.size_kb }}KB
-            </option>
-          </select>
+          <AppSelect
+            v-model="signalCkptName"
+            :options="signalCheckpointOptions"
+            wide
+            aria-label="signal checkpoint"
+            data-testid="signal-ckpt-select"
+          />
         </label>
         <button
           class="ghost"
@@ -626,6 +629,33 @@
 </template>
 
 <script setup lang="ts">
+// ===== the drawn selects =====
+//
+// The native control's popup is an OS window (Windows paints the row
+// under the pointer with the system hover colour), so the control is
+// drawn instead — see components/command/AppSelect.vue.
+const SCENE_OPTIONS = [
+  { value: 'cross', label: '单路口' },
+  { value: 'corridor', label: '走廊 (2 路口)' },
+  { value: 't_junction', label: 'T 型路口' },
+  { value: 'roundabout', label: '环形路口' },
+]
+const deviceOptions = computed(() => [
+  { value: 'auto', label: '自动 (推荐)' },
+  { value: 'gpu', label: 'GPU', disabled: !gpuAvailable.value },
+  { value: 'cpu', label: 'CPU' },
+])
+const egoCheckpointOptions = computed(() => [
+  { value: '', label: '— 选择 —' },
+  ...egoCheckpoints.value.map((c) => ({ value: c.name, label: c.name })),
+])
+const signalCheckpointOptions = computed(() => [
+  { value: '', label: '— 选择 —' },
+  ...signalCheckpoints.value.map((c) => ({ value: c.name, label: c.name })),
+])
+const availableVehicleOptions = computed(() =>
+  availableVehicles.value.map((vid) => ({ value: vid, label: vid })),
+)
 /**
  * AI Playground — single-agent training dashboard.
  * Checkpoint management UI.
@@ -634,6 +664,7 @@
  * RL replay surface — load a PPO checkpoint and drive one
  *   vehicle in the TS sim from the policy's actions.
  */
+import AppSelect from '@interfaces/components/command/AppSelect.vue'
 import { ShowcaseNav } from '@interfaces/components/showcase'
 import TrainingStage from '@interfaces/components/command/TrainingStage.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'

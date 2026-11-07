@@ -44,21 +44,14 @@
           <div class="scene-switcher">
             <label>
               <span>当前场景</span>
-              <select
-                :value="world.currentSceneKind"
+              <AppSelect
+                :model-value="world.currentSceneKind"
+                :options="SCENE_OPTIONS"
+                wide
+                aria-label="场景"
                 data-testid="scene-select"
-                @change="onSceneChange"
-              >
-                <option value="cross">单路口 (cross)</option>
-                <option value="corridor">走廊 (corridor)</option>
-                <option value="t">T 型路口 (t)</option>
-                <option value="loop">矩形环 (loop)</option>
-                <option value="elevated">高架桥 (elevated)</option>
-                <option value="grid">5×5 网格 (grid)</option>
-                <option v-if="world.currentSceneKind === 'imported'" value="imported" disabled>
-                  已导入 ({{ world.currentSceneLabel }})
-                </option>
-              </select>
+                @update:model-value="onSceneChange"
+              />
             </label>
           </div>
           <div class="stat-grid">
@@ -103,16 +96,13 @@
           <div class="ctrl-row">
             <label class="ctrl-kind">
               <span>控制器</span>
-              <select
-                :value="world.controllerKind"
+              <AppSelect
+                :model-value="world.controllerKind"
+                :options="CONTROLLER_OPTIONS"
+                aria-label="控制器"
                 data-testid="controller-select"
-                @change="onControllerKindChange"
-              >
-                <option value="fixed-cycle">固定</option>
-                <option value="actuated">感应</option>
-                <option value="coordinated">协调 (绿波带)</option>
-                <option value="rl">RL (未实装·回退固定周期)</option>
-              </select>
+                @update:model-value="onControllerKindChange"
+              />
             </label>
             <button
               class="btn"
@@ -279,6 +269,26 @@
 </template>
 
 <script setup lang="ts">
+// The drawn select's options (the native control's popup is an OS
+// window — see components/command/AppSelect.vue).
+const CONTROLLER_OPTIONS = [
+  { value: 'fixed-cycle', label: '固定' },
+  { value: 'actuated', label: '感应' },
+  { value: 'coordinated', label: '协调 (绿波带)' },
+  { value: 'rl', label: 'RL (未实装·回退固定周期)' },
+]
+const SCENE_OPTIONS = [
+  { value: 'cross', label: '单路口 (cross)' },
+  { value: 'corridor', label: '走廊 (corridor)' },
+  { value: 't', label: 'T 型路口 (t)' },
+  { value: 'loop', label: '矩形环 (loop)' },
+  { value: 'elevated', label: '高架桥 (elevated)' },
+  { value: 'grid', label: '5×5 网格 (grid)' },
+  { value: 'junction', label: '无信号路口' },
+  { value: 'junction-grid', label: '无信号路网' },
+  { value: 'micro-city', label: '微型城区' },
+]
+import AppSelect from '@interfaces/components/command/AppSelect.vue'
 import { ShowcaseNav } from '@interfaces/components/showcase'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useWorldStore, type SceneKind } from '@interfaces/stores/worldStore'
@@ -389,16 +399,14 @@ const changingCount = computed(() => {
 })
 
 // 2. 信号控制
-const onControllerKindChange = (e: Event): void => {
-  const v = (e.target as HTMLSelectElement).value
+const onControllerKindChange = (value: string): void => {
   // world.setControllerKind 接受 ControllerKind union; 4 个 option 值都合法.
-  ;(world.setControllerKind as (k: string) => void)(v)
+  ;(world.setControllerKind as (k: string) => void)(value)
 }
 
 // 1. 场景切换
-const onSceneChange = (e: Event): void => {
-  const v = (e.target as HTMLSelectElement).value
-  world.switchScene(v as SceneKind)
+const onSceneChange = (value: string): void => {
+  world.switchScene(value as SceneKind)
 }
 
 // 3. 传感器

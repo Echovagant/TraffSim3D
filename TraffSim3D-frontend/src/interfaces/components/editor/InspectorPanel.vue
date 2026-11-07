@@ -16,16 +16,12 @@
       /></label>
       <label
         >Type
-        <select
-          :value="(entity as Vehicle).type"
-          @change="
-            updateType(($event.target as HTMLSelectElement).value as 'car' | 'truck' | 'bus')
-          "
-        >
-          <option value="car">car</option>
-          <option value="truck">truck</option>
-          <option value="bus">bus</option>
-        </select>
+        <AppSelect
+          :model-value="(entity as Vehicle).type"
+          :options="VEHICLE_TYPE_OPTIONS"
+          aria-label="车型"
+          @update:model-value="updateType($event as 'car' | 'truck' | 'bus')"
+        />
       </label>
       <label
         >Speed (km/h)
@@ -85,19 +81,30 @@
       <p class="hint">相位由信号控制器决定，编辑器不可直接改写。</p>
       <label
         >Axis
-        <select
-          :value="(entity as TrafficLight).axis"
-          @change="updateAxis(($event.target as HTMLSelectElement).value as 'ns' | 'ew')"
-        >
-          <option value="ns">ns</option>
-          <option value="ew">ew</option>
-        </select>
+        <AppSelect
+          :model-value="(entity as TrafficLight).axis"
+          :options="AXIS_OPTIONS"
+          aria-label="轴向"
+          @update:model-value="updateAxis($event as 'ns' | 'ew')"
+        />
       </label>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+// The drawn select's options (the native control's popup is an OS
+// window — see components/command/AppSelect.vue).
+const VEHICLE_TYPE_OPTIONS = [
+  { value: 'car', label: 'car' },
+  { value: 'truck', label: 'truck' },
+  { value: 'bus', label: 'bus' },
+]
+const AXIS_OPTIONS = [
+  { value: 'ns', label: 'ns' },
+  { value: 'ew', label: 'ew' },
+]
+import AppSelect from '@interfaces/components/command/AppSelect.vue'
 import { computed, ref } from 'vue'
 import { useEditor } from '@interfaces/composables/useEditor'
 import { Speed } from '@domain/value-objects/Speed'

@@ -141,7 +141,10 @@ describe('SimulationLabView — the dashboard must run a live simulation', () =>
     const view = mountView()
     const store = useWorldStore()
 
-    await view.get('[data-testid="scene-select"]').setValue('loop')
+    // The drawn select's root is a div; the hidden native mirror inside
+    // it is the element `setValue` can drive (it fires `change`, which
+    // the component turns into a selection).
+    await view.get('[data-testid="scene-select"] select').setValue('loop')
     expect(store.currentSceneKind).toBe('loop')
     expect(Object.keys(store.network.intersections).length).toBe(4)
 
@@ -158,7 +161,10 @@ describe('SimulationLabView — the dashboard must run a live simulation', () =>
     // The button is only available for the coordinated controller.
     expect(view.get('[data-testid="coordinated-button"]').attributes('disabled')).toBeDefined()
 
-    await view.get('[data-testid="controller-select"]').setValue('coordinated')
+    // The drawn select's root is a div; the hidden native mirror inside
+    // it is the element `setValue` can drive (it fires `change`, which
+    // the component turns into a selection).
+    await view.get('[data-testid="controller-select"] select').setValue('coordinated')
     expect(store.controllerKind).toBe('coordinated')
     expect(view.get('[data-testid="coordinated-button"]').attributes('disabled')).toBeUndefined()
 

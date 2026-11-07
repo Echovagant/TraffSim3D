@@ -332,15 +332,31 @@ test.describe('driving behaviour (live scene)', () => {
         if (a.road === b.road) {
           // Same road: motion is continuous — no teleport, no jump of
           // two lanes.
-          // The bound uses the HIGHER of the two samples' speeds plus
-          // an acceleration allowance: a vehicle that starts from a
-          // red light travels much further than its starting speed
-          // suggests over a long sample gap (measured: 11.3 m in 3.2 s
-          // of sim time from 1.2 m/s — physics, not a teleport). A real
-          // teleport happens inside ONE frame, where the gap is tiny
-          // and the bound stays small.
-          const bound = (Math.max(a.sp, b.sp) + 3) * wallS * 1.2 + 5
-          expect(d, `${id} moved ${d.toFixed(1)} m in ${wallS.toFixed(2)} s`).toBeLessThan(bound)
+          //
+          // The bound is measured against the simulation's OWN truth —
+          // how far the vehicle's arc length `s` advanced — not against
+          // the reported speed. Under load the 4x clock delivers
+          // several physics sub-steps between two samples, so a
+          // vehicle can cover 11 m while the speed field still reads
+          // the value from an earlier step (measured 2026-11-08: a
+          // false "moved 13 m in 0.70 s" against a bound of 12.3 m,
+          // while the arc length advanced by the same 10.8 m — the
+          // vehicle was simply driving at 16.7 m/s). A real WRAP, by
+          // contrast, teleports the position by the road's length while
+          // `s` barely moves: this check catches it, the speed-based
+          // one does not.
+          //
+          // A vehicle mid-TURN-ARC is the exception: the arc advances
+          // `turn.dist`, not the lane's `s`, so the two legitimately
+          // disagree (measured 2026-11-08: 5.7 m of arc with s frozen).
+          // The arc is checked by the road-change branch below.
+          if (!a.turn && !b.turn) {
+            const ds = Math.abs(b.s - a.s)
+            expect(
+              d,
+              `${id} moved ${d.toFixed(1)} m but advanced only ${ds.toFixed(1)} m of lane (wt=${b.wt})`,
+            ).toBeLessThan(ds + 2)
+          }
           expect(Math.abs(b.lane - a.lane), `${id} laneIndex jump at wt=${b.wt}`).toBeLessThan(2)
         } else {
           turns += 1

@@ -50,11 +50,12 @@
           </button>
           <label class="top-field" title="Cesium 视图模式">
             <span>视图</span>
-            <select v-model="viewMode" data-testid="view-mode-select">
-              <option value="bird">鸟瞰 (1500m)</option>
-              <option value="street">平视 (1.7m)</option>
-              <option value="free">自由</option>
-            </select>
+            <AppSelect
+              v-model="viewMode"
+              :options="VIEW_MODE_OPTIONS"
+              aria-label="视图"
+              data-testid="view-mode-select"
+            />
           </label>
         </div>
 
@@ -152,6 +153,13 @@
 </template>
 
 <script setup lang="ts">
+// The drawn select's options (the native control's popup is an OS
+// window — see components/command/AppSelect.vue).
+const VIEW_MODE_OPTIONS = [
+  { value: 'bird', label: '鸟瞰 (1500m)' },
+  { value: 'street', label: '平视 (1.7m)' },
+  { value: 'free', label: '自由' },
+]
 /**
  * Smart City — the command-centre view.
  *
@@ -169,6 +177,7 @@
  * the same tokens for its road/building colours: the dashboard and the
  * city can never disagree about the palette.
  */
+import AppSelect from '@interfaces/components/command/AppSelect.vue'
 import { ShowcaseNav } from '@interfaces/components/showcase'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as Cesium from 'cesium'

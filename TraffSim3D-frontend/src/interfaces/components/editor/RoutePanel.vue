@@ -14,16 +14,26 @@
 
     <label class="ctrl">
       起点车辆
-      <select v-model="startVehicleId" data-testid="route-start-vehicle">
-        <option v-for="v in vehicles" :key="v.id" :value="v.id">{{ v.id }} · {{ v.roadId }}</option>
-      </select>
+      <AppSelect
+        :model-value="startVehicleId"
+        :options="vehicleOptions"
+        wide
+        aria-label="起点车辆"
+        data-testid="route-start-vehicle"
+        @update:model-value="startVehicleId = $event"
+      />
     </label>
 
     <label class="ctrl">
       终点路口
-      <select v-model="endJunctionId" data-testid="route-end-junction">
-        <option v-for="j in junctions" :key="j.id" :value="j.id">{{ j.id }}</option>
-      </select>
+      <AppSelect
+        :model-value="endJunctionId"
+        :options="junctionOptions"
+        wide
+        aria-label="终点路口"
+        data-testid="route-end-junction"
+        @update:model-value="endJunctionId = $event"
+      />
     </label>
 
     <div class="actions">
@@ -104,6 +114,13 @@
 </template>
 
 <script setup lang="ts">
+// The drawn select's options (the native control's popup is an OS
+// window — see components/command/AppSelect.vue).
+const vehicleOptions = computed(() =>
+  vehicles.value.map((v) => ({ value: v.id, label: `${v.id} · ${v.roadId}` })),
+)
+const junctionOptions = computed(() => junctions.value.map((j) => ({ value: j.id, label: j.id })))
+import AppSelect from '@interfaces/components/command/AppSelect.vue'
 import { computed, ref, watch } from 'vue'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 import { routeTurnHint } from '@application/services/routePlanner'

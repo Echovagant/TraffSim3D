@@ -121,11 +121,13 @@
 
       <label class="coord-datum">
         <span>坐标系</span>
-        <select v-model="coordDatum" data-testid="coord-datum-select">
-          <option v-for="entry in OSM_COORD_DATUMS" :key="entry.value" :value="entry.value">
-            {{ entry.label }}
-          </option>
-        </select>
+        <AppSelect
+          v-model="coordDatum"
+          :options="coordDatumOptions"
+          wide
+          aria-label="坐标系"
+          data-testid="coord-datum-select"
+        />
         <small v-if="coordDatum !== 'wgs84'" class="coord-note">
           {{ coordDatum === 'gcj02' ? '高德' : '百度' }} 导出的文件选这个 — 导入时自动转到 WGS84（约
           300–600 m 的偏移）
@@ -195,6 +197,11 @@
 </template>
 
 <script setup lang="ts">
+// The drawn select's options (the native control's popup is an OS
+// window — see components/command/AppSelect.vue).
+const coordDatumOptions = computed(() =>
+  OSM_COORD_DATUMS.map((entry) => ({ value: entry.value, label: entry.label })),
+)
 /**
  * MapLab — OSM file importer.
  * Overpass query templates + backend port env var.
@@ -211,6 +218,7 @@
  * (default 8000). The frontend uses the same env var so direct fetches
  * (this upload) target the same port the proxy uses.
  */
+import AppSelect from '@interfaces/components/command/AppSelect.vue'
 import { ShowcaseNav } from '@interfaces/components/showcase'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'

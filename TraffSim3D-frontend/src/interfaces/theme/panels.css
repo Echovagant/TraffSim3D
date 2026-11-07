@@ -101,6 +101,41 @@ select {
 :root[data-theme='paper'] select {
   color-scheme: light;
 }
+
+/* ===== the options themselves =====
+   `color-scheme` fixes the PALETTE the browser picks, but the report
+   was that the options stayed white-on-grey: the list's background is
+   painted by the browser and the option text inherits our own (light)
+   colour, so the two fight. Chrome honours `background-color` and
+   `color` on `<option>` (since 2023), so the options are painted with
+   the theme's surface and ink — and the SELECTED option gets the
+   accent, so the current value is readable at a glance. */
+option {
+  background-color: var(--dc-panel) !important;
+  color: var(--dc-text) !important;
+}
+option:checked {
+  background-color: color-mix(in srgb, var(--dc-accent) 32%, var(--dc-panel)) !important;
+  color: var(--dc-text) !important;
+}
+/* The SELECTED row is the one Chromium still paints with the OS
+   highlight (light grey on Windows) — the report's "白底灰字". It
+   survives an `option:checked` background in the popup, so the list is
+   given the surface colour as well: the highlight then has dark ink on
+   it instead of the OS's own. */
+select option:checked {
+  color: var(--dc-text) !important;
+}
+select:focus option:checked {
+  background-color: color-mix(in srgb, var(--dc-accent) 42%, var(--dc-panel)) !important;
+}
+/* Firefox paints the list itself, not the options — give the popup the
+   surface colour too. */
+select option:hover,
+select option:focus {
+  background-color: color-mix(in srgb, var(--dc-accent) 22%, var(--dc-panel)) !important;
+  color: var(--dc-text) !important;
+}
 input:focus,
 select:focus,
 textarea:focus {

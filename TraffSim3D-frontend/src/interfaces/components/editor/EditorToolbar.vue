@@ -51,12 +51,12 @@
 
     <label class="ctrl-kind" title="信号灯控制策略">
       <span class="ctrl-kind-label">控制</span>
-      <select :value="world.controllerKind" @change="onControllerKindChange">
-        <option value="fixed-cycle">固定</option>
-        <option value="actuated">感应</option>
-        <option value="coordinated">协调 (绿波带)</option>
-        <option value="rl">RL (未实装·回退固定周期)</option>
-      </select>
+      <AppSelect
+        :model-value="world.controllerKind"
+        :options="CONTROLLER_OPTIONS"
+        aria-label="控制器"
+        @update:model-value="onControllerKindChange"
+      />
     </label>
 
     <label class="ctrl-kind scene-kind" title="演示场景 (道路几何)">
@@ -66,22 +66,15 @@
            user can still switch to a built-in scene to abandon
            the import via the dropdown menu of the next built-in
            scene (we keep the select available, just disabled). -->
-      <select
+      <AppSelect
         v-if="world.currentSceneKind !== 'imported'"
-        :value="world.currentSceneKind"
-        @change="onSceneKindChange"
+        :model-value="world.currentSceneKind"
+        :options="SCENE_OPTIONS"
+        wide
+        aria-label="场景"
         data-testid="scene-kind-select"
-      >
-        <option value="cross">十字路口</option>
-        <option value="t">T 路口</option>
-        <option value="loop">矩形环</option>
-        <option value="elevated">高架桥</option>
-        <option value="corridor">多路口走廊</option>
-        <option value="grid">5×5 网格</option>
-        <option value="junction">无信号路口</option>
-        <option value="junction-grid">无信号路网</option>
-        <option value="micro-city">微型城区</option>
-      </select>
+        @update:model-value="onSceneKindChange"
+      />
       <span
         v-else
         class="scene-label-imported"
@@ -159,6 +152,30 @@
 </template>
 
 <script setup lang="ts">
+// ===== the drawn selects =====
+//
+// The native control's popup is an OS window (Windows paints the row
+// under the pointer with the system hover colour), so the control is
+// drawn instead — see components/command/AppSelect.vue.
+const CONTROLLER_OPTIONS = [
+  { value: 'fixed-cycle', label: '固定' },
+  { value: 'actuated', label: '感应' },
+  { value: 'coordinated', label: '协调 (绿波带)' },
+  { value: 'rl', label: 'RL (未实装·回退固定周期)' },
+]
+
+const SCENE_OPTIONS = [
+  { value: 'cross', label: '十字路口' },
+  { value: 't', label: 'T 路口' },
+  { value: 'loop', label: '矩形环' },
+  { value: 'elevated', label: '高架桥' },
+  { value: 'corridor', label: '多路口走廊' },
+  { value: 'grid', label: '5×5 网格' },
+  { value: 'junction', label: '无信号路口' },
+  { value: 'junction-grid', label: '无信号路网' },
+  { value: 'micro-city', label: '微型城区' },
+]
+import AppSelect from '@interfaces/components/command/AppSelect.vue'
 import { useEditor } from '@interfaces/composables/useEditor'
 import { useSceneIO } from '@interfaces/composables/useSceneIO'
 import { _flashMessageRef, showFlashMessage } from '@interfaces/composables/useFlashMessage'
@@ -213,15 +230,13 @@ const onSpawnMany = (count: number): void => {
   }
 }
 
-const onControllerKindChange = (e: Event): void => {
-  const v = (e.target as HTMLSelectElement).value as ControllerKind
-  world.setControllerKind(v)
+const onControllerKindChange = (value: string): void => {
+  world.setControllerKind(value as ControllerKind)
 }
 
-const onSceneKindChange = (e: Event): void => {
-  const v = (e.target as HTMLSelectElement).value as SceneKind
-  world.switchScene(v)
-  showFlashMessage(`已切换场景: ${sceneLabel(v)}`, 'info')
+const onSceneKindChange = (value: string): void => {
+  world.switchScene(value as SceneKind)
+  showFlashMessage(`已切换场景: ${sceneLabel(value as SceneKind)}`, 'info')
 }
 
 /** Manual re-fit trigger. Bumps `worldStore.fitRequestTick`,
