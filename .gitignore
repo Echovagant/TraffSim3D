@@ -94,6 +94,9 @@ plans/
 team/
 .claude/
 CLAUDE.md
+# The local hand-over note (same convention: lives beside the
+# project, never committed).
+HANDOFF.md
 任务详细20261016.md
 任务过程.md
 插件兼容性审计.md
