@@ -166,6 +166,21 @@ export interface TickContext {
    */
   routeNextRoadId?: (vehicleId: string) => string | null
   /**
+   * The human driver's throttle intent, for the vehicle the user is
+   * DRIVING in the smart-city view (cockpit ride). Returns the wanted
+   * target speed in m/s, or `null` when this vehicle has no manual
+   * intent this tick (the AI layer keeps its normal say).
+   *
+   * The intent replaces the ROAD-LIMIT basis of the speed, but it is
+   * still a ceiling that the constraint layers below can lower: the
+   * curve warning speed, the red light and the car in front all keep
+   * their authority — a manual throttle cannot drive into a queue any
+   * more than an AI one can. The steering side of manual driving is
+   * lane changes (`worldStore.requestLaneChange`), which is what the
+   * lane model offers as steering intent.
+   */
+  driverOverride?: (vehicleId: string) => number | null
+  /**
    * The cooperative-driving policy over the junction's negotiation
    * (Scene 4), when it is enabled.
    *
@@ -632,6 +647,13 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         TURN_LAT_ACCEL,
       )
       if (curveLimit < speedLimit) speedLimit = curveLimit
+      // The human throttle replaces the road-limit basis, but nothing
+      // else: the curve warning above and both constraint layers below
+      // keep their authority over it.
+      const driver = ctx.driverOverride?.(v.id)
+      if (driver !== null && driver !== undefined && driver < speedLimit) {
+        speedLimit = driver
+      }
     }
     v.targetSpeed = speedLimit
     applyTrafficLightConstraint(v, road, ctx, junctions)

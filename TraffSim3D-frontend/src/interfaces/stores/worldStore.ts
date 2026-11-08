@@ -569,6 +569,18 @@ export const useWorldStore = defineStore('world', () => {
     bumpTick()
   }
 
+  /**
+   * The manual driver's pedal, while the camera rides in the cockpit:
+   * `'accel'` = W held, `'brake'` = S held, `null` = hands off (the AI
+   * layer drives again the very next tick). The view writes it every
+   * frame from its key set; the tick reads it through the context's
+   * `driverOverride`.
+   */
+  const driverInput = ref<'accel' | 'brake' | null>(null)
+  const setDriverInput = (input: 'accel' | 'brake' | null): void => {
+    driverInput.value = input
+  }
+
   /** chase ↔ chase-top — the tracking view's own look toggles. */
   const toggleRideLook = (): void => {
     if (!rideVehicleId.value) return
@@ -1230,6 +1242,22 @@ export const useWorldStore = defineStore('world', () => {
       // The junction negotiation: the trained policy owns the drivers'
       // speed while it is enabled.
       drivePolicy: drivePolicyContext(),
+      // The manual driver's pedal (cockpit ride): the intent becomes
+      // the speed basis inside tick, still bounded by the curve
+      // warning, the lights and the car in front.
+      driverOverride: (vehicleId: string): number | null => {
+        if (rideVehicleId.value !== vehicleId || rideMode.value !== 'cockpit') return null
+        const input = driverInput.value
+        if (!input) return null
+        const v = network.value.vehicles[vehicleId]
+        if (!v) return null
+        const road = network.value.roads[v.roadId]
+        const ceiling = Math.min(road?.speedLimit ?? 14, 16)
+        if (input === 'accel') {
+          return Math.min(ceiling, (v.targetSpeed ?? 0) + 5 * clampedDt)
+        }
+        return Math.max(0, (v.targetSpeed ?? 0) - 9 * clampedDt)
+      },
     })
     // Re-apply the user's speed pins. `tick()` owns the speed
     // computation and always re-derives it from the road limit, so
@@ -2021,6 +2049,8 @@ export const useWorldStore = defineStore('world', () => {
     setRideVehicle,
     setRideMode,
     toggleRideLook,
+    driverInput,
+    setDriverInput,
     routeRenderPath,
     // sensor + exporter surface
     sensorRegistry,

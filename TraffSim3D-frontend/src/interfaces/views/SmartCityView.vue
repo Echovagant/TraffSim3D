@@ -163,7 +163,11 @@
         {{ ride.mode === 'cockpit' ? '跟踪' : '驾驶' }}
       </button>
       <button class="ride-btn ride-exit" data-testid="ride-exit" @click="leaveRide()">退出</button>
-      <span class="ride-hint">点击空白处也可退出 · 滚轮拉远近</span>
+      <span class="ride-hint">{{
+        ride.mode === 'cockpit'
+          ? 'W/S 油门·刹车 · A/D 变道 · 点击空白退出'
+          : '点击空白处也可退出 · 滚轮拉远近'
+      }}</span>
     </div>
   </main>
 </template>
@@ -469,11 +473,12 @@ const applyBasemapTuning = (viewer: Cesium.Viewer, theme: string): void => {
   const imageryLayer = viewer.imageryLayers.get(0)
   if (imageryLayer) {
     const paper = theme === 'paper'
-    // The clay theme keeps a LITTLE more raster: its buildings are
-    // light, and a fully-black ground under them reads as a void from
-    // street level. 0.34 gives the ground a whisper of texture while
-    // the vector network stays the subject.
-    const dim = theme === 'paper' ? 1 : theme === 'clay' ? 0.34 : 0.26
+    // The clay theme keeps a whisper of raster texture (its buildings
+    // are light and a fully-black ground reads as a void from street
+    // level) — but at 0.34 the ground washed out the whole street-level
+    // frame and the white model lost its base. 0.22 keeps the texture
+    // and lets the road ribbons own the lower band.
+    const dim = theme === 'paper' ? 1 : theme === 'clay' ? 0.22 : 0.26
     imageryLayer.brightness = dim
     imageryLayer.contrast = paper ? 1 : 1.05
     imageryLayer.saturation = paper ? 1 : 0.12
@@ -764,13 +769,44 @@ const leaveRide = (): void => {
   })
 }
 
-/** The ride's keyboard: C toggles the tracking look, X drives, Esc leaves. */
+/** The ride's keyboard: C toggles the tracking look, X drives, Esc leaves,
+ *  and while DRIVING the A/D keys are the steering intent (the lane
+ *  change is what the lane model offers as steering). */
 const onRideKey = (e: KeyboardEvent): void => {
   if (!world.rideVehicleId) return
   if (e.code === 'KeyC') world.toggleRideLook()
   else if (e.code === 'KeyX')
     world.setRideMode(world.rideMode === 'cockpit' ? 'chase' : 'cockpit')
   else if (e.code === 'Escape') leaveRide()
+  else if (e.code === 'KeyA' && world.rideMode === 'cockpit') {
+    flashLaneChange(world.requestLaneChange(world.rideVehicleId, 'left'))
+  } else if (e.code === 'KeyD' && world.rideMode === 'cockpit') {
+    flashLaneChange(world.requestLaneChange(world.rideVehicleId, 'right'))
+  }
+}
+
+/**
+ * A rejected steering intent must SAY why — on this city's mostly
+ * two-lane ways there is often no lane to change into (a forward car
+ * on a 2-lane street has the oncoming carriageway on its left and the
+ * curb on its right), and a silent refusal reads as a broken key.
+ */
+const flashLaneChange = (r: { ok: boolean; reason?: string }): void => {
+  if (r.ok) return
+  const texts: Record<string, string> = {
+    crashed: '车辆已碰撞，无法变道',
+    'already-changing': '正在变道中',
+    'in-intersection': '路口内不能变道',
+    'too-slow': '车速过低，无法变道（需 5 m/s 以上）',
+    'not-found': '车辆不在路网上',
+    'no-target-lane': '该方向没有目标车道',
+    'not-drivable-lane': '该方向没有可行驶车道',
+  }
+  const text = texts[r.reason ?? ''] ?? '此处无法变道'
+  status.value = { kind: 'info', text }
+  setTimeout(() => {
+    if (status.value?.text === text) status.value = null
+  }, 2000)
 }
 
 // ===== street-level walking: WASD moves, Alt+mouse looks ============
@@ -889,6 +925,16 @@ const startCameraSync = (): void => {
       return
     }
     walkStreet(dt)
+    // The cockpit's pedals: W/S held = throttle/brake. The intent goes
+    // into the tick through `driverOverride`; letting go of both hands
+    // the car straight back to its AI the very next tick.
+    if (world.rideVehicleId && world.rideMode === 'cockpit') {
+      world.setDriverInput(
+        keysDown.has('KeyW') ? 'accel' : keysDown.has('KeyS') ? 'brake' : null,
+      )
+    } else if (world.driverInput !== null) {
+      world.setDriverInput(null)
+    }
     if (!cameraSync) {
       cameraSync = createCameraSync({
         cesiumViewer,
