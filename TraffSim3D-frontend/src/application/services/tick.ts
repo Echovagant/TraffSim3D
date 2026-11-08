@@ -598,7 +598,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       if (routeLimit !== null) speedLimit = Math.min(speedLimit, routeLimit)
     }
     v.targetSpeed = speedLimit
-    applyTrafficLightConstraint(v, road, network, ctx)
+    applyTrafficLightConstraint(v, road, ctx, junctions)
     applyCarFollowingConstraint(v, road, network, ctx)
     // NOTE: there is deliberately **no** "road end" clamp here any
     // more. The road end used to be terminal: step 8 snapped the
@@ -1729,13 +1729,18 @@ const updateIntersectionEntry = (
 const applyTrafficLightConstraint = (
   v: Vehicle,
   road: Road,
-  network: RoadNetwork,
   ctx: TickContext,
+  junctions: JunctionIndex,
 ) => {
   // Replay target handles lights itself via obs.
   if (isReplayDriven(ctx, v)) return
-  for (const inter of Object.values(network.intersections)) {
-    if (!inter.connectedRoads.includes(road.id)) continue
+  // The junctions ON THIS ROAD, from the per-tick index — not a scan of
+  // every junction in the network. The scan was O(junctions) per
+  // vehicle per tick: on the imported Shenzhen core (1 120 junctions)
+  // and ~90 cars that is 100 000 property lookups per frame, every
+  // frame. The index answers the same question in O(junctions on the
+  // road) — two or three.
+  for (const inter of junctions.on(road.id)) {
     // The stop line sits on the edge of the intersection box, **on the
     // side the vehicle approaches from**.
     //

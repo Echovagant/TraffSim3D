@@ -48,4 +48,18 @@ export interface Road {
    * that as two-way, so the default behaviour is unchanged.
    */
   oneway?: boolean
+  /**
+   * The road's class, as OSM names it ("motorway", "trunk", "primary",
+   * "secondary", "tertiary", "residential", "unclassified", "service",
+   * "footway", "path", …).
+   *
+   * The lane count and the speed limit are DERIVED from this class by
+   * the parser, so keeping the class itself is what lets a renderer
+   * draw the road hierarchy (a trunk must not look like a footway) and
+   * lets traffic rules reason about road rights.
+   *
+   * `undefined` for the built-in scenes and for any scene saved before
+   * this field existed — those roads carry no class.
+   */
+  highway?: string
 }

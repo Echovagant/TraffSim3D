@@ -1213,6 +1213,12 @@ def _build_network(
                     "laneCount": lanes,
                     "oneway": oneway,
                     "speedLimit": HIGHWAY_SPEED_LIMIT[way.tags["highway"]],
+                    # The OSM highway class itself ("primary", "residential",
+                    # "footway", …). The lane count and the speed limit are
+                    # DERIVED from it, so a consumer that wants to draw the
+                    # road hierarchy — or reason about road rights — needs
+                    # the class, not only the two numbers it produced.
+                    "highway": way.tags["highway"],
                     "level": level,
                 }
             )

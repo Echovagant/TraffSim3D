@@ -9,6 +9,7 @@ simulate. The parser capability already existed (`osm_parser.parse_osm_xml`
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -27,6 +28,31 @@ router = APIRouter()
 # Field order is the bbox tuple order; also the order FastAPI reports in 422
 # payloads, so it doubles as the user-facing hint.
 _BBOX_FIELDS = ("south", "west", "north", "east")
+
+# ---------------------------------------------------------------------------
+# The city that ships with the backend
+# ---------------------------------------------------------------------------
+
+# The Shenzhen Futian extract, committed to the repo. The path follows the
+# same rule as the Overpass cache (`parents[3]/geojson`).
+SAMPLE_OSM_FILE = Path(__file__).resolve().parents[3] / "geojson" / "福田中心(深圳).osm"
+
+# (south, west, north, east) — the 4.4 km × 4.1 km core of Futian. It is
+# the same rectangle the Smart City basemap fetches (the frontend's
+# `DEFAULT_BBOX`), so the drawn city and the simulated city cover one
+# area instead of two that merely look alike.
+SAMPLE_BBOX: BBox = (22.52297, 114.04865, 22.56297, 114.08865)
+
+# The projection origin: the centre of the clipped area. The frontend
+# falls back to the same point for a network that carries no origin, so
+# the simulation overlay and the basemap share one anchor.
+SAMPLE_CENTER: tuple[float, float] = (
+    (SAMPLE_BBOX[0] + SAMPLE_BBOX[2]) / 2,
+    (SAMPLE_BBOX[1] + SAMPLE_BBOX[3]) / 2,
+)
+
+# The parsed sample network. Built on the first request, then kept.
+_sample_network: dict[str, Any] | None = None
 
 
 def _resolve_bbox(
@@ -124,6 +150,38 @@ async def parse_osm(
         raise HTTPException(status_code=400, detail=f"Invalid OSM XML: {e}") from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OSM parse failed: {e}") from e
+
+
+@router.post("/maps/parse-sample", tags=["maps"])
+async def parse_sample() -> dict[str, Any]:
+    """Parse the city that ships with the backend into a RoadNetwork dict.
+
+    The repository carries a 7.4 MB OSM extract of 深圳福田中心
+    (`geojson/福田中心(深圳).osm`). This endpoint parses the 4.4 km ×
+    4.1 km core of it — the same rectangle the Smart City basemap draws
+    — so the command centre can show a real city with cars driving on
+    its roads, without an upload and without Overpass.
+
+    The projection origin is the centre of that rectangle, which is also
+    the frontend's fallback tangent origin (`DEFAULT_TANGENT_ORIGIN`):
+    the simulation and the basemap therefore describe one place.
+
+    The parse costs ~2 s the first time; the result is cached in memory
+    and every later call returns the same network.
+    """
+    global _sample_network
+    if _sample_network is None:
+        if not SAMPLE_OSM_FILE.exists():
+            raise HTTPException(
+                status_code=500,
+                detail=f"sample map missing from the backend: {SAMPLE_OSM_FILE.name}",
+            )
+        raw = SAMPLE_OSM_FILE.read_bytes()
+        try:
+            _sample_network = parse_osm_xml(raw, bbox=SAMPLE_BBOX, center=SAMPLE_CENTER)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"sample parse failed: {e}") from e
+    return _sample_network
 
 
 @router.post("/maps/parse-pbf", tags=["maps"])

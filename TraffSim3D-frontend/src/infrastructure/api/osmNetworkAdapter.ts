@@ -239,6 +239,11 @@ const normalizeRoad = (raw: unknown): Road | null => {
   // street; dropping it (as this adapter used to) turned every one-way
   // street in an imported map into a two-way one.
   const oneway = raw.oneway === true ? true : raw.oneway === false ? false : null
+  // The OSM highway class ("primary", "residential", "footway", …). The
+  // parser derives the lane count and the speed limit from it, so this
+  // is the one field that says WHICH kind of road this is — the
+  // renderer needs it to draw the road hierarchy.
+  const highway = typeof raw.highway === 'string' && raw.highway.length > 0 ? raw.highway : null
   return {
     id,
     startNode,
@@ -250,6 +255,7 @@ const normalizeRoad = (raw: unknown): Road | null => {
     speedLimit: num(raw.speedLimit, DEFAULT_SPEED_LIMIT),
     level: int(raw.level, 0),
     ...(oneway === null ? {} : { oneway }),
+    ...(highway === null ? {} : { highway }),
   }
 }
 
