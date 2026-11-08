@@ -238,12 +238,21 @@ const ROAD_TIERS: Record<RoadTier, { token: string; fallback: string; width: num
 }
 
 /**
- * The local metric frame → WGS84 degrees.
+ * The store's local metric frame → WGS84 degrees.
  *
- * The inverse of the parser's flat projection
- * (`osm_parser.py::_project_nodes`):
+ * The parser's flat projection is
  *   `x = (lon - originLon) · 111000 · cos(lat)`, `z = (lat - originLat) · 111000`
- * with **north positive** on z (see `OSM_PAYLOAD_NORTH_IS_POSITIVE_Z`).
+ * — north POSITIVE on z — but the adapter flips z on the way into the
+ * store (`toAppFrame`, see `OSM_PAYLOAD_NORTH_IS_POSITIVE_Z`): the app
+ * frame is north NEGATIVE, the same convention the camera sync uses
+ * (`three.z = -north`). The store's roads therefore carry north-negative
+ * z, and the inverse has to negate it back:
+ *   `lat = originLat − z / 111000`.
+ *
+ * Getting this sign wrong mirrors the whole drawn city north-south
+ * about the projection origin — the roads land on the far side of the
+ * city while the vehicles (rendered in the app frame by Three.js) stay
+ * on the true side. That was the "cars are not on the network" bug.
  */
 export const localToLngLat = (
   origin: GeoOrigin,
@@ -253,7 +262,7 @@ export const localToLngLat = (
   const cosLat = Math.max(0.05, Math.cos((origin.lat * Math.PI) / 180))
   return {
     lng: origin.lon + x / (OSM_METERS_PER_DEGREE_LAT * cosLat),
-    lat: origin.lat + z / OSM_METERS_PER_DEGREE_LAT,
+    lat: origin.lat - z / OSM_METERS_PER_DEGREE_LAT,
   }
 }
 
