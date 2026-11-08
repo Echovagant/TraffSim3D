@@ -493,3 +493,142 @@ export const worldToLaneS = (
   }
   return Math.max(0, Math.min(len, bestS))
 }
+
+// ---------------------------------------------------------------------------
+// Curvature speed limit — geometry bends need braking, not lane guards
+// ---------------------------------------------------------------------------
+//
+// An OSM way is a polyline, and city ways BEND: a 90° corner in the
+// middle of a road is common (median cuts, ramp merges, dual-carriageway
+// stitches). A car at full speed cannot follow such a corner — its
+// minimum turning radius is v²/a_lat (13.9 m/s ⇒ ~77 m at the comfy
+// lateral accel), so it sweeps 5 m off the lane, the projection gives
+// up (its 5 m cap equals the guard's threshold), and the lane guard
+// snaps the car back and zeroes its speed — right before it does it
+// all again. Measured on the Futian network: ~30 guards / 60 s / 90
+// cars, every one just past 5.0 m at full speed, several looping on
+// the same corner.
+//
+// The traffic-engineering answer is a curve warning speed: a road with
+// an R-metre corner may be travelled at √(a_lat · R), and the driver
+// brakes BEFORE the corner. The lookahead has to exceed the braking
+// distance (v² / 2a ≈ 32 m from 13.9 m/s), hence 40 m.
+
+/** The polyline's inner vertices with their approximate corner radius. */
+interface CurvaturePoint {
+  /** Arc length of the vertex along the polyline. */
+  s: number
+  /** Approximate turning radius through the vertex (metres). */
+  radius: number
+}
+
+/** Per-road curvature cache — the geometry is immutable in practice. */
+const curvatureCache = new WeakMap<Road, CurvaturePoint[]>()
+
+/** Minimum plausible corner radius — a hairpin must not limit to 0. */
+const MIN_CORNER_RADIUS_M = 4
+
+const curvatureOf = (road: Road): CurvaturePoint[] => {
+  const cached = curvatureCache.get(road)
+  if (cached) return cached
+  const wps = roadWaypoints(road)
+  const points: CurvaturePoint[] = []
+  let running = 0
+  for (let i = 1; i + 1 < wps.length; i++) {
+    const ax = wps[i]!.x - wps[i - 1]!.x
+    const az = wps[i]!.z - wps[i - 1]!.z
+    const bx = wps[i + 1]!.x - wps[i]!.x
+    const bz = wps[i + 1]!.z - wps[i]!.z
+    const d1 = Math.hypot(ax, az)
+    const d2 = Math.hypot(bx, bz)
+    running += d1
+    if (d1 < 1e-6 || d2 < 1e-6) continue
+    // Deflection angle between the two segments (0 = straight through).
+    const cosTheta = (ax * bx + az * bz) / (d1 * d2)
+    const deflection = Math.acos(Math.max(-1, Math.min(1, cosTheta)))
+    let radius = Number.POSITIVE_INFINITY
+    if (deflection > 1e-3) {
+      // Tangent circle through the corner, tangent points conservatively
+      // at the midpoint of the SHORTER leg.
+      const t = Math.min(d1, d2) / 2
+      radius = Math.max(MIN_CORNER_RADIUS_M, t / Math.tan(deflection / 2))
+    }
+    points.push({ s: running, radius })
+  }
+  curvatureCache.set(road, points)
+  return points
+}
+
+/**
+ * The speed the geometry ahead allows: √(a_lat · R) for the sharpest
+ * corner within `lookaheadM` of `s`, in the direction `sign` (+1
+ * start→end, −1 end→start). `Infinity` when the road ahead is straight.
+ */
+export const curvatureSpeedLimit = (
+  road: Road,
+  s: number,
+  sign: 1 | -1,
+  lookaheadM: number,
+  latAccel: number,
+): number => {
+  const points = curvatureOf(road)
+  if (points.length === 0) return Number.POSITIVE_INFINITY
+  let minRadius = Number.POSITIVE_INFINITY
+  for (const p of points) {
+    const ahead = sign === 1 ? p.s >= s && p.s <= s + lookaheadM : p.s <= s && p.s >= s - lookaheadM
+    if (ahead && p.radius < minRadius) minRadius = p.radius
+  }
+  if (!Number.isFinite(minRadius)) return Number.POSITIVE_INFINITY
+  return Math.sqrt(latAccel * minRadius)
+}
+
+/**
+ * The lane point of `road` nearest to a world position — the arc-landing snap:
+ * a turn arc's end is a geometric approximation of the exit lane's
+ * entry point, and on a real city network (junction radii, multi-point
+ * ways) it can sit ~5 m off the lane — exactly where the 5 m lane
+ * guard fires the moment the arc ends. Snapping the landing onto the
+ * lane removes the whole class.
+ *
+ * Lanes whose travel direction disagrees with `headingHint` by more
+ * than 90° are skipped (do not snap a car onto the opposite carriageway).
+ * Returns `null` when nothing is within `maxDistM` — the caller keeps
+ * the raw landing.
+ */
+export const nearestLanePointOnRoad = (
+  road: Road,
+  x: number,
+  z: number,
+  headingHint: number | undefined,
+  maxDistM: number = 8,
+): { laneIndex: number; s: number; position: Position; heading: number } | null => {
+  let best: { laneIndex: number; s: number; position: Position; heading: number; distSq: number } | null =
+    null
+  for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
+    const s = worldToLaneS(road, laneIndex, x, z)
+    const lp = lanePoint(road, laneIndex, s)
+    if (
+      headingHint !== undefined &&
+      Math.abs(normalizeAngleSafe(lp.heading - headingHint)) > Math.PI / 2
+    ) {
+      continue
+    }
+    const dx = lp.position.x - x
+    const dz = lp.position.z - z
+    const distSq = dx * dx + dz * dz
+    if (distSq > maxDistM * maxDistM) continue
+    if (!best || distSq < best.distSq) {
+      best = { laneIndex, s, position: lp.position, heading: lp.heading, distSq }
+    }
+  }
+  if (!best) return null
+  const { distSq: _drop, ...rest } = best
+  return rest
+}
+
+const normalizeAngleSafe = (a: number): number => {
+  let r = a % (2 * Math.PI)
+  if (r > Math.PI) r -= 2 * Math.PI
+  if (r < -Math.PI) r += 2 * Math.PI
+  return r
+}

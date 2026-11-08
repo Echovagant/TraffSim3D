@@ -29,6 +29,8 @@ import {
   laneForwardSign,
   stopLineSOnRoad,
   projectIntersectionOnRoad,
+  curvatureSpeedLimit,
+  nearestLanePointOnRoad,
 } from '@domain/services/laneGeometry'
 import {
   steerLateralVelocity,
@@ -617,6 +619,19 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         ctx.routeNextRoadId?.(v.id) ?? null,
       )
       if (routeLimit !== null) speedLimit = Math.min(speedLimit, routeLimit)
+      // The road's own geometry bends too — a mid-way 90° corner needs
+      // the same √(a_lat·R) treatment a junction turn gets, or a
+      // full-speed car sweeps off the lane and the 5 m guard loops it
+      // forever (measured: ~30 guards / 60 s on the Futian network,
+      // 6 of 8 hotspots sat within 40 m of a ≈90° polyline corner).
+      const curveLimit = curvatureSpeedLimit(
+        road,
+        v.s,
+        laneForwardSign(v.laneIndex, road.laneCount),
+        CURVE_BRAKE_LOOKAHEAD_M,
+        TURN_LAT_ACCEL,
+      )
+      if (curveLimit < speedLimit) speedLimit = curveLimit
     }
     v.targetSpeed = speedLimit
     applyTrafficLightConstraint(v, road, ctx, junctions)
@@ -791,13 +806,26 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
           // ~7 m from the lane point, and the 5 m lane guard would fire
           // on exactly this frame otherwise (measured).
           const end = arcPointAt(turnArc, v.turn.length)
-          v.position.x = end.x
-          v.position.z = end.z
-          v.heading = end.heading
+          // The arc's end is a geometric APPROXIMATION of the exit
+          // lane's entry point; on a real network (junction radii,
+          // multi-point ways) it can sit ~5 m off the lane — exactly
+          // where the guard fires the moment the arc ends (measured:
+          // v-1 looped on w-25447649 s=78.9, four trips to the same
+          // spot). Snap the landing onto the exit lane itself.
+          const lane = network.roads[v.roadId]
+          const snapped = lane
+            ? nearestLanePointOnRoad(lane, end.x, end.z, end.heading)
+            : null
+          const landX = snapped ? snapped.position.x : end.x
+          const landZ = snapped ? snapped.position.z : end.z
+          const landH = snapped ? snapped.heading : end.heading
+          v.position.x = landX
+          v.position.z = landZ
+          v.heading = landH
           v.turn = undefined
           ctx.rapierWorld!.setVehiclePosition(v.id, v.position)
-          ctx.rapierWorld!.setVehicleHeading(v.id, end.heading)
-          ctx.rapierWorld!.setVehicleSpeed(v.id, v.speed, end.heading)
+          ctx.rapierWorld!.setVehicleHeading(v.id, landH)
+          ctx.rapierWorld!.setVehicleSpeed(v.id, v.speed, landH)
           // Fall through: the normal lane re-derivation now agrees with
           // the pose (the vehicle IS at its lane's entry point).
         } else {
@@ -941,6 +969,26 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
             // now, through the same event log as the exit phase.
             const offLaneM = Math.sqrt(distFromExpectedSq)
             const speedAtGuard = v.speed
+            // Dev-only forensic line: the event log carries who/where/
+            // how-far, but diagnosing a guard LOOP needs the arc state
+            // (s, road length, heading) at the fire instant. Tree-shaken
+            // from production builds.
+            if (import.meta.env.DEV) {
+              console.debug(
+                '[lane-guard-diag]',
+                JSON.stringify({
+                  id: v.id,
+                  road: vRoad.id,
+                  lane: v.laneIndex,
+                  s: +v.s.toFixed(1),
+                  len: +len.toFixed(1),
+                  heading: +v.heading.toFixed(2),
+                  speed: +speedAtGuard.toFixed(1),
+                  off: +offLaneM.toFixed(2),
+                  inTurn: !!v.turn,
+                }),
+              )
+            }
             const clampedS = Math.max(0, Math.min(len, v.s))
             v.s = clampedS
             const lp = lanePoint(vRoad, v.laneIndex, v.s)
@@ -1501,6 +1549,15 @@ const TURN_STICKY_M = 5.0
  * `roadContinuation` on vehicles Nowhere near a junction.
  */
 const TURN_DECIDE_LEAD_M = 10.0
+
+/**
+ * How far ahead a geometry corner must be announced for the car to
+ * brake into it: braking from the city's top speed (13.9 m/s) at the
+ * comfy decel covers ~32 m, so the corner has to be seen at 40 m —
+ * the √(a_lat·R) limit is otherwise met while already sliding off
+ * the lane.
+ */
+const CURVE_BRAKE_LOOKAHEAD_M = 40.0
 /**
  * A wrap landing stays this far (m) from any vehicle on the landing
  * lane — centres, so 8 m is roughly two vehicle lengths: enough for the

@@ -276,3 +276,94 @@ describe('elevated road geometry', () => {
     expect(roadLength(r)).toBeGreaterThan(roadLength(flat))
   })
 })
+
+// ---------------------------------------------------------------------------
+// Curvature speed limit + arc-landing snap
+// ---------------------------------------------------------------------------
+
+import { curvatureSpeedLimit, nearestLanePointOnRoad } from './laneGeometry'
+
+const LAT_ACCEL = 2.5
+
+describe('curvatureSpeedLimit — a polyline corner needs braking, not a lane guard', () => {
+  const makeBent = (): Road => ({
+    id: 'r-bent',
+    startNode: { x: 0, y: 0, z: 0 },
+    endNode: { x: 60, y: 0, z: 30 },
+    waypoints: [
+      { x: 0, y: 0, z: 0 },
+      { x: 30, y: 0, z: 0 }, // corner at s = 30 (legs 30 m + 30 m at 90°)
+      { x: 30, y: 0, z: 30 },
+      { x: 60, y: 0, z: 30 },
+    ],
+    laneCount: 1,
+    speedLimit: 20,
+    level: 0,
+  })
+
+  it('limits a car approaching a 90° corner to √(a_lat·R)', () => {
+    const road = makeBent()
+    // R = (min leg / 2) / tan(45°) = 15 m → √(2.5·15) ≈ 6.12 m/s.
+    const limit = curvatureSpeedLimit(road, 10, 1, 40, LAT_ACCEL)
+    expect(limit).toBeCloseTo(Math.sqrt(LAT_ACCEL * 15), 2)
+  })
+
+  it('does not limit a car with no corner ahead', () => {
+    const road = makeBent()
+    // Past the last corner (s = 60), the final 30 m leg is straight.
+    const limit = curvatureSpeedLimit(road, 70, 1, 40, LAT_ACCEL)
+    expect(limit).toBe(Number.POSITIVE_INFINITY)
+  })
+
+  it('respects the driving direction (backward lanes look backward)', () => {
+    const road = makeBent()
+    // Standing at s = 35 heading backward: the corner (s = 30) is 5 m
+    // behind along the driving direction — inside the window.
+    const back = curvatureSpeedLimit(road, 35, -1, 40, LAT_ACCEL)
+    expect(back).toBeLessThan(Number.POSITIVE_INFINITY)
+    // Standing at s = 10 heading backward: the corner (s = 30) is 20 m
+    // AHEAD in polyline terms — behind the driver, so unconstrained.
+    const clear = curvatureSpeedLimit(road, 10, -1, 40, LAT_ACCEL)
+    expect(clear).toBe(Number.POSITIVE_INFINITY)
+  })
+
+  it('never limits a straight two-point road', () => {
+    const road = makeRoad2()
+    expect(curvatureSpeedLimit(road, 5, 1, 40, LAT_ACCEL)).toBe(Number.POSITIVE_INFINITY)
+  })
+})
+
+describe('nearestLanePointOnRoad — the arc-landing snap', () => {
+  const makeTwoLane = (): Road => ({
+    id: 'r-2l',
+    startNode: { x: 0, y: 0, z: 0 },
+    endNode: { x: 100, y: 0, z: 0 },
+    laneCount: 2,
+    speedLimit: 20,
+    level: 0,
+  })
+
+  it('snaps a landing that sits a few metres off the lane', () => {
+    const road = makeTwoLane()
+    const snap = nearestLanePointOnRoad(road, 50, -2, 0)
+    expect(snap).not.toBeNull()
+    expect(snap!.laneIndex).toBe(0)
+    expect(snap!.s).toBeCloseTo(50, 1)
+    // Back on the lane centreline: lane 0 sits 1.75 m off the
+    // centerline, on the (0,-1) normal side for an eastward road.
+    expect(snap!.position.z).toBeCloseTo(-1.75, 2)
+  })
+
+  it('skips lanes whose travel direction disagrees with the heading hint', () => {
+    const road = makeTwoLane()
+    // Heading east (+x): lane 0 is forward, lane 1 backward — the hint
+    // must keep the landing on a forward lane.
+    const snap = nearestLanePointOnRoad(road, 50, -2, 0)
+    expect(snap!.laneIndex).toBe(0)
+  })
+
+  it('returns null when nothing is within reach', () => {
+    const road = makeTwoLane()
+    expect(nearestLanePointOnRoad(road, 50, -20, 0)).toBeNull()
+  })
+})
