@@ -149,6 +149,22 @@
     <div v-if="status" class="status-toast" :class="status.kind" data-testid="status-toast">
       {{ status.text }}
     </div>
+
+    <!-- The ride banner: tracking / driving one vehicle. -->
+    <div v-if="ride" class="ride-banner" data-testid="ride-banner">
+      <span class="ride-id">{{ ride.id }}</span>
+      <span class="ride-mode">{{
+        ride.mode === 'cockpit' ? '驾驶' : ride.mode === 'chase-top' ? '跟踪·俯视' : '跟踪·平视'
+      }}</span>
+      <button class="ride-btn" data-testid="ride-look" @click="world.toggleRideLook()">
+        {{ ride.mode === 'chase-top' ? '平视' : '俯视' }}
+      </button>
+      <button class="ride-btn" data-testid="ride-drive" @click="driveRide()">
+        {{ ride.mode === 'cockpit' ? '跟踪' : '驾驶' }}
+      </button>
+      <button class="ride-btn ride-exit" data-testid="ride-exit" @click="leaveRide()">退出</button>
+      <span class="ride-hint">点击空白处也可退出 · 滚轮拉远近</span>
+    </div>
   </main>
 </template>
 
@@ -488,6 +504,20 @@ const tokenScreen = (_theme: string): string => {
   return '#0d1117'
 }
 
+// ===== the ride (tracking / driving) ======================================
+
+/** Banner state, or null when the camera rides with nobody. */
+const ride = computed(() => {
+  const id = world.rideVehicleId
+  if (!id) return null
+  return { id, mode: world.rideMode }
+})
+
+const driveRide = (): void => {
+  if (!world.rideVehicleId) return
+  world.setRideMode(world.rideMode === 'cockpit' ? 'chase' : 'cockpit')
+}
+
 // ===== lifecycle ==========================================================
 
 onMounted(async () => {
@@ -594,6 +624,16 @@ onMounted(async () => {
 
   // 3) Start camera sync loop — Cesium → Three.js every frame.
   startCameraSync()
+
+  // 4) The interaction layer: walking keys, the Alt free look, and
+  //    click-to-track. All on `window`/`document` — the Cesium canvas
+  //    keeps dragging the basemap and rarely owns keyboard focus.
+  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('blur', onBlurWindow)
+  window.addEventListener('pointerdown', onPointerDown)
+  window.addEventListener('pointerup', onPointerUp)
+  cesiumContainer.value?.addEventListener('mousemove', onMouseLook)
 })
 
 /**
@@ -622,6 +662,22 @@ const birdView = computed(() => {
   }
 })
 
+// The ride (tracking / driving) hands the camera to Three.js — the
+// basemap follows through the sync. EVERY path in and out (a click, a
+// programmatic ride, the exit button) goes through this watch, so the
+// ownership can never disagree with the ride state.
+watch(
+  () => world.rideVehicleId,
+  (id) => {
+    if (!cameraSync) return
+    if (id) {
+      cameraSync.setOwner('three')
+    } else {
+      cameraSync.setOwner('cesium')
+    }
+  },
+)
+
 // A theme switch changes the road and building colours — and the
 // Cesium layers bake their colours in at creation, so they have to be
 // re-coloured explicitly. The raster basemap and the sky follow the
@@ -634,9 +690,16 @@ watch(themeId, (theme) => {
 })
 
 // View mode toggle: Cesium flyTo for bird/street; orbit controls
-// for free. We watch viewMode and react.
+// for free; the ride camera (tracking / driving) takes the Three.js
+// camera and lets the basemap follow. We watch viewMode and react.
 watch(viewMode, (mode) => {
   if (!cesiumViewer) return
+  if (world.rideVehicleId) {
+    // Riding: the follow camera owns the view regardless of the
+    // dropdown. The dropdown itself is restored when the ride ends.
+    cameraSync?.setOwner('three')
+    return
+  }
   if (mode === 'bird') {
     // Cesium owns the camera again — hand the current view over once
     // so the switch does not jump.
@@ -665,15 +728,167 @@ watch(viewMode, (mode) => {
   }
 })
 
+// ===== riding: click a car to track it, drive it, or leave =========
+//
+// A click picks a vehicle through the Three.js camera (the same ray
+// the editor uses). Dragging the basemap must NOT pick, so the click
+// is only honoured when the pointer travelled less than a few pixels
+// between down and up.
+const downPos = { x: 0, y: 0 }
+const onPointerDown = (e: PointerEvent): void => {
+  downPos.x = e.clientX
+  downPos.y = e.clientY
+}
+const onPointerUp = (e: PointerEvent): void => {
+  if (Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 6) return
+  const renderer = rendererRef.value
+  if (!renderer) return
+  const hit = renderer.pick(e.clientX, e.clientY, world.network)
+  if (hit?.kind === 'vehicle') {
+    world.setRideVehicle(hit.id, 'chase')
+  } else if (world.rideVehicleId) {
+    // Clicking empty space leaves the ride — the basemap comes back.
+    leaveRide()
+  }
+}
+
+const leaveRide = (): void => {
+  world.setRideVehicle(null)
+  // Back to the mode the ride interrupted (the oblique is the home).
+  cameraSync?.setOwner('cesium')
+  const view = birdView.value
+  cesiumViewer?.camera.flyTo({
+    destination: view.destination,
+    orientation: { heading: view.heading, pitch: view.pitch, roll: 0 },
+    duration: 1.2,
+  })
+}
+
+/** The ride's keyboard: C toggles the tracking look, X drives, Esc leaves. */
+const onRideKey = (e: KeyboardEvent): void => {
+  if (!world.rideVehicleId) return
+  if (e.code === 'KeyC') world.toggleRideLook()
+  else if (e.code === 'KeyX')
+    world.setRideMode(world.rideMode === 'cockpit' ? 'chase' : 'cockpit')
+  else if (e.code === 'Escape') leaveRide()
+}
+
+// ===== street-level walking: WASD moves, Alt+mouse looks ============
+//
+// The reference project's pattern: keys are collected in a Set on
+// `window` (a dashboard often has no canvas focus), Alt enters the
+// free look by disabling Cesium's own drag controller while held, and
+// a blur releases everything — otherwise the car walks on after an
+// Alt+Tab.
+const keysDown = new Set<string>()
+let altLook = false
+
+const isTypingTarget = (t: EventTarget | null): boolean => {
+  const el = t as HTMLElement | null
+  if (!el) return false
+  return (
+    el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true
+  )
+}
+
+const setStreetControlsEnabled = (enabled: boolean): void => {
+  const controller = cesiumViewer?.scene.screenSpaceCameraController
+  if (!controller) return
+  controller.enableRotate = enabled
+  controller.enableTranslate = enabled
+  controller.enableTilt = enabled
+  controller.enableZoom = enabled
+}
+
+const onKeyDown = (e: KeyboardEvent): void => {
+  if (isTypingTarget(e.target)) return
+  keysDown.add(e.code)
+  onRideKey(e)
+  if (viewMode.value === 'street' && (e.code === 'AltLeft' || e.code === 'AltRight')) {
+    // Alt hands the look to the mouse; without preventDefault the
+    // browser moves focus to its own menu bar.
+    e.preventDefault()
+    altLook = true
+    setStreetControlsEnabled(false)
+  }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault()
+}
+const onKeyUp = (e: KeyboardEvent): void => {
+  keysDown.delete(e.code)
+  if (e.code === 'AltLeft' || e.code === 'AltRight') {
+    altLook = false
+    setStreetControlsEnabled(true)
+  }
+}
+const onBlurWindow = (): void => {
+  keysDown.clear()
+  altLook = false
+  setStreetControlsEnabled(true)
+}
+const onMouseLook = (e: MouseEvent): void => {
+  if (!altLook || !cesiumViewer) return
+  // A few pixels of mouse turn into a few degrees of look — the
+  // factor is what feels natural at eye height.
+  const k = 0.0045
+  cesiumViewer.camera.lookRight(e.movementX * k)
+  cesiumViewer.camera.lookUp(e.movementY * k)
+  // The walk is a WALK: clamp the pitch so the camera cannot flip
+  // under the ground or into the sky.
+  const pitch = cesiumViewer.camera.pitch
+  const maxUp = 0.35
+  const minDown = -Math.PI / 2 + 0.08
+  if (pitch > maxUp) cesiumViewer.camera.lookUp(maxUp - pitch)
+  if (pitch < minDown) cesiumViewer.camera.lookUp(minDown - pitch)
+}
+
+/** One frame of street walking: WASD relative to the look direction. */
+const walkStreet = (dt: number): void => {
+  if (!cesiumViewer || viewMode.value !== 'street' || world.rideVehicleId) return
+  const speed = keysDown.has('ShiftLeft') || keysDown.has('ShiftRight') ? 6 : 2.5
+  let moved = false
+  if (keysDown.has('KeyW') || keysDown.has('ArrowUp')) {
+    cesiumViewer.camera.moveForward(speed * dt)
+    moved = true
+  }
+  if (keysDown.has('KeyS') || keysDown.has('ArrowDown')) {
+    cesiumViewer.camera.moveBackward(speed * dt)
+    moved = true
+  }
+  if (keysDown.has('KeyA') || keysDown.has('ArrowLeft')) {
+    cesiumViewer.camera.moveLeft(speed * dt)
+    moved = true
+  }
+  if (keysDown.has('KeyD') || keysDown.has('ArrowRight')) {
+    cesiumViewer.camera.moveRight(speed * dt)
+    moved = true
+  }
+  if (!moved) return
+  // Pin the eye height: moveForward follows the look direction, and a
+  // tilted look would walk the camera into the sky or under the map.
+  const carto = cesiumViewer.camera.positionCartographic
+  if (carto && Math.abs(carto.height - 1.7) > 0.05) {
+    cesiumViewer.camera.position = Cesium.Cartesian3.fromRadians(
+      carto.longitude,
+      carto.latitude,
+      1.7,
+    )
+  }
+}
+
 /** Per-frame: apply the current owner's direction (Cesium → Three, or
  *  Three → Cesium in "free" mode). Exactly one direction runs per
  *  frame — see the ownership note in cameraSync.ts. */
 const startCameraSync = (): void => {
+  let last = performance.now()
   const tick = (): void => {
+    const now = performance.now()
+    const dt = Math.min(0.1, (now - last) / 1000)
+    last = now
     if (!cesiumViewer || !rendererRef.value) {
       syncRafId = requestAnimationFrame(tick)
       return
     }
+    walkStreet(dt)
     if (!cameraSync) {
       cameraSync = createCameraSync({
         cesiumViewer,
@@ -692,6 +907,12 @@ onBeforeUnmount(() => {
   if (syncRafId !== null) cancelAnimationFrame(syncRafId)
   if (trendTimer !== null) window.clearInterval(trendTimer)
   unsubscribeOob?.()
+  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('blur', onBlurWindow)
+  window.removeEventListener('pointerdown', onPointerDown)
+  window.removeEventListener('pointerup', onPointerUp)
+  cesiumContainer.value?.removeEventListener('mousemove', onMouseLook)
   cesiumViewer?.destroy()
   cesiumViewer = null
 })
@@ -1035,5 +1256,54 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--dc-alert) 18%, transparent);
   color: color-mix(in srgb, var(--dc-alert) 85%, var(--dc-text));
   border: 1px solid color-mix(in srgb, var(--dc-alert) 45%, transparent);
+}
+
+/* ===== the ride banner =====
+   Bottom centre, above the event feed: who is tracked, which look is
+   active, and the three actions. Glass like the panels. */
+.ride-banner {
+  position: absolute;
+  bottom: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--dc-z-toast);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: var(--dc-radius);
+  background: var(--dc-chrome);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 32%, transparent);
+  font-size: var(--dc-label-size);
+  pointer-events: auto;
+}
+.ride-id {
+  font-weight: 600;
+  color: var(--dc-accent);
+  font-variant-numeric: tabular-nums;
+}
+.ride-mode {
+  color: var(--dc-text);
+}
+.ride-btn {
+  padding: 3px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--dc-panel) 70%, transparent);
+  color: var(--dc-text);
+  cursor: pointer;
+  font-size: var(--dc-label-size);
+}
+.ride-btn:hover {
+  background: color-mix(in srgb, var(--dc-accent) 24%, transparent);
+}
+.ride-exit {
+  border-color: color-mix(in srgb, var(--dc-alert) 45%, transparent);
+  color: color-mix(in srgb, var(--dc-alert) 80%, var(--dc-text));
+}
+.ride-hint {
+  color: var(--dc-text-faint);
 }
 </style>

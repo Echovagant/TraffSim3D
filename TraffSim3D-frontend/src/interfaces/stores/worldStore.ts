@@ -544,6 +544,37 @@ export const useWorldStore = defineStore('world', () => {
   const routeProgressIndex = ref(0)
   /** First-person camera: ride along with the follower. */
   const followCamera = ref(false)
+  /**
+   * The vehicle the smart-city camera RIDES with — tracking (chase)
+   * or driving (cockpit) — independent of any planned route. A ride
+   * needs no destination: the car keeps its ordinary AI driving, the
+   * camera just goes with it.
+   */
+  const rideVehicleId = ref<string | null>(null)
+  /** The ride's camera shape: chase behind, chase from above, or cockpit. */
+  const rideMode = ref<'chase' | 'chase-top' | 'cockpit'>('chase')
+
+  /** Track (or drive with) a vehicle; `null` leaves the ride. */
+  const setRideVehicle = (id: string | null, mode: 'chase' | 'chase-top' | 'cockpit' = 'chase'): void => {
+    rideVehicleId.value = id
+    rideMode.value = mode
+    followCamera.value = id !== null
+    bumpTick()
+  }
+
+  /** Switch the ride's camera shape. */
+  const setRideMode = (mode: 'chase' | 'chase-top' | 'cockpit'): void => {
+    if (!rideVehicleId.value) return
+    rideMode.value = mode
+    bumpTick()
+  }
+
+  /** chase ↔ chase-top — the tracking view's own look toggles. */
+  const toggleRideLook = (): void => {
+    if (!rideVehicleId.value) return
+    rideMode.value = rideMode.value === 'chase-top' ? 'chase' : 'chase-top'
+    bumpTick()
+  }
 
   /**
    * Plan a route for a vehicle to a junction.
@@ -636,10 +667,15 @@ export const useWorldStore = defineStore('world', () => {
    */
   const followCameraTarget = (): FollowCameraTarget | null => {
     if (!followCamera.value) return null
-    const id = routeFollowerId.value
+    // The ride (tracking / driving) wins over the route follower: they
+    // are two entries into the same camera, and the ride is the
+    // user's explicit choice in the smart-city view.
+    const id = rideVehicleId.value ?? routeFollowerId.value
     if (!id) return null
     const vehicle = network.value.vehicles[id]
     if (!vehicle) return null
+    const riding = rideVehicleId.value === id
+    const mode: FollowCameraTarget['mode'] = !riding ? 'cockpit' : rideMode.value
     return {
       position: {
         x: vehicle.position.x,
@@ -648,6 +684,8 @@ export const useWorldStore = defineStore('world', () => {
       },
       heading: vehicle.heading,
       vehicleId: id,
+      mode,
+      vehicleKind: vehicle.type,
     }
   }
 
@@ -1978,6 +2016,11 @@ export const useWorldStore = defineStore('world', () => {
     enableDrivePolicy,
     disableDrivePolicy,
     followCameraTarget,
+    rideVehicleId,
+    rideMode,
+    setRideVehicle,
+    setRideMode,
+    toggleRideLook,
     routeRenderPath,
     // sensor + exporter surface
     sensorRegistry,

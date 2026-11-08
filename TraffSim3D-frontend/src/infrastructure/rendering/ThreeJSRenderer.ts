@@ -10,13 +10,22 @@ import {
 } from './SceneBuilder'
 import { buildRouteMesh, type RouteRenderPath } from './RouteMesh'
 import { createPoiLayer, type Poi, type PoiLayer } from './PoiLayer'
-import { MAX_DPR } from '@shared/constants/simulation'
+import { MAX_DPR, VEHICLE_BODY_SPEC } from '@shared/constants/simulation'
 
 /** How far ahead of the car the first-person camera looks (m). */
 export const FOLLOW_LOOK_AHEAD_M = 14
 
 /** How far below the driver's eye the camera's look-at point sits (m). */
 export const FOLLOW_LOOK_DOWN_M = 1.6
+
+/** How far behind the car the chase camera hangs (m). */
+export const FOLLOW_CHASE_BEHIND_M = 9
+
+/** How far above the car the chase camera hangs (m). */
+export const FOLLOW_CHASE_ABOVE_M = 3.4
+
+/** How high the overhead chase camera looks down from (m). */
+export const FOLLOW_CHASE_TOP_M = 55
 
 /**
  * How many frames the camera takes to arrive at the driver's eye.
@@ -47,6 +56,17 @@ export interface FollowCameraTarget {
    * the car, so the car's own body would fill the frame.
    */
   vehicleId?: string
+  /** The body length the chase camera hangs off (defaults to a car). */
+  vehicleKind?: 'car' | 'truck' | 'bus'
+  /**
+   * Which ride the camera takes. `cockpit` (default) sits at the
+   * driver's eye — the POI drive's first person; the car's own body is
+   * hidden while it rides. `chase` hangs behind and above the car (the
+   * tracking view); `chase-top` looks straight down from above it (the
+   * tracking view's overhead). The car stays visible in both chase
+   * views — the vehicle IS the subject there.
+   */
+  mode?: 'cockpit' | 'chase' | 'chase-top'
 }
 
 export interface RendererCallbacks {
@@ -501,10 +521,31 @@ export class ThreeJSRenderer {
    * between.
    */
   private applyFollowCamera(target: FollowCameraTarget): void {
-    const eye = new THREE.Vector3(target.position.x, target.position.y, target.position.z)
+    const mode = target.mode ?? 'cockpit'
     const forward = new THREE.Vector3(Math.cos(target.heading), 0, Math.sin(target.heading))
-    const look = eye.clone().add(forward.multiplyScalar(FOLLOW_LOOK_AHEAD_M))
-    look.y = target.position.y - FOLLOW_LOOK_DOWN_M
+    let eye: THREE.Vector3
+    let look: THREE.Vector3
+    if (mode === 'chase') {
+      // Behind and above: the tracking camera reads the street the car
+      // is driving through, with the car itself in the lower third.
+      // The hang-back distance scales with the body — the constants
+      // are tuned for a car, and a 9 m bus would fill the frame.
+      const length = VEHICLE_BODY_SPEC[target.vehicleKind ?? 'car'].length
+      const behind = FOLLOW_CHASE_BEHIND_M + length / 2
+      const above = FOLLOW_CHASE_ABOVE_M + length * 0.18
+      const body = new THREE.Vector3(target.position.x, target.position.y, target.position.z)
+      eye = body.clone().sub(forward.clone().multiplyScalar(behind)).add(new THREE.Vector3(0, above, 0))
+      look = body.add(forward.clone().multiplyScalar(8))
+    } else if (mode === 'chase-top') {
+      // Straight down from above the car: the whole junction in frame.
+      const body = new THREE.Vector3(target.position.x, target.position.y, target.position.z)
+      eye = body.clone().add(new THREE.Vector3(0, FOLLOW_CHASE_TOP_M, 0))
+      look = body.clone()
+    } else {
+      eye = new THREE.Vector3(target.position.x, target.position.y, target.position.z)
+      look = eye.clone().add(forward.clone().multiplyScalar(FOLLOW_LOOK_AHEAD_M))
+      look.y = target.position.y - FOLLOW_LOOK_DOWN_M
+    }
 
     // The camera eases toward the driver's eye instead of snapping: a
     // snap puts the whole view at the car in one frame, and the road
@@ -547,7 +588,10 @@ export class ThreeJSRenderer {
   private syncFollowerVisibility(follow: FollowCameraTarget | null): void {
     const vehicles = this.built?.vehicles
     if (!vehicles) return
-    const wanted = follow?.vehicleId ?? null
+    // Only the cockpit sits INSIDE the car — a chase view needs the
+    // car visible, it is the subject of the shot.
+    const wanted =
+      follow?.vehicleId && (follow.mode ?? 'cockpit') === 'cockpit' ? follow.vehicleId : null
     if (wanted === this.hiddenFollowerId) return
     if (this.hiddenFollowerId) {
       vehicles.show(this.hiddenFollowerId)
