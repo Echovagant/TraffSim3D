@@ -85,6 +85,12 @@ export interface OobEvent {
   speed: number
   /** Human-readable reason. */
   reason: string
+  /** The road the event happened on, when there still is one. */
+  roadId?: string
+  /** The lane the vehicle will end up on. */
+  laneIndex?: number
+  /** Why the exit phase ended — only on `reset`. */
+  resetReason?: OobResetReason
 }
 
 /** How many events the log keeps. */
@@ -153,6 +159,9 @@ export const recordLaneGuard = (event: {
   speed: number
   /** Human-readable reason. */
   reason: string
+  /** Where the guard fired — for the dashboard's Chinese message. */
+  roadId?: string
+  laneIndex?: number
 }): void => {
   emit(event)
 }
@@ -275,6 +284,9 @@ const advanceExitPhase = (
     distance: exit.startDistance,
     speed: v.speed,
     reason: `back at the start of ${road.id} lane ${v.laneIndex} after leaving the network (${reason})`,
+    roadId: road.id,
+    laneIndex: v.laneIndex,
+    resetReason: reason,
   })
 }
 
@@ -346,6 +358,8 @@ export const tickOobCleanup = (
       distance,
       speed: v.speed,
       reason: `left the network (${distance.toFixed(1)} m off its lane) — braking to a stop`,
+      roadId: road.id,
+      laneIndex: v.laneIndex,
     })
   }
 }

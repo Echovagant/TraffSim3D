@@ -393,8 +393,42 @@ const pushEvent = (kind: string, text: string): void => {
 }
 
 const onOobEvent = (e: OobEvent): void => {
-  const kind = e.kind === 'lane-guard' || e.kind === 'lateral-guard' ? '车道修正' : '越界'
-  pushEvent(kind, e.reason)
+  // The event's `reason` is the domain layer's English text (the unit
+  // tests pin it). The dashboard speaks Chinese, so the message is
+  // assembled here from the STRUCTURED fields — not by translating the
+  // string — so a wording change in the domain can never garble it.
+  const d = e.distance.toFixed(1)
+  const v = e.speed.toFixed(1)
+  let kind = '越界'
+  let text: string
+  switch (e.kind) {
+    case 'lane-guard':
+      kind = '车道修正'
+      text = `${e.vehicleId} 偏离车道点 ${d} m（${v} m/s）—— 已拉回，速度清零`
+      break
+    case 'lateral-guard':
+      kind = '车道修正'
+      text = `${e.vehicleId} 侧向漂移 ${d} m（${v} m/s）—— 已修正，速度限幅`
+      break
+    case 'exit-start':
+      kind = '越界'
+      text = `${e.vehicleId} 驶出路网（偏离 ${d} m）—— 刹停中`
+      break
+    case 'reset': {
+      kind = '复位'
+      const why =
+        e.resetReason === 'stopped' ? '已停稳' : e.resetReason === 'distance' ? '滑出过远' : '超时'
+      text = `${e.vehicleId} 已送回${e.roadId ?? '原路'} 车道 ${e.laneIndex ?? 0} 起点（${why}）`
+      break
+    }
+    case 'orphan-removed':
+      kind = '移除'
+      text = `${e.vehicleId} 所在道路已不存在 —— 车辆已移除`
+      break
+    default:
+      text = e.reason
+  }
+  pushEvent(kind, text)
 }
 
 /**
