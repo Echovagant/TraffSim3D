@@ -494,39 +494,65 @@ export const loadNetworkRoads = async (
     })
 
     if (fits) continue
-    // The barrier at the narrow lane's entrance: two posts and a bar —
-    // enough to read as "cars do not enter here" from the 45° view.
-    const a = points[0]!
-    const ll = localToLngLat(origin, a.x, a.z)
-    const post = (offsetM: number): Cesium.Cartesian3 => {
-      const cosLat = Math.cos((ll.lat * Math.PI) / 180)
-      return Cesium.Cartesian3.fromDegrees(
-        ll.lng + offsetM / (OSM_METERS_PER_DEGREE_LAT * cosLat),
-        ll.lat,
-        1.3,
-      )
+    // Barriers at every entrance a car could actually TRY: the road's
+    // endpoints that meet a junction which also connects a drivable
+    // road (a barred lane ending in the middle of nowhere gets none —
+    // nobody turns into it from there). The bar spans the lane on the
+    // END SEGMENT's normal: a short corridor, which fits any heading —
+    // a box could not rotate to match, and the old longitude-offset
+    // version skewed across every road that does not run east-west.
+    const ends: Array<{ at: { x: number; y: number; z: number }; next: { x: number; y: number; z: number } }> = []
+    if (points.length >= 2) {
+      ends.push({ at: points[0]!, next: points[1]! })
+      ends.push({ at: points[points.length - 1]!, next: points[points.length - 2]! })
     }
     const half = roadWidthM(road) / 2
-    const barColor = Cesium.Color.fromCssColorString(token('--dc-alert', '#f43f5e'))
-    collection.entities.add({
-      position: Cesium.Cartesian3.midpoint(post(-half), post(half), new Cesium.Cartesian3()),
-      box: {
-        dimensions: new Cesium.Cartesian3(roadWidthM(road), 0.18, 0.18),
-        material: new Cesium.ColorMaterialProperty(barColor),
-      },
-      properties: { access: 'barrier' },
-    })
-    for (const side of [-half, half]) {
+    for (const { at, next } of ends) {
+      const junction = Object.values(network.intersections).find(
+        (i) =>
+          i.connectedRoads.includes(road.id) &&
+          Math.hypot(i.position.x - at.x, i.position.z - at.z) < 8,
+      )
+      if (!junction) continue
+      const hasDrivableExit = junction.connectedRoads.some(
+        (id) => id !== road.id && network.roads[id] && vehicleFitsRoad(network.roads[id]!, 'car'),
+      )
+      if (!hasDrivableExit) continue
+      // The end segment's tangent → its normal, in the local frame.
+      const dx = next.x - at.x
+      const dz = next.z - at.z
+      const segLen = Math.hypot(dx, dz) || 1
+      const nx = dz / segLen
+      const nz = -dx / segLen
+      const corner = (side: number): Cesium.Cartesian3 => {
+        const ll = localToLngLat(origin, at.x + nx * side, at.z + nz * side)
+        return Cesium.Cartesian3.fromDegrees(ll.lng, ll.lat, 1.35)
+      }
       collection.entities.add({
-        position: post(side),
-        cylinder: {
-          length: 2.6,
-          topRadius: 0.09,
-          bottomRadius: 0.09,
-          material: new Cesium.ColorMaterialProperty(barColor),
+        corridor: {
+          positions: [corner(-half), corner(half)],
+          width: 0.25,
+          height: 1.35,
+          material: new Cesium.ColorMaterialProperty(
+            Cesium.Color.fromCssColorString(token('--dc-alert', '#f43f5e')),
+          ),
         },
         properties: { access: 'barrier' },
       })
+      for (const side of [-half, half]) {
+        collection.entities.add({
+          position: corner(side),
+          cylinder: {
+            length: 2.7,
+            topRadius: 0.09,
+            bottomRadius: 0.09,
+            material: new Cesium.ColorMaterialProperty(
+              Cesium.Color.fromCssColorString(token('--dc-alert', '#f43f5e')),
+            ),
+          },
+          properties: { access: 'barrier' },
+        })
+      }
     }
   }
 
@@ -544,14 +570,16 @@ export const loadNetworkRoads = async (
     const barColor = Cesium.Color.fromCssColorString(token('--dc-alert', '#f43f5e'))
     for (const entity of collection.entities.values) {
       const access = entity.properties?.access?.getValue(undefined)
+      if (access === 'barrier') {
+        const bar = Cesium.Color.fromCssColorString(token('--dc-alert', '#f43f5e'))
+        if (entity.corridor) entity.corridor.material = new Cesium.ColorMaterialProperty(bar)
+        if (entity.cylinder) entity.cylinder.material = new Cesium.ColorMaterialProperty(bar)
+        continue
+      }
       if (entity.corridor) {
         entity.corridor.material = new Cesium.ColorMaterialProperty(
           access === 'barred' ? barredColor : roadColor,
         )
-      } else if (entity.box || entity.cylinder) {
-        entity.box
-          ? (entity.box.material = new Cesium.ColorMaterialProperty(barColor))
-          : (entity.cylinder!.material = new Cesium.ColorMaterialProperty(barColor))
       }
     }
   }
