@@ -336,10 +336,13 @@ export class ThreeJSRenderer {
       }
     }
 
-    const lh = raycaster.intersectObjects([this.built.lightLayer.bulbs], false)
+    // No light layer (smart-city mode) → nothing to pick.
+    const lightLayer = this.built.lightLayer
+    if (!lightLayer) return null
+    const lh = raycaster.intersectObjects([lightLayer.bulbs], false)
     if (lh.length > 0) {
       const hit = lh[0]!
-      const id = this.built.lightLayer.lightIdAt(hit.instanceId ?? -1)
+      const id = lightLayer.lightIdAt(hit.instanceId ?? -1)
       if (id) return { kind: 'light', id }
     }
     return null

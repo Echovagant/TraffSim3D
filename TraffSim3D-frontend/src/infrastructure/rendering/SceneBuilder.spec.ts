@@ -105,11 +105,11 @@ describe('buildScene — flat mode (default)', () => {
   it('indexes light nodes by light id and parents the signal heads into the root', () => {
     expect([...built.lightNodes.keys()]).toEqual(['tl-1'])
     const node = built.lightNodes.get('tl-1')!
-    expect(built.root.children).toContain(built.lightLayer.root)
+    expect(built.root.children).toContain(built.lightLayer!.root)
     // Every head of the network shares three meshes.
-    expect(built.lightLayer.bulbs.count).toBe(1)
-    expect(built.lightLayer.bars.count).toBe(1)
-    expect(built.lightLayer.poles).not.toBeNull()
+    expect(built.lightLayer!.bulbs.count).toBe(1)
+    expect(built.lightLayer!.bars.count).toBe(1)
+    expect(built.lightLayer!.poles).not.toBeNull()
   })
 
   it('allocates every network vehicle into the instanced pool and parents its trail', () => {
@@ -148,8 +148,12 @@ describe('buildScene — smart-city mode', () => {
   it('skips the Three.js road meshes — Cesium draws the basemap', () => {
     expect(built.roadSurface).toBeNull()
     expect(built.roadMarkings).toBeNull()
-    // pick plane + 3 meshes + 2 trails + 1 light + 1 ring
-    expect(built.root.children).toHaveLength(8)
+    // The light layer is skipped too: an imported city's ~3 000 heads
+    // would be invisible over the basemap yet cost a scene-graph
+    // traversal every frame.
+    expect(built.lightLayer).toBeNull()
+    // pick plane + 3 meshes + 2 trails + 1 ring
+    expect(built.root.children).toHaveLength(7)
   })
 })
 
@@ -171,7 +175,7 @@ describe('syncMeshTransforms', () => {
     net.intersections['i-1']!.trafficLights[0]!.phaseRemaining = 15
     syncMeshTransforms(net, built, 0)
     const matrix = new THREE.Matrix4().fromArray(
-      built.lightLayer.bars.instanceMatrix.array as Float32Array,
+      built.lightLayer!.bars.instanceMatrix.array as Float32Array,
       node.index * 16,
     )
     expect(matrix.elements[0]).toBeCloseTo(0.5, 6)
@@ -183,7 +187,7 @@ describe('syncMeshTransforms', () => {
     const node = built.lightNodes.get('tl-1')!
     const glow = (): number =>
       (
-        built.lightLayer.bulbs.geometry.getAttribute(
+        built.lightLayer!.bulbs.geometry.getAttribute(
           'instanceGlow',
         ) as THREE.InstancedBufferAttribute
       ).getX(node.index)
@@ -253,22 +257,22 @@ describe('syncSceneContents — traffic lights', () => {
     // The heads share three meshes, so a new light does not add a child
     // to the root — it adds an instance.
     expect(built.root.children).toHaveLength(before)
-    expect(built.lightLayer.bulbs.count).toBe(2)
-    expect(built.lightLayer.bars.count).toBe(2)
-    expect(built.lightLayer.lightIdAt(1)).toBe('tl-2')
+    expect(built.lightLayer!.bulbs.count).toBe(2)
+    expect(built.lightLayer!.bars.count).toBe(2)
+    expect(built.lightLayer!.lightIdAt(1)).toBe('tl-2')
   })
 
   it('drops a node whose light left the network', () => {
     const net = buildTestNetwork(0)
     const built = buildScene(net)
-    const poleGeometry = built.lightLayer.poles!.geometry
+    const poleGeometry = built.lightLayer!.poles!.geometry
     const disposeSpy = vi.spyOn(poleGeometry, 'dispose')
 
     net.intersections['i-1']!.trafficLights = []
     syncSceneContents(net, built)
 
     expect(built.lightNodes.has('tl-1')).toBe(false)
-    expect(built.lightLayer.bulbs.count).toBe(0)
+    expect(built.lightLayer!.bulbs.count).toBe(0)
     expect(disposeSpy).toHaveBeenCalledTimes(1)
   })
 

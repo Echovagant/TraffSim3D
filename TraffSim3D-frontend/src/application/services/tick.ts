@@ -431,6 +431,27 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   const junctions = junctionIndex(network)
   updateIntersectionEntry(network, simTime, junctions)
 
+  // Bucket the vehicles by road ONCE per tick. The car-following rule
+  // below used to scan EVERY vehicle for EVERY vehicle — O(n²): on the
+  // imported city with ~90 cars that is 8 100 iterations per tick, most
+  // rejected immediately by the same-road filter (measured: 8.7% of the
+  // whole frame in that loop). The buckets bring it down to the road's
+  // own population. Turn-arc cars go in a separate short list: they are
+  // BETWEEN roads (their roadId already names the destination), so the
+  // same-road bucket would hide them from the follower behind them —
+  // the rule finds them by the spatial cone instead.
+  const vehiclesByRoad = new Map<string, Vehicle[]>()
+  const turningVehicles: Vehicle[] = []
+  for (const other of Object.values(network.vehicles)) {
+    if (other.turn) {
+      turningVehicles.push(other)
+      continue
+    }
+    const bucket = vehiclesByRoad.get(other.roadId)
+    if (bucket) bucket.push(other)
+    else vehiclesByRoad.set(other.roadId, [other])
+  }
+
   // 2.5. RL replay override. When a policy + replay target
   //      are set, build a 14-dim obs matching Python's `SimCore._obs()`,
   //      run the in-browser MlpPolicy forward pass, and write the
@@ -599,7 +620,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     }
     v.targetSpeed = speedLimit
     applyTrafficLightConstraint(v, road, ctx, junctions)
-    applyCarFollowingConstraint(v, road, network, ctx)
+    applyCarFollowingConstraint(v, road, ctx, vehiclesByRoad, turningVehicles)
     // NOTE: there is deliberately **no** "road end" clamp here any
     // more. The road end used to be terminal: step 8 snapped the
     // body back to the end point and zeroed its speed, and this
@@ -938,6 +959,8 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
               distance: offLaneM,
               speed: speedAtGuard,
               reason: `snapped back onto its lane — it was ${offLaneM.toFixed(1)} m off its lane point at ${speedAtGuard.toFixed(1)} m/s, and its speed was zeroed`,
+              roadId: vRoad.id,
+              laneIndex: v.laneIndex,
             })
           }
         }
@@ -973,6 +996,8 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
             distance: offLaneM,
             speed: speedAtGuard,
             reason: `pulled back onto its lane — it had drifted ${offLaneM.toFixed(1)} m sideways at ${speedAtGuard.toFixed(1)} m/s, and its speed was clamped`,
+            roadId: vRoad.id,
+            laneIndex: v.laneIndex,
           })
         }
       }
@@ -1857,51 +1882,57 @@ const applyTrafficLightConstraint = (
 const applyCarFollowingConstraint = (
   v: Vehicle,
   road: Road,
-  network: RoadNetwork,
   ctx: TickContext,
+  vehiclesByRoad: Map<string, Vehicle[]>,
+  turningVehicles: Vehicle[],
 ) => {
   // Replay target handles follower distance via obs.
   if (isReplayDriven(ctx, v)) return
   const sign = laneForwardSign(v.laneIndex, road.laneCount)
   let bestGap = Infinity
   let leader: Vehicle | null = null
-  for (const other of Object.values(network.vehicles)) {
+  // Turn-arc cars FIRST: they are BETWEEN roads (their roadId already
+  // names the destination), so the same-road bucket below would hide
+  // them from the follower behind it — and the follower drives into
+  // the corner the arc is sweeping (measured on the grid with the
+  // corner speed: 110 overlap frames, the first pair both "waiting"
+  // on the SAME road). Spatial cone instead: ahead of me within a
+  // lane width counts as a leader, whatever road it names.
+  for (const other of turningVehicles) {
     if (other.id === v.id) continue
-    // A vehicle that is leaving the network (it has drifted off the
-    // road and is braking to a stop) is not a leader: it is not on the
-    // lane any more, so nobody behind it has to brake for it.
     if (isOobExiting(other)) continue
-    // A vehicle ON a turn arc is BETWEEN roads: its roadId already
-    // names the destination, so the same-lane filter below would hide
-    // it from the follower behind it — and the follower drives into
-    // the corner the arc is sweeping (measured on the grid with the
-    // corner speed: 110 overlap frames, the first pair both "waiting"
-    // on the SAME road). Spatial cone instead: ahead of me within a
-    // lane width counts as a leader, whatever road it names.
-    if (other.turn) {
-      const dx = other.position.x - v.position.x
-      const dz = other.position.z - v.position.z
-      const distance = Math.hypot(dx, dz)
-      if (distance > 80) continue
-      const cosH = Math.cos(v.heading)
-      const sinH = Math.sin(v.heading)
-      const longitudinal = dx * cosH + dz * sinH
-      if (longitudinal <= 0) continue
-      if (Math.abs(-dx * sinH + dz * cosH) > 3.5) continue
-      if (longitudinal < bestGap) {
-        bestGap = longitudinal
+    const dx = other.position.x - v.position.x
+    const dz = other.position.z - v.position.z
+    const distance = Math.hypot(dx, dz)
+    if (distance > 80) continue
+    const cosH = Math.cos(v.heading)
+    const sinH = Math.sin(v.heading)
+    const longitudinal = dx * cosH + dz * sinH
+    if (longitudinal <= 0) continue
+    if (Math.abs(-dx * sinH + dz * cosH) > 3.5) continue
+    if (longitudinal < bestGap) {
+      bestGap = longitudinal
+      leader = other
+    }
+  }
+  // Same-road, same-lane leaders from the per-tick road bucket — not a
+  // scan of every vehicle in the network.
+  const bucket = vehiclesByRoad.get(road.id)
+  if (bucket) {
+    for (const other of bucket) {
+      if (other.id === v.id) continue
+      // A vehicle that is leaving the network (it has drifted off the
+      // road and is braking to a stop) is not a leader: it is not on
+      // the lane any more, so nobody behind it has to brake for it.
+      if (isOobExiting(other)) continue
+      if (other.laneIndex !== v.laneIndex) continue
+      const ds = sign === 1 ? other.s - v.s : v.s - other.s
+      if (ds <= 0) continue
+      if (ds > 80) continue
+      if (ds < bestGap) {
+        bestGap = ds
         leader = other
       }
-      continue
-    }
-    if (other.roadId !== road.id) continue
-    if (other.laneIndex !== v.laneIndex) continue
-    const ds = sign === 1 ? other.s - v.s : v.s - other.s
-    if (ds <= 0) continue
-    if (ds > 80) continue
-    if (ds < bestGap) {
-      bestGap = ds
-      leader = other
     }
   }
   if (!leader) return

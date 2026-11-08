@@ -532,9 +532,11 @@ describe('ThreeJSRenderer — scene rebuild', () => {
     const scRoot = builtRoot()
     expect(scRoot).not.toBe(flatRoot)
     expect(scRoot.children.some((c) => c.name === 'pick-plane')).toBe(true)
-    // Flat mode paints the markings in one group; smart-city has neither
-    // the road surface nor the paint.
-    expect(scRoot.children.filter((c) => c instanceof THREE.Group)).toHaveLength(roadGroups - 1)
+    // Flat mode paints the markings in one group and holds the light
+    // layer in another; smart-city has neither the paint nor the lights
+    // (an imported city's light heads would be invisible over the
+    // basemap yet cost a traversal every frame).
+    expect(scRoot.children.filter((c) => c instanceof THREE.Group)).toHaveLength(roadGroups - 2)
   })
 
   it('setRenderMode to the current mode is a no-op (no rebuild)', () => {

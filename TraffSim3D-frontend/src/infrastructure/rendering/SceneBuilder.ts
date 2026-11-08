@@ -27,8 +27,17 @@ export interface BuiltScene {
   /** Instanced vehicle rendering (3 InstancedMesh, one per type). */
   vehicles: VehicleInstances
   lightNodes: Map<string, TrafficLightNode>
-  /** The signal heads of the whole network, in three draw calls. */
-  lightLayer: TrafficLightLayer
+  /**
+   * The signal heads of the whole network, in three draw calls.
+   *
+   * `null` in smart-city mode: an imported city carries thousands of
+   * junctions (Futian: 1 120), so the light heads alone were ~3 000
+   * scene-graph nodes that the basemap renders as a couple of pixels —
+   * and Three.js paid for every one of them on every frame (measured:
+   ~35% of total CPU in scene-graph traversal). The dashboard's
+   * signal-phase panel reads the network, not the meshes.
+   */
+  lightLayer: TrafficLightLayer | null
   /**
    * The network's road surface — every road merged into ONE mesh, so the
    * carriageway costs one draw call instead of one per road.
@@ -131,10 +140,15 @@ export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): Bui
     if (trail) root.add(trail.line)
   }
 
-  const lightLayer = createTrafficLightLayer()
-  lightLayer.setLights(collectLights(network))
-  root.add(lightLayer.root)
-  const lightNodes = lightLayer.nodes
+  // The light heads exist only in the editor's flat mode. In smart-city
+  // mode the basemap owns the picture and the heads would be invisible
+  // — but Three.js would still traverse ~3 000 nodes every frame.
+  const lightLayer = mode === 'smart-city' ? null : createTrafficLightLayer()
+  if (lightLayer) {
+    lightLayer.setLights(collectLights(network))
+    root.add(lightLayer.root)
+  }
+  const lightNodes = lightLayer ? lightLayer.nodes : new Map<string, TrafficLightNode>()
 
   const selectionRing = createSelectionRing()
   root.add(selectionRing)
@@ -159,10 +173,13 @@ export const syncMeshTransforms = (
   for (const v of Object.values(network.vehicles)) {
     built.vehicles.update(v)
   }
-  for (const inter of Object.values(network.intersections)) {
-    for (const light of inter.trafficLights) {
-      const node = built.lightNodes.get(light.id)
-      if (node) built.lightLayer.update(node, light, simTime)
+  // No light layer (smart-city mode) → no per-light sync at all.
+  if (built.lightLayer) {
+    for (const inter of Object.values(network.intersections)) {
+      for (const light of inter.trafficLights) {
+        const node = built.lightNodes.get(light.id)
+        if (node) built.lightLayer.update(node, light, simTime)
+      }
     }
   }
 }
@@ -199,14 +216,19 @@ export const syncSceneContents = (network: RoadNetwork, built: BuiltScene): void
   // Lights (lights live under intersections, not at the top level of the
   // network). The heads share three meshes, so a change in the set of
   // lights rebuilds them — the cheap path (no change) is the norm.
-  const liveLights = collectLights(network)
-  if (liveLights.length !== built.lightNodes.size) {
-    built.lightLayer.setLights(liveLights)
-  } else {
-    for (const light of liveLights) {
-      if (!built.lightNodes.has(light.id)) {
-        built.lightLayer.setLights(liveLights)
-        break
+  // Skipped entirely when there is no light layer: collectLights walks
+  // every junction of the network, which on an imported city is a
+  // thousand-junction walk per frame for nothing.
+  if (built.lightLayer) {
+    const liveLights = collectLights(network)
+    if (liveLights.length !== built.lightNodes.size) {
+      built.lightLayer.setLights(liveLights)
+    } else {
+      for (const light of liveLights) {
+        if (!built.lightNodes.has(light.id)) {
+          built.lightLayer.setLights(liveLights)
+          break
+        }
       }
     }
   }
@@ -225,7 +247,7 @@ export const syncSelection = (
   let pos: THREE.Vector3 | null = null
   if (selected.kind === 'vehicle') {
     pos = built.vehicles.getPosition(selected.id)
-  } else {
+  } else if (built.lightLayer) {
     const node = built.lightNodes.get(selected.id)
     if (node) pos = node.position
   }
