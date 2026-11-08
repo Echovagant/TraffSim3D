@@ -86,17 +86,29 @@ export const findNearestLane = (v: Vehicle, network: RoadNetwork): NearestLane =
   let bestDistSq = Number.POSITIVE_INFINITY
 
   for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
-    // 1. heading 偏差预检: 反向 (|Δheading| > π/2) 跳过.
-    //    Polyline-aware: use current s (when we know it) so the heading
-    //    check uses the LOCAL tangent. For the first lane we don't know
-    //    s yet, so we use the midpoint; once we find a candidate we
-    //    refine.
-    const initialLH = laneForwardHeading(road, laneIndex, len / 2)
-    if (Math.abs(normalizeAngle(v.heading - initialLH)) > Math.PI / 2) continue
-
-    // 2. 沿车道 forward 投影 position → s. (polyline-aware via worldToLaneS)
+    // 1. 沿车道 forward 投影 position → s. (polyline-aware via worldToLaneS)
+    //    The projection comes FIRST: the heading check below must use
+    //    the tangent AT the projection. The old order pre-checked the
+    //    heading against the tangent at the road's MIDPOINT — and a
+    //    curved OSM way bends more than 90° between its middle and its
+    //    far leg, so a car driving perfectly on the far leg had every
+    //    lane skipped. The fallback then froze `v.s`: the lane point
+    //    stopped moving while the body kept driving, and the 5 m lane
+    //    guard fired ~0.4 s later (measured on the Futian network:
+    //    ~10 guards / 20 s / 90 cars, all just past the threshold at
+    //    full speed).
     const s = projectOntoLane(road, laneIndex, v.position.x, v.position.z)
     if (s < 0 || s > len) continue // off-road
+
+    // 2. heading 偏差预检: 反向 (|Δheading| > π/2) 跳过.
+    //    Same rejection rule as before — driving against the lane's
+    //    travel direction is not a projection candidate — but the
+    //    tangent is taken where the car actually IS, not at the road's
+    //    midpoint. (The midpoint version also let a wrong-way car
+    //    through when the bend made the midpoint tangent agree with it
+    //    by accident.)
+    const localHeading = laneForwardHeading(road, laneIndex, s)
+    if (Math.abs(normalizeAngle(v.heading - localHeading)) > Math.PI / 2) continue
 
     // 3. 垂直距离 (perpendicular).
     const perpDistSq = perpendicularDistSq(road, laneIndex, s, v.position.x, v.position.z)
