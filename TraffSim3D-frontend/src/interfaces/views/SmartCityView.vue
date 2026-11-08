@@ -150,6 +150,15 @@
       {{ status.text }}
     </div>
 
+    <!-- The cockpit's instrument panel (driving only). -->
+    <DriveGauge
+      v-if="ride && ride.mode === 'cockpit'"
+      :speed-mps="rideSpeed"
+      :limit-mps="rideLimit"
+      :pedal="world.driverInput"
+      :status="rideStatus"
+    />
+
     <!-- The ride banner: tracking / driving one vehicle. -->
     <div v-if="ride" class="ride-banner" data-testid="ride-banner">
       <span class="ride-id">{{ ride.id }}</span>
@@ -232,6 +241,7 @@ import PanelCard from '@interfaces/components/command/PanelCard.vue'
 import MetricCard from '@interfaces/components/command/MetricCard.vue'
 import MiniDonut from '@interfaces/components/command/MiniDonut.vue'
 import MiniLine from '@interfaces/components/command/MiniLine.vue'
+import DriveGauge from '@interfaces/components/command/DriveGauge.vue'
 
 const cesiumContainer = ref<HTMLDivElement | null>(null)
 const threeCanvas = ref<HTMLCanvasElement | null>(null)
@@ -522,6 +532,22 @@ const driveRide = (): void => {
   if (!world.rideVehicleId) return
   world.setRideMode(world.rideMode === 'cockpit' ? 'chase' : 'cockpit')
 }
+
+/** The cluster's three inputs: the speed, the road's limit, and the
+ *  vehicle's traffic state. All read from the network the simulation
+ *  is actually running — the gauge never invents a number. */
+const rideVehicle = computed(() => {
+  const id = world.rideVehicleId
+  if (!id) return null
+  return world.network.vehicles[id] ?? null
+})
+const rideSpeed = computed(() => rideVehicle.value?.speed ?? 0)
+const rideLimit = computed(() => {
+  const v = rideVehicle.value
+  if (!v) return 0
+  return world.network.roads[v.roadId]?.speedLimit ?? 0
+})
+const rideStatus = computed(() => rideVehicle.value?.status ?? 'driving')
 
 // ===== lifecycle ==========================================================
 
@@ -1302,6 +1328,18 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--dc-alert) 18%, transparent);
   color: color-mix(in srgb, var(--dc-alert) 85%, var(--dc-text));
   border: 1px solid color-mix(in srgb, var(--dc-alert) 45%, transparent);
+}
+
+/* ===== the cockpit cluster =====
+   Above the ride banner (bottom 64px + its height), centred — the
+   same place a car's instrument binnacle sits: low, central, and
+   out of the road's way. */
+.gauge {
+  position: absolute;
+  bottom: 150px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--dc-z-toast);
 }
 
 /* ===== the ride banner =====
