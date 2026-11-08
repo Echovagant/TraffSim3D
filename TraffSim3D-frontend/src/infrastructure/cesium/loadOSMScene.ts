@@ -18,6 +18,7 @@
 import * as Cesium from 'cesium'
 import { OSM_METERS_PER_DEGREE_LAT } from '@infrastructure/api/osmNetworkAdapter'
 import type { GeoOrigin, RoadNetwork } from '@domain/entities/RoadNetwork'
+import { roadWidthM, vehicleFitsRoad } from '@domain/services/roadAccess'
 
 export interface Bbox {
   /** South-west corner (lat, lng). */
@@ -38,12 +39,14 @@ export interface LoadedOSMBuildings {
   restyle: () => void
 }
 
-/** The simulated network's roads, drawn on the basemap. */
+/** The simulated network's roads, drawn on the basemap as ribbons. */
 export interface LoadedNetworkRoads {
-  /** One datasource per road tier (main / secondary / local / footway). */
-  sources: Cesium.GeoJsonDataSource[]
-  /** How many roads were drawn. */
+  /** The entity collection the ribbons and barriers live in. */
+  entities: Cesium.EntityCollection
+  /** How many road ribbons were drawn. */
   roadCount: number
+  /** How many roads are barred to cars (too narrow — see roadAccess). */
+  barredCount: number
   /** Re-apply the theme's road colours (a theme switch changes them). */
   restyle: () => void
 }
@@ -183,59 +186,6 @@ const token = (name: string, fallback: string): string => {
 const BUILDING_OPACITY = 0.75
 const DEFAULT_BUILDING_HEIGHT_M = 10
 const METERS_PER_LEVEL = 3.5
-
-// ---------------------------------------------------------------------------
-// The road hierarchy
-// ---------------------------------------------------------------------------
-//
-// OSM's highway classes are a flat list of ~20 names; the renderer wants
-// four tiers. The mapping follows how the classes actually differ in
-// traffic law: a motorway and a primary road are both "main roads with
-// priority", a residential street and a service road are both "local
-// access", and the pedestrian classes are not roads at all but paths.
-//
-// The tier decides the colour AND the stroke width: a trunk must not
-// look like a footway, and the width difference is what makes the
-// hierarchy readable from the bird's-eye view.
-type RoadTier = 'main' | 'secondary' | 'local' | 'footway'
-
-const MAIN_CLASSES = new Set(['motorway', 'trunk', 'primary'])
-const SECONDARY_CLASSES = new Set(['secondary', 'tertiary'])
-const LOCAL_CLASSES = new Set([
-  'residential',
-  'unclassified',
-  'living_street',
-  'service',
-  'road',
-])
-const FOOTWAY_CLASSES = new Set([
-  'footway',
-  'path',
-  'cycleway',
-  'pedestrian',
-  'steps',
-  'track',
-])
-
-const roadTierOf = (highway: string | undefined): RoadTier => {
-  const cls = (highway ?? '').toLowerCase()
-  if (MAIN_CLASSES.has(cls)) return 'main'
-  if (SECONDARY_CLASSES.has(cls)) return 'secondary'
-  if (FOOTWAY_CLASSES.has(cls)) return 'footway'
-  if (LOCAL_CLASSES.has(cls)) return 'local'
-  // A road with no class at all (a hand-built scene) is drawn as a
-  // local road — the quietest tier, so it never outshouts the
-  // classified ones.
-  return 'local'
-}
-
-/** The four road tiers, each with its token colour and stroke width. */
-const ROAD_TIERS: Record<RoadTier, { token: string; fallback: string; width: number }> = {
-  main: { token: '--dc-road-main', fallback: '#2b5fa8', width: 5 },
-  secondary: { token: '--dc-road-secondary', fallback: '#24507f', width: 4 },
-  local: { token: '--dc-road-local', fallback: '#1b3f63', width: 2.5 },
-  footway: { token: '--dc-road-footway', fallback: '#143050', width: 1.5 },
-}
 
 /**
  * The store's local metric frame → WGS84 degrees.
@@ -475,99 +425,139 @@ export const loadOSMBuildings = async (
  * snapshots of the same place.
  *
  * Drawing the network's own waypoints removes the second source of
- * truth. The line under the car IS the road the car is on — not an
- * approximation of it.
+ * truth. The ribbon under the car IS the road the car drives on — not
+ * an approximation of it.
+ *
+ * The roads are drawn as CORRIDOR PRIMITIVES, not lines: a corridor has
+ * real width (`roadWidthM` — lane count × the class's lane metres), a
+ * real opaque material, and it sits IN the white model between the
+ * matte buildings. The buildings render at 75% alpha, the road surface
+ * at 100% — the transparency is what separates the two materials in the
+ * clay theme. A road too narrow for a car (`vehicleFitsRoad` says no)
+ * is drawn darker and blocked with a barrier at its entrance: the
+ * simulation refuses to spawn or turn a car into it, and the picture
+ * says why.
  *
  * The projection is the flat local frame the parser used:
  * `x = (lon - originLon) · 111000 · cos(lat)`, `z = (lat - originLat) · 111000`
  * (north-positive, see `OSM_PAYLOAD_NORTH_IS_POSITIVE_Z`). This inverts
  * it back to degrees.
- *
- * The roads are NOT clamped to the ground: the waypoint height carries
- * the OSM level, so a bridge stays a bridge and a tunnel stays below.
  */
 export const loadNetworkRoads = async (
   viewer: Cesium.Viewer,
   network: RoadNetwork,
   origin: GeoOrigin | null,
 ): Promise<LoadedNetworkRoads> => {
-  const empty: LoadedNetworkRoads = { sources: [], roadCount: 0, restyle: () => undefined }
+  const empty: LoadedNetworkRoads = {
+    entities: viewer.entities,
+    roadCount: 0,
+    barredCount: 0,
+    restyle: () => undefined,
+  }
   // Without an anchor there is no way to place the roads on the globe.
   if (!origin) return empty
   if (!Number.isFinite(origin.lat) || !Number.isFinite(origin.lon)) return empty
 
-  /** One feature collection per tier — Cesium styles a whole datasource
-   *  at once, so the tiers have to be separate datasources. */
-  const byTier = new Map<RoadTier, MinimalFeature[]>()
-  for (const tier of Object.keys(ROAD_TIERS) as RoadTier[]) byTier.set(tier, [])
+  const carto = (p: { x: number; y: number; z: number }): Cesium.Cartesian3 => {
+    const ll = localToLngLat(origin, p.x, p.z)
+    return Cesium.Cartesian3.fromDegrees(ll.lng, ll.lat, Number.isFinite(p.y) ? p.y : 0)
+  }
+
+  const collection = new Cesium.CustomDataSource('sim-roads')
+  viewer.dataSources.add(collection)
+  let roadCount = 0
+  let barredCount = 0
 
   for (const road of Object.values(network.roads)) {
     const points =
       road.waypoints && road.waypoints.length >= 2 ? road.waypoints : [road.startNode, road.endNode]
-    const coordinates: number[][] = []
-    for (const p of points) {
-      if (!Number.isFinite(p.x) || !Number.isFinite(p.z)) continue
-      const ll = localToLngLat(origin, p.x, p.z)
-      coordinates.push([ll.lng, ll.lat, Number.isFinite(p.y) ? p.y : 0])
-    }
-    if (coordinates.length < 2) continue
-    const tier = roadTierOf(road.highway)
-    byTier.get(tier)?.push({
-      type: 'Feature',
-      geometry: { type: 'LineString', coordinates },
-      properties: { id: road.id, highway: road.highway ?? null },
-    })
-  }
-
-  const sources: Cesium.GeoJsonDataSource[] = []
-  /** Each source with the tier it belongs to — a restyle has to know
-   *  which colour a source wears. */
-  const tiers: RoadTier[] = []
-  let roadCount = 0
-
-  for (const [tier, features] of byTier) {
-    if (features.length === 0) continue
-    const spec = ROAD_TIERS[tier]
-    const source = await Cesium.GeoJsonDataSource.load(
-      { type: 'FeatureCollection', features } as MinimalGeoJSON,
-      {
-        // The height comes from the waypoints, so no ground clamping —
-        // that would flatten every bridge into the street below it.
-        clampToGround: false,
-        stroke: Cesium.Color.fromCssColorString(token(spec.token, spec.fallback)),
-        strokeWidth: spec.width,
+    const positions = points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.z)).map(carto)
+    if (positions.length < 2) continue
+    const fits = vehicleFitsRoad(road, 'car')
+    if (!fits) barredCount += 1
+    roadCount += 1
+    collection.entities.add({
+      corridor: {
+        positions,
+        // The width the domain agrees on — the same number the spawn
+        // and turn decisions use, so a drawn lane is a drivable lane.
+        width: roadWidthM(road),
+        height: 0.15,
+        material: new Cesium.ColorMaterialProperty(
+          Cesium.Color.fromCssColorString(
+            fits ? token('--dc-road-main', '#3d4653') : token('--dc-road-local', '#2a323c'),
+          ),
+        ),
+        outline: false,
       },
-    )
-    viewer.dataSources.add(source)
-    sources.push(source)
-    tiers.push(tier)
-    roadCount += features.length
+      properties: { access: fits ? 'road' : 'barred' },
+    })
+
+    if (fits) continue
+    // The barrier at the narrow lane's entrance: two posts and a bar —
+    // enough to read as "cars do not enter here" from the 45° view.
+    const a = points[0]!
+    const ll = localToLngLat(origin, a.x, a.z)
+    const post = (offsetM: number): Cesium.Cartesian3 => {
+      const cosLat = Math.cos((ll.lat * Math.PI) / 180)
+      return Cesium.Cartesian3.fromDegrees(
+        ll.lng + offsetM / (OSM_METERS_PER_DEGREE_LAT * cosLat),
+        ll.lat,
+        1.3,
+      )
+    }
+    const half = roadWidthM(road) / 2
+    const barColor = Cesium.Color.fromCssColorString(token('--dc-alert', '#f43f5e'))
+    collection.entities.add({
+      position: Cesium.Cartesian3.midpoint(post(-half), post(half), new Cesium.Cartesian3()),
+      box: {
+        dimensions: new Cesium.Cartesian3(roadWidthM(road), 0.18, 0.18),
+        material: new Cesium.ColorMaterialProperty(barColor),
+      },
+      properties: { access: 'barrier' },
+    })
+    for (const side of [-half, half]) {
+      collection.entities.add({
+        position: post(side),
+        cylinder: {
+          length: 2.6,
+          topRadius: 0.09,
+          bottomRadius: 0.09,
+          material: new Cesium.ColorMaterialProperty(barColor),
+        },
+        properties: { access: 'barrier' },
+      })
+    }
   }
 
   /**
    * Re-apply the theme's road colours.
    *
-   * The datasource bakes the colours in at creation, so a theme switch
-   * has to reach the entities themselves. The style is applied AFTER the
-   * datasource is added to the viewer — adding it rewrites the entity
-   * graphics (the same trap the building polygons fell into).
+   * The corridor bakes its colour in at creation, so a theme switch has
+   * to reach the entities themselves. Each entity carries its access
+   * class (`road` / `barred` / `barrier`) so the restyle knows which
+   * token to apply.
    */
   const restyle = (): void => {
-    for (const [index, source] of sources.entries()) {
-      const tier = tiers[index]
-      if (!tier) continue
-      const spec = ROAD_TIERS[tier]
-      const color = Cesium.Color.fromCssColorString(token(spec.token, spec.fallback))
-      for (const entity of source.entities.values) {
-        if (!entity.polyline) continue
-        entity.polyline.material = new Cesium.ColorMaterialProperty(color)
-        entity.polyline.width = new Cesium.ConstantProperty(spec.width)
+    const roadColor = Cesium.Color.fromCssColorString(token('--dc-road-main', '#3d4653'))
+    const barredColor = Cesium.Color.fromCssColorString(token('--dc-road-local', '#2a323c'))
+    const barColor = Cesium.Color.fromCssColorString(token('--dc-alert', '#f43f5e'))
+    for (const entity of collection.entities.values) {
+      const access = entity.properties?.access?.getValue(undefined)
+      if (entity.corridor) {
+        entity.corridor.material = new Cesium.ColorMaterialProperty(
+          access === 'barred' ? barredColor : roadColor,
+        )
+      } else if (entity.box || entity.cylinder) {
+        entity.box
+          ? (entity.box.material = new Cesium.ColorMaterialProperty(barColor))
+          : (entity.cylinder!.material = new Cesium.ColorMaterialProperty(barColor))
       }
     }
   }
   restyle()
 
-  return { sources, roadCount, restyle }
+  return { entities: collection.entities, roadCount, barredCount, restyle }
 }
 
 /**
