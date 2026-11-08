@@ -22,6 +22,7 @@ import type { Vehicle, VehicleType } from '@domain/entities/Vehicle'
 import { LaneId } from '@domain/value-objects/LaneId'
 import { intersectionSRange, lanePoint, roadLength } from '@domain/services/laneGeometry'
 import { isDrivableLane } from '@domain/services/oneway'
+import { vehicleFitsRoad } from '@domain/services/roadAccess'
 
 const DEFAULT_COLORS: Record<VehicleType, string> = {
   car: '#3a86ff',
@@ -153,11 +154,16 @@ const junctionBoxesOnRoad = (
  * **Deprecated**: only used as a back-compat fallback when
  * `network.spawnPoints` is empty (legacy saved scenes).
  */
-const findFreeLanes = (network: RoadNetwork, minGap: number): SpawnCandidate[] => {
+const findFreeLanes = (
+  network: RoadNetwork,
+  minGap: number,
+  type: VehicleType,
+): SpawnCandidate[] => {
   const candidates: SpawnCandidate[] = []
   const intersections = Object.values(network.intersections)
   for (const road of Object.values(network.roads)) {
     if (road.laneCount === 0) continue
+    if (!vehicleFitsRoad(road, type)) continue
     for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
       // A one-way road's backward lanes are the phantom half of a
       // two-way road — a car started there drives against the flow. The
@@ -215,9 +221,22 @@ const findFreeLanes = (network: RoadNetwork, minGap: number): SpawnCandidate[] =
  * backward half of a one-way road — is not free either: a car must
  * never start against the flow. `isSpotFree` is what decides that.
  */
-const pickFreeSpawnPoint = (network: RoadNetwork, minGap: number): SpawnCandidate | null => {
+const pickFreeSpawnPoint = (
+  network: RoadNetwork,
+  minGap: number,
+  type: VehicleType,
+): SpawnCandidate | null => {
   for (const sp of Object.values(network.spawnPoints)) {
     if (sp.occupiedBy !== null) continue
+    // A road too narrow for this vehicle is not a spawn candidate at
+    // all: the width rule (`roadAccess.ts`) is what keeps a bus out of
+    // a single-lane street and every car out of the 2.2 m lanes
+    // between buildings. The renderer draws those barred.
+    // A spawn point whose road does not EXIST is a malformed scene and
+    // keeps throwing below (isSpotFree resolves the lane point, and
+    // the import spec pins that failure as loud) — no `!road` guard.
+    const road = network.roads[sp.roadId]
+    if (road && !vehicleFitsRoad(road, type)) continue
     const candidate: SpawnCandidate = {
       roadId: sp.roadId,
       laneIndex: sp.laneIndex,
@@ -273,13 +292,13 @@ export const spawnVehicle = (
   // nearby vehicles. Empty spawnPoints → fall through to back-compat.
   let spot: SpawnCandidate | null = null
   if (Object.keys(network.spawnPoints).length > 0) {
-    spot = pickFreeSpawnPoint(network, minGap)
+    spot = pickFreeSpawnPoint(network, minGap, type)
     if (!spot) {
       return { ok: false, reason: 'no free spawn point' }
     }
   } else {
     // Back-compat: legacy saved scenes with no spawn points.
-    const candidates = findFreeLanes(network, minGap)
+    const candidates = findFreeLanes(network, minGap, type)
     if (candidates.length === 0) {
       return { ok: false, reason: 'traffic density full' }
     }

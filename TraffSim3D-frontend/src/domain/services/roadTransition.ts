@@ -41,6 +41,8 @@ import {
   roadLength,
 } from './laneGeometry'
 import { isDrivableLane } from './oneway'
+import { vehicleFitsRoad } from './roadAccess'
+import type { VehicleType } from '@domain/entities/Vehicle'
 import { junctionIndex } from './roadJunctionIndex'
 import { MIN_ARC_TURN_RAD } from './roadTurnArc'
 import { RIGHT_TURN_SHARE, TURN_PROBABILITY } from '@shared/constants/simulation'
@@ -273,8 +275,11 @@ export const roadContinuation = (
   if (!junction) return null
 
   // 2. The candidate roads: the junction's other roads. The road the
-  //    vehicle came from is never a candidate.
-  const candidates = buildCandidates(network, road, laneIndex, junction, heading)
+  //    vehicle came from is never a candidate. The width rule is per
+  //    vehicle type — the seed names the vehicle, its type names the
+  //    required clearance.
+  const vehicleType = (turnSeed ? network.vehicles[turnSeed]?.type : undefined) ?? 'car'
+  const candidates = buildCandidates(network, road, laneIndex, junction, heading, vehicleType)
   if (candidates.length === 0) return null
 
   // 2.5. Lane semantics — the painted arrows decide. The rightmost
@@ -480,6 +485,7 @@ const buildCandidates = (
   laneIndex: number,
   junction: Intersection,
   heading: number,
+  vehicleType: VehicleType = 'car',
 ): Candidate[] => {
   const len = roadLength(road)
   if (len < 1e-6) return []
@@ -493,6 +499,12 @@ const buildCandidates = (
     if (!other) continue
     const otherLen = roadLength(other)
     if (otherLen < 1e-6) continue
+
+    // A road too narrow for this vehicle is NOT a candidate: a car
+    // must never turn into the 2.2 m lane between buildings, a bus
+    // not into a single-lane street (`roadAccess.ts` — the same rule
+    // the spawner uses, so what the arrows promise is what fits).
+    if (!vehicleFitsRoad(other, vehicleType)) continue
 
     // The vehicle enters the candidate at the end of it that is nearest
     // the junction. A junction in the MIDDLE of the candidate is not an
