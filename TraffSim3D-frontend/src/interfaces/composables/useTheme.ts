@@ -33,9 +33,16 @@ export interface ThemeDefinition {
 
 export const THEMES: readonly ThemeDefinition[] = [
   {
+    id: 'clay',
+    label: '哑光白模',
+    description: '默认。建筑是主体，道路退成底纹。无辉光，久看不累。',
+    swatches: ['#0d1117', '#101720', '#4a7fb5', '#5b6a7d', '#8a93a0'],
+    display: 'sans',
+  },
+  {
     id: 'deep-space',
     label: '深空蓝',
-    description: '默认。夜幕色，适合长时间值守。',
+    description: '夜幕色。路网发光，适合长时间值守。',
     swatches: ['#000000', '#1c1c1e', '#2997ff', '#64d2ff', '#2b5fa8'],
     display: 'sans',
   },

@@ -17,6 +17,7 @@
 
 import * as Cesium from 'cesium'
 import { OSM_METERS_PER_DEGREE_LAT } from '@infrastructure/api/osmNetworkAdapter'
+import type { GeoOrigin, RoadNetwork } from '@domain/entities/RoadNetwork'
 
 export interface Bbox {
   /** South-west corner (lat, lng). */
@@ -29,12 +30,22 @@ export interface Bbox {
   east: number
 }
 
-export interface LoadedOSMScene {
-  roads: Cesium.GeoJsonDataSource
+export interface LoadedOSMBuildings {
   buildings: Cesium.GeoJsonDataSource
-  /** Combined feature counts for the AI Playground / status display. */
-  roadCount: number
+  /** How many buildings were drawn. */
   buildingCount: number
+  /** Re-apply the theme's building colours (a theme switch changes them). */
+  restyle: () => void
+}
+
+/** The simulated network's roads, drawn on the basemap. */
+export interface LoadedNetworkRoads {
+  /** One datasource per road tier (main / secondary / local / footway). */
+  sources: Cesium.GeoJsonDataSource[]
+  /** How many roads were drawn. */
+  roadCount: number
+  /** Re-apply the theme's road colours (a theme switch changes them). */
+  restyle: () => void
 }
 
 // ---- Overpass query templates ----
@@ -54,16 +65,6 @@ const overpassBuildingsQuery = (b: Bbox): string => `
 (
   way["building"](${b.south},${b.west},${b.north},${b.east});
   relation["building"](${b.south},${b.west},${b.north},${b.east});
-);
-out body; >; out skel qt;
-`
-
-const overpassRoadsQuery = (b: Bbox): string => `
-[out:json][timeout:60];
-(
-  way["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified)$"]
-     ["area"!="yes"]
-     (${b.south},${b.west},${b.north},${b.east});
 );
 out body; >; out skel qt;
 `
@@ -140,7 +141,19 @@ const osmiumToFeatureCollection = (elements: unknown[]): MinimalGeoJSON => {
       .map((n) => [n.lon, n.lat])
     if (coords.length < 2) continue
     const tags = el.tags ?? {}
-    const isArea = tags['area'] === 'yes'
+    // A CLOSED way is an area — that is the OSM convention, and for the
+    // building query it is THE rule: a building footprint is a closed
+    // way, and almost none of them carry `area=yes` (the `building` tag
+    // itself implies the area). Testing only `area === 'yes'` turned
+    // 99% of the buildings into LineStrings — the city rendered as
+    // white outlines with nothing inside them (measured on the Futian
+    // extract: 396 of 400 sampled building entities were polylines).
+    // `area=no` is the explicit opt-out.
+    const closed =
+      coords.length >= 4 &&
+      coords[0]![0] === coords[coords.length - 1]![0] &&
+      coords[0]![1] === coords[coords.length - 1]![1]
+    const isArea = closed && tags['area'] !== 'no'
     const geometry = isArea
       ? { type: 'Polygon', coordinates: [coords] }
       : { type: 'LineString', coordinates: coords }
@@ -167,11 +180,82 @@ const token = (name: string, fallback: string): string => {
   return raw.length > 0 ? raw : fallback
 }
 
-const ROAD_COLOR = () => token('--dc-road-main', '#2b5fa8')
-const ROAD_WIDTH_PX = 3
 const BUILDING_OPACITY = 0.75
 const DEFAULT_BUILDING_HEIGHT_M = 10
 const METERS_PER_LEVEL = 3.5
+
+// ---------------------------------------------------------------------------
+// The road hierarchy
+// ---------------------------------------------------------------------------
+//
+// OSM's highway classes are a flat list of ~20 names; the renderer wants
+// four tiers. The mapping follows how the classes actually differ in
+// traffic law: a motorway and a primary road are both "main roads with
+// priority", a residential street and a service road are both "local
+// access", and the pedestrian classes are not roads at all but paths.
+//
+// The tier decides the colour AND the stroke width: a trunk must not
+// look like a footway, and the width difference is what makes the
+// hierarchy readable from the bird's-eye view.
+type RoadTier = 'main' | 'secondary' | 'local' | 'footway'
+
+const MAIN_CLASSES = new Set(['motorway', 'trunk', 'primary'])
+const SECONDARY_CLASSES = new Set(['secondary', 'tertiary'])
+const LOCAL_CLASSES = new Set([
+  'residential',
+  'unclassified',
+  'living_street',
+  'service',
+  'road',
+])
+const FOOTWAY_CLASSES = new Set([
+  'footway',
+  'path',
+  'cycleway',
+  'pedestrian',
+  'steps',
+  'track',
+])
+
+const roadTierOf = (highway: string | undefined): RoadTier => {
+  const cls = (highway ?? '').toLowerCase()
+  if (MAIN_CLASSES.has(cls)) return 'main'
+  if (SECONDARY_CLASSES.has(cls)) return 'secondary'
+  if (FOOTWAY_CLASSES.has(cls)) return 'footway'
+  if (LOCAL_CLASSES.has(cls)) return 'local'
+  // A road with no class at all (a hand-built scene) is drawn as a
+  // local road — the quietest tier, so it never outshouts the
+  // classified ones.
+  return 'local'
+}
+
+/** The four road tiers, each with its token colour and stroke width. */
+const ROAD_TIERS: Record<RoadTier, { token: string; fallback: string; width: number }> = {
+  main: { token: '--dc-road-main', fallback: '#2b5fa8', width: 5 },
+  secondary: { token: '--dc-road-secondary', fallback: '#24507f', width: 4 },
+  local: { token: '--dc-road-local', fallback: '#1b3f63', width: 2.5 },
+  footway: { token: '--dc-road-footway', fallback: '#143050', width: 1.5 },
+}
+
+/**
+ * The local metric frame → WGS84 degrees.
+ *
+ * The inverse of the parser's flat projection
+ * (`osm_parser.py::_project_nodes`):
+ *   `x = (lon - originLon) · 111000 · cos(lat)`, `z = (lat - originLat) · 111000`
+ * with **north positive** on z (see `OSM_PAYLOAD_NORTH_IS_POSITIVE_Z`).
+ */
+export const localToLngLat = (
+  origin: GeoOrigin,
+  x: number,
+  z: number,
+): { lng: number; lat: number } => {
+  const cosLat = Math.max(0.05, Math.cos((origin.lat * Math.PI) / 180))
+  return {
+    lng: origin.lon + x / (OSM_METERS_PER_DEGREE_LAT * cosLat),
+    lat: origin.lat + z / OSM_METERS_PER_DEGREE_LAT,
+  }
+}
 
 // Classify buildings by OSM tag for visual variety.
 // Each category gets a distinct hue so a bird's-eye view reads
@@ -238,28 +322,21 @@ const getBuildingColor = (tags: Record<string, unknown> | undefined): string => 
   return COLOR_DEFAULT()
 }
 
-/** Main entry: load roads + buildings, attach styled GeoJsonDataSources
- *  to the Cesium viewer, return counts for UI display. */
-export const loadOSMScene = async (
+/**
+ * Load the city BLOCKS (buildings) onto the basemap.
+ *
+ * Only the buildings come from Overpass. The ROADS are the simulated
+ * network's own waypoints (see `loadNetworkRoads`) — drawing a second,
+ * independent road layer on top of the same rectangle would put two
+ * slightly different sets of lines under the cars, and the cars would
+ * sit on neither of them.
+ */
+export const loadOSMBuildings = async (
   viewer: Cesium.Viewer,
   bbox: Bbox,
   abortSignal?: AbortSignal,
-): Promise<LoadedOSMScene> => {
-  // Fetch in parallel — typical Overpass round-trip is 1-3s.
-  const [roadsGeo, buildingsGeo] = await Promise.all([
-    overpassFetch(overpassRoadsQuery(bbox), abortSignal),
-    overpassFetch(overpassBuildingsQuery(bbox), abortSignal),
-  ])
-
-  // Roads: polyline clamped to ground. Cesium's clampToGround flag
-  // is the GIS-standard way to render roads without z-fighting on
-  // terrain (we don't use terrain here yet, but this is forward-compat).
-  const roads = await Cesium.GeoJsonDataSource.load(roadsGeo, {
-    clampToGround: true,
-    stroke: Cesium.Color.fromCssColorString(ROAD_COLOR()),
-    strokeWidth: ROAD_WIDTH_PX,
-  })
-  viewer.dataSources.add(roads)
+): Promise<LoadedOSMBuildings> => {
+  const buildingsGeo = await overpassFetch(overpassBuildingsQuery(bbox), abortSignal)
 
   // Buildings: extruded polygons. We post-process to set heights
   // and a violet semi-transparent material so the road network
@@ -341,12 +418,147 @@ export const loadOSMScene = async (
   }
   addable.entityAdded?.addEventListener((entity) => styleBuilding(entity))
 
-  return {
-    roads,
-    buildings,
-    roadCount: roads.entities.values.length,
-    buildingCount: buildings.entities.values.length,
+  /**
+   * Re-apply the theme's building colours.
+   *
+   * The datasource bakes the colours in at creation; a theme switch has
+   * to reach the entities themselves. The outline colour is included —
+   * it is the one style that survives every per-entity reset.
+   */
+  const restyle = (): void => {
+    for (const entity of buildings.entities.values) {
+      if (!entity.polygon) continue
+      const props = entity.properties
+      const getTag = (key: string): string | undefined => {
+        const p = props?.[key as keyof typeof props]
+        if (p && typeof (p as any).getValue === 'function')
+          return (p as any).getValue() as string | undefined
+        return p as string | undefined
+      }
+      const color = getBuildingColor({
+        building: getTag('building'),
+        amenity: getTag('amenity'),
+      })
+      entity.polygon.material = new Cesium.ColorMaterialProperty(
+        Cesium.Color.fromCssColorString(color).withAlpha(BUILDING_OPACITY),
+      )
+      entity.polygon.outlineColor = new Cesium.ColorMaterialProperty(
+        Cesium.Color.fromCssColorString(token('--dc-building-edge', '#1e40af')),
+      )
+    }
   }
+
+  return {
+    buildings,
+    buildingCount: buildings.entities.values.length,
+    restyle,
+  }
+}
+
+/**
+ * Draw the **simulated** network's own roads on the basemap.
+ *
+ * Why not the Overpass roads: until now the picture and the simulation
+ * were two independent readings of the same city — the Overpass snapshot
+ * for the vector layer, the OSM file for the cars. They agree roughly
+ * and disagree exactly where it shows: a car drove along a street the
+ * picture did not draw, because the two came from two different
+ * snapshots of the same place.
+ *
+ * Drawing the network's own waypoints removes the second source of
+ * truth. The line under the car IS the road the car is on — not an
+ * approximation of it.
+ *
+ * The projection is the flat local frame the parser used:
+ * `x = (lon - originLon) · 111000 · cos(lat)`, `z = (lat - originLat) · 111000`
+ * (north-positive, see `OSM_PAYLOAD_NORTH_IS_POSITIVE_Z`). This inverts
+ * it back to degrees.
+ *
+ * The roads are NOT clamped to the ground: the waypoint height carries
+ * the OSM level, so a bridge stays a bridge and a tunnel stays below.
+ */
+export const loadNetworkRoads = async (
+  viewer: Cesium.Viewer,
+  network: RoadNetwork,
+  origin: GeoOrigin | null,
+): Promise<LoadedNetworkRoads> => {
+  const empty: LoadedNetworkRoads = { sources: [], roadCount: 0, restyle: () => undefined }
+  // Without an anchor there is no way to place the roads on the globe.
+  if (!origin) return empty
+  if (!Number.isFinite(origin.lat) || !Number.isFinite(origin.lon)) return empty
+
+  /** One feature collection per tier — Cesium styles a whole datasource
+   *  at once, so the tiers have to be separate datasources. */
+  const byTier = new Map<RoadTier, MinimalFeature[]>()
+  for (const tier of Object.keys(ROAD_TIERS) as RoadTier[]) byTier.set(tier, [])
+
+  for (const road of Object.values(network.roads)) {
+    const points =
+      road.waypoints && road.waypoints.length >= 2 ? road.waypoints : [road.startNode, road.endNode]
+    const coordinates: number[][] = []
+    for (const p of points) {
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.z)) continue
+      const ll = localToLngLat(origin, p.x, p.z)
+      coordinates.push([ll.lng, ll.lat, Number.isFinite(p.y) ? p.y : 0])
+    }
+    if (coordinates.length < 2) continue
+    const tier = roadTierOf(road.highway)
+    byTier.get(tier)?.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates },
+      properties: { id: road.id, highway: road.highway ?? null },
+    })
+  }
+
+  const sources: Cesium.GeoJsonDataSource[] = []
+  /** Each source with the tier it belongs to — a restyle has to know
+   *  which colour a source wears. */
+  const tiers: RoadTier[] = []
+  let roadCount = 0
+
+  for (const [tier, features] of byTier) {
+    if (features.length === 0) continue
+    const spec = ROAD_TIERS[tier]
+    const source = await Cesium.GeoJsonDataSource.load(
+      { type: 'FeatureCollection', features } as MinimalGeoJSON,
+      {
+        // The height comes from the waypoints, so no ground clamping —
+        // that would flatten every bridge into the street below it.
+        clampToGround: false,
+        stroke: Cesium.Color.fromCssColorString(token(spec.token, spec.fallback)),
+        strokeWidth: spec.width,
+      },
+    )
+    viewer.dataSources.add(source)
+    sources.push(source)
+    tiers.push(tier)
+    roadCount += features.length
+  }
+
+  /**
+   * Re-apply the theme's road colours.
+   *
+   * The datasource bakes the colours in at creation, so a theme switch
+   * has to reach the entities themselves. The style is applied AFTER the
+   * datasource is added to the viewer — adding it rewrites the entity
+   * graphics (the same trap the building polygons fell into).
+   */
+  const restyle = (): void => {
+    for (const [index, source] of sources.entries()) {
+      const tier = tiers[index]
+      if (!tier) continue
+      const spec = ROAD_TIERS[tier]
+      const color = Cesium.Color.fromCssColorString(token(spec.token, spec.fallback))
+      for (const entity of source.entities.values) {
+        if (!entity.polyline) continue
+        entity.polyline.material = new Cesium.ColorMaterialProperty(color)
+        entity.polyline.width = new Cesium.ConstantProperty(spec.width)
+      }
+    }
+  }
+  restyle()
+
+  return { sources, roadCount, restyle }
 }
 
 /**

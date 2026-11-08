@@ -193,10 +193,12 @@ import {
   resolveTangentOrigin,
 } from '@infrastructure/cesium/viewer'
 import {
-  loadOSMScene,
+  loadNetworkRoads,
+  loadOSMBuildings,
+  localToLngLat,
   bboxAround,
   DEFAULT_BBOX,
-  type LoadedOSMScene,
+  type LoadedNetworkRoads,
 } from '@infrastructure/cesium/loadOSMScene'
 import {
   createCameraSync,
@@ -205,6 +207,7 @@ import {
 } from '@infrastructure/cesium/cameraSync'
 import { subscribeOobEvents, type OobEvent } from '@application/services/oobCleanup'
 import { useTheme } from '@interfaces/composables/useTheme'
+import { useSampleCity } from '@interfaces/composables/useSampleCity'
 import PanelCard from '@interfaces/components/command/PanelCard.vue'
 import MetricCard from '@interfaces/components/command/MetricCard.vue'
 import MiniDonut from '@interfaces/components/command/MiniDonut.vue'
@@ -220,25 +223,78 @@ const panelsCollapsed = ref(false)
 
 const world = useWorldStore()
 const { themeId, themes, setTheme, initTheme } = useTheme()
+const { loadSampleCity } = useSampleCity()
 
 let cesiumViewer: Cesium.Viewer | null = null
 let syncRafId: number | null = null
 let cameraSync: CameraSyncContext | null = null
+// The two city layers, kept so a theme switch can re-colour them.
+let networkRoads: LoadedNetworkRoads | null = null
+let osmBuildings: { restyle: () => void } | null = null
 
-// Geographic anchor of the loaded scene. An imported OSM map carries
-// its own projection origin; the built-in demo scenes have none and
-// fall back to the default 天安门 anchor.
-const sceneOrigin = world.network.origin ?? null
-const tangent: TangentOrigin = resolveTangentOrigin(sceneOrigin)
+// Geographic anchor of the loaded scene.
+//
+// The view loads a REAL city (the backend's bundled 深圳福田 extract)
+// before the basemap is built, so the anchor, the camera height and the
+// basemap rectangle all follow the loaded network — not the demo scene
+// that happened to be in the store when the view mounted. That is the
+// whole point: the cars and the picture must describe one place.
+const sceneOrigin = computed(() => world.network.origin ?? null)
+const tangent = computed<TangentOrigin>(() => resolveTangentOrigin(sceneOrigin.value))
 
 // How much of the scene the bird's-eye camera has to cover, and which
-// basemap area to fetch. A demo scene keeps the historic 天安门 bbox;
-// an imported map gets a bbox around its own origin.
-const sceneBounds = computeNetworkBounds(world.network)
-const birdHeight = Math.max(1500, Math.round(sceneBounds.diagonal * 1.2))
-const osmBbox = sceneOrigin
-  ? bboxAround(sceneOrigin.lat, sceneOrigin.lon, Math.max(1500, sceneBounds.diagonal / 2))
-  : DEFAULT_BBOX
+// basemap area to fetch. A demo scene keeps the default bbox; a loaded
+// city gets a bbox around its own origin.
+const sceneBounds = computed(() => computeNetworkBounds(world.network))
+const birdHeight = computed(() => {
+  const diagonal = sceneBounds.value.diagonal
+  // A 45° oblique frames a ground swath of about `height` metres in
+  // front of the camera, so the altitude has to match the size of the
+  // area we want to see — not the 1.2× diagonal a plan view needs.
+  return Math.max(1200, Math.min(4200, Math.round(diagonal * 0.55)))
+})
+const osmBbox = computed(() =>
+  sceneOrigin.value
+    ? bboxAround(
+        sceneOrigin.value.lat,
+        sceneOrigin.value.lon,
+        Math.max(1500, sceneBounds.value.diagonal / 2),
+      )
+    : DEFAULT_BBOX,
+)
+
+// The bird's-eye camera: a 45° oblique, not a plan view.
+//
+// A vertical top-down view reads as a MAP; a 45° oblique reads as a
+// CITY — the buildings get their sides, the streets get their
+// perspective, the cars have a horizon to drive toward. The reference
+// project frames it the same way (altitude 1500 m, 45° tilt, camera
+// pulled back by the distance it is high).
+const OVERHEAD_TILT_RAD = Math.PI / 4
+
+/** Where the street-level camera stands: on a real road, not inside a
+ *  block. The projection origin is the middle of the drawn rectangle,
+ *  which in a city is as likely to be a building as a street. */
+const streetAnchor = computed(() => {
+  const origin = sceneOrigin.value
+  const fallback = { lng: tangent.value.lng, lat: tangent.value.lat }
+  if (!origin) return fallback
+  let best: { lng: number; lat: number } | null = null
+  let bestDist = Infinity
+  for (const road of Object.values(world.network.roads)) {
+    const points =
+      road.waypoints && road.waypoints.length >= 2
+        ? road.waypoints
+        : [road.startNode, road.endNode]
+    const mid = points[Math.floor(points.length / 2)]
+    if (!mid) continue
+    const dist = mid.x * mid.x + mid.z * mid.z
+    if (dist >= bestDist) continue
+    bestDist = dist
+    best = localToLngLat(origin, mid.x, mid.z)
+  }
+  return best ?? fallback
+})
 
 // Reuse the simulation tick so the simulation keeps running.
 const { isReady, getRenderer } = useWorldSimulation(threeCanvas)
@@ -341,6 +397,63 @@ const onOobEvent = (e: OobEvent): void => {
   pushEvent(kind, e.reason)
 }
 
+/**
+ * Tune the raster basemap and the sky for the current theme.
+ *
+ * The only raster basemap reachable from this network is the OSM
+ * standard style — a bright beige map. Under a dark dashboard that
+ * reads as a mistake, so on the dark themes it is dimmed, desaturated
+ * and hue-shifted into a faint substrate (the vector network is the
+ * subject); on the paper theme it is left at its natural brightness.
+ * Done on the IMAGERY LAYER (not with a CSS filter on the canvas): a
+ * filter would also invert the vector roads and buildings, whose
+ * colours come from the theme tokens.
+ *
+ * The sky follows the same rule: Cesium's default atmosphere is a BLUE
+ * gradient, and at street level it fills the whole upper half of the
+ * frame — a blue sky over a dark dashboard is the same mistake. The
+ * dark themes turn it off (the backdrop becomes the theme's screen
+ * colour); paper keeps it.
+ */
+const applyBasemapTuning = (viewer: Cesium.Viewer, theme: string): void => {
+  const imageryLayer = viewer.imageryLayers.get(0)
+  if (imageryLayer) {
+    const paper = theme === 'paper'
+    // The clay theme keeps a LITTLE more raster: its buildings are
+    // light, and a fully-black ground under them reads as a void from
+    // street level. 0.34 gives the ground a whisper of texture while
+    // the vector network stays the subject.
+    const dim = theme === 'paper' ? 1 : theme === 'clay' ? 0.34 : 0.26
+    imageryLayer.brightness = dim
+    imageryLayer.contrast = paper ? 1 : 1.05
+    imageryLayer.saturation = paper ? 1 : 0.12
+    imageryLayer.gamma = paper ? 1 : 1.25
+    // A third of a turn: any raster road line joins the night palette
+    // instead of fighting the token colours.
+    imageryLayer.hue = paper ? 0 : 0.55
+  }
+  const dark = theme !== 'paper'
+  if (viewer.scene.skyBox) viewer.scene.skyBox.show = !dark
+  if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = !dark
+  // What shows behind the tiles when the sky is off — the theme's own
+  // screen colour, so the void is THE THEME's void, not Cesium's black.
+  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString(
+    theme === 'paper' ? '#f5f5f7' : tokenScreen(theme),
+  )
+}
+
+/** The theme's screen colour — read from the CSS custom property so a
+ *  token change never has to touch this file. The theme is already
+ *  applied to the document root whenever this runs (initTheme at
+ *  mount; setTheme before the watch fires). */
+const tokenScreen = (_theme: string): string => {
+  if (typeof document !== 'undefined') {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--dc-screen').trim()
+    if (raw.length > 0) return raw
+  }
+  return '#0d1117'
+}
+
 // ===== lifecycle ==========================================================
 
 onMounted(async () => {
@@ -355,40 +468,47 @@ onMounted(async () => {
     status.value = { kind: 'error', text: 'Cesium 容器未挂载' }
     return
   }
-  // 1) Construct Cesium viewer (sync — the SDK init is fast).
+
+  // 1) Load the city FIRST — before the basemap exists.
+  //
+  // The order is the whole fix: the basemap is built FROM the loaded
+  // network (its anchor, its rectangle and its very road geometry), so
+  // a car can never end up on a street the picture does not contain.
+  status.value = { kind: 'info', text: '正在载入深圳福田路网...' }
+  const city = await loadSampleCity()
+  if (city.ok) {
+    status.value = {
+      kind: 'info',
+      text: `✓ 福田路网 ${city.roadCount} 条道路 · ${city.vehicleCount} 辆车已就位`,
+    }
+  } else {
+    // The city could not be loaded — the demo scene stays in the store
+    // and the view still works, but it must say so.
+    status.value = {
+      kind: 'error',
+      text: `路网载入失败（${city.error ?? '未知原因'}）— 显示当前场景`,
+    }
+  }
+
+  // 2) Construct Cesium viewer (sync — the SDK init is fast).
   try {
     cesiumViewer = createCesiumViewer(cesiumContainer.value, {
-      center: tangent,
-      zoomLevel: birdHeight,
+      center: tangent.value,
+      zoomLevel: birdHeight.value,
       imagery: DEFAULT_IMAGERY,
     })
-    // The only raster basemap reachable from this network is the OSM
-    // standard style — a bright beige map. Under a dark dashboard that
-    // reads as a mistake, so the imagery is dimmed, desaturated and
-    // hue-shifted toward the night palette. Done on the IMAGERY LAYER
-    // (not with a CSS filter on the canvas): a filter would also
-    // invert the vector roads and buildings, whose colours come from
-    // the theme tokens — the theme would then disagree with itself.
-    const imageryLayer = cesiumViewer.imageryLayers.get(0)
-    if (imageryLayer) {
-      // The raster becomes a faint substrate, not the subject: dimmed
-      // hard and nearly desaturated, so the token-coloured vector
-      // network (roads/buildings) reads as the city and the OSM
-      // building outlines stop shouting in yellow.
-      // The basemap tuning FOLLOWS the theme: on the night themes the
-      // bright OSM raster is dimmed into a substrate (the vector
-      // network is the subject), and on the paper theme it is left at
-      // its natural brightness — a dark map under a white dashboard
-      // would be just as wrong as the other way round.
-      const paper = document.documentElement.dataset.theme === 'paper'
-      imageryLayer.brightness = paper ? 1 : 0.26
-      imageryLayer.contrast = paper ? 1 : 1.05
-      imageryLayer.saturation = paper ? 1 : 0.12
-      imageryLayer.gamma = paper ? 1 : 1.25
-      // A third of a turn: any raster road line joins the night
-      // palette instead of fighting the blue network.
-      imageryLayer.hue = paper ? 0 : 0.55
-    }
+    // The viewer opens looking straight down (Cesium's default for a
+    // destination without an orientation). A command centre wants the
+    // 45° oblique, so the camera is placed explicitly right away.
+    const opening = birdView.value
+    cesiumViewer.camera.setView({
+      destination: opening.destination,
+      orientation: { heading: opening.heading, pitch: opening.pitch, roll: 0 },
+    })
+    // The raster basemap, the sky and the globe colour all FOLLOW the
+    // theme — and a theme switch re-runs this (the watch below), so the
+    // map and the dashboard never disagree.
+    applyBasemapTuning(cesiumViewer, themeId.value)
   } catch (e) {
     status.value = {
       kind: 'error',
@@ -397,8 +517,9 @@ onMounted(async () => {
     return
   }
 
-  // 2) Async load OSM buildings + roads.
-  status.value = { kind: 'info', text: '正在从 Overpass 加载 OSM 数据...' }
+  // 3) Draw the city: the SIMULATED roads first (they are the ones the
+  //    cars drive on), then the buildings around them.
+  status.value = { kind: 'info', text: '正在绘制路网与建筑...' }
   // Dev-only handle on the viewer, for the e2e specs (the basemap's
   // tile URL is the thing they assert) — same pattern as the store's
   // `window.__world`, and tree-shaken out of the production bundle.
@@ -406,14 +527,25 @@ onMounted(async () => {
     ;(window as unknown as { __cesium?: Cesium.Viewer }).__cesium = cesiumViewer
   }
   try {
-    const loaded: LoadedOSMScene = await loadOSMScene(cesiumViewer, osmBbox)
+    const roads: LoadedNetworkRoads = await loadNetworkRoads(
+      cesiumViewer,
+      world.network,
+      sceneOrigin.value,
+    )
+    networkRoads = roads
+    // The road count is published as soon as the roads are on the map —
+    // the buildings take a while longer, and a panel that says
+    // 「道路 0 条」 while a thousand roads are drawn is a lie.
+    osmStats.value = { roadCount: roads.roadCount, buildingCount: 0 }
+    const buildings = await loadOSMBuildings(cesiumViewer, osmBbox.value)
+    osmBuildings = buildings
     osmStats.value = {
-      roadCount: loaded.roadCount,
-      buildingCount: loaded.buildingCount,
+      roadCount: roads.roadCount,
+      buildingCount: buildings.buildingCount,
     }
     status.value = {
       kind: 'info',
-      text: `✓ 已加载 ${loaded.roadCount} 条道路 + ${loaded.buildingCount} 栋建筑`,
+      text: `✓ ${roads.roadCount} 条仿真道路 + ${buildings.buildingCount} 栋建筑`,
     }
     // Fade the toast after 3s.
     setTimeout(() => {
@@ -422,12 +554,49 @@ onMounted(async () => {
   } catch (e) {
     status.value = {
       kind: 'error',
-      text: `OSM 加载失败: ${e instanceof Error ? e.message : String(e)}`,
+      text: `城市绘制失败: ${e instanceof Error ? e.message : String(e)}`,
     }
   }
 
   // 3) Start camera sync loop — Cesium → Three.js every frame.
   startCameraSync()
+})
+
+/**
+ * The 45° oblique view of the city.
+ *
+ * The camera stands due south of the city centre, at the same distance
+ * back as it is high — that is what makes the tilt exactly 45° — and
+ * looks north. The city fills the lower two thirds of the frame and
+ * the skyline sits on the upper third.
+ */
+const birdView = computed(() => {
+  const t = tangent.value
+  const height = birdHeight.value
+  const back = height / Math.tan(OVERHEAD_TILT_RAD)
+  // The bearing from the city centre TO the camera, clockwise from north.
+  const bearing = Math.PI
+  const cosLat = Math.max(0.05, Math.cos((t.lat * Math.PI) / 180))
+  const dLat = (back * Math.cos(bearing)) / 111000
+  const dLng = (back * Math.sin(bearing)) / (111000 * cosLat)
+  return {
+    destination: Cesium.Cartesian3.fromDegrees(t.lng + dLng, t.lat + dLat, height),
+    // Looking back at the centre: the camera's heading is the bearing
+    // from the centre to the camera, plus half a turn.
+    heading: bearing + Math.PI,
+    pitch: -OVERHEAD_TILT_RAD,
+  }
+})
+
+// A theme switch changes the road and building colours — and the
+// Cesium layers bake their colours in at creation, so they have to be
+// re-coloured explicitly. The raster basemap and the sky follow the
+// same switch. Without this the city would keep the old palette while
+// the dashboard around it changed.
+watch(themeId, (theme) => {
+  networkRoads?.restyle()
+  osmBuildings?.restyle()
+  if (cesiumViewer) applyBasemapTuning(cesiumViewer, theme)
 })
 
 // View mode toggle: Cesium flyTo for bird/street; orbit controls
@@ -438,14 +607,17 @@ watch(viewMode, (mode) => {
     // Cesium owns the camera again — hand the current view over once
     // so the switch does not jump.
     cameraSync?.setOwner('cesium')
+    const view = birdView.value
     cesiumViewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(tangent.lng, tangent.lat, birdHeight),
+      destination: view.destination,
+      orientation: { heading: view.heading, pitch: view.pitch, roll: 0 },
       duration: 2,
     })
   } else if (mode === 'street') {
     cameraSync?.setOwner('cesium')
+    const anchor = streetAnchor.value
     cesiumViewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(tangent.lng, tangent.lat, 1.7),
+      destination: Cesium.Cartesian3.fromDegrees(anchor.lng, anchor.lat, 1.7),
       orientation: { heading: 0, pitch: 0, roll: 0 },
       duration: 2,
     })
@@ -472,7 +644,7 @@ const startCameraSync = (): void => {
       cameraSync = createCameraSync({
         cesiumViewer,
         threeCamera: rendererRef.value.getCamera(),
-        tangent,
+        tangent: tangent.value,
         owner: 'cesium',
       })
     }

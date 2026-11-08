@@ -28,6 +28,15 @@ export interface CesiumSceneOptions {
   center?: TangentOrigin
   /** Initial camera height in meters (default 1500m = bird's-eye). */
   zoomLevel: number
+  /**
+   * The initial camera orientation.
+   *
+   * Cesium's default for a destination without an orientation is
+   * pitch −90° — straight down, which reads as a MAP. A command centre
+   * wants a 45° oblique: the city gets its sides and the streets get
+   * their perspective. The caller passes the orientation it wants.
+   */
+  orientation?: { heading: number; pitch: number; roll?: number }
   /** Tile service — defaults to OpenStreetMap's own tiles. */
   imagery?: {
     urlTemplate: string
@@ -137,10 +146,19 @@ export const createCesiumViewer = (
   // ---- Initial camera (bird's-eye fly-in over 2s) ----
   // Default Cesium camera orientation when destination is specified
   // without `orientation` is pitch=-90° (straight down), heading=0
-  // (north), roll=0. Matches the user's prior project behaviour.
+  // (north), roll=0. A caller that wants a 45° oblique passes one.
   const center = opts.center ?? DEFAULT_TANGENT_ORIGIN
   viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(center.lng, center.lat, opts.zoomLevel),
+    ...(opts.orientation
+      ? {
+          orientation: {
+            heading: opts.orientation.heading,
+            pitch: opts.orientation.pitch,
+            roll: opts.orientation.roll ?? 0,
+          },
+        }
+      : {}),
   })
 
   // ---- Warm the tile cache for the ancestors ----

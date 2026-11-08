@@ -189,6 +189,70 @@
   --dc-building-edge: #0e7490;
 }
 
+/* ===== 哑光白模 (clay) — the buildings are the subject =====
+
+   The night themes draw the roads as bright lines and the buildings as
+   dark blocks, so the picture is read from the ROADS: the building
+   faces sit at almost the same value as the ground and only their
+   outline survives.
+
+   This theme inverts the weights. The buildings become matte light
+   grey (they carry the mass), the roads become a dark grey texture
+   behind them, and the glow drops to almost nothing — no neon, no
+   flow animation on top of the picture.
+
+   The ground stays dark on purpose: a white model needs light and
+   shadow to read as volume, and this renderer has neither. Dark ground
+   + light massing gives the same "the buildings are the subject"
+   result and does not fight the dark panels around the viewport.
+
+   The values are the reference project's own clay theme, measured
+   there: high-frequency detail 27.13% → 18.01%, saturated pixels
+   72.08% → 0.19%, building/ground contrast 5.68:1 → 8.32:1. */
+:root[data-theme='clay'] {
+  --dc-screen: #0d1117;
+  --dc-panel: #101720;
+  --dc-panel-2: #161d27;
+  --dc-accent: #4a7fb5;
+  --dc-flow: #5b6a7d;
+  --dc-secondary: #39424f;
+  --dc-text: #dde3ea;
+  --dc-text-dim: #9aa4b1;
+  --dc-text-faint: #6b7683;
+  --dc-ok: #4ade80;
+  --dc-warning: #f59e0b;
+  --dc-alert: #f43f5e;
+  --dc-hairline: rgba(255, 255, 255, 0.07);
+  --dc-hairline-strong: rgba(255, 255, 255, 0.14);
+  --dc-chrome: rgba(16, 23, 32, 0.72);
+
+  /* chart series — desaturated blues, so a chart never competes with
+     the massing model */
+  --dc-series-1: #3f5f80;
+  --dc-series-2: #5b7fa6;
+  --dc-series-3: #4a6b8c;
+  --dc-series-4: #7d9ab8;
+  --dc-series-5: #6b8aa8;
+  --dc-series-6: #a8bfd2;
+
+  /* ===== the scene's own road/building colours =====
+     The roads are the quiet tier: dark greys, four steps of weight
+     (main → secondary → local → footway). The buildings are one
+     matte material with a barely-there variation per category — a
+     white model is ONE material, not a colour-coded map. */
+  --dc-road-main: #3d4653;
+  --dc-road-secondary: #333c48;
+  --dc-road-local: #2a323c;
+  --dc-road-footway: #232a33;
+  --dc-building: #8a93a0;
+  --dc-building-edge: #c3ccd8;
+  --dc-building-residential: #868f9c;
+  --dc-building-commercial: #949dab;
+  --dc-building-public: #9aa3b1;
+  --dc-building-industrial: #7d8694;
+  --dc-surface: #1b222c;
+}
+
 /* ===== shared surface recipes ===== */
 .dc-surface {
   background: color-mix(in srgb, var(--dc-panel) 82%, transparent);
