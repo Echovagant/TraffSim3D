@@ -240,10 +240,10 @@
      (main → secondary → local → footway). The buildings are one
      matte material with a barely-there variation per category — a
      white model is ONE material, not a colour-coded map. */
-  --dc-road-main: #3d4653;
-  --dc-road-secondary: #333c48;
-  --dc-road-local: #2a323c;
-  --dc-road-footway: #232a33;
+  --dc-road-main: #4a5462;
+  --dc-road-secondary: #3e4753;
+  --dc-road-local: #333b45;
+  --dc-road-footway: #2b323b;
   --dc-building: #8a93a0;
   --dc-building-edge: #c3ccd8;
   --dc-building-residential: #868f9c;
