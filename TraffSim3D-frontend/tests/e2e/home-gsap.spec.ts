@@ -131,23 +131,24 @@ test('Home: SmartCity link in top nav', async ({ page }) => {
   await expect(link).toHaveAttribute('href', '/smart-city')
 })
 
-test('Home: every module is reachable — 3 bands + 4 index rows', async ({ page }) => {
+test('Home: every module is reachable — 3 bands + 3 index rows', async ({ page }) => {
   await page.goto('/')
   await page.waitForTimeout(1200)
   const bands = page.locator('.feature-band a[href]')
   const rows = page.locator('.module-index a[href]')
   await expect(bands).toHaveCount(3)
-  await expect(rows).toHaveCount(4)
-  // All seven modules are on the page, each linking to its route.
+  // SimulationLab merged into the scene editor (2026-11-09), so the
+  // index carries one fewer row.
+  await expect(rows).toHaveCount(3)
+  // All six modules are on the page, each linking to its route.
   const hrefs = await page
     .locator('.feature-band a[href], .module-index a[href]')
     .evaluateAll((els) => els.map((el) => (el as HTMLAnchorElement).getAttribute('href')))
-  expect(new Set(hrefs).size).toBe(7)
+  expect(new Set(hrefs).size).toBe(6)
   for (const route of [
     '/scene-editor',
     '/smart-city',
     '/ai-playground',
-    '/simulation-lab',
     '/map-importer',
     '/backend',
     '/deliverables',

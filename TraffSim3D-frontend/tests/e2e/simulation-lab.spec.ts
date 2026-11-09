@@ -12,7 +12,7 @@
  */
 import { test, expect } from '@playwright/test'
 
-test('SimulationLab: the page loads, mounts the live stage and advances the tick', async ({
+test('SimulationLab (merged into SceneLab): the redirect lands, the drawer runs', async ({
   page,
 }) => {
   const pageErrors: string[] = []
@@ -20,12 +20,15 @@ test('SimulationLab: the page loads, mounts the live stage and advances the tick
 
   await page.goto('/simulation-lab')
 
-  // The panel and the live 3D stage are both mounted.
-  await expect(page.locator('[data-testid="sim-lab-panel"]')).toBeVisible()
-  await expect(page.locator('[data-testid="sim-lab-stage"]')).toBeAttached()
-  await expect(page.locator('[data-testid="world-canvas"]')).toBeAttached()
+  // The old route redirects to the scene editor — bookmarks and old
+  // links keep working.
+  await expect(page).toHaveURL(/\/scene-editor/)
 
-  // The key controls exist.
+  // The live 3D stage and the readout drawer are both mounted.
+  await expect(page.locator('[data-testid="world-canvas"]')).toBeAttached()
+  await expect(page.locator('[data-testid="sim-drawer"]')).toBeVisible()
+
+  // The key controls exist (the drawer carries them now).
   await expect(page.locator('[data-testid="scene-select"]')).toBeVisible()
   await expect(page.locator('[data-testid="controller-select"]')).toBeVisible()
   await expect(page.locator('[data-testid="pause-button"]')).toBeVisible()

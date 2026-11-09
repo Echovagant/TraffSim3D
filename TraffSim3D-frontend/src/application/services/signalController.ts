@@ -192,7 +192,7 @@ export type ControllerKind = 'fixed-cycle' | 'actuated' | 'coordinated' | 'rl'
 //    and never the EW arm.
 // 2. **Network-wide fallback.** When the light is attached to no
 //    intersection at all (the Simulation Lab synthesises a light from
-//    nothing but an axis — see `SimulationLabView.vue`) or when its
+//    nothing but an axis — see `SimReadoutDrawer.vue`) or when its
 //    intersection has no road on that axis, every road in the network
 //    whose geometry matches the axis is used.
 //

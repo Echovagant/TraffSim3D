@@ -13,12 +13,12 @@
 
     <!-- ===== the numbers ===== -->
     <section class="facts" data-reveal>
-      <div class="fact"><b>1 233</b><span>前端单测</span></div>
-      <div class="fact"><b>57</b><span>e2e 用例</span></div>
+      <div class="fact"><b>1 255</b><span>前端单测</span></div>
+      <div class="fact"><b>58</b><span>e2e 用例</span></div>
       <div class="fact"><b>17</b><span>架构决策 ADR</span></div>
-      <div class="fact"><b>9</b><span>模块路由</span></div>
-      <div class="fact"><b>3 014</b><span>深圳福田建筑</span></div>
-      <div class="fact"><b>994</b><span>导入道路</span></div>
+      <div class="fact"><b>8</b><span>模块路由</span></div>
+      <div class="fact"><b>5 422</b><span>深圳福田建筑</span></div>
+      <div class="fact"><b>988</b><span>导入道路</span></div>
     </section>
 
     <!-- ===== the architecture ===== -->
@@ -102,7 +102,7 @@
         <div class="run-card">
           <span class="run-label">验证</span>
           <code>npm test &amp;&amp; npx playwright test</code>
-          <p class="muted">1 233 单测 + 57 条 e2e（含视觉基线）</p>
+          <p class="muted">1 255 单测 + 58 条 e2e（含视觉基线）</p>
         </div>
       </div>
     </section>
@@ -170,12 +170,6 @@ const screens: ReadonlyArray<{ to: string; name: string; sub: string; tile: stri
   { to: '/scene-editor', name: 'SceneLab', sub: '场景编辑器', tile: '/tiles/tile-scenelab.png' },
   { to: '/smart-city', name: 'SmartCity 3D', sub: '指挥大屏', tile: '/tiles/tile-smartcity.png' },
   { to: '/ai-playground', name: 'AI Proving Ground', sub: 'RL 训练', tile: '/tiles/tile-ai.png' },
-  {
-    to: '/simulation-lab',
-    name: 'SimulationLab',
-    sub: '物理与传感器',
-    tile: '/tiles/tile-simulationlab.png',
-  },
   { to: '/map-importer', name: 'MapLab', sub: '地图导入', tile: '/tiles/tile-maplab.png' },
   { to: '/backend', name: 'Backend', sub: '服务状态', tile: '/tiles/tile-backend.png' },
 ]

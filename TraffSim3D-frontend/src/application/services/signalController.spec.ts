@@ -249,7 +249,7 @@ describe('queue lookup — an imported OSM map is no longer structurally 0', () 
 
   it('a light that belongs to no intersection falls back to the whole network', () => {
     // The Simulation Lab synthesises an axis-only light (see
-    // SimulationLabView.vue) — it is in no intersection at all.
+    // SimReadoutDrawer.vue) — it is in no intersection at all.
     const net = buildImportedNetwork()
     const stub = makeTestLight({ id: '__queue_ns', axis: 'ns' })
     expect(net.intersections['i-osm-1']!.trafficLights.some((l) => l.id === stub.id)).toBe(false)

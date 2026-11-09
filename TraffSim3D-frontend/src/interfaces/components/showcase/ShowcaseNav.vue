@@ -5,7 +5,7 @@
 
     full     the floating glass capsule with the whole module list —
              the content pages (MapLab, AI Playground, DeliveryLab,
-             Backend, SimulationLab).
+             Backend).
     minimal  a small floating brand pill — the immersive 3D screens
              (SceneLab, SmartCity), where a full bar would cover the
              canvas.
@@ -38,7 +38,6 @@ interface NavLink {
 
 const LINKS: readonly NavLink[] = [
   { to: '/scene-editor', label: 'SceneLab' },
-  { to: '/simulation-lab', label: 'SimulationLab' },
   { to: '/map-importer', label: 'MapLab' },
   { to: '/smart-city', label: 'SmartCity 3D', accent: true },
   { to: '/ai-playground', label: 'AI Proving Ground' },

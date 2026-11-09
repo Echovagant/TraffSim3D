@@ -1,6 +1,6 @@
-// src/interfaces/views/SimulationLabView.trajectory.spec.ts
+// src/interfaces/components/editor/SimReadoutDrawer.trajectory.spec.ts
 //
-// The two things the SimulationLab panel has to show about the
+// The two things the drawer has to show about the
 // trajectory buffer:
 //
 //   1. **How many samples the dirty-data filter dropped.** The count
@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import SimulationLabView from './SimulationLabView.vue'
+import SimReadoutDrawer from './SimReadoutDrawer.vue'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 import { tickOobCleanup, clearOobEvents, recordLaneGuard } from '@application/services/oobCleanup'
 import { buildTestNetwork } from '@__fixtures__/testNetwork'
@@ -24,9 +24,9 @@ const stubs = {
   CameraView: { name: 'CameraView', template: '<div data-testid="camera-stub" />' },
 }
 
-const mountView = (): VueWrapper => mount(SimulationLabView, { global: { stubs } })
+const mountView = (): VueWrapper => mount(SimReadoutDrawer, { global: { stubs } })
 
-describe('SimulationLabView — the trajectory panel shows the loss', () => {
+describe('SimReadoutDrawer — the trajectory panel shows the loss', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     clearOobEvents()

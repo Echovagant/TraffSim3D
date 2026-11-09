@@ -21,8 +21,10 @@ test('Deliverables: the page loads and links to the other modules', async ({ pag
   await expect(page.getByRole('heading', { name: '界面' })).toBeVisible()
 
   // The screen wall links to every module that has a screen.
+  // (SimulationLab merged into the scene editor, 2026-11-09 — its tile
+  // went with it.)
   const wall = page.locator('.wall a[href]')
-  await expect(wall).toHaveCount(6)
+  await expect(wall).toHaveCount(5)
   for (const route of ['/scene-editor', '/smart-city', '/ai-playground', '/backend']) {
     await expect(page.locator(`.wall a[href="${route}"]`)).toBeVisible()
   }

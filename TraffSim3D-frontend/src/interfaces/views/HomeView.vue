@@ -27,16 +27,16 @@
             <router-link to="/backend" class="btn ghost">后端状态</router-link>
           </div>
           <ul class="hero-facts">
-            <li><b>9</b><span>模块路由</span></li>
-            <li><b>1 233</b><span>前端单测</span></li>
-            <li><b>3 014</b><span>深圳福田建筑</span></li>
-            <li><b>60 s</b><span>信号周期上限</span></li>
+            <li><b>8</b><span>模块路由</span></li>
+            <li><b>1 255</b><span>前端单测</span></li>
+            <li><b>5 422</b><span>深圳福田建筑</span></li>
+            <li><b>460</b><span>信号灯</span></li>
           </ul>
         </div>
         <figure class="hero-shot">
           <img src="/scene-smartcity.png" alt="SmartCity 3D：OSM 底图上的仿真路网与车辆" />
           <figcaption>
-            SmartCity 3D — 深圳福田：994 条道路、3 014 栋建筑，仿真车辆跑在同源路网上
+            SmartCity 3D — 深圳福田：988 条道路、5 422 栋建筑、460 盏信号灯，仿真车辆跑在同源路网上
           </figcaption>
         </figure>
       </section>
@@ -161,7 +161,7 @@ const MODULES: readonly ModuleEntry[] = [
     to: '/scene-editor',
     name: 'SceneLab',
     sub: '场景编辑器',
-    desc: '车道级驾驶仿真：按车道语义选择转向、跟车、让行、红灯停车，路口不穿模、不瞬移。',
+    desc: '车道级驾驶仿真 + 实时读数：按车道语义转向、跟车、让行，信号控制与传感器 (LiDAR/相机) 就在同一页。',
     badge: 'Active',
     tile: '/tiles/tile-scenelab.png',
     feature: true,
@@ -170,7 +170,7 @@ const MODULES: readonly ModuleEntry[] = [
     to: '/smart-city',
     name: 'SmartCity 3D',
     sub: '大屏 · Cesium + Three.js',
-    desc: '真实城区底图上跑仿真：994 条道路、3 014 栋建筑，同源同基准，指挥中心读数实时刷新。',
+    desc: '真实城区路网上跑仿真：988 条道路、5 422 栋建筑，点击车辆跟踪或亲自驾驶探索城区。',
     badge: 'New',
     tile: '/tiles/tile-smartcity.png',
     feature: true,
@@ -183,14 +183,6 @@ const MODULES: readonly ModuleEntry[] = [
     badge: 'Active',
     tile: '/tiles/tile-ai.png',
     feature: true,
-  },
-  {
-    to: '/simulation-lab',
-    name: 'SimulationLab',
-    sub: '物理 + 传感器仿真',
-    desc: 'Rapier 刚体动力学、碰撞检测，以及 LiDAR / 相机 / IMU 的观测空间。',
-    badge: 'Active',
-    tile: '/tiles/tile-simulationlab.png',
   },
   {
     to: '/map-importer',

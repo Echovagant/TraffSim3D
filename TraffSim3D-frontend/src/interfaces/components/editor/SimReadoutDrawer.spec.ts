@@ -1,4 +1,4 @@
-// src/interfaces/views/SimulationLabView.spec.ts
+// src/interfaces/components/editor/SimReadoutDrawer.spec.ts
 //
 // Two contracts are pinned here:
 //
@@ -15,44 +15,47 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import SimulationLabView from './SimulationLabView.vue'
-import WorldCanvas from '@interfaces/components/scene/WorldCanvas.vue'
+import SimReadoutDrawer from './SimReadoutDrawer.vue'
+import SensorPanel from './SensorPanel.vue'
 import CameraView from '@interfaces/components/debug/CameraView.vue'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 
 /**
- * The 3D canvas is stubbed out: happy-dom has no WebGL, and the
- * render loop itself is verified in a real browser (Playwright).
- * The stub keys are the component names, so a rename would stop
- * matching and the real component would be mounted instead.
+ * The 3D canvas is stubbed out where it is still referenced: happy-dom
+ * has no WebGL, and the render loop itself is verified in a real
+ * browser (Playwright). The stub keys are the component names, so a
+ * rename would stop matching and the real component would be mounted.
  */
 const stubs = {
   RouterLink: true,
-  WorldCanvas: { name: 'WorldCanvas', template: '<div data-testid="canvas-stub" />' },
+  Teleport: true,
   CameraView: { name: 'CameraView', template: '<div data-testid="camera-stub" />' },
 }
 
-const mountView = (): VueWrapper => mount(SimulationLabView, { global: { stubs } })
+const mountView = (): VueWrapper => mount(SimReadoutDrawer, { global: { stubs } })
+const mountSensors = (): VueWrapper => mount(SensorPanel, { global: { stubs } })
 
-describe('SimulationLabView — the dashboard must run a live simulation', () => {
+describe('SimReadoutDrawer — the dashboard must run a live simulation', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
 
-  it('mounts the 3D canvas, and the camera PiP together with the camera toggle', async () => {
-    const view = mountView()
-    // The render loop that drives `world.step()`.
-    expect(view.findComponent(WorldCanvas).exists()).toBe(true)
-    // The camera PiP is mounted with the toggle: CameraView's rAF loop
-    // bails out (without rescheduling) while the camera is off, so a
-    // PiP mounted before the toggle never renders a frame.
+  it('the sensor panel wires the camera toggle into the store', async () => {
+    // The camera PiP itself is mounted BY THE PAGE (the merged editor
+    // keeps CameraView in its right column), so the PiP's mount
+    // contract is pinned by the page-level e2e now. What the panel
+    // owns is the wiring: the toggle flips `world.cameraEnabled`, and
+    // the PiP — wherever it is mounted — reads that same flag, so a
+    // PiP mounted while the camera is off never renders a frame.
+    const store = useWorldStore()
+    expect(store.cameraEnabled).toBe(false)
+    const view = mountSensors()
     expect(view.findComponent(CameraView).exists()).toBe(false)
 
     // `setValue(true)` — vue-test-utils has no `setChecked`; for a
     // checkbox, `setValue` sets `checked` and fires `change`.
     await view.get('[data-testid="camera-toggle"]').setValue(true)
-    await view.vm.$nextTick()
-    expect(view.findComponent(CameraView).exists()).toBe(true)
+    expect(store.cameraEnabled).toBe(true)
     view.unmount()
   })
 
@@ -193,7 +196,7 @@ describe('SimulationLabView — the dashboard must run a live simulation', () =>
   })
 })
 
-describe('SimulationLabView — no number the page does not measure', () => {
+describe('SimReadoutDrawer — no number the page does not measure', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })

@@ -1,21 +1,7 @@
 <template>
   <div class="scene-editor" data-testid="scene-canvas">
     <!--
-      PROTOTYPE (2026-11-07): the layout prototype lives behind
-      `?variant=A|B|C`. Without the param the view renders EXACTLY as
-      before — the e2e visual baselines and every existing spec are
-      unaffected. Delete this block (and components/prototype/) once a
-      layout wins.
-    -->
-    <template v-if="prototypeVariant">
-      <VariantAWorkbench v-if="prototypeVariant === 'A'" />
-      <VariantBColumns v-else-if="prototypeVariant === 'B'" />
-      <VariantCFocus v-else />
-      <PrototypeSwitcher />
-    </template>
-
-    <!--
-      The real layout (2026-11-07).
+      The layout (2026-11-07 grid rework; 2026-11-09 merge).
 
       Before this, eight panels were absolutely positioned with
       hand-written offsets (POI at `top: 300px`, the inspector at
@@ -28,7 +14,6 @@
       live in two columns that cannot overlap, and every panel can be
       folded away — on a narrow viewport the columns fold themselves.
     -->
-    <template v-else>
       <ShowcaseNav variant="minimal" />
       <WorldCanvas />
 
@@ -110,7 +95,44 @@
           </button>
           <InspectorPanel v-show="inspectorOpen" />
         </div>
+
+        <div class="slot" :class="{ 'is-folded': !sensorOpen }">
+          <button
+            class="slot-fold"
+            :title="sensorOpen ? '收起 传感器' : '展开 传感器'"
+            :aria-expanded="sensorOpen"
+            @click="sensorOpen = !sensorOpen"
+          >
+            {{ sensorOpen ? '▶' : '◀' }}
+          </button>
+          <SensorPanel v-show="sensorOpen" />
+        </div>
       </aside>
+
+      <!--
+        The simulation drawer — the bottom strip.
+
+        SimulationLab was a whole page for these three cards; they live
+        here now (the merge of 2026-11-09). It folds to a slim rail so
+        the map can take the full height when the readouts are not
+        wanted.
+      -->
+      <footer
+        class="deck-drawer"
+        :class="{ 'is-folded': !drawerOpen }"
+        data-testid="sim-drawer"
+      >
+        <button
+          class="drawer-fold"
+          :title="drawerOpen ? '收起 仿真读数' : '展开 仿真读数'"
+          :aria-expanded="drawerOpen"
+          data-testid="drawer-toggle"
+          @click="drawerOpen = !drawerOpen"
+        >
+          {{ drawerOpen ? '▼ 仿真读数' : '▲ 仿真读数' }}
+        </button>
+        <SimReadoutDrawer v-show="drawerOpen" class="drawer-body" />
+      </footer>
 
       <!-- The map gets a click back when both columns are folded. -->
       <button
@@ -122,7 +144,6 @@
       >
         ⟩ 面板
       </button>
-    </template>
   </div>
 </template>
 
@@ -137,23 +158,12 @@ import RoutePanel from '@interfaces/components/editor/RoutePanel.vue'
 import PoiPanel from '@interfaces/components/editor/PoiPanel.vue'
 import EntityOutline from '@interfaces/components/editor/EntityOutline.vue'
 import InspectorPanel from '@interfaces/components/editor/InspectorPanel.vue'
+import SensorPanel from '@interfaces/components/editor/SensorPanel.vue'
+import SimReadoutDrawer from '@interfaces/components/editor/SimReadoutDrawer.vue'
 import CameraView from '@interfaces/components/debug/CameraView.vue'
-// PROTOTYPE — layout variants (throwaway; see components/prototype/).
-import VariantAWorkbench from '@interfaces/components/prototype/VariantAWorkbench.vue'
-import VariantBColumns from '@interfaces/components/prototype/VariantBColumns.vue'
-import VariantCFocus from '@interfaces/components/prototype/VariantCFocus.vue'
-import PrototypeSwitcher from '@interfaces/components/prototype/PrototypeSwitcher.vue'
 import { useEditorShortcuts } from '@interfaces/composables/useEditorShortcuts'
 
 useEditorShortcuts()
-
-const route = useRoute()
-/** `?variant=A|B|C` → the prototype layout; absent → today's layout. */
-const prototypeVariant = computed(() => {
-  const raw = route.query.variant
-  const key = Array.isArray(raw) ? raw[0] : raw
-  return key === 'A' || key === 'B' || key === 'C' ? key : null
-})
 
 // ===== the foldable panels =====
 //
@@ -166,6 +176,8 @@ const poiOpen = ref(true)
 const debugOpen = ref(true)
 const cameraOpen = ref(true)
 const inspectorOpen = ref(true)
+const sensorOpen = ref(true)
+const drawerOpen = ref(true)
 
 const bothColumnsFolded = computed(
   () =>
@@ -174,7 +186,8 @@ const bothColumnsFolded = computed(
     !poiOpen.value &&
     !debugOpen.value &&
     !cameraOpen.value &&
-    !inspectorOpen.value,
+    !inspectorOpen.value &&
+    !sensorOpen.value,
 )
 
 const restorePanels = (): void => {
@@ -184,6 +197,8 @@ const restorePanels = (): void => {
   debugOpen.value = true
   cameraOpen.value = true
   inspectorOpen.value = true
+  sensorOpen.value = true
+  drawerOpen.value = true
 }
 </script>
 
@@ -198,10 +213,11 @@ const restorePanels = (): void => {
      cover it, whatever their content height. */
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr) 292px;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
     'top   top   top'
-    'left  .     right';
+    'left  .     right'
+    'drawer drawer drawer';
   gap: var(--dc-gap);
   padding: var(--dc-gap);
 }
@@ -235,6 +251,42 @@ const restorePanels = (): void => {
 }
 .deck-right {
   grid-area: right;
+}
+
+/* The simulation drawer: a horizontal strip under the map. Folded, it
+   collapses to its rail so the map takes the full height. */
+.deck-drawer {
+  grid-area: drawer;
+  z-index: var(--dc-z-panel);
+  min-width: 0;
+  border-radius: var(--dc-radius);
+  background: color-mix(in srgb, var(--dc-panel) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dc-accent) 26%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.drawer-fold {
+  align-self: flex-start;
+  padding: 5px 14px;
+  border: none;
+  background: transparent;
+  color: var(--dc-text-dim);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+.drawer-fold:hover {
+  color: var(--dc-text);
+}
+.drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.deck-drawer.is-folded .drawer-body {
+  display: none;
 }
 
 /* A slot holds one panel plus its fold button. Folded, the panel is
@@ -333,6 +385,10 @@ const restorePanels = (): void => {
   .deck-left,
   .deck-right {
     display: none;
+  }
+  /* The drawer's three panes stack; the drawer scrolls internally. */
+  .deck-drawer :deep(.drawer) {
+    grid-template-columns: 1fr;
   }
 }
 </style>

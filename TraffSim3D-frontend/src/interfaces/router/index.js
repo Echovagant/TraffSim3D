@@ -13,9 +13,11 @@ const router = createRouter({
       component: () => import('@interfaces/views/SceneEditorView.vue'),
     },
     {
+      // The lab merged into the scene editor (2026-11-09): the route
+      // stays as a redirect so old links, bookmarks and the e2e specs
+      // that navigate here keep working.
       path: '/simulation-lab',
-      name: 'simulation-lab',
-      component: () => import('@interfaces/views/SimulationLabView.vue'),
+      redirect: { name: 'scene-editor' },
     },
     {
       path: '/ai-playground',
