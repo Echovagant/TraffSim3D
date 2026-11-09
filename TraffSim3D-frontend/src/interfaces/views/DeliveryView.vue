@@ -70,6 +70,22 @@
       </div>
     </section>
 
+    <!-- ===== the capability timeline ===== -->
+    <section class="block" data-reveal>
+      <h2>时间线</h2>
+      <p class="block-lead">每个节点都对应仓库里的一组提交 —— 能力是长出来的，不是计划出来的。</p>
+      <ol class="timeline">
+        <li v-for="m in milestones" :key="m.date" class="milestone">
+          <span class="m-date dc-num">{{ m.date }}</span>
+          <span class="m-dot" aria-hidden></span>
+          <div class="m-body">
+            <h3>{{ m.title }}</h3>
+            <p>{{ m.desc }}</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
     <!-- ===== the screen wall ===== -->
     <section class="block" data-reveal>
       <h2>界面</h2>
@@ -163,6 +179,54 @@ const capabilities: readonly Capability[] = [
     state: 'planned',
     desc: '把多场景碰撞样本变成风险预测。',
     features: ['碰撞样本库', '危险路段识别', '给车主的风险解释'],
+  },
+]
+
+/**
+ * The capability timeline — every entry names a stretch of real
+ * commits (`git log --date=short` is the source), month precision for
+ * the early stretches and day precision for the recent ones.
+ */
+const milestones: readonly { date: string; title: string; desc: string }[] = [
+  {
+    date: '2026-06',
+    title: '内核奠基',
+    desc: 'DDD 分层 + Three.js 场景渲染 + 场景编辑器骨架，首日即带性能门禁与持久化。',
+  },
+  {
+    date: '2026-10',
+    title: '物理与训练',
+    desc: 'Rapier 刚体物理（固定步长）、PPO 训练管线、LiDAR / 相机传感器与轨迹导出。',
+  },
+  {
+    date: '2026-10-31',
+    title: '多智能体协商',
+    desc: '无信号路口的驾驶 agent 与网格泛化，训练出的策略回放进浏览器实时驾驶。',
+  },
+  {
+    date: '2026-11-01',
+    title: '接入真实地图',
+    desc: 'OSM 导入（GCJ-02 / BD-09 自动转 WGS84）、零 Key 的 POI、路线规划与第一人称跟随。',
+  },
+  {
+    date: '2026-11-07',
+    title: '指挥大屏',
+    desc: '设计令牌层、SmartCity 指挥中心、场景编辑器网格化、作品集视觉语言。',
+  },
+  {
+    date: '2026-11-08',
+    title: '城区仿真闭环',
+    desc: '仿真网 = 绘制网（随包深圳福田 988 路）、哑光白模主题、点击跟踪与手动驾驶。',
+  },
+  {
+    date: '2026-11-09',
+    title: '信号回补与仪表盘',
+    desc: 'Overpass 补回 264 个信控路口；驾驶舱仪表盘读活信号相位与倒计时。',
+  },
+  {
+    date: '2026-11-10',
+    title: '一条主线',
+    desc: 'SimulationLab 并入场景编辑器：读数抽屉、传感器面板、一条路由讲完整件事。',
   },
 ]
 
@@ -468,6 +532,82 @@ const screens: ReadonlyArray<{ to: string; name: string; sub: string; tile: stri
   }
   .arch-arrow {
     transform: rotate(90deg);
+  }
+}
+
+/* ===== the capability timeline =====
+   A vertical rail with dated nodes. The rail is a hairline; the node
+   is a small ring that fills with the accent when its entry is in
+   view (the reveal layer handles the fade). */
+.timeline {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  position: relative;
+}
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 96px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: color-mix(in srgb, var(--dc-accent) 26%, transparent);
+}
+.milestone {
+  display: grid;
+  grid-template-columns: 84px 24px minmax(0, 1fr);
+  align-items: baseline;
+  padding: 9px 0;
+}
+.m-date {
+  text-align: right;
+  font-size: 12px;
+  color: var(--dc-text-faint);
+  letter-spacing: 0.04em;
+}
+.m-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dc-screen);
+  border: 2px solid var(--dc-accent);
+  justify-self: center;
+  align-self: center;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--dc-accent) 55%, transparent);
+}
+.m-body {
+  min-width: 0;
+}
+.m-body h3 {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dc-text);
+}
+.m-body p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--dc-text-dim);
+  line-height: 1.6;
+}
+@media (max-width: 720px) {
+  .timeline::before {
+    left: 12px;
+  }
+  .milestone {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+  .m-date {
+    grid-column: 2;
+    text-align: left;
+    order: 3;
+  }
+  .m-dot {
+    grid-row: 1;
+  }
+  .m-body {
+    grid-column: 2;
   }
 }
 </style>

@@ -34,7 +34,10 @@
           </ul>
         </div>
         <figure class="hero-shot">
-          <img src="/scene-smartcity.png" alt="SmartCity 3D：OSM 底图上的仿真路网与车辆" />
+          <img
+            src="/scene-smartcity.png"
+            alt="SmartCity 3D：深圳福田哑光白模城区，仿真车辆行驶在 45° 斜俯视的真实路网上"
+          />
           <figcaption>
             SmartCity 3D — 深圳福田：988 条道路、5 422 栋建筑、460 盏信号灯，仿真车辆跑在同源路网上
           </figcaption>
@@ -263,6 +266,61 @@ onMounted(() => {
     //    now (see `useReveal`): the GSAP tween that used to live here
     //    fought the new `data-reveal` classes, and the observer version
     //    is cheaper (no scroll listener, no per-frame layout).
+
+    // 4) The showcase bands' three motion layers. `prefers-reduced-motion`
+    //    skips all of them — the page stays fully readable.
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (!reduced) {
+      // a. Scroll parallax: the image drifts UP through its clipping
+      //    frame as the band crosses the viewport. The img is scaled
+      //    1.15 so the drift never reveals an edge; GSAP owns the img
+      //    transform (CSS only handles the frame's hover lift, so the
+      //    two never fight over the same style).
+      document.querySelectorAll<HTMLElement>('.band-media img').forEach((img) => {
+        gsap.fromTo(
+          img,
+          { yPercent: -7, scale: 1.15 },
+          {
+            yPercent: 7,
+            scale: 1.15,
+            ease: 'none',
+            scrollTrigger: {
+              trigger: img.closest('.feature-band'),
+              start: 'top bottom',
+              end: 'bottom top',
+              scrub: true,
+            },
+          },
+        )
+      })
+
+      // b. Hover drift: the image glides sideways while the band is
+      //    hovered — a slow ken-burns push, not a snap. Composed ON TOP
+      //    of the parallax's yPercent (GSAP keeps the components).
+      document.querySelectorAll<HTMLElement>('.feature-band').forEach((band) => {
+        const img = band.querySelector('.band-media img')
+        if (!img) return
+        const dir = band.classList.contains('is-flipped') ? 1 : -1
+        band.addEventListener('mouseenter', () => {
+          gsap.to(img, { xPercent: 2.4 * dir, duration: 1.6, ease: 'power2.out' })
+        })
+        band.addEventListener('mouseleave', () => {
+          gsap.to(img, { xPercent: 0, duration: 1.2, ease: 'power2.out' })
+        })
+      })
+
+      // c. The index number wipes in when the band first enters —
+      //    clipped reveal, once.
+      document.querySelectorAll<HTMLElement>('.band-index').forEach((el) => {
+        gsap.from(el, {
+          autoAlpha: 0,
+          x: -18,
+          duration: 0.7,
+          ease: 'power3.out',
+          scrollTrigger: { trigger: el.closest('.feature-band'), start: 'top 70%', once: true },
+        })
+      })
+    }
   }, root.value)
 
   // The reveal layer: every `[data-reveal]` inside the page fades up
@@ -1105,11 +1163,21 @@ html {
   object-fit: cover;
   border-radius: var(--dc-radius-lg);
   background: var(--dc-screen);
-  transform: scale(1.01);
-  transition: transform var(--ds-dur-slow) var(--ds-ease-out);
+  /* The img's transform belongs to GSAP (the scroll parallax + the
+     hover drift write yPercent/xPercent here); the hover feedback
+     lives on the FRAME below, so the two never fight. */
+  will-change: transform;
 }
-.feature-band:hover .band-media img {
-  transform: scale(1.04);
+/* The frame's hover lift: the framed card rises a breath and the
+   shadow deepens — the "the product is physical" cue. */
+.band-media {
+  transition:
+    transform var(--ds-dur-slow) var(--ds-ease-out),
+    box-shadow var(--ds-dur-slow) var(--ds-ease-out);
+}
+.feature-band:hover .band-media {
+  transform: translateY(-4px);
+  box-shadow: var(--ds-shadow-product), 0 18px 48px color-mix(in srgb, var(--dc-accent) 14%, transparent);
 }
 .band-copy {
   display: flex;
