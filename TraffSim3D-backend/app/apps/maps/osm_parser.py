@@ -1380,3 +1380,79 @@ def parse_osmpbf(
         road_id_prefix="w-pbf-",
         intersection_id_prefix="i-pbf-",
     )
+
+
+# ---------------------------------------------------------------------------
+# Signal enrichment
+# ---------------------------------------------------------------------------
+#
+# The bundled Shenzhen extract was generated from `roads.geojson`, which
+# carried only the ROADS — the `highway=traffic_signals` nodes were
+# dropped on the way. Measured on the parsed core: 1 120 junctions and
+# **10** of them signalised (14 lights). That is not a city without
+# traffic lights; it is a city with its lights missing from the file.
+#
+# The fix is to fetch the signal nodes separately (Overpass) and attach
+# them to the junctions they stand at. The junction geometry, the road
+# hierarchy and the light PHASES are unchanged — only the lights that
+# the source data dropped come back.
+
+#: How close a signal node has to be to a junction to light it up.
+SIGNAL_MATCH_RADIUS_M = 25.0
+
+
+def attach_traffic_signals(
+    network: dict[str, Any],
+    signal_nodes: Sequence[tuple[float, float]],
+) -> int:
+    """Give the junctions near `signal_nodes` their lights.
+
+    `signal_nodes` are (lat, lon) in WGS84 — Overpass's own
+    coordinates. They are projected into the network's local metric
+    frame (the same flat projection the parser used) and matched to the
+    junctions by distance.
+
+    Idempotent: the lights a junction already carries are replaced, so
+    calling it twice does not double the signals.
+
+    Returns the number of junctions that gained a light.
+    """
+    origin_lat = float(network.get("originLat", 0.0))
+    origin_lon = float(network.get("originLon", 0.0))
+    cos_lat = max(0.05, math.cos(math.radians(origin_lat)))
+    projected: list[tuple[float, float]] = [
+        (
+            (lon - origin_lon) * 111000.0 * cos_lat,
+            (lat - origin_lat) * 111000.0,
+        )
+        for lat, lon in signal_nodes
+    ]
+    if not projected:
+        return 0
+
+    roads = network.get("roads") or []
+    road_index_by_id = {road.get("id"): i for i, road in enumerate(roads)}
+    lit = 0
+    for inter in network.get("intersections") or []:
+        position = inter.get("position") or {}
+        px = float(position.get("x", 0.0))
+        pz = float(position.get("z", 0.0))
+        if not any((px - sx) ** 2 + (pz - sz) ** 2 <= SIGNAL_MATCH_RADIUS_M**2 for sx, sz in projected):
+            continue
+        connected = [road_index_by_id[rid] for rid in inter.get("connectedRoads", []) if rid in road_index_by_id]
+        if not connected:
+            continue
+        lights = _build_traffic_lights(
+            light_index=len(network.get("intersections") or []),
+            position=position,
+            roads=roads,
+            connected_road_indices=connected,
+        )
+        if not lights:
+            continue
+        # The ids must be unique across the network.
+        for light in lights:
+            light["id"] = f"tl-{inter.get('id', 'i')}-{light['id'].rsplit('-', 1)[-1]}"
+        inter["trafficLights"] = lights
+        lit += 1
+    return lit

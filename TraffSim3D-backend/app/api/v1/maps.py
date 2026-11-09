@@ -15,7 +15,12 @@ from typing import Any
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
-from app.apps.maps.osm_parser import BBox, parse_osm_xml, parse_osmpbf
+from app.apps.maps.osm_parser import (
+    BBox,
+    attach_traffic_signals,
+    parse_osm_xml,
+    parse_osmpbf,
+)
 from app.apps.maps.overpass_cache import cached_overpass_fetch, list_cached_queries
 from app.apps.maps.poi import (
     PoiQuery,
@@ -152,6 +157,76 @@ async def parse_osm(
         raise HTTPException(status_code=500, detail=f"OSM parse failed: {e}") from e
 
 
+# ---------------------------------------------------------------------------
+# The sample city's traffic signals
+# ---------------------------------------------------------------------------
+
+#: The signal nodes of the sample area, as (lat, lon) pairs. Filled from
+#: Overpass on the first request and kept in memory afterwards.
+_sample_signal_nodes: list[tuple[float, float]] | None = None
+
+
+def _signal_nodes_query(bbox: BBox) -> str:
+    """The Overpass query for the traffic-signal nodes of a rectangle.
+
+    Both spellings are needed: a signal is a NODE in most of the world
+    and a WAY (the pole) in the rest — and the way's first node is where
+    the light stands.
+    """
+    south, west, north, east = bbox
+    return f"""[out:json][timeout:60];
+(
+  node["highway"="traffic_signals"]({south},{west},{north},{east});
+  way["highway"="traffic_signals"]({south},{west},{north},{east});
+);
+out body;"""
+
+
+def _fetch_signal_nodes(bbox: BBox) -> list[tuple[float, float]]:
+    """The signal nodes of a rectangle, from Overpass (disk-cached).
+
+    The bundled extract was generated from a roads-only GeoJSON, so the
+    signal nodes were never in the file: the parsed city had 1 120
+    junctions and 10 of them signalised. This puts the lights back.
+    """
+    from app.apps.maps.overpass_cache import cached_overpass_fetch
+
+    try:
+        data = cached_overpass_fetch(_signal_nodes_query(bbox), timeout_s=60.0, budget_s=90.0)
+    except Exception:
+        # Overpass is often slow or busy. The city still loads without
+        # the extra lights — a missing signal is not a broken map.
+        return []
+    nodes: list[tuple[float, float]] = []
+    for element in data.get("elements", []):
+        if element.get("type") == "node":
+            lat, lon = element.get("lat"), element.get("lon")
+            if lat is not None and lon is not None:
+                nodes.append((float(lat), float(lon)))
+        elif element.get("type") == "way":
+            for ref in element.get("nodes", [])[:1]:
+                for node in data.get("elements", []):
+                    if node.get("type") == "node" and node.get("id") == ref:
+                        lat, lon = node.get("lat"), node.get("lon")
+                        if lat is not None and lon is not None:
+                            nodes.append((float(lat), float(lon)))
+                        break
+    return nodes
+
+
+@router.get("/maps/signal-nodes", tags=["maps"])
+def signal_nodes(
+    south: float = Query(..., ge=-90, le=90),
+    west: float = Query(..., ge=-180, le=180),
+    north: float = Query(..., ge=-90, le=90),
+    east: float = Query(..., ge=-180, le=180),
+) -> dict[str, Any]:
+    """The traffic-signal nodes inside a rectangle (WGS84)."""
+    bbox = (south, west, north, east)
+    nodes = _fetch_signal_nodes(bbox)
+    return {"count": len(nodes), "nodes": [{"lat": lat, "lon": lon} for lat, lon in nodes]}
+
+
 @router.post("/maps/parse-sample", tags=["maps"])
 async def parse_sample() -> dict[str, Any]:
     """Parse the city that ships with the backend into a RoadNetwork dict.
@@ -169,7 +244,7 @@ async def parse_sample() -> dict[str, Any]:
     The parse costs ~2 s the first time; the result is cached in memory
     and every later call returns the same network.
     """
-    global _sample_network
+    global _sample_network, _sample_signal_nodes
     if _sample_network is None:
         if not SAMPLE_OSM_FILE.exists():
             raise HTTPException(
@@ -181,6 +256,14 @@ async def parse_sample() -> dict[str, Any]:
             _sample_network = parse_osm_xml(raw, bbox=SAMPLE_BBOX, center=SAMPLE_CENTER)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"sample parse failed: {e}") from e
+
+    # The lights the source file dropped. They are attached to the
+    # CACHED network every time (the geometry is untouched), so the
+    # first load that finds the cache and every later one agree.
+    if _sample_signal_nodes is None:
+        _sample_signal_nodes = _fetch_signal_nodes(SAMPLE_BBOX)
+    if _sample_signal_nodes:
+        attach_traffic_signals(_sample_network, _sample_signal_nodes)
     return _sample_network
 
 
