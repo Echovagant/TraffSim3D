@@ -157,6 +157,8 @@
       :limit-mps="rideLimit"
       :pedal="world.driverInput"
       :status="rideStatus"
+      :signal="rideSignal"
+      :steer-deg="rideSteerDeg"
     />
 
     <!-- The ride banner: tracking / driving one vehicle. -->
@@ -216,6 +218,8 @@ import { useCameraControls } from '@interfaces/composables/useCameraControls'
 import type { ThreeJSRenderer } from '@infrastructure/rendering'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 import { computeNetworkBounds } from '@domain/services/networkBounds'
+import { approachSignalFor, signalPhaseLabel } from '@domain/services/approachSignal'
+import { laneForwardSign, roadForward, roadLength } from '@domain/services/laneGeometry'
 import {
   createCesiumViewer,
   DEFAULT_IMAGERY,
@@ -533,10 +537,22 @@ const driveRide = (): void => {
   world.setRideMode(world.rideMode === 'cockpit' ? 'chase' : 'cockpit')
 }
 
-/** The cluster's three inputs: the speed, the road's limit, and the
- *  vehicle's traffic state. All read from the network the simulation
- *  is actually running — the gauge never invents a number. */
+/**
+ * The cluster's readouts, and why they take the tick counter.
+ *
+ * The store's network is a **shallow** ref — a deep-reactive network
+ * of 1 000 roads and 90 vehicles would re-evaluate every dependent on
+ * every field write, every frame. So the readouts below would have
+ * been one-frame snapshots: the dial would have shown the speed the
+ * car had when the ride started.
+ *
+ * The store already counts the ticks (`tickCount`, a ref that grows on
+ * every simulation step), so reading it here is the trigger: every
+ * tick the cluster recomputes from the live network. The numbers stay
+ * exactly what the simulation has — the gauge invents nothing.
+ */
 const rideVehicle = computed(() => {
+  void world.tickCount
   const id = world.rideVehicleId
   if (!id) return null
   return world.network.vehicles[id] ?? null
@@ -548,6 +564,67 @@ const rideLimit = computed(() => {
   return world.network.roads[v.roadId]?.speedLimit ?? 0
 })
 const rideStatus = computed(() => rideVehicle.value?.status ?? 'driving')
+
+/**
+ * The signal ahead of the car, for the cluster.
+ *
+ * Read from the LIVE network — the tick writes the phase and the
+ * countdown every frame — so the lamp shows the real signal, not a
+ * forecast of it.
+ */
+const rideSignal = computed(() => {
+  void world.tickCount
+  const v = rideVehicle.value
+  if (!v) return null
+  const signal = approachSignalFor(v, world.network)
+  if (!signal) return null
+  const label = signalPhaseLabel(signal.phase)
+  const tone: 'go' | 'warn' | 'stop' =
+    label === '绿灯' ? 'go' : label === '黄灯' || label === '闪黄' ? 'warn' : 'stop'
+  return { label, remainingS: signal.remainingS, distanceM: signal.distanceM, tone }
+})
+
+/**
+ * The steering angle: the car's heading against its lane's direction.
+ *
+ * This is the quantity the lane guard watches (a car pointing away
+ * from its lane is the failure the guard corrects), so the wheel
+ * shows the car's real attitude to the road — it turns when the car
+ * drifts, and through the turn arcs.
+ */
+const rideSteerDeg = computed(() => {
+  void world.tickCount
+  const v = rideVehicle.value
+  if (!v) return 0
+  const road = world.network.roads[v.roadId]
+  if (!road) return 0
+  // The wheel shows how much steering the road ahead ASKS for: the
+  // angle between where the car points now and the lane's heading a
+  // car's-length-and-a-half ahead. On a straight that is zero; in a
+  // bend it is the corner the wheel has to hold. (Comparing the car's
+  // heading with the lane's tangent AT the car would read zero in a
+  // bend too — the car follows the tangent — which is why the wheel
+  // looked frozen.)
+  const len = roadLength(road)
+  const lookS = Math.min(len, Math.max(0, v.s + 18))
+  const ahead = roadForward(road, lookS)
+  // The tangent is the ROAD's; a car on a backward lane travels the
+  // other way, so the sign of the lane flips it — otherwise every car
+  // on the oncoming carriageway would show the wheel at full lock.
+  const sign = laneForwardSign(v.laneIndex, road.laneCount)
+  const aheadHeading = Math.atan2(ahead.uz * sign, ahead.ux * sign)
+  let diff = aheadHeading - v.heading
+  while (diff > Math.PI) diff -= Math.PI * 2
+  while (diff < -Math.PI) diff += Math.PI * 2
+  let deg = (diff * 180) / Math.PI
+  // A lane change IS a steering input: the wheel turns the way the
+  // car is crossing. Lane 0 is the rightmost, so a HIGHER target lane
+  // is a turn to the LEFT — negative on the dial.
+  if (v.desiredLaneIndex !== null && v.desiredLaneIndex !== v.laneIndex) {
+    deg += v.desiredLaneIndex > v.laneIndex ? -26 : 26
+  }
+  return deg
+})
 
 // ===== lifecycle ==========================================================
 

@@ -28,9 +28,15 @@ const props = withDefaults(
     pedal?: 'accel' | 'brake' | null
     /** The vehicle's traffic state. */
     status?: 'driving' | 'waiting' | 'crashed'
+    /** The signal ahead: its phase name, the seconds left, and the
+     *  metres to it. Null when the road ahead has no light. */
+    signal?: { label: string; remainingS: number; distanceM: number; tone: 'go' | 'warn' | 'stop' } | null
+    /** The steering angle in degrees — how far the car points away
+     *  from its lane. Positive is a right turn. */
+    steerDeg?: number
     size?: number
   }>(),
-  { pedal: null, status: 'driving', size: 104 },
+  { pedal: null, status: 'driving', signal: null, steerDeg: 0, size: 104 },
 )
 
 // The dial's geometry: a 270° sweep from the lower left, clockwise
@@ -100,6 +106,25 @@ const stateKind = computed(() => {
   if (props.status === 'waiting') return 'warn'
   return 'ok'
 })
+
+/** The signal's countdown, in whole seconds. */
+const signalSeconds = computed(() =>
+  props.signal ? Math.max(0, Math.round(props.signal.remainingS)) : 0,
+)
+
+/**
+ * The steering wheel's angle.
+ *
+ * The wheel turns by the car's heading error against its lane — the
+ * same cross-track the lane guard watches. A cap keeps it a wheel and
+ * not a spinner: a real steering wheel travels about 500° lock to
+ * lock, and the model's lane-keeping never asks for more than a
+ * fraction of that.
+ */
+const steerRotation = computed(() => {
+  const deg = Math.max(-140, Math.min(140, props.steerDeg))
+  return deg.toFixed(1)
+})
 </script>
 
 <template>
@@ -155,6 +180,30 @@ const stateKind = computed(() => {
         <span class="limit">限速 <b class="dc-num">{{ limitKmh }}</b></span>
       </div>
     </div>
+
+    <div class="signal" :class="signal?.tone ?? 'none'" data-testid="gauge-signal">
+      <span class="lamp"></span>
+      <template v-if="signal">
+        <b>{{ signal.label }}</b>
+        <span class="count dc-num">{{ signalSeconds }}s</span>
+        <span class="dist dc-num">{{ Math.round(signal.distanceM) }}m</span>
+      </template>
+      <template v-else>
+        <b>无信号</b>
+      </template>
+    </div>
+
+    <!-- The steering wheel: it turns by the car's heading error
+         against its lane — the same quantity the lane guard watches. -->
+    <svg class="wheel" viewBox="0 0 60 60" role="img" aria-label="方向盘">
+      <circle cx="30" cy="30" r="25" fill="none" stroke="currentColor" stroke-width="3.4" />
+      <circle cx="30" cy="30" r="6" fill="none" stroke="currentColor" stroke-width="3" />
+      <g :transform="`rotate(${steerRotation} 30 30)`">
+        <line x1="30" y1="30" x2="30" y2="8" stroke="currentColor" stroke-width="3" />
+        <line x1="30" y1="30" x2="14" y2="44" stroke="currentColor" stroke-width="3" />
+        <line x1="30" y1="30" x2="46" y2="44" stroke="currentColor" stroke-width="3" />
+      </g>
+    </svg>
 
     <div class="gears" aria-label="档位">
       <span v-for="g in ['P', 'N', 'D']" :key="g" class="gear" :class="{ on: gear === g }">
@@ -230,6 +279,56 @@ const stateKind = computed(() => {
 .limit b {
   color: var(--dc-text);
   font-weight: 600;
+}
+.signal {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--dc-text-faint);
+  min-width: 78px;
+}
+.signal b {
+  font-weight: 600;
+}
+.signal .count {
+  color: var(--dc-text);
+}
+.signal .dist {
+  color: var(--dc-text-faint);
+}
+.signal .lamp {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--dc-text-faint) 40%, transparent);
+}
+.signal.go {
+  color: var(--dc-ok);
+}
+.signal.go .lamp {
+  background: var(--dc-ok);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--dc-ok) 70%, transparent);
+}
+.signal.warn {
+  color: var(--dc-warning);
+}
+.signal.warn .lamp {
+  background: var(--dc-warning);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--dc-warning) 70%, transparent);
+}
+.signal.stop {
+  color: var(--dc-alert);
+}
+.signal.stop .lamp {
+  background: var(--dc-alert);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--dc-alert) 70%, transparent);
+}
+.wheel {
+  width: 46px;
+  height: 46px;
+  color: var(--dc-text-dim);
+  flex-shrink: 0;
 }
 .gears {
   display: flex;
