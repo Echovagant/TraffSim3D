@@ -2,8 +2,9 @@
  * 录一段产品演示视频。
  *
  * 内容：
- *   1. AI Proving Ground：列出 checkpoints → 加载训好的策略 → 选回放目标 → 开始回放
- *   2. 客户端路由回 SceneLab：看**策略在开车**（它会开到路口前并按灯停车）
+ *   1. SmartCity 3D：白模城区鸟瞰 → 点选一辆车跟踪（chase）→ 切驾驶视角
+ *   2. AI Proving Ground：列出 checkpoints → 加载训好的策略 → 选回放目标 → 开始回放
+ *   3. 客户端路由回 SceneLab：看**策略在开车**（它会开到路口前并按灯停车）
  *
  * 前置（都必须是本项目自己的进程，端口 5173 / 8000 属于别的项目）：
  *   后端：cd TraffSim3D-backend
@@ -59,20 +60,57 @@ const main = async () => {
     if (m.type() === 'error') errors.push(m.text().slice(0, 160))
   })
 
-  // --- 1) AI Proving Ground：加载策略并开始回放 -------------------------
+  // --- 1) SmartCity 3D：白模城区 + 跟踪 + 驾驶 --------------------------
+  await page.goto(`${URL}/smart-city`, { waitUntil: 'domcontentloaded' })
+  await waitFor(
+    page,
+    () => {
+      const el = document.querySelector('[data-testid="osm-building-count"]')
+      return Boolean(el && Number((el.textContent ?? '0').replace(/\D/g, '')) > 0)
+    },
+    90_000,
+  )
+  console.log('city drawn')
+  // 给瓦片链一点时间细化（预取把祖先铺好了，细节级还在走）。
+  await page.waitForTimeout(9_000)
+  // 收起面板，画面留给城市。
+  const toggle = page.locator('[data-testid="toggle-panels"]')
+  if (await toggle.count()) await toggle.click()
+  await page.waitForTimeout(1_500)
+  // 跟踪一辆在跑的车（与产品点击拾取走同一个 store 入口）。
+  const ride = await page.evaluate(() => {
+    const w = window.__world
+    const car = Object.values(w.network.vehicles).find((v) => v.type === 'car' && v.speed > 4)
+    if (!car) return null
+    w.setRideVehicle(car.id, 'chase')
+    return car.id
+  })
+  console.log('tracking:', ride)
+  await page.waitForTimeout(8_000)
+  // 切驾驶视角：车里看街道。
+  await page.evaluate(() => window.__world.setRideMode('cockpit'))
+  await page.waitForTimeout(6_000)
+  // 退出驾驶，回到鸟瞰收尾这一段。
+  await page.evaluate(() => window.__world.setRideVehicle(null))
+  await page.waitForTimeout(1_500)
+
+  // --- 2) AI Proving Ground：加载策略并开始回放 -------------------------
   await page.goto(`${URL}/ai-playground`, { waitUntil: 'domcontentloaded' })
   await page.locator('[data-testid="list-checkpoints-button"]').click()
   await waitFor(
     page,
     () => {
-      const sel = document.querySelector('[data-testid="ckpt-replay-select"]')
+      const sel = document.querySelector('[data-testid="ckpt-replay-select"] select')
       return Boolean(sel && sel.options.length > 1)
     },
     30_000,
   )
-  const ckpt = await page.$eval('[data-testid="ckpt-replay-select"]', (el) => el.options[1].value)
+  const ckpt = await page.$eval(
+    '[data-testid="ckpt-replay-select"] select',
+    (el) => el.options[1].value,
+  )
   console.log('replaying checkpoint:', ckpt)
-  await page.selectOption('[data-testid="ckpt-replay-select"]', ckpt)
+  await page.selectOption('[data-testid="ckpt-replay-select"] select', ckpt)
   await page.locator('[data-testid="load-policy-button"]').click()
   await waitFor(
     page,
@@ -85,12 +123,12 @@ const main = async () => {
   await waitFor(
     page,
     () => {
-      const sel = document.querySelector('[data-testid="replay-target-select"]')
+      const sel = document.querySelector('[data-testid="replay-target-select"] select')
       return Boolean(sel && sel.options.length > 1)
     },
     30_000,
   )
-  await page.selectOption('[data-testid="replay-target-select"]', 'v-1')
+  await page.selectOption('[data-testid="replay-target-select"] select', 'v-1')
   await page.locator('[data-testid="start-replay-button"]').click()
   await waitFor(
     page,
@@ -108,9 +146,11 @@ const main = async () => {
     const v = window.__world.network.vehicles['v-1']
     return v ? v.s : null
   })
-  await page.locator('a.back-link').click()
+  // 回首页再进编辑器——用现在真实存在的导航（玻璃胶囊的 logo 回首页，
+  // 场景带进 SceneLab）。客户端路由，策略与回放状态都活在内存里。
+  await page.locator('.showcase-nav a[href="/"]').first().click()
   await page.waitForURL('**/', { timeout: 20_000 })
-  await page.locator('a.module-card[href="/scene-editor"]').click()
+  await page.locator('.feature-band a[href="/scene-editor"]').click()
   await page.waitForURL('**/scene-editor', { timeout: 20_000 })
   await waitFor(page, () => {
     const w = window

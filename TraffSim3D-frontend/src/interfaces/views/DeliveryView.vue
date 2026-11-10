@@ -84,6 +84,19 @@
           </div>
         </li>
       </ol>
+      <!-- The visual anchor: the timeline's last stretch is the city
+           simulation loop, and this is what that looks like — a car
+           tracked through the white-model streets. -->
+      <figure class="timeline-shot">
+        <img
+          src="/timeline-chase.png"
+          alt="SmartCity 3D：跟踪镜头跟在一辆车后穿过哑光白模街区"
+          loading="lazy"
+        />
+        <figcaption>
+          城区仿真闭环 — 跟踪镜头跟在一辆仿真车后，穿过 988 条道路的白模城区。
+        </figcaption>
+      </figure>
     </section>
 
     <!-- ===== the screen wall ===== -->
@@ -608,6 +621,37 @@ const screens: ReadonlyArray<{ to: string; name: string; sub: string; tile: stri
   }
   .m-body {
     grid-column: 2;
+  }
+}
+
+/* The timeline's visual anchor: the same framed-card idiom the home
+   page's bands use. */
+.timeline-shot {
+  margin: 22px 0 0 108px;
+  padding: 10px;
+  border: 1px solid var(--dc-hairline);
+  border-radius: var(--dc-radius-xl);
+  background: var(--dc-panel);
+  box-shadow: var(--ds-shadow-product);
+  overflow: hidden;
+  max-width: 720px;
+}
+.timeline-shot img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--dc-radius-lg);
+  background: var(--dc-screen);
+}
+.timeline-shot figcaption {
+  padding: 8px 4px 0;
+  font-size: 12px;
+  color: var(--dc-text-faint);
+}
+@media (max-width: 720px) {
+  .timeline-shot {
+    margin-left: 0;
   }
 }
 </style>
