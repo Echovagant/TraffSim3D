@@ -185,6 +185,7 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
 
     nodes.clear()
     ids.length = 0
+    lastWritten.clear()
 
     const count = lights.length
     bulbs = createInstancedHeads(bulbGeometry, material, count)
@@ -236,6 +237,12 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
     layer.poles = poles
   }
 
+  /** What each node last had written — a light whose phase, blink
+   *  visibility and countdown bar are unchanged writes nothing. On an
+   *  imported city that is ~460 lights × 4 attribute writes + 4 whole
+   *  GPU buffer uploads per frame, saved. */
+  const lastWritten = new Map<string, { phase: string; visible: boolean; bar: number }>()
+
   const update = (node: TrafficLightNode, light: TrafficLight, simTime: number): void => {
     let phase = light.phase
     let visible = true
@@ -248,6 +255,23 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
       const t = simTime % 2.0
       visible = t < 1.0
     }
+    // The countdown bar at 4% granularity: finer is invisible at the
+    // sizes a light head is drawn at, coarser skips most ticks.
+    const phaseTotal =
+      phase === LightPhase.Green || phase === LightPhase.GreenLeft
+        ? PHASE_DURATIONS.green
+        : phase === LightPhase.Yellow || phase === LightPhase.YellowLeft
+          ? PHASE_DURATIONS.yellow
+          : PHASE_DURATIONS.red
+    const bar = Math.max(0.02, Math.min(1, light.phaseRemaining / phaseTotal))
+    const barStep = Math.round(bar * 25)
+
+    const prev = lastWritten.get(light.id)
+    if (prev && prev.phase === phase && prev.visible === visible && prev.bar === barStep) {
+      return
+    }
+    lastWritten.set(light.id, { phase, visible, bar: barStep })
+
     const color = PHASE_COLOR[phase]
     const intensity = visible ? PHASE_EMISSIVE_INTENSITY[phase] : 0
 
@@ -265,19 +289,9 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
     barGlow.needsUpdate = true
 
     // Phase-countdown bar: width is the remaining time as a fraction of
-    // the current phase's nominal duration. Falls back to red duration
-    // for phases PHASE_DURATIONS doesn't list (e.g. GreenLeft) — fine for
-    // now; per-phase durations are not defined yet.
-    const phaseTotal =
-      phase === LightPhase.Green || phase === LightPhase.GreenLeft
-        ? PHASE_DURATIONS.green
-        : phase === LightPhase.Yellow || phase === LightPhase.YellowLeft
-          ? PHASE_DURATIONS.yellow
-          : PHASE_DURATIONS.red
-    // Clamp to a small positive value so the bar stays visible (not zero-width)
-    // on a fresh phase.
-    const ratio = Math.max(0.02, Math.min(1, light.phaseRemaining / phaseTotal))
-    _scale.set(ratio, 1, 1)
+    // the current phase's nominal duration (computed above for the
+    // dirty check).
+    _scale.set(bar, 1, 1)
     _pos.set(node.position.x, node.position.y + BAR_HEIGHT, node.position.z)
     _matrix.compose(_pos, _quat, _scale)
     bars.setMatrixAt(node.index, _matrix)
@@ -302,6 +316,7 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
     poleMaterial.dispose()
     nodes.clear()
     ids.length = 0
+    lastWritten.clear()
     layer.bulbs = bulbs
     layer.bars = bars
     layer.poles = poles

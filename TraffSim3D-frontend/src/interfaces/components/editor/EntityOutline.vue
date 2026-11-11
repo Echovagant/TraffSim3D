@@ -90,11 +90,13 @@ const selection = useSelectionStore()
 // read it inside the computeds — that flips the dep and Vue re-runs
 // `Object.values` against the new state.
 const vehicles = computed(() => {
-  void world.tickCount
+  // uiTick (10 Hz), not the per-frame tickCount: this panel is a
+  // reading list, and it re-sorted ~90 rows per frame.
+  void world.uiTick
   return Object.values(world.network.vehicles)
 })
 const lights = computed(() => {
-  void world.tickCount
+  void world.uiTick
   return Object.values(world.network.intersections).flatMap((i) => i.trafficLights)
 })
 const vehicleRows = computed(() => [...vehicles.value].sort((a, b) => a.id.localeCompare(b.id)))

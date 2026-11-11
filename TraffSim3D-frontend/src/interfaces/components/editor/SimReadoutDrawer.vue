@@ -50,7 +50,7 @@ const SCENE_OPTIONS = [
  * countdown table froze at the mount-time phase, the tick display was
  * the only thing that moved.)
  */
-const tick = computed(() => world.tickCount)
+const tick = computed(() => world.uiTick)
 
 const vehicleCount = computed(() => {
   void tick.value
@@ -138,15 +138,22 @@ const oobEventLabel = computed(() =>
 const oobEventDetail = computed(() => lastOobEvent.value?.reason ?? '')
 
 // ===== the frame-rate readouts =====
-const fpsText = computed(() => (world.fps > 0 ? String(world.fps) : '—'))
+// Frame stats via the non-reactive snapshot (uiTick-triggered) — same
+// reason as the debug panel: the per-frame refs would re-render this
+// drawer sixty times a second.
+const frameSnapshot = computed(() => {
+  void world.uiTick
+  return world.frameStatsSnapshot()
+})
+const fpsText = computed(() => (frameSnapshot.value.fps > 0 ? String(frameSnapshot.value.fps) : '—'))
 const frameAvg = computed(() =>
-  Number.isFinite(world.frameMsAvg) ? `${world.frameMsAvg.toFixed(1)}` : '—',
+  Number.isFinite(frameSnapshot.value.avg) ? `${frameSnapshot.value.avg.toFixed(1)}` : '—',
 )
 const frameMin = computed(() =>
-  Number.isFinite(world.frameMsMin) ? `${world.frameMsMin.toFixed(1)}` : '—',
+  Number.isFinite(frameSnapshot.value.min) ? `${frameSnapshot.value.min.toFixed(1)}` : '—',
 )
 const frameMax = computed(() =>
-  Number.isFinite(world.frameMsMax) ? `${world.frameMsMax.toFixed(1)}` : '—',
+  Number.isFinite(frameSnapshot.value.max) ? `${frameSnapshot.value.max.toFixed(1)}` : '—',
 )
 const formatRate = (rate: number): string => (Number.isInteger(rate) ? `${rate}×` : `${rate.toFixed(1)}×`)
 </script>

@@ -220,16 +220,29 @@ export const syncSceneContents = (network: RoadNetwork, built: BuiltScene): void
   // every junction of the network, which on an imported city is a
   // thousand-junction walk per frame for nothing.
   if (built.lightLayer) {
-    const liveLights = collectLights(network)
-    if (liveLights.length !== built.lightNodes.size) {
-      built.lightLayer.setLights(liveLights)
+    // The set diff WITHOUT allocating: collectLights materialises an
+    // array of every light in the network — on an imported city that
+    // is ~460 objects built and dropped EVERY FRAME just to compare a
+    // count. Walk the intersections directly instead; the array is
+    // only built when a rebuild is actually needed.
+    let liveCount = 0
+    for (const inter of Object.values(network.intersections)) {
+      liveCount += inter.trafficLights.length
+    }
+    if (liveCount !== built.lightNodes.size) {
+      built.lightLayer.setLights(collectLights(network))
     } else {
-      for (const light of liveLights) {
-        if (!built.lightNodes.has(light.id)) {
-          built.lightLayer.setLights(liveLights)
-          break
+      let allKnown = true
+      for (const inter of Object.values(network.intersections)) {
+        for (const light of inter.trafficLights) {
+          if (!built.lightNodes.has(light.id)) {
+            allKnown = false
+            break
+          }
         }
+        if (!allKnown) break
       }
+      if (!allKnown) built.lightLayer.setLights(collectLights(network))
     }
   }
 }

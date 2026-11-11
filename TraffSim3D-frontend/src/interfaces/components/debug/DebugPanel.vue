@@ -1,7 +1,7 @@
 <template>
   <div class="debug">
     <div class="row">
-      <span>帧率</span><b data-testid="fps" :class="fpsClass">{{ store.fps }}</b>
+      <span>帧率</span><b data-testid="fps" :class="fpsClass">{{ frameSnapshot.fps }}</b>
     </div>
     <div class="row" data-testid="vehicle-count">
       <span>车辆数</span><b>{{ vehicleCount }}</b>
@@ -103,10 +103,24 @@ const counts = computed(() => {
   }
   return out
 })
-const frameMin = computed(() => (store.frameMsMin === Infinity ? 0 : store.frameMsMin.toFixed(1)))
-const frameMax = computed(() => (store.frameMsMax === -Infinity ? 0 : store.frameMsMax.toFixed(1)))
-const frameAvg = computed(() => store.frameMsAvg.toFixed(1))
-const fpsClass = computed(() => (store.fps >= M1_MIN_FPS ? 'ok' : 'warn'))
+// The frame stats read through the NON-reactive snapshot, triggered by
+// the 10 Hz uiTick: the per-frame refs would re-render this whole panel
+// sixty times a second, and the DOM patch was the largest non-render
+// cost of the editor frame (measured: ~7% — setStyle + setElementText).
+const frameSnapshot = computed(() => {
+  void store.uiTick
+  return store.frameStatsSnapshot()
+})
+const frameMin = computed(() => {
+  const v = frameSnapshot.value.min
+  return v === Infinity ? '0.0' : v.toFixed(1)
+})
+const frameMax = computed(() => {
+  const v = frameSnapshot.value.max
+  return v === -Infinity ? '0.0' : v.toFixed(1)
+})
+const frameAvg = computed(() => frameSnapshot.value.avg.toFixed(1))
+const fpsClass = computed(() => (frameSnapshot.value.fps >= M1_MIN_FPS ? 'ok' : 'warn'))
 
 /**
  * Camera readout.

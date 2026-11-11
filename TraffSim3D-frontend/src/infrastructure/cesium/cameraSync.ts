@@ -74,25 +74,48 @@ export const makeTangentFrame = (tangent: TangentOrigin): Cesium.Matrix4 => {
   )
 }
 
+/** The ENU frame AND its inverse, precomputed once per tangent.
+ *
+ *  Both sync directions need the frame (and the Cesium→Three
+ *  direction needs the inverse) on EVERY frame, but the tangent only
+ *  changes when a different map loads. Building the frame runs
+ *  `eastNorthUpToFixedFrame` (a full trig-based 4×4) and inverting it
+ *  is another 4×4 inversion — sixty times a second was measurable in
+ *  the profile, for a value that never changes between maps.
+ */
+export interface TangentFramePair {
+  frame: Cesium.Matrix4
+  inverse: Cesium.Matrix4
+}
+
+export const makeTangentFramePair = (tangent: TangentOrigin): TangentFramePair => {
+  const frame = makeTangentFrame(tangent)
+  return { frame, inverse: Cesium.Matrix4.inverseTransformation(frame, new Cesium.Matrix4()) }
+}
+
 /** Apply the inverse ENU transform to a Cesium ECEF point. Result
  *  is `(east, north, up)` metres relative to the tangent origin. */
 const toLocalENU = (
   ecef: Cesium.Cartesian3,
-  enuFrame: Cesium.Matrix4,
+  pair: TangentFramePair,
 ): { x: number; y: number; z: number } => {
-  const inverse = Cesium.Matrix4.inverseTransformation(enuFrame, new Cesium.Matrix4())
-  const local = Cesium.Matrix4.multiplyByPoint(inverse, ecef, new Cesium.Cartesian3())
+  const local = Cesium.Matrix4.multiplyByPoint(pair.inverse, ecef, new Cesium.Cartesian3())
   return { x: local.x, y: local.y, z: local.z }
 }
 
 /** Per-frame: copy Cesium camera state → Three.js camera.
  *  Returns the same `threeCamera` for chaining. */
-export const syncThreeCameraToCesium = (deps: CameraSyncDeps): THREE.PerspectiveCamera => {
+export const syncThreeCameraToCesium = (
+  deps: CameraSyncDeps & { framePair?: TangentFramePair },
+): THREE.PerspectiveCamera => {
   const { cesiumViewer, threeCamera, tangent } = deps
-  const enuFrame = makeTangentFrame(tangent)
+  // With a precomputed pair the tick only multiplies; without one
+  // (direct callers, tests) the inverse is built here as before.
+  const framePair =
+    deps.framePair ?? makeTangentFramePair(tangent)
 
   // 1) Position
-  const local = toLocalENU(cesiumViewer.camera.position, enuFrame)
+  const local = toLocalENU(cesiumViewer.camera.position, framePair)
   threeCamera.position.set(local.x, local.z, -local.y)
 
   // 2) Orientation
@@ -128,9 +151,11 @@ export const syncThreeCameraToCesium = (deps: CameraSyncDeps): THREE.Perspective
  * Orientation: the Three camera's world forward vector gives Cesium's
  * heading (0 = north, CW positive) and pitch (negative = looking down).
  */
-export const syncCesiumCameraToThree = (deps: CameraSyncDeps): Cesium.Camera => {
+export const syncCesiumCameraToThree = (
+  deps: CameraSyncDeps & { framePair?: TangentFramePair },
+): Cesium.Camera => {
   const { cesiumViewer, threeCamera, tangent } = deps
-  const enuFrame = makeTangentFrame(tangent)
+  const enuFrame = deps.framePair?.frame ?? makeTangentFrame(tangent)
 
   // Three world → ENU: x = east, -z = north, y = up.
   const enu = new Cesium.Cartesian3(
@@ -198,16 +223,20 @@ export const createCameraSync = (
 ): CameraSyncContext => {
   let tangent = deps.tangent
   let owner: CameraOwner = deps.owner ?? 'cesium'
+  // The frame pair is built ONCE per tangent — the per-frame tick then
+  // only multiplies matrices.
+  let framePair = makeTangentFramePair(tangent)
   return {
     tick: () => {
       if (owner === 'cesium') {
-        syncThreeCameraToCesium({ ...deps, tangent })
+        syncThreeCameraToCesium({ ...deps, tangent, framePair })
       } else {
-        syncCesiumCameraToThree({ ...deps, tangent })
+        syncCesiumCameraToThree({ ...deps, tangent, framePair })
       }
     },
     setTangent: (t: TangentOrigin) => {
       tangent = t
+      framePair = makeTangentFramePair(t)
     },
     setOwner: (next: CameraOwner) => {
       owner = next

@@ -189,6 +189,17 @@ export const useWorldStore = defineStore('world', () => {
   // Vehicle.position assignment to trigger a full re-render.
   const network = shallowRef<RoadNetwork>(buildCrossIntersectionNetwork())
   const tickCount = ref(0)
+  /**
+   * The READOUT tick — bumped at 10 Hz inside step(), not per frame.
+   *
+   * Readouts (the SmartCity cluster, the lab drawer, any panel that
+   * wants "the latest numbers") use this as their reactive trigger:
+   * the live network is a shallow ref, so a readout needs SOME ref to
+   * re-run on — and a per-frame one had every DOM-bound panel patching
+   * sixty times a second for numbers a human reads at a glance.
+   */
+  const uiTick = ref(0)
+  let lastUiTickAt = 0
   const fps = ref(0)
   const isRunning = ref(true)
 
@@ -1055,8 +1066,19 @@ export const useWorldStore = defineStore('world', () => {
    * network on every push. The arrays are mutated in place, so every
    * mutation site must call `triggerRef()` to notify the dependents.
    */
-  const history = shallowRef<SerializedScene[]>([])
-  const redoStack = shallowRef<SerializedScene[]>([])
+  /**
+   * The undo/redo stacks hold JSON STRINGS, not parsed scenes.
+   *
+   * A snapshot used to be `cloneScene(serializeNetwork(...))` — a
+   * stringify AND a parse at push time, plus a live object graph held
+   * in memory. On an imported city (988 roads with waypoints, 1 120
+   * junctions, 460 lights) that made every add/move/remove vehicle
+   * cost ~8 ms of pure serialization on the click's frame budget.
+   * Storing the string halves the push cost and defers the parse to
+   * the (rare) moment the user actually undoes; memory drops too.
+   */
+  const history = shallowRef<string[]>([])
+  const redoStack = shallowRef<string[]>([])
 
   /**
    * Push the current network state to the history stack. Called by
@@ -1068,7 +1090,7 @@ export const useWorldStore = defineStore('world', () => {
    * trail (standard undo/redo semantic).
    */
   const pushHistory = (): void => {
-    history.value.push(cloneScene(serializeNetwork(network.value)))
+    history.value.push(JSON.stringify(serializeNetwork(network.value)))
     if (history.value.length > HISTORY_LIMIT) {
       history.value.shift() // drop oldest
     }
@@ -1173,6 +1195,10 @@ export const useWorldStore = defineStore('world', () => {
   const frameMsAvg = ref(0)
   let frameWindowMs = 0
   let frameWindowCount = 0
+  /** Session min/max accumulators — the refs flush on the 500 ms clock
+   *  (see the stats block in step()). */
+  let frameMsMinAcc = Infinity
+  let frameMsMaxAcc = -Infinity
 
   // A pause stops the renderer from calling step(), so the first
   // sample after resuming would span the whole pause. Drop the
@@ -1186,10 +1212,29 @@ export const useWorldStore = defineStore('world', () => {
    *  window. Called by a view that mounts a fresh renderer, so the
    *  readouts describe the current session instead of the previous
    *  route's leftovers. */
+  /**
+   * A NON-REACTIVE snapshot of the frame stats, for readouts that
+   * re-render on the 10 Hz uiTick instead of the refs themselves.
+   *
+   * The `frameMsMin/Max` refs update per frame — a panel whose
+   * computed reads them re-rendered sixty times a second, and the
+   * DOM patch was measurably the largest non-render cost of the
+   * whole editor frame. Reading through this method (with `uiTick`
+   * as the reactive trigger) keeps the numbers live at reading speed.
+   */
+  const frameStatsSnapshot = (): { min: number; max: number; avg: number; fps: number } => ({
+    min: frameMsMinAcc === Infinity ? frameMsMin.value : frameMsMinAcc,
+    max: frameMsMaxAcc === -Infinity ? frameMsMax.value : frameMsMaxAcc,
+    avg: frameMsAvg.value,
+    fps: fps.value,
+  })
+
   const resetFrameStats = (): void => {
     fps.value = 0
     frameMsMin.value = Infinity
     frameMsMax.value = -Infinity
+    frameMsMinAcc = Infinity
+    frameMsMaxAcc = -Infinity
     frameMsAvg.value = 0
     frameWindowMs = 0
     frameWindowCount = 0
@@ -1332,6 +1377,11 @@ export const useWorldStore = defineStore('world', () => {
     }
 
     tickCount.value += 1
+    const uiNowMs = performance.now()
+    if (uiNowMs - lastUiTickAt >= 100) {
+      uiTick.value += 1
+      lastUiTickAt = uiNowMs
+    }
 
     // Frame-time stats + FPS, measured from the wall clock between
     // two consecutive frames (see the measurement block above). The
@@ -1348,6 +1398,8 @@ export const useWorldStore = defineStore('world', () => {
       fpsWindowMs = 0
       frameWindowMs = 0
       frameWindowCount = 0
+      frameMsMinAcc = Infinity
+      frameMsMaxAcc = -Infinity
     } else {
       frameMsMin.value = Math.min(frameMsMin.value, elapsedMs)
       frameMsMax.value = Math.max(frameMsMax.value, elapsedMs)
@@ -1428,6 +1480,10 @@ export const useWorldStore = defineStore('world', () => {
 
   const bumpTick = () => {
     tickCount.value += 1
+    // Discrete events (scene switch, force-all-red, add vehicle…)
+    // refresh the readouts IMMEDIATELY — they are rare, and a panel
+    // that waits for the 10 Hz cadence after a click reads as laggy.
+    uiTick.value += 1
   }
   const notifyChange = bumpTick
 
@@ -1927,11 +1983,11 @@ export const useWorldStore = defineStore('world', () => {
   const undo = (): boolean => {
     if (history.value.length === 0) return false
     const previous = history.value.pop()!
-    redoStack.value.push(cloneScene(serializeNetwork(network.value)))
+    redoStack.value.push(JSON.stringify(serializeNetwork(network.value)))
     if (redoStack.value.length > HISTORY_LIMIT) redoStack.value.shift()
     triggerRef(history)
     triggerRef(redoStack)
-    const restored = sceneToNetwork(previous)
+    const restored = sceneToNetwork(JSON.parse(previous) as SerializedScene)
     // Use loadNetwork to re-register Rapier bodies
     loadNetwork(restored)
     return true
@@ -1943,11 +1999,11 @@ export const useWorldStore = defineStore('world', () => {
   const redo = (): boolean => {
     if (redoStack.value.length === 0) return false
     const next = redoStack.value.pop()!
-    history.value.push(cloneScene(serializeNetwork(network.value)))
+    history.value.push(JSON.stringify(serializeNetwork(network.value)))
     if (history.value.length > HISTORY_LIMIT) history.value.shift()
     triggerRef(history)
     triggerRef(redoStack)
-    const restored = sceneToNetwork(next)
+    const restored = sceneToNetwork(JSON.parse(next) as SerializedScene)
     loadNetwork(restored)
     return true
   }
@@ -1964,6 +2020,8 @@ export const useWorldStore = defineStore('world', () => {
   return {
     network,
     tickCount,
+    uiTick,
+    frameStatsSnapshot,
     fps,
     isRunning,
     tickRate,

@@ -9,7 +9,13 @@ import cesium from 'vite-plugin-cesium'
 export default defineConfig({
   plugins: [
     vue(),
-    vueDevTools(),
+    // The devtools overlay deep-watches every Pinia store: on the
+    // imported city that is a full traverse of ~988 roads + 1 120
+    // junctions per state write (measured: ~50% of the simulation
+    // step in the dev profile). It stays on by default, but a perf
+    // session can turn it off without editing this file:
+    //   VITE_DEVTOOLS=0 npm run dev -- --port 5188
+    ...(process.env.VITE_DEVTOOLS === '0' ? [] : [vueDevTools()]),
     // Cesium plugin — copies Cesium's static assets (Workers,
     // ThirdParty, Assets, Widgets) to /Cesium/* in dev and emits the
     // CESIUM_BASE_URL script. Without this, Cesium tries to load

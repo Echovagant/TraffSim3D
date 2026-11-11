@@ -552,7 +552,7 @@ const driveRide = (): void => {
  * exactly what the simulation has — the gauge invents nothing.
  */
 const rideVehicle = computed(() => {
-  void world.tickCount
+  void world.uiTick
   const id = world.rideVehicleId
   if (!id) return null
   return world.network.vehicles[id] ?? null
@@ -573,7 +573,7 @@ const rideStatus = computed(() => rideVehicle.value?.status ?? 'driving')
  * forecast of it.
  */
 const rideSignal = computed(() => {
-  void world.tickCount
+  void world.uiTick
   const v = rideVehicle.value
   if (!v) return null
   const signal = approachSignalFor(v, world.network)
@@ -593,7 +593,7 @@ const rideSignal = computed(() => {
  * drifts, and through the turn arcs.
  */
 const rideSteerDeg = computed(() => {
-  void world.tickCount
+  void world.uiTick
   const v = rideVehicle.value
   if (!v) return 0
   const road = world.network.roads[v.roadId]

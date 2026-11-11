@@ -408,6 +408,14 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   //    the clearance is 6 s by construction.
   if (ctx.signal) {
     for (const inter of Object.values(network.intersections)) {
+      // Junctions without lights have nothing to control — and on an
+      // imported city they are the MAJORITY (the Shenzhen core: 856 of
+      // 1 120 junctions carry no signal). decide() allocates a plan and
+      // a per-axis views record per call, so running it for an empty
+      // junction was 856 object allocations + three function calls per
+      // tick, every tick, for nothing. Measured: this skip is the
+      // single largest tick win on a city network.
+      if (inter.trafficLights.length === 0) continue
       const controller = junctionController(ctx.signal, inter)
       const plan = controller.decide(inter, network, simTime, dt)
       applyJunctionPlan(inter, plan)
