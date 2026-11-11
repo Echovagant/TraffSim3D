@@ -305,10 +305,13 @@ function init() {
   }
   composer.addPass(effectPass)
 
-  // 绑定事件（使用节流）
+  // 绑定事件（使用节流）。节流包装的引用要存下来——removeEventListener
+  // 只认同一个引用，传原始函数永远摘不掉（实测：离开首页后监听永久残留）。
+  throttledMouseMove = throttle(onMouseMove, 16) // 约60fps
+  throttledScroll = throttle(onScroll, 50)
   window.addEventListener('resize', onResize)
-  window.addEventListener('mousemove', throttle(onMouseMove, 16)) // 约60fps
-  window.addEventListener('scroll', throttle(onScroll, 50)) // 新增滚动事件，节流50ms
+  window.addEventListener('mousemove', throttledMouseMove)
+  window.addEventListener('scroll', throttledScroll)
   animate()
 }
 
@@ -330,8 +333,14 @@ function onScroll() {
   scrollY = window.scrollY / window.innerHeight // 归一化
 }
 
+let rafId = 0
+let throttledMouseMove = null
+let throttledScroll = null
+const _lightColor = new THREE.Color()
+const _lightVec = new THREE.Vector3()
+
 function animate(timestamp) {
-  requestAnimationFrame(animate)
+  rafId = requestAnimationFrame(animate)
 
   // 新增：帧率监控，每60帧检查一次
   frameCount++
@@ -362,26 +371,16 @@ function animate(timestamp) {
     particlesForeground.material.uniforms.u_mouse.value.y = mouseY
     particlesForeground.material.uniforms.u_scroll.value = scrollY
 
-    // 新增：更新光源颜色和位置
-    const lightColor = new THREE.Color().setHSL((time * 0.05) % 1, 0.8, 0.5)
-    pointLight.color = lightColor
+    // 新增：更新光源颜色和位置（Color/Vector3 复用——这里每帧 4 个
+    // new 的分配在整页会话里从不清除）。
+    _lightColor.setHSL((time * 0.05) % 1, 0.8, 0.5)
+    pointLight.color = _lightColor
     pointLight.position.x = Math.sin(time * 0.2) * 100
     pointLight.position.y = Math.cos(time * 0.2) * 100
-    particlesBackground.material.uniforms.u_lightColor.value = new THREE.Vector3(
-      lightColor.r,
-      lightColor.g,
-      lightColor.b,
-    )
-    particlesMidground.material.uniforms.u_lightColor.value = new THREE.Vector3(
-      lightColor.r,
-      lightColor.g,
-      lightColor.b,
-    )
-    particlesForeground.material.uniforms.u_lightColor.value = new THREE.Vector3(
-      lightColor.r,
-      lightColor.g,
-      lightColor.b,
-    )
+    _lightVec.set(_lightColor.r, _lightColor.g, _lightColor.b)
+    particlesBackground.material.uniforms.u_lightColor.value = _lightVec
+    particlesMidground.material.uniforms.u_lightColor.value = _lightVec
+    particlesForeground.material.uniforms.u_lightColor.value = _lightVec
   }
 
   if (gridMesh) {
@@ -392,14 +391,19 @@ function animate(timestamp) {
   composer.render()
 }
 
+// 每帧循环里不再 new —— 见 animate 内的使用点。
+
 onMounted(() => {
   init()
 })
 
 onUnmounted(() => {
+  // 停掉渲染循环——否则离开首页后全屏后处理每帧空转（renderer 已
+  // dispose，循环却还在跑），与之后页面的仿真抢帧预算。
+  cancelAnimationFrame(rafId)
   window.removeEventListener('resize', onResize)
-  window.removeEventListener('mousemove', onMouseMove)
-  window.removeEventListener('scroll', onScroll)
+  if (throttledMouseMove) window.removeEventListener('mousemove', throttledMouseMove)
+  if (throttledScroll) window.removeEventListener('scroll', throttledScroll)
   if (renderer) {
     renderer.dispose()
   }

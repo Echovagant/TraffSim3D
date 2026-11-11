@@ -100,16 +100,47 @@ export const roadPolylineAxis = (road: Road): RoadAxis => {
  * The backend rejects the same projections (`MAX_INTERSECTION_OFFSET_M` is
  * mirrored there), so the two ends fall back at the same places.
  */
+/**
+ * Per-(road, junction) axis cache — the axis derives from the cached
+ * projection plus the tangent at it, both immutable per scene. The
+ * actuated controller's queue counting re-derives this for every
+ * (light, connected road) pair every tick; on the city that was
+ * thousands of tangent lookups per tick for values that never change.
+ *
+ * Keyed by the JUNCTION OBJECT, not its id: a road's axis legitimately
+ * differs from one junction to the next (an L-shaped road is `ns` at
+ * the corner and `ew` at the far end), and the object identity is the
+ * real key (the spec's L-road fixture creates same-id junctions at
+ * different positions and pins exactly that).
+ */
+const AXIS_CACHE = new WeakMap<Road, WeakMap<Intersection, RoadAxis>>()
+
 export const approachAxis = (road: Road, intersection: Intersection): RoadAxis => {
-  const projection = projectIntersectionOnRoad(road, intersection)
-  if (!projection.projected) return roadPolylineAxis(road)
-  const tangent = roadForward(road, projection.s)
-  // A degenerate tangent (zero-length segment) carries no direction —
-  // the road's extent is the only thing left to go on.
-  if (Math.abs(tangent.ux) < 1e-9 && Math.abs(tangent.uz) < 1e-9) {
-    return roadPolylineAxis(road)
+  let perRoad = AXIS_CACHE.get(road)
+  if (!perRoad) {
+    perRoad = new WeakMap()
+    AXIS_CACHE.set(road, perRoad)
   }
-  return Math.abs(tangent.uz) > Math.abs(tangent.ux) ? 'ns' : 'ew'
+  const cached = perRoad.get(intersection)
+  if (cached) return cached
+
+  const projection = projectIntersectionOnRoad(road, intersection)
+  let axis: RoadAxis
+  if (!projection.projected) {
+    axis = roadPolylineAxis(road)
+  } else {
+    const tangent = roadForward(road, projection.s)
+    // A degenerate tangent (zero-length segment) carries no direction —
+    // the road's extent is the only thing left to go on.
+    axis =
+      Math.abs(tangent.ux) < 1e-9 && Math.abs(tangent.uz) < 1e-9
+        ? roadPolylineAxis(road)
+        : Math.abs(tangent.uz) > Math.abs(tangent.ux)
+          ? 'ns'
+          : 'ew'
+  }
+  perRoad.set(intersection, axis)
+  return axis
 }
 
 /**

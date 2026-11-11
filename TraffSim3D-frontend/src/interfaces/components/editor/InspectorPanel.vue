@@ -116,7 +116,7 @@ const { world, selection } = useEditor(ref(null))
 
 const entity = computed(() => {
   // Read tickCount so this computed re-evaluates after any worldStore mutation.
-  void world.tickCount
+  void world.uiTick
   if (!selection.id || !selection.kind) return null
   if (selection.kind === 'vehicle') return world.network.vehicles[selection.id] ?? null
   if (selection.kind === 'light') {
@@ -171,7 +171,7 @@ const onChangeLane = (dir: 'left' | 'right'): void => {
  * "已锁定" badge appears / disappears with the pin.
  */
 const speedOverrideMps = computed(() => {
-  void world.tickCount
+  void world.uiTick
   if (selection.kind !== 'vehicle' || !selection.id) return null
   return world.getVehicleSpeedOverride(selection.id)
 })

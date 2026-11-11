@@ -974,12 +974,20 @@ def _build_spawn_points(
     a car may not start inside an intersection.
     """
     spawn_points: list[dict[str, Any]] = []
+    # road_id → its junctions, built once. See `_spawn_arc_length` for
+    # the O(R×I) this replaces.
+    junctions_by_road: dict[str, list[dict[str, Any]]] = {}
+    for intersection in intersections:
+        for road_id in intersection.get("connectedRoads") or []:
+            junctions_by_road.setdefault(road_id, []).append(intersection)
     for road in roads:
         if int(road.get("laneCount", 0)) < SPAWN_MIN_LANES:
             continue
         if _polyline_length(road["waypoints"]) < SPAWN_MIN_ROAD_LENGTH_M:
             continue
-        s = _spawn_arc_length(road, intersections)
+        s = _spawn_arc_length(
+            road, junctions_by_road.get(str(road.get("id", ""))) or ()
+        )
         if s is None:
             # No open stretch: the road is covered by junction boxes from
             # end to end. Skipped on purpose — see `_spawn_arc_length`.
@@ -1430,6 +1438,15 @@ def attach_traffic_signals(
     if not projected:
         return 0
 
+    # Bucket the signal nodes on a coarse grid (cell = match radius) so
+    # each junction checks the handful of nodes in its own cell instead
+    # of scanning all of them: O(I + S) instead of O(I × S) — on the
+    # Shenzhen core 1 120 × 268 ≈ 300 k distance checks per attach.
+    cell = SIGNAL_MATCH_RADIUS_M
+    buckets: dict[tuple[int, int], list[tuple[float, float]]] = {}
+    for sx, sz in projected:
+        buckets.setdefault((math.floor(sx / cell), math.floor(sz / cell)), []).append((sx, sz))
+
     roads = network.get("roads") or []
     road_index_by_id = {road.get("id"): i for i, road in enumerate(roads)}
     lit = 0
@@ -1437,7 +1454,12 @@ def attach_traffic_signals(
         position = inter.get("position") or {}
         px = float(position.get("x", 0.0))
         pz = float(position.get("z", 0.0))
-        if not any((px - sx) ** 2 + (pz - sz) ** 2 <= SIGNAL_MATCH_RADIUS_M**2 for sx, sz in projected):
+        cx, cz = math.floor(px / cell), math.floor(pz / cell)
+        near = []
+        for gx in (cx - 1, cx, cx + 1):
+            for gz in (cz - 1, cz, cz + 1):
+                near.extend(buckets.get((gx, gz)) or ())
+        if not any((px - sx) ** 2 + (pz - sz) ** 2 <= SIGNAL_MATCH_RADIUS_M**2 for sx, sz in near):
             continue
         connected = [road_index_by_id[rid] for rid in inter.get("connectedRoads", []) if rid in road_index_by_id]
         if not connected:

@@ -31,6 +31,9 @@ the user is looking at.
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections import OrderedDict
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -104,7 +107,7 @@ def plan_route(req: RouteRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="network has no roads")
 
     try:
-        graph = RoadGraph.from_network(network)
+        graph = _road_graph_for(network)
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"invalid network: {exc}") from exc
 
@@ -151,6 +154,34 @@ def plan_route(req: RouteRequest) -> dict[str, Any]:
         "start_node": start_node.id,
         "end_node": end_node.id,
     }
+
+
+# ---------------------------------------------------------------------------
+# The road-graph cache
+# ---------------------------------------------------------------------------
+
+#: (payload hash) → built graph. The plan endpoint receives the WHOLE
+#: network in the request body, and `RoadGraph.from_network` walks every
+#: waypoint of every road — hundreds of milliseconds on an imported city
+#: — to build a graph that is a pure function of that payload. The same
+#: client planning route after route (the POI flow, the editor) paid it
+#: every time.
+_GRAPH_CACHE: OrderedDict[str, Any] = OrderedDict()
+_GRAPH_CACHE_MAX = 4
+
+
+def _road_graph_for(network: dict[str, Any]) -> Any:
+    """The `RoadGraph` for a network payload, built once per payload."""
+    key = hashlib.sha1(json.dumps(network, sort_keys=True, default=str).encode()).hexdigest()
+    cached = _GRAPH_CACHE.get(key)
+    if cached is not None:
+        _GRAPH_CACHE.move_to_end(key)
+        return cached
+    graph = RoadGraph.from_network(network)
+    _GRAPH_CACHE[key] = graph
+    while len(_GRAPH_CACHE) > _GRAPH_CACHE_MAX:
+        _GRAPH_CACHE.popitem(last=False)
+    return graph
 
 
 def _shortest_path_avoiding_first_road(

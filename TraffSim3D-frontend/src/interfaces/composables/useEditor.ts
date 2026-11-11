@@ -48,10 +48,20 @@ export const useEditor = (rendererRef: { value: ThreeJSRenderer | null }) => {
     // 4px threshold distinguishes click from drag (don't lower it
     // — the threshold is tuned to the pointer behaviour).
     if (!isDragging && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+    if (!isDragging) {
+      // The threshold crossing STARTS the drag: snapshot the pre-drag
+      // state once here, so the ~60 moves a second that follow do not
+      // each serialize the whole network (and evict the undo stack).
+      world.beginVehicleDrag()
+    }
     isDragging = true
     const worldPos = rendererRef.value.screenToGround(event.clientX, event.clientY)
     if (!worldPos) return
-    const result = world.moveVehicleTo(dragStart.pickedId, worldPos)
+    // Mid-drag: position only (no history, no whole-network re-snap).
+    const result = world.moveVehicleTo(dragStart.pickedId, worldPos, {
+      recordHistory: false,
+      resnap: false,
+    })
     if (!result.ok) {
       // Drag failed (vehicle not found, etc.) — reset.
       world.setDraggingId(null)
@@ -75,6 +85,12 @@ export const useEditor = (rendererRef: { value: ThreeJSRenderer | null }) => {
     // The vehicle was selected on mousedown; clearing draggingId
     // lets tick() resume normal updates.
     world.setDraggingId(null)
+    if (wasDragging && rendererRef.value) {
+      // The drop: ONE whole-network lane re-snap (the step the mid-drag
+      // moves skipped), so the next tick resumes lane-based movement.
+      const worldPos = rendererRef.value.screenToGround(event.clientX, event.clientY)
+      if (worldPos) world.endVehicleDrag(pickedId, worldPos)
+    }
     if (!wasDragging) {
       // It was a click, not a drag — handleClick's selection logic
       // already ran on mousedown (via `selection.select(hit.kind,

@@ -199,6 +199,7 @@ const onToggleDrive = (event: Event): void => {
 
 /** Per-driver readout: speed, or "through" once it is on its out-road. */
 const driveReadout = computed(() => {
+  void store.uiTick
   if (!store.driveEnabled) return []
   return Object.keys(store.driveRoutes ?? {}).map((id) => {
     const vehicle = store.network.vehicles[id]
@@ -226,13 +227,17 @@ const onToggleFollow = (): void => {
 
 /** The follower's speed, in km/h. */
 const speedKmh = computed(() => {
+  void store.uiTick
   const id = store.routeFollowerId
   const vehicle = id ? store.network.vehicles[id] : undefined
   return vehicle ? Math.round(vehicle.speed * 3.6) : 0
 })
 
 /** How far along the route the follower is, in [0, 1]. */
-const progress = computed(() => store.routeProgress())
+const progress = computed(() => {
+  void store.uiTick
+  return store.routeProgress()
+})
 
 /**
  * What the driver is heading for: the POI's name when the destination

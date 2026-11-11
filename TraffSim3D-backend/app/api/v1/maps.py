@@ -164,6 +164,9 @@ async def parse_osm(
 #: The signal nodes of the sample area, as (lat, lon) pairs. Filled from
 #: Overpass on the first request and kept in memory afterwards.
 _sample_signal_nodes: list[tuple[float, float]] | None = None
+#: Whether the cached network has had the signals attached. The attach
+#: is idempotent, but a cache hit should not pay for it again.
+_sample_signals_attached = False
 
 
 def _signal_nodes_query(bbox: BBox) -> str:
@@ -244,7 +247,7 @@ async def parse_sample() -> dict[str, Any]:
     The parse costs ~2 s the first time; the result is cached in memory
     and every later call returns the same network.
     """
-    global _sample_network, _sample_signal_nodes
+    global _sample_network, _sample_signal_nodes, _sample_signals_attached
     if _sample_network is None:
         if not SAMPLE_OSM_FILE.exists():
             raise HTTPException(
@@ -260,10 +263,15 @@ async def parse_sample() -> dict[str, Any]:
     # The lights the source file dropped. They are attached to the
     # CACHED network every time (the geometry is untouched), so the
     # first load that finds the cache and every later one agree.
-    if _sample_signal_nodes is None:
-        _sample_signal_nodes = _fetch_signal_nodes(SAMPLE_BBOX)
-    if _sample_signal_nodes:
-        attach_traffic_signals(_sample_network, _sample_signal_nodes)
+    # The attach is idempotent but not free (~0.1-0.3 s of distance
+    # matching plus geometry rebuilds for every lit junction) — on a
+    # cache hit it was pure repetition. Attach ONCE per process.
+    if not _sample_signals_attached:
+        if _sample_signal_nodes is None:
+            _sample_signal_nodes = _fetch_signal_nodes(SAMPLE_BBOX)
+        if _sample_signal_nodes:
+            attach_traffic_signals(_sample_network, _sample_signal_nodes)
+        _sample_signals_attached = True
     return _sample_network
 
 

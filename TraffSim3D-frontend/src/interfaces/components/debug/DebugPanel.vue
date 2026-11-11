@@ -93,6 +93,7 @@ const lightCount = computed(() =>
   Object.values(store.network.intersections).reduce((s, i) => s + i.trafficLights.length, 0),
 )
 const counts = computed(() => {
+  void store.uiTick
   const out = { red: 0, yellow: 0, green: 0 }
   for (const inter of Object.values(store.network.intersections)) {
     for (const l of inter.trafficLights) {
@@ -162,7 +163,7 @@ const coordinatedPairs = computed(() =>
     .sort(),
 )
 const laneDistribution = computed(() => {
-  void store.tickCount
+  void store.uiTick
   const lanes = new Map<string, number>()
   let changing = 0
   for (const v of Object.values(store.network.vehicles)) {

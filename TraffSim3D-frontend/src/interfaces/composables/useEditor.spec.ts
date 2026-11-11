@@ -173,7 +173,13 @@ describe('useEditor — mousedown / drag', () => {
 
     expect(screenToGround).toHaveBeenCalledWith(104, 100)
     expect(move).toHaveBeenCalledTimes(1)
-    expect(move).toHaveBeenCalledWith(vehicleId, ground)
+    // The mid-drag move is history-free and resnap-free (both happen
+    // once at the threshold crossing / at the drop — see the drag
+    // split in worldStore).
+    expect(move).toHaveBeenCalledWith(vehicleId, ground, {
+      recordHistory: false,
+      resnap: false,
+    })
   })
 
   it('continues dragging on every move past the threshold', () => {

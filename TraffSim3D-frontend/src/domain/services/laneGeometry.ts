@@ -73,6 +73,7 @@ export const roadPolylineLengths = (road: Road): ReadonlyArray<number> => {
  */
 export const invalidateRoadPolylineCache = (road: Road): void => {
   CUM_LENGTHS_CACHE.delete(road)
+  PROJECTION_CACHE.delete(road)
 }
 
 /** Find the polyline segment that contains arc-length `s`, plus
@@ -283,19 +284,51 @@ export const worldToCenterlineS = (
  * degradation path so a bad projection can never move a stop line to a
  * nonsense place.
  */
+/**
+ * Per-(road, junction) projection cache.
+ *
+ * The projection is a polyline scan (`worldToCenterlineS`), and the
+ * tick re-derives the SAME (road, junction) projection dozens of times
+ * per tick: the actuated controller's queue counting, the stop-line
+ * placement for every approaching vehicle, the turn candidates, the
+ * cross-road yield. Measured on the city step: this projection was
+ * ~5% of the tick as repeated work. The geometry only changes when a
+ * road's waypoints are rewritten in place — the same edit that calls
+ * `invalidateRoadPolylineCache`, which clears this cache too.
+ */
+/// Keyed by the JUNCTION OBJECT for the same reason approachAxis is:
+/// the id is not the identity across fixtures, and the object is.
+const PROJECTION_CACHE = new WeakMap<Road, WeakMap<Intersection, IntersectionProjection>>()
+
 export const projectIntersectionOnRoad = (
   road: Road,
   intersection: Intersection,
 ): IntersectionProjection => {
+  let perRoad = PROJECTION_CACHE.get(road)
+  if (!perRoad) {
+    perRoad = new WeakMap()
+    PROJECTION_CACHE.set(road, perRoad)
+  }
+  const cached = perRoad.get(intersection)
+  if (cached) return cached
+
   const len = roadLength(road)
+  let result: IntersectionProjection
   if (len < 1e-6) {
-    return { s: 0, distance: Number.POSITIVE_INFINITY, projected: false }
+    result = { s: 0, distance: Number.POSITIVE_INFINITY, projected: false }
+  } else {
+    const { s, distance } = worldToCenterlineS(
+      road,
+      intersection.position.x,
+      intersection.position.z,
+    )
+    result =
+      !Number.isFinite(distance) || distance > MAX_INTERSECTION_OFFSET_M
+        ? { s: len / 2, distance, projected: false }
+        : { s, distance, projected: true }
   }
-  const { s, distance } = worldToCenterlineS(road, intersection.position.x, intersection.position.z)
-  if (!Number.isFinite(distance) || distance > MAX_INTERSECTION_OFFSET_M) {
-    return { s: len / 2, distance, projected: false }
-  }
-  return { s, distance, projected: true }
+  perRoad.set(intersection, result)
+  return result
 }
 
 /**

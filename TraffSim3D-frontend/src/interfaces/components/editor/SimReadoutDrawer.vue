@@ -181,7 +181,7 @@ const formatRate = (rate: number): string => (Number.isInteger(rate) ? `${rate}�
         <span class="stat"><i>EW 队列</i><b>{{ ewQueue }}</b></span>
         <span class="stat"><i>变道</i><b :class="{ changing: changingCount > 0 }">{{ changingCount }}</b></span>
         <span class="stat" title="每个渲染帧 +1；store 变更通知也会 +1">
-          <i>tick</i><b data-testid="sim-tick">{{ world.tickCount }}</b></span>
+          <i>tick</i><b data-testid="sim-tick">{{ world.uiTick }}</b></span>
         <span
           class="stat"
           title="车偏离车道后会被拉回车道或放回路口起点 — 这里记录最近一次的原因"

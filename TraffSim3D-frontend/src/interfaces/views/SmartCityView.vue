@@ -351,13 +351,23 @@ const { handleMouseDown, handleMouseMove, handleMouseUp } = useEditor(
   rendererRef as unknown as Parameters<typeof useEditor>[0],
 )
 
-const vehicleCount = computed(() => Object.keys(world.network.vehicles).length)
+// uiTick (10 Hz) is the reactive trigger for every readout below:
+// the network is a shallow ref that mutates IN PLACE while the sim
+// runs, so a computed keyed only on it never recomputes and the
+// panel froze at its mount-time values.
+const readoutTick = computed(() => world.uiTick)
+
+const vehicleCount = computed(() => {
+  void readoutTick.value
+  return Object.keys(world.network.vehicles).length
+})
 const intersectionCount = computed(() => Object.keys(world.network.intersections).length)
 const lightCount = computed(() =>
   Object.values(world.network.intersections).reduce((s, i) => s + i.trafficLights.length, 0),
 )
 
 const avgSpeed = computed(() => {
+  void readoutTick.value
   const vehicles = Object.values(world.network.vehicles)
   if (vehicles.length === 0) return 0
   const totalSpeed = vehicles.reduce((sum, v) => sum + v.speed, 0)
@@ -376,6 +386,7 @@ const controllerLabel = computed(() => {
 
 /** The vehicles by state — the donut's four slices. */
 const vehicleSlices = computed(() => {
+  void readoutTick.value
   const buckets = { driving: 0, waiting: 0, crashed: 0 }
   for (const v of Object.values(world.network.vehicles)) {
     if (v.status === 'crashed') buckets.crashed += 1
@@ -390,12 +401,13 @@ const vehicleSlices = computed(() => {
 })
 
 /** The signal phases, newest first. */
-const lightRows = computed(() =>
-  Object.values(world.network.intersections)
+const lightRows = computed(() => {
+  void readoutTick.value
+  return Object.values(world.network.intersections)
     .flatMap((i) => i.trafficLights)
     .slice(0, 8)
-    .map((l) => ({ id: l.id, axis: l.axis, phase: l.phase, left: l.phaseRemaining })),
-)
+    .map((l) => ({ id: l.id, axis: l.axis, phase: l.phase, left: l.phaseRemaining }))
+})
 
 // ===== the live readouts ==================================================
 

@@ -200,6 +200,9 @@ export const useWorldStore = defineStore('world', () => {
    */
   const uiTick = ref(0)
   let lastUiTickAt = 0
+  /** The last whole-metre distance written to `poiDistanceM` — the
+   *  write gate above compares against this. */
+  let lastPoiDistanceWritten: number | null = null
   const fps = ref(0)
   const isRunning = ref(true)
 
@@ -514,6 +517,7 @@ export const useWorldStore = defineStore('world', () => {
     poiDestinationId.value = poi.id
     poiArrived.value = false
     poiDistanceM.value = distanceToPoi(vehicle, poi)
+    lastPoiDistanceWritten = Math.round(distanceToPoi(vehicle, poi))
     followCamera.value = true
     bumpTick()
     return { ok: true }
@@ -1116,27 +1120,60 @@ export const useWorldStore = defineStore('world', () => {
   const moveVehicleTo = (
     vehicleId: string,
     position: { x: number; y: number; z: number },
+    options: { recordHistory?: boolean; resnap?: boolean } = {},
   ): { ok: true } | { ok: false; reason: string } => {
     const v = network.value.vehicles[vehicleId]
     if (!v) return { ok: false, reason: 'vehicle not found' }
-    pushHistory()
+    // History + the full-network lane re-snap happen ONCE per drag (see
+    // `beginVehicleDrag` / `endVehicleDrag`), not per mousemove: a drag
+    // fires 60-120 moves a second, and both costs scale with the whole
+    // network (serialization ≈8 ms; the nearest-lane scan walks every
+    // road of it). The mid-drag move only needs the body to follow the
+    // cursor — tick() is skipped for the dragged vehicle, so the lane
+    // bookkeeping is read by nothing until the drop.
+    if (options.recordHistory !== false) pushHistory()
     v.position = { x: position.x, y: position.y, z: position.z }
     if (rapierWorld) {
       rapierWorld.setVehiclePosition(vehicleId, v.position)
     }
-    // Re-snap to the nearest lane across the whole network. If the
-    // drop point is far from any lane (e.g. mid-intersection with
-    // no road near the cursor), keep the entity's existing roadId
-    // / laneIndex / s — the next tick will derive a sensible
-    // position via findNearestLane anyway.
-    const snap = findNearestLaneOnNetwork(network.value, v.position)
-    if (snap) {
-      v.roadId = snap.roadId
-      v.laneIndex = snap.laneIndex
-      v.s = snap.s
+    if (options.resnap !== false) {
+      // Re-snap to the nearest lane across the whole network. If the
+      // drop point is far from any lane (e.g. mid-intersection with
+      // no road near the cursor), keep the entity's existing roadId
+      // / laneIndex / s — the next tick will derive a sensible
+      // position via findNearestLane anyway.
+      const snap = findNearestLaneOnNetwork(network.value, v.position)
+      if (snap) {
+        v.roadId = snap.roadId
+        v.laneIndex = snap.laneIndex
+        v.s = snap.s
+      }
+      bumpTick()
     }
-    bumpTick()
     return { ok: true }
+  }
+
+  /**
+   * The drag START: snapshot the pre-drag state ONCE. The 60 moves a
+   * second that follow are history-free (see `moveVehicleTo`), so a
+   * one-second drag costs one snapshot instead of sixty — and the
+   * undo stack is not filled with (and evicted by) sixty copies of
+   * the same intermediate position.
+   */
+  const beginVehicleDrag = (): void => {
+    pushHistory()
+  }
+
+  /**
+   * The drag END: the lane re-snap the mid-drag moves skipped. The
+   * vehicle keeps the position the cursor left it at; the lane
+   * bookkeeping makes the next tick resume lane-based movement.
+   */
+  const endVehicleDrag = (
+    vehicleId: string,
+    position: { x: number; y: number; z: number },
+  ): { ok: true } | { ok: false; reason: string } => {
+    return moveVehicleTo(vehicleId, position, { recordHistory: false, resnap: true })
   }
 
   const togglePause = (): void => {
@@ -1319,7 +1356,14 @@ export const useWorldStore = defineStore('world', () => {
       const driver = network.value.vehicles[routeFollowerId.value]
       if (poi && driver) {
         const distance = distanceToPoi(driver, poi)
-        poiDistanceM.value = distance
+        // The HUD shows whole metres — write only when the displayed
+        // metre changes (≈ speed×1/s writes instead of 60/s), so the
+        // two panels binding it stop re-rendering every frame.
+        const rounded = Math.round(distance)
+        if (rounded !== lastPoiDistanceWritten) {
+          poiDistanceM.value = rounded
+          lastPoiDistanceWritten = rounded
+        }
         if (distance <= POI_ARRIVAL_RADIUS_M) {
           poiArrived.value = true
           // Stop AT the destination. The route itself ends at the
@@ -2057,6 +2101,8 @@ export const useWorldStore = defineStore('world', () => {
     setDraggingId,
     getDraggingId,
     moveVehicleTo,
+    beginVehicleDrag,
+    endVehicleDrag,
     undo,
     redo,
     canUndo,
