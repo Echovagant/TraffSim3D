@@ -261,6 +261,59 @@ class _Node:
     z: float  # meters south of center (lat increase = z increase)
 
 
+class _ProjectedNodes(dict[int, _Node]):
+    """The node table, projected to world meters the first time it is asked for.
+
+    A file carries every node it mentions — a city-scale PBF has
+    millions — but only the nodes a HIGHWAY way references can ever
+    become a road vertex or a junction: every read of the table below
+    uses a `ref` taken from a highway way's node list. So the
+    projection runs on demand, and the nodes no road mentions are never
+    turned into objects at all.
+
+    What it cost to project the whole file up front: one `_Node` per
+    node in it (51 715 for the bundled 7.4 MB Shenzhen extract, and a
+    city extract is an order of magnitude worse), while the network
+    used a fraction of them.
+
+    The projection origin does not move: `_resolve_center` runs on the
+    FULL raw node table before this is built, so every coordinate in
+    the network is the same as it was.
+
+    Membership keeps the old meaning — "is this node in the file" — so
+    the dangling-reference filter (a way may name a node the file does
+    not carry) behaves exactly as before.
+    """
+
+    def __init__(
+        self,
+        raw_nodes: dict[int, tuple[float, float]],
+        origin_lat: float,
+        origin_lon: float,
+        cos_lat: float,
+    ) -> None:
+        super().__init__()
+        self._raw = raw_nodes
+        self._origin_lat = origin_lat
+        self._origin_lon = origin_lon
+        self._cos_lat = cos_lat
+
+    def __contains__(self, node_id: object) -> bool:
+        return node_id in self._raw
+
+    def __missing__(self, node_id: int) -> _Node:
+        lat, lon = self._raw[node_id]
+        node = _Node(
+            id=node_id,
+            lat=lat,
+            lon=lon,
+            x=(lon - self._origin_lon) * 111000.0 * self._cos_lat,
+            z=(lat - self._origin_lat) * 111000.0,
+        )
+        self[node_id] = node
+        return node
+
+
 @dataclass
 class _RawWay:
     way_id: int
@@ -985,9 +1038,7 @@ def _build_spawn_points(
             continue
         if _polyline_length(road["waypoints"]) < SPAWN_MIN_ROAD_LENGTH_M:
             continue
-        s = _spawn_arc_length(
-            road, junctions_by_road.get(str(road.get("id", ""))) or ()
-        )
+        s = _spawn_arc_length(road, junctions_by_road.get(str(road.get("id", ""))) or ())
         if s is None:
             # No open stretch: the road is covered by junction boxes from
             # end to end. Skipped on purpose — see `_spawn_arc_length`.
@@ -1119,18 +1170,15 @@ def _build_network(
     if bbox is not None:
         _validate_bbox(bbox)
 
-    # ---- 1) Project every node to world meters (centered) ----
+    # ---- 1) The node table, projected to world meters on first use ----
+    #
+    # Only the nodes a highway way references can ever become a road
+    # vertex or a junction, so the projection is deferred per node
+    # instead of being run over the whole file (see `_ProjectedNodes`).
+    # The origin is the one `_resolve_center` just computed from the
+    # FULL node table, so no coordinate moves.
     cos_lat = math.cos(origin_lat * math.pi / 180.0)
-    nodes: dict[int, _Node] = {
-        node_id: _Node(
-            id=node_id,
-            lat=lat,
-            lon=lon,
-            x=(lon - origin_lon) * 111000.0 * cos_lat,
-            z=(lat - origin_lat) * 111000.0,
-        )
-        for node_id, (lat, lon) in raw_nodes.items()
-    }
+    nodes = _ProjectedNodes(raw_nodes, origin_lat, origin_lon, cos_lat)
 
     # ---- 2) The region: in degrees, and as a rectangle in world meters ----
     region: BBox = (
@@ -1461,7 +1509,11 @@ def attach_traffic_signals(
                 near.extend(buckets.get((gx, gz)) or ())
         if not any((px - sx) ** 2 + (pz - sz) ** 2 <= SIGNAL_MATCH_RADIUS_M**2 for sx, sz in near):
             continue
-        connected = [road_index_by_id[rid] for rid in inter.get("connectedRoads", []) if rid in road_index_by_id]
+        connected = [
+            road_index_by_id[rid]
+            for rid in inter.get("connectedRoads", [])
+            if rid in road_index_by_id
+        ]
         if not connected:
             continue
         lights = _build_traffic_lights(

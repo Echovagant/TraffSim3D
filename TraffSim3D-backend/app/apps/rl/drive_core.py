@@ -57,6 +57,7 @@ the ego, so the policy does not have to learn four different approaches.
 
 from __future__ import annotations
 
+import bisect
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -65,7 +66,7 @@ from typing import Any
 import numpy as np
 
 from .idm import find_lead_vehicle, idm_acceleration
-from .network_graph import NetworkGraph, Route, point_on_road
+from .network_graph import NetworkGraph, Route, point_on_road, route_metrics
 
 #: The observation dimension of one learned driver.
 #:
@@ -138,6 +139,43 @@ CONFLICT_RELEASE_M = 7.5
 #: The lateral tolerance of the lead search (m) — one lane width, the
 #: same rule the IDM uses.
 LEAD_LANE_TOLERANCE = 3.5
+
+#: An empty candidate set — the shared "no zones" value.
+_EMPTY_ZONES: frozenset[int] = frozenset()
+
+
+class _ZoneGrid:
+    """A grid index over the conflict zones.
+
+    A pair of vehicles can only be jointly inside a zone that one of
+    them is near, so the zones worth examining are the ones within the
+    release radius of either vehicle. The cell size is that radius, so
+    the three-by-three block of cells around a point holds every zone
+    the radius can reach.
+    """
+
+    CELL = CONFLICT_RELEASE_M
+
+    def __init__(self, zones: list[tuple[float, float]]) -> None:
+        self._cells: dict[tuple[int, int], set[int]] = {}
+        for index, (x, z) in enumerate(zones):
+            self._cells.setdefault(self._cell_key(x, z), set()).add(index)
+
+    @classmethod
+    def _cell_key(cls, x: float, z: float) -> tuple[int, int]:
+        return (math.floor(x / cls.CELL), math.floor(z / cls.CELL))
+
+    def near(self, x: float, z: float) -> set[int]:
+        """The zones within the release radius of the point."""
+        cx, cz = self._cell_key(x, z)
+        found: set[int] = set()
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                bucket = self._cells.get((cx + dx, cz + dy))
+                if bucket:
+                    found |= bucket
+        return found
+
 
 #: The lead search range (m) — the IDM's own.
 LEAD_SEARCH_RANGE = 30.0
@@ -340,6 +378,15 @@ class DriveCore:
         #: Which pairs were jointly inside the box last step (the
         #: conflict events are counted on the transition into it).
         self._joint_in_zone: dict[tuple[str, str], bool] = {}
+        #: The conflict zones, computed on first use (the junctions do
+        #: not move, so the list is built once — see `_conflict_zones`).
+        self._conflict_zones_cache: list[tuple[float, float]] | None = None
+        #: The spatial index over those zones (see `_ZoneGrid`).
+        self._zone_grid_cache: _ZoneGrid | None = None
+        #: Which zones each pair is currently marked as jointly inside.
+        #: A pair that has left a zone still has to have that zone
+        #: cleared, so the zones it was in stay in the candidate set.
+        self._pair_joint_zones: dict[tuple[str, str], set[int]] = {}
         #: Steps in which nothing moved while vehicles remained.
         self.deadlock_steps = 0
 
@@ -364,6 +411,7 @@ class DriveCore:
         # policy did (measured over a 30 000 step run).
         self.total_conflicts = 0
         self._joint_in_zone = {}
+        self._pair_joint_zones = {}
         self._overlapping = {}
         self.deadlock_steps = 0
         self.agents = []
@@ -810,19 +858,17 @@ class DriveCore:
         ):
             self._pivot_to_next_segment(vehicle)
 
-        total_length = sum(
-            self.graph.segments[sid].length
-            for sid in vehicle.route.segment_ids
-            if sid in self.graph.segments
-        )
+        # The route's lengths and their prefix sums are measured once (see
+        # `route_metrics`), so the two sums this used to walk the route
+        # for are a lookup each. The accumulation order is unchanged, so
+        # the progress is bit for bit what it was.
+        metrics = route_metrics(self.graph, vehicle.route)
+        total_length = metrics.total
         if total_length <= 0.0:
             vehicle.route_progress = 1.0
             return
-        done = sum(
-            self.graph.segments[sid].length
-            for sid in vehicle.route.segment_ids[: vehicle.current_seg_idx]
-            if sid in self.graph.segments
-        )
+        before = bisect.bisect_left(metrics.index, vehicle.current_seg_idx)
+        done = metrics.prefix[before]
         vehicle.route_progress = min(1.0, (done + vehicle.seg_t) / total_length)
         vehicle.progress_gain = max(0.0, vehicle.route_progress - vehicle.prev_route_progress)
         vehicle.prev_route_progress = vehicle.route_progress
@@ -877,19 +923,36 @@ class DriveCore:
             accumulated += seg_len
         return best_t
 
+    def _zone_grid(self) -> _ZoneGrid:
+        """The spatial index over the conflict zones."""
+        grid = self._zone_grid_cache
+        if grid is None:
+            grid = _ZoneGrid(self._conflict_zones())
+            self._zone_grid_cache = grid
+        return grid
+
     def _conflict_zones(self) -> list[tuple[float, float]]:
         """The junction boxes a conflict can happen in.
 
         One per real intersection on the network; the single-junction
         scenario has exactly one. A network without any real intersection
         falls back to the core's conflict point.
+
+        The list is computed ONCE per core and kept: the junctions do
+        not move, and it used to be rebuilt on every step — one position
+        lookup per graph node, per step (1 233 lookups per step on the
+        988-road Shenzhen extract).
         """
-        zones = [
-            position
-            for position in (self._junction_position(node_id) for node_id in self.graph.nodes)
-            if position is not None
-        ]
-        return zones or [self.conflict_point]
+        zones = self._conflict_zones_cache
+        if zones is None:
+            zones = [
+                position
+                for position in (self._junction_position(node_id) for node_id in self.graph.nodes)
+                if position is not None
+            ]
+            zones = zones or [self.conflict_point]
+            self._conflict_zones_cache = zones
+        return zones
 
     def _update_target_progress(self, vehicle: DriveVehicle) -> None:
         """The distance to the destination, and whether it has arrived.
@@ -960,7 +1023,23 @@ class DriveCore:
                 # and out, and every flicker counted as a new conflict;
                 # measured: 486 "conflicts" in one evaluation of a
                 # policy that was not conflicting at all).
-                for zone_index, (zx, cz) in enumerate(zones):
+                #
+                # Only the zones this pair can possibly be in are
+                # examined: the ones within the release radius of either
+                # vehicle, and the ones the pair is currently marked as
+                # jointly inside (a pair that has LEFT a zone must have
+                # that zone cleared, or a later re-entry would not count
+                # as a new conflict). Every other zone was, and stays,
+                # "not jointly inside" — the scan used to walk all of
+                # them, once per vehicle pair, on every step: 28 pairs ×
+                # 1 233 zones × 2 distances = 69 000 distance
+                # computations per step on the 988-road Shenzhen extract,
+                # which was 98 % of the step.
+                zone_grid = self._zone_grid()
+                candidates = zone_grid.near(a.x, a.z) | zone_grid.near(b.x, b.z)
+                candidates |= self._pair_joint_zones.get(pair_key, _EMPTY_ZONES)
+                for zone_index in candidates:
+                    zx, cz = zones[zone_index]
                     zone_key = (zone_index, a.id, b.id)
                     was_jointly = self._joint_in_zone.get(zone_key, False)
                     a_distance = math.hypot(a.x - zx, a.z - cz)
@@ -979,6 +1058,17 @@ class DriveCore:
                         b.conflicts_increment += 1
                         self.total_conflicts += 1
                     self._joint_in_zone[zone_key] = jointly
+                    # Keep the pair's active zones in step with the
+                    # state, so a zone the pair has left is still
+                    # examined (and cleared) next step.
+                    active = self._pair_joint_zones.get(pair_key)
+                    if jointly:
+                        if active is None:
+                            active = set()
+                            self._pair_joint_zones[pair_key] = active
+                        active.add(zone_index)
+                    elif active is not None:
+                        active.discard(zone_index)
 
     def _accumulate_delay(self) -> None:
         """Accrue waiting time, and attribute it to whoever caused it.

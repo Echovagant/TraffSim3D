@@ -30,6 +30,7 @@ light, route info, and neighbor distances.
 
 from __future__ import annotations
 
+import bisect
 import math
 from dataclasses import dataclass, field
 from typing import Any
@@ -43,6 +44,7 @@ from .network_graph import (
     Route,
     find_route,
     point_on_road,
+    route_metrics,
 )
 
 OBS_DIM_NETWORK = 24
@@ -337,23 +339,22 @@ class NetworkSimCore:
         seg = self.graph.segments[seg_id]
         v.seg_t = _project_on_segment(seg, (v.x, v.z))
 
-        total_length = sum(
-            self.graph.segments[sid].length
-            for sid in v.route.segment_ids
-            if sid in self.graph.segments
-        )
+        # The route's lengths and their prefix sums are measured once (see
+        # `route_metrics`), so this is O(1) instead of a walk over the
+        # route's segments on every step of every vehicle.
+        metrics = route_metrics(self.graph, v.route)
+        total_length = metrics.total
         if total_length < 1e-6:
             return
 
-        progress = 0.0
-        for i, sid in enumerate(v.route.segment_ids):
-            if sid not in self.graph.segments:
-                continue
-            if i < idx:
-                progress += self.graph.segments[sid].length
-            elif i == idx:
-                progress += v.seg_t
-                break
+        # How many of the route's existing segments lie BEFORE the one the
+        # vehicle is on; `prefix[before]` is the distance covered.
+        before = bisect.bisect_left(metrics.index, idx)
+        progress = metrics.prefix[before]
+        # The current segment's own distance counts only when that
+        # segment exists in the graph.
+        if before < len(metrics.index) and metrics.index[before] == idx:
+            progress += v.seg_t
         v.route_progress = progress / total_length
 
         if v.seg_t >= seg.length * 0.95 and idx < len(v.route.segment_ids) - 1:
