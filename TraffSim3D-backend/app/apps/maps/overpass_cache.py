@@ -62,6 +62,24 @@ def _cache_key(query: str) -> str:
     return hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
 
 
+#: The parsed responses, keyed by (path, mtime, size).
+#:
+#: A cache HIT used to re-read the file and re-parse the JSON on every
+#: call. The big responses are 3-6 MB (the city's roads and buildings),
+#: and the Smart City view asks for them on every load — so the cost of
+#: the cache was paid again on every request, which is what a cache is
+#: supposed to prevent.
+#:
+#: The mtime and the size are part of the key: a rewritten cache file
+#: gets a new key and is parsed again.
+#:
+#: The callers only READ the payload (the endpoint returns it, the POI
+#: parser walks `elements`, the signal-node reader builds tuples), so
+#: the memoized object is handed out as-is. The top level is copied on
+#: the way out, as it was before.
+_MEMO: dict[tuple[str, float, int], dict[str, Any]] = {}
+
+
 def cached_overpass_fetch(
     query: str,
     *,
@@ -93,7 +111,13 @@ def cached_overpass_fetch(
     cache_path = CACHE_DIR / f"{key}.json"
 
     if cache_path.exists():
-        return dict(json.loads(cache_path.read_text(encoding="utf-8")))
+        stat = cache_path.stat()
+        memo_key = (str(cache_path), stat.st_mtime, stat.st_size)
+        memoized = _MEMO.get(memo_key)
+        if memoized is None:
+            memoized = dict(json.loads(cache_path.read_text(encoding="utf-8")))
+            _MEMO[memo_key] = memoized
+        return dict(memoized)
 
     # Cache miss — hit Overpass.
     body = {"data": query}
