@@ -1132,6 +1132,24 @@ html {
   flex-direction: column;
   gap: var(--ds-space-8);
   padding-bottom: var(--ds-space-8);
+  /*
+   * The gutter that every other section on this page already has: the
+   * hero sits at 48px from the viewport's edge, and so does the module
+   * index below this one. Without it the bands bled to the edge of the
+   * window, which cost three things:
+   *
+   *   - the rounded frame of the media was cut by the viewport;
+   *   - the FLIPPED band's copy column started flush with the screen
+   *     edge, so the index number ("02") — which the entrance
+   *     animation starts 18px to the left — landed off-screen
+   *     entirely;
+   *   - this section's own header sat 40px left of the identical
+   *     header in the section below it.
+   *
+   * The bands were the only thing that wanted to bleed; the text inside
+   * them never did.
+   */
+  padding-inline: 40px;
 }
 .feature-band {
   display: grid;
@@ -1322,6 +1340,10 @@ html {
 }
 /* On a narrow screen the preview is dropped rather than squeezed. */
 @media (max-width: 900px) {
+  .features {
+    /* The gutter follows the window down (see the note on `.features`). */
+    padding-inline: 24px;
+  }
   .feature-band,
   .feature-band.is-flipped {
     grid-template-columns: minmax(0, 1fr);

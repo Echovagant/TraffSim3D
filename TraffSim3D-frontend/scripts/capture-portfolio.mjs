@@ -65,10 +65,23 @@ const main = async () => {
   }
 
   // The home page's hero: the Smart City view behind the title.
+  //
+  // The panels are COLLAPSED for this shot (the product's own
+  // 「收起面板」 button): the hero sits NEXT TO the title, so a
+  // dashboard full of panels competes with the text instead of showing
+  // the city. The cityscape alone is the stronger image — and it is
+  // what the old hero showed, which is why the homepage was built
+  // around it.
   console.log('capturing:')
   await page.setViewportSize(HERO_VIEWPORT)
   await page.goto(`${URL}/smart-city`, { waitUntil: 'domcontentloaded' })
-  await shoot('scene-smartcity.png', 18000)
+  await page.waitForTimeout(14000)
+  const collapse = page.locator('[data-testid="toggle-panels"]')
+  if (await collapse.count()) {
+    await collapse.click()
+    await page.waitForTimeout(1200)
+  }
+  await shoot('scene-smartcity.png', 4000)
 
   await page.setViewportSize(TILE_VIEWPORT)
   for (const tile of TILES) {
