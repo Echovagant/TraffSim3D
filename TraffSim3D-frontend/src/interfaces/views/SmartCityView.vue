@@ -657,18 +657,34 @@ onMounted(async () => {
   // network (its anchor, its rectangle and its very road geometry), so
   // a car can never end up on a street the picture does not contain.
   status.value = { kind: 'info', text: '正在载入深圳福田路网...' }
-  const city = await loadSampleCity()
-  if (city.ok) {
+  // The bundled city is the DEFAULT, not an override: if the store
+  // already holds an IMPORTED map (one with a geographic anchor — the
+  // MapLab sets it), that map is what the command centre shows.
+  //
+  // It used to be overwritten unconditionally, so importing your own
+  // city and then opening the 3D view threw your map away and loaded
+  // the bundled one — and the imported map's own facts (a tunnel's
+  // 3.5 m height limit, for instance) could never be seen here.
+  const hasImportedMap = world.network.origin !== undefined && world.network.origin !== null
+  if (hasImportedMap) {
     status.value = {
       kind: 'info',
-      text: `✓ 福田路网 ${city.roadCount} 条道路 · ${city.vehicleCount} 辆车已就位`,
+      text: `✓ 当前导入的路网 · ${Object.keys(world.network.roads).length} 条道路`,
     }
   } else {
-    // The city could not be loaded — the demo scene stays in the store
-    // and the view still works, but it must say so.
-    status.value = {
-      kind: 'error',
-      text: `路网载入失败（${city.error ?? '未知原因'}）— 显示当前场景`,
+    const city = await loadSampleCity()
+    if (city.ok) {
+      status.value = {
+        kind: 'info',
+        text: `✓ 福田路网 ${city.roadCount} 条道路 · ${city.vehicleCount} 辆车已就位`,
+      }
+    } else {
+      // The city could not be loaded — the demo scene stays in the store
+      // and the view still works, but it must say so.
+      status.value = {
+        kind: 'error',
+        text: `路网载入失败（${city.error ?? '未知原因'}）— 显示当前场景`,
+      }
     }
   }
 

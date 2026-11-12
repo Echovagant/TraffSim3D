@@ -215,6 +215,35 @@ describe('normalizeOsmPayload — the one-way flag survives the import', () => {
   })
 })
 
+describe('normalizeOsmPayload — the height limit survives the import', () => {
+  it('keeps `maxHeightM` on a road that has one', () => {
+    // The parser reads OSM's `maxheight` (the 春风隧道 tunnel is
+    // signed 3.5 m). It used to be dropped here, so the simulation
+    // never heard about it and a bus drove through a tunnel it does
+    // not fit under.
+    const { network } = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      roads: [{ ...BACKEND_PAYLOAD.roads[0], maxHeightM: 3.5 }, BACKEND_PAYLOAD.roads[1]],
+    })
+    expect(network.road('w-201')?.maxHeightM).toBe(3.5)
+  })
+
+  it('leaves the limit undefined when the road has none', () => {
+    // `maxheight=no` and `maxheight=default` mean "no limit", and the
+    // parser drops them — so an absent limit is the normal case.
+    const { network } = normalizeOsmPayload(BACKEND_PAYLOAD)
+    expect(network.road('w-201')?.maxHeightM).toBeUndefined()
+  })
+
+  it('ignores a nonsensical limit', () => {
+    const { network } = normalizeOsmPayload({
+      ...BACKEND_PAYLOAD,
+      roads: [{ ...BACKEND_PAYLOAD.roads[0], maxHeightM: 0 }, BACKEND_PAYLOAD.roads[1]],
+    })
+    expect(network.road('w-201')?.maxHeightM).toBeUndefined()
+  })
+})
+
 describe('normalizeOsmPayload — coordinate frame', () => {
   it('converts the backend frame (north-positive Z) into the app frame (north = -Z)', () => {
     const { network } = normalizeOsmPayload(BACKEND_PAYLOAD)

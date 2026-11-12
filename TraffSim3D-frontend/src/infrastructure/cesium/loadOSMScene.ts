@@ -18,7 +18,7 @@
 import * as Cesium from 'cesium'
 import { OSM_METERS_PER_DEGREE_LAT } from '@infrastructure/api/osmNetworkAdapter'
 import type { GeoOrigin, RoadNetwork } from '@domain/entities/RoadNetwork'
-import { roadWidthM, vehicleFitsRoad } from '@domain/services/roadAccess'
+import { roadWidthM, vehicleFitsRoad, roadHeightLimitM } from '@domain/services/roadAccess'
 
 export interface Bbox {
   /** South-west corner (lat, lng). */
@@ -443,6 +443,36 @@ export const loadOSMBuildings = async (
  * (north-positive, see `OSM_PAYLOAD_NORTH_IS_POSITIVE_Z`). This inverts
  * it back to degrees.
  */
+/** The road's two ends, each with the next point along the polyline. */
+const roadEnds = (
+  points: ReadonlyArray<{ x: number; y: number; z: number }>,
+): Array<{
+  at: { x: number; y: number; z: number }
+  next: { x: number; y: number; z: number }
+}> => {
+  if (points.length < 2) return []
+  return [
+    { at: points[0]!, next: points[1]! },
+    { at: points[points.length - 1]!, next: points[points.length - 2]! },
+  ]
+}
+
+/**
+ * The normal of the end segment, in the local frame.
+ *
+ * The bar and the gantry span the lane ON the normal, so they sit
+ * across the road whatever its heading is.
+ */
+const endNormal = (
+  at: { x: number; y: number; z: number },
+  next: { x: number; y: number; z: number },
+): { nx: number; nz: number } => {
+  const dx = next.x - at.x
+  const dz = next.z - at.z
+  const segLen = Math.hypot(dx, dz) || 1
+  return { nx: dz / segLen, nz: -dx / segLen }
+}
+
 export const loadNetworkRoads = async (
   viewer: Cesium.Viewer,
   network: RoadNetwork,
@@ -492,6 +522,88 @@ export const loadNetworkRoads = async (
       },
       properties: { access: fits ? 'road' : 'barred' },
     })
+
+    // The HEIGHT limit of this road, when the map states one (the
+    // 春风隧道 tunnel is signed 3.5 m). It is drawn as a GANTRY: a
+    // portal whose cross-beam sits AT the limit height, with the
+    // number on it — so the picture says "this is how low it is"
+    // instead of merely "something is forbidden here". A bus does not
+    // fit under it; the cars do, so the road itself is NOT drawn
+    // barred (only the vehicles that do not fit are kept off it).
+    const heightLimit = roadHeightLimitM(road)
+    if (heightLimit !== null) {
+      const half = roadWidthM(road) / 2
+      for (const { at, next } of roadEnds(points)) {
+        const junction = Object.values(network.intersections).find(
+          (i) =>
+            i.connectedRoads.includes(road.id) &&
+            Math.hypot(i.position.x - at.x, i.position.z - at.z) < 8,
+        )
+        if (!junction) continue
+        // Only where a car could actually turn in — a tunnel mouth in
+        // the middle of nowhere needs no sign.
+        const hasDrivableExit = junction.connectedRoads.some(
+          (id) => id !== road.id && network.roads[id] && vehicleFitsRoad(network.roads[id]!, 'car'),
+        )
+        if (!hasDrivableExit) continue
+        const { nx, nz } = endNormal(at, next)
+        const post = (side: number): Cesium.Cartesian3 => {
+          const ll = localToLngLat(origin, at.x + nx * side, at.z + nz * side)
+          // The posts stand on the ground and reach the limit height.
+          return Cesium.Cartesian3.fromDegrees(ll.lng, ll.lat, heightLimit / 2)
+        }
+        const beam = (side: number): Cesium.Cartesian3 => {
+          const ll = localToLngLat(origin, at.x + nx * side, at.z + nz * side)
+          return Cesium.Cartesian3.fromDegrees(ll.lng, ll.lat, heightLimit)
+        }
+        // The cross-beam, AT the limit height.
+        collection.entities.add({
+          corridor: {
+            positions: [beam(-half), beam(half)],
+            width: 0.18,
+            height: 0.18,
+            material: new Cesium.ColorMaterialProperty(
+              Cesium.Color.fromCssColorString(token('--dc-warning', '#f59e0b')),
+            ),
+          },
+          properties: { access: 'gantry' },
+        })
+        // The two posts.
+        for (const side of [-half, half]) {
+          collection.entities.add({
+            position: post(side),
+            cylinder: {
+              length: heightLimit,
+              topRadius: 0.08,
+              bottomRadius: 0.08,
+              material: new Cesium.ColorMaterialProperty(
+                Cesium.Color.fromCssColorString(token('--dc-warning', '#f59e0b')),
+              ),
+            },
+            properties: { access: 'gantry' },
+          })
+        }
+        // The number: "3.5 m", on the beam.
+        const labelPoint = (): Cesium.Cartesian3 => {
+          const ll = localToLngLat(origin, at.x, at.z)
+          return Cesium.Cartesian3.fromDegrees(ll.lng, ll.lat, heightLimit + 0.45)
+        }
+        collection.entities.add({
+          position: labelPoint(),
+          label: {
+            text: `${heightLimit.toFixed(1)} m`,
+            font: '600 15px system-ui, sans-serif',
+            fillColor: Cesium.Color.fromCssColorString(token('--dc-warning', '#f59e0b')),
+            outlineColor: Cesium.Color.fromCssColorString('#0b1220'),
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          properties: { access: 'gantry' },
+        })
+      }
+    }
 
     if (fits) continue
     // Barriers at every entrance a car could actually TRY: the road's
@@ -577,6 +689,21 @@ export const loadNetworkRoads = async (
         const bar = Cesium.Color.fromCssColorString(token('--dc-alert', '#f43f5e'))
         if (entity.corridor) entity.corridor.material = new Cesium.ColorMaterialProperty(bar)
         if (entity.cylinder) entity.cylinder.material = new Cesium.ColorMaterialProperty(bar)
+        continue
+      }
+      if (access === 'gantry') {
+        // The height gantry is a WARNING, not a prohibition: the cars
+        // go under it, the tall ones do not. It is therefore the
+        // warning colour, not the alert colour.
+        const gantry = Cesium.Color.fromCssColorString(token('--dc-warning', '#f59e0b'))
+        if (entity.corridor) entity.corridor.material = new Cesium.ColorMaterialProperty(gantry)
+        if (entity.cylinder) entity.cylinder.material = new Cesium.ColorMaterialProperty(gantry)
+        if (entity.label) {
+          entity.label.fillColor = new Cesium.ConstantProperty(gantry)
+          entity.label.outlineColor = new Cesium.ConstantProperty(
+            Cesium.Color.fromCssColorString(token('--dc-surface', '#0b1220')),
+          )
+        }
         continue
       }
       if (entity.corridor) {

@@ -2,12 +2,15 @@ import { describe, it, expect } from 'vitest'
 import {
   roadWidthM,
   vehicleFitsRoad,
+  vehicleFitsRoadHeight,
   vehicleRequiredWidthM,
+  vehicleRequiredHeightM,
+  roadHeightLimitM,
   effectiveLaneCount,
 } from './roadAccess'
 import type { Road } from '@domain/entities/Road'
 
-const makeRoad = (highway: string | undefined, laneCount: number): Road => ({
+const makeRoad = (highway: string | undefined, laneCount: number, maxHeightM?: number): Road => ({
   id: 'r-1',
   startNode: { x: 0, y: 0, z: 0 },
   endNode: { x: 10, y: 0, z: 0 },
@@ -15,6 +18,7 @@ const makeRoad = (highway: string | undefined, laneCount: number): Road => ({
   speedLimit: 20,
   level: 0,
   ...(highway === undefined ? {} : { highway }),
+  ...(maxHeightM === undefined ? {} : { maxHeightM }),
 })
 
 describe('roadWidthM — the class decides the lane metres', () => {
@@ -54,5 +58,45 @@ describe('vehicleFitsRoad — cars cannot scrape through the narrow lanes', () =
   it('a truck (2.2 m) fits single residential lanes but not the narrow ones', () => {
     expect(vehicleFitsRoad(makeRoad('residential', 1), 'truck')).toBe(true)
     expect(vehicleFitsRoad(makeRoad('unclassified', 1), 'truck')).toBe(false)
+  })
+})
+
+describe('the height limit — OSM `maxheight`', () => {
+  it('a road with no limit clears every vehicle', () => {
+    expect(roadHeightLimitM(makeRoad('trunk', 2))).toBeNull()
+    expect(vehicleFitsRoadHeight(makeRoad('trunk', 2), 'bus')).toBe(true)
+  })
+
+  it('the 春风隧道 tunnel (3.5 m) takes a car and refuses a bus', () => {
+    // The real numbers from the bundled Shenzhen extract: 春风隧道 is
+    // signed `maxheight=3.5`, and a bus is 3.4 m tall plus 0.2 m of
+    // clearance — 3.6 m, which does not fit under 3.5 m.
+    expect(roadHeightLimitM(makeRoad('trunk', 2, 3.5))).toBeCloseTo(3.5, 5)
+    expect(vehicleRequiredHeightM('car')).toBeCloseTo(1.8, 5)
+    expect(vehicleRequiredHeightM('bus')).toBeCloseTo(3.6, 5)
+
+    expect(vehicleFitsRoadHeight(makeRoad('trunk', 2, 3.5), 'car')).toBe(true)
+    expect(vehicleFitsRoadHeight(makeRoad('trunk', 2, 3.5), 'bus')).toBe(false)
+    expect(vehicleFitsRoadHeight(makeRoad('trunk', 2, 3.5), 'truck')).toBe(false)
+  })
+
+  it('a 5 m limit (梅观路) takes everything on the road', () => {
+    expect(vehicleFitsRoadHeight(makeRoad('trunk', 2, 5), 'car')).toBe(true)
+    expect(vehicleFitsRoadHeight(makeRoad('trunk', 2, 5), 'bus')).toBe(true)
+    expect(vehicleFitsRoadHeight(makeRoad('trunk', 2, 5), 'truck')).toBe(true)
+  })
+
+  it('the fit rule counts the height as well as the width', () => {
+    // Wide enough for a bus, too low for one: the bus is barred.
+    const tunnel = makeRoad('trunk', 2, 3.5)
+    expect(roadWidthM(tunnel)).toBeGreaterThan(vehicleRequiredWidthM('bus'))
+    expect(vehicleFitsRoad(tunnel, 'car')).toBe(true)
+    expect(vehicleFitsRoad(tunnel, 'bus')).toBe(false)
+  })
+
+  it('a nonsensical limit is treated as no limit', () => {
+    const road = makeRoad('trunk', 2, 0)
+    expect(roadHeightLimitM(road)).toBeNull()
+    expect(vehicleFitsRoadHeight(road, 'bus')).toBe(true)
   })
 })

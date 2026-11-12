@@ -222,11 +222,15 @@ export const STOP_LINE_BUFFER = 4.0
 
 export const VEHICLE_BODY_SPEC: Record<
   'car' | 'truck' | 'bus',
-  { length: number; width: number; mass: number }
+  { length: number; width: number; height: number; mass: number }
 > = {
-  car: { length: 4.2, width: 1.8, mass: 1500 },
-  truck: { length: 6.5, width: 2.2, mass: 4500 },
-  bus: { length: 9.0, width: 2.5, mass: 8000 },
+  // The heights are the ones that matter under a tunnel: a Chinese
+  // road tunnel is often signed at 3.5 m, which is above a car and
+  // below a bus. (The vehicle body table had no height at all, so
+  // there was nothing to compare a `maxheight` against.)
+  car: { length: 4.2, width: 1.8, height: 1.6, mass: 1500 },
+  truck: { length: 6.5, width: 2.2, height: 3.6, mass: 4500 },
+  bus: { length: 9.0, width: 2.5, height: 3.4, mass: 8000 },
 }
 
 // ===== signal controller constants =====

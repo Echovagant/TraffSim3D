@@ -244,6 +244,13 @@ const normalizeRoad = (raw: unknown): Road | null => {
   // is the one field that says WHICH kind of road this is — the
   // renderer needs it to draw the road hierarchy.
   const highway = typeof raw.highway === 'string' && raw.highway.length > 0 ? raw.highway : null
+  // The road's HEIGHT limit (OSM `maxheight`), when it has one. The
+  // parser keeps only a numeric limit, so anything else ("no",
+  // "default") arrives as absent — which is what "no limit" means.
+  const maxHeightM =
+    typeof raw.maxHeightM === 'number' && Number.isFinite(raw.maxHeightM) && raw.maxHeightM > 0
+      ? raw.maxHeightM
+      : null
   return {
     id,
     startNode,
@@ -256,6 +263,7 @@ const normalizeRoad = (raw: unknown): Road | null => {
     level: int(raw.level, 0),
     ...(oneway === null ? {} : { oneway }),
     ...(highway === null ? {} : { highway }),
+    ...(maxHeightM === null ? {} : { maxHeightM }),
   }
 }
 

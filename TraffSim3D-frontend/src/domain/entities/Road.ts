@@ -62,4 +62,18 @@ export interface Road {
    * this field existed — those roads carry no class.
    */
   highway?: string
+  /**
+   * The road's HEIGHT limit in metres, when it has one — the tunnel's
+   * 3.5 m, the underpass's 4 m.
+   *
+   * It comes from OSM's `maxheight` tag, which the parser reads and
+   * keeps as a number (`maxheight=no` and `maxheight=default` mean
+   * "no limit", and are dropped). A road with a limit is not a road
+   * every vehicle may use: a bus does not fit under a 3.5 m tunnel,
+   * and the simulation has to know that.
+   *
+   * `undefined` means no limit — every built-in scene, and every road
+   * whose `maxheight` says there is none.
+   */
+  maxHeightM?: number
 }

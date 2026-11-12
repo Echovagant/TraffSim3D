@@ -16,6 +16,12 @@
 // it physically is — the whole point of the white-model road ribbons)
 // and the SIMULATION (a vehicle that does not fit must never spawn on
 // or turn into such a road: it would scrape both curbs forever).
+//
+// The HEIGHT is the same kind of constraint, one dimension further
+// out: a road's `maxheight` (a tunnel's 3.5 m) decides whether a bus
+// may be on it at all. It is in this file for the same reason the width
+// is: the parser cannot know a vehicle's shape, so the rule that
+// consumes the limit lives next to the vehicle table.
 
 import type { Road } from '@domain/entities/Road'
 import type { Vehicle } from '@domain/entities/Vehicle'
@@ -74,6 +80,45 @@ export const vehicleRequiredWidthM = (type: Vehicle['type']): number =>
  * buildings that only pedestrians fit through). A bus is 2.5 m wide:
  * it needs a full 3.1 m, so single-lane residential streets exclude it
  * too.
+ *
+ * AND the road must clear the vehicle's HEIGHT. That is the rule the
+ * OSM `maxheight` tag feeds: the 春风隧道 tunnel is signed at 3.5 m,
+ * which takes a car (1.8 m) and refuses a bus (3.6 m). A road with no
+ * limit clears everything.
  */
 export const vehicleFitsRoad = (road: Road, type: Vehicle['type']): boolean =>
-  roadWidthM(road) >= vehicleRequiredWidthM(type)
+  roadWidthM(road) >= vehicleRequiredWidthM(type) && vehicleFitsRoadHeight(road, type)
+
+/**
+ * The road's height limit in metres, or null when it has none.
+ *
+ * `undefined` (the built-in scenes) and an explicit `null` both mean
+ * "no limit" — which is also what OSM's `maxheight=no` and
+ * `maxheight=default` mean, so the parser drops them.
+ */
+export const roadHeightLimitM = (road: Road): number | null => {
+  const limit = road.maxHeightM
+  if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) return null
+  return limit
+}
+
+/** A vehicle needs this much clearance above its body (roof equipment). */
+export const ROAD_MIN_HEIGHT_CLEARANCE_M = 0.2
+
+/** Vehicle height plus clearance — what a road must offer overhead. */
+export const vehicleRequiredHeightM = (type: Vehicle['type']): number =>
+  VEHICLE_BODY_SPEC[type].height + ROAD_MIN_HEIGHT_CLEARANCE_M
+
+/**
+ * Can the vehicle pass UNDER the road's height limit?
+ *
+ * A road with no limit clears every vehicle. A road limited to 3.5 m
+ * takes a car (1.6 m + 0.2 m clearance) and refuses a bus (3.4 m +
+ * 0.2 m) — which is why the 春风隧道 in the Shenzhen extract is a
+ * place where a bus cannot follow the cars.
+ */
+export const vehicleFitsRoadHeight = (road: Road, type: Vehicle['type']): boolean => {
+  const limit = roadHeightLimitM(road)
+  if (limit === null) return true
+  return vehicleRequiredHeightM(type) <= limit + 1e-9
+}
