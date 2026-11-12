@@ -12,7 +12,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, watch } from 'vue'
+import { onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useWorldSimulation } from '@interfaces/composables/useWorldSimulation'
 import { useCameraControls } from '@interfaces/composables/useCameraControls'
 import { useEditor } from '@interfaces/composables/useEditor'
@@ -39,6 +39,16 @@ const { handleMouseDown, handleMouseMove, handleMouseUp } = useEditor(rendererRe
 // + immediate OSM load) piling up fit animations.
 const world = useWorldStore()
 let fitTimer: number | null = null
+
+// The debounce timer must not outlive the component: a fit requested
+// in the last 200 ms before the view closed would still fire, and
+// would then move the camera of a renderer that is on its way out.
+onBeforeUnmount(() => {
+  if (fitTimer !== null) {
+    clearTimeout(fitTimer)
+    fitTimer = null
+  }
+})
 const requestFitForCurrent = (): void => {
   if (fitTimer !== null) clearTimeout(fitTimer)
   fitTimer = window.setTimeout(() => {

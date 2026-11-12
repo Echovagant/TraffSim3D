@@ -208,20 +208,35 @@ def _fetch_signal_nodes(bbox: BBox) -> list[tuple[float, float]]:
         # Overpass is often slow or busy. The city still loads without
         # the extra lights — a missing signal is not a broken map.
         return []
+    elements = data.get("elements") or []
+    # The nodes, indexed by their id.
+    #
+    # A signal is a NODE in most of the world and a WAY (the pole) in
+    # the rest — and the way's first node is where the light stands.
+    # Finding that node used to mean scanning the WHOLE element list
+    # once per way: O(ways × elements). The Shenzhen response has
+    # ~2 000 elements, so the scan was ~2 000 comparisons per way.
+    # One index turns it into a lookup.
+    by_id: dict[Any, dict[str, Any]] = {
+        element.get("id"): element
+        for element in elements
+        if element.get("type") == "node"
+    }
     nodes: list[tuple[float, float]] = []
-    for element in data.get("elements", []):
+    for element in elements:
         if element.get("type") == "node":
             lat, lon = element.get("lat"), element.get("lon")
             if lat is not None and lon is not None:
                 nodes.append((float(lat), float(lon)))
         elif element.get("type") == "way":
             for ref in element.get("nodes", [])[:1]:
-                for node in data.get("elements", []):
-                    if node.get("type") == "node" and node.get("id") == ref:
-                        lat, lon = node.get("lat"), node.get("lon")
-                        if lat is not None and lon is not None:
-                            nodes.append((float(lat), float(lon)))
-                        break
+                node = by_id.get(ref)
+                if node is None:
+                    continue
+                lat, lon = node.get("lat"), node.get("lon")
+                if lat is not None and lon is not None:
+                    nodes.append((float(lat), float(lon)))
+                break
     return nodes
 
 

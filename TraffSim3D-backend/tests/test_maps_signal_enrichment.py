@@ -101,3 +101,47 @@ def test_no_signal_nodes_leaves_the_network_alone() -> None:
     network = _network()
     assert attach_traffic_signals(network, []) == 0
     assert network["intersections"][0]["trafficLights"] == []
+
+
+# ---------------------------------------------------------------------------
+# The signal-node lookup
+# ---------------------------------------------------------------------------
+
+
+def test_the_way_spelling_of_a_signal_finds_its_node() -> None:
+    """A signal can be a node OR a way — and the way's first node is
+    where the light stands.
+
+    Finding that node used to mean scanning the whole element list
+    once per way (O(ways × elements)); it is an index lookup now.
+    The result must not change.
+    """
+    from app.api.v1.maps import _fetch_signal_nodes
+
+    elements = [
+        {"type": "node", "id": 1, "lat": 22.5, "lon": 114.0},
+        {"type": "node", "id": 2, "lat": 22.6, "lon": 114.1},
+        # A signal pole: a WAY whose first node is where the light is.
+        {"type": "way", "id": 100, "nodes": [2, 1], "tags": {"highway": "traffic_signals"}},
+    ]
+
+    class _FakeCache:
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        def __call__(self, query: str, **kwargs: object) -> dict:
+            self.queries.append(query)
+            return {"elements": elements}
+
+    import app.apps.maps.overpass_cache as cache_module
+
+    original = cache_module.cached_overpass_fetch
+    fake = _FakeCache()
+    cache_module.cached_overpass_fetch = fake  # type: ignore[assignment]
+    try:
+        nodes = _fetch_signal_nodes((22.4, 113.9, 22.7, 114.2))
+    finally:
+        cache_module.cached_overpass_fetch = original  # type: ignore[assignment]
+
+    # The node, the node, and the way's FIRST node.
+    assert nodes == [(22.5, 114.0), (22.6, 114.1), (22.6, 114.1)]
