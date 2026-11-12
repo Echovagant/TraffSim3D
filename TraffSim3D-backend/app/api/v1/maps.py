@@ -43,11 +43,26 @@ _BBOX_FIELDS = ("south", "west", "north", "east")
 # same rule as the Overpass cache (`parents[3]/geojson`).
 SAMPLE_OSM_FILE = Path(__file__).resolve().parents[3] / "geojson" / "福田中心(深圳).osm"
 
-# (south, west, north, east) — the 4.4 km × 4.1 km core of Futian. It is
+# (south, west, north, east) — the 4.4 km × 4.7 km core of Futian. It is
 # the same rectangle the Smart City basemap fetches (the frontend's
 # `DEFAULT_BBOX`), so the drawn city and the simulated city cover one
 # area instead of two that merely look alike.
-SAMPLE_BBOX: BBox = (22.52297, 114.04865, 22.56297, 114.08865)
+#
+# The eastern edge reaches the **春风隧道** (the Chunfeng tunnel), which
+# is signed `maxheight=3.5` — the one place in the extract where a
+# height limit bites. Including its western mouth is what puts a bus
+# somewhere it cannot go, and a height bar on the screen.
+#
+# The edge is at the tunnel's mouth rather than at its far end on
+# purpose: the whole tunnel would add 1 170 roads (the city would more
+# than double) and stretch the rectangle into a 9 km strip, for two
+# more segments of the same tunnel. Measured (2026-11-12):
+#
+#   east edge   size        roads   height-limited
+#   114.08865   4.4 × 4.0   988     0   (the old rectangle)
+#   114.09500   4.4 × 4.7   1 115   2   ← this one
+#   114.13865   4.4 × 9.0   2 160   6   (the whole tunnel)
+SAMPLE_BBOX: BBox = (22.52297, 114.04865, 22.56297, 114.09500)
 
 # The projection origin: the centre of the clipped area. The frontend
 # falls back to the same point for a network that carries no origin, so
@@ -190,8 +205,8 @@ def _fetch_signal_nodes(bbox: BBox) -> list[tuple[float, float]]:
     """The signal nodes of a rectangle, from Overpass (disk-cached).
 
     The bundled extract was generated from a roads-only GeoJSON, so the
-    signal nodes were never in the file: the parsed city had 1 120
-    junctions and 10 of them signalised. This puts the lights back.
+    signal nodes were never in the file: the parsed city had 1 264
+    junctions and 16 of them signalised. This puts the lights back.
 
     The budget is 15 s (not the 60 s the query itself asks Overpass
     for): the endpoint that calls this one serves the WHOLE city, and a
@@ -318,7 +333,7 @@ async def parse_sample() -> dict[str, Any]:
 async def sample_stats() -> dict[str, Any]:
     """The size of the bundled city — without shipping the whole network.
 
-    A page that states a number ("988 roads") should be able to CHECK
+    A page that states a number ("1 115 roads") should be able to CHECK
     it, and the check should not cost a megabyte of network. This
     endpoint counts the very same city `parse-sample` serves: the same
     file, the same rectangle, the same cached parse — so the numbers

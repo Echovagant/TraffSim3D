@@ -28,7 +28,11 @@ from app.main import app
 # The frontend's fallback tangent origin (viewer.ts). The sample's
 # projection origin has to BE this point, or the cars and the basemap
 # would not describe the same place.
-FRONTEND_TANGENT_ORIGIN = {"lat": 22.54297, "lon": 114.06865}
+# The frontend's fallback tangent origin (viewer.ts → DEFAULT_TANGENT_ORIGIN).
+# It is the CENTRE of the sample rectangle, so it moves with it: the
+# eastern edge reached the 春风隧道's mouth on 2026-11-12, and the
+# centre moved east with it.
+FRONTEND_TANGENT_ORIGIN = {"lat": 22.54297, "lon": 114.071825}
 
 
 @pytest.fixture
@@ -63,7 +67,7 @@ async def test_parse_sample_origin_is_the_drawn_rectangle_centre(
     # The sample's rectangle is the one the frontend fetches the
     # basemap for.
     south, west, north, east = maps_api.SAMPLE_BBOX
-    assert (south, west, north, east) == (22.52297, 114.04865, 22.56297, 114.08865)
+    assert (south, west, north, east) == (22.52297, 114.04865, 22.56297, 114.095)
 
 
 @pytest.mark.asyncio
@@ -93,7 +97,7 @@ async def test_sample_stats_counts_the_same_city_parse_sample_serves(
 ) -> None:
     """The stats endpoint must describe the SAME city, not a similar one.
 
-    A page that shows "988 roads" has to be able to check the number,
+    A page that shows "1 115 roads" has to be able to check the number,
     and the check has to be about the city the product actually drives
     on — so the counts are compared against the network `parse-sample`
     hands out, not against hardcoded numbers.

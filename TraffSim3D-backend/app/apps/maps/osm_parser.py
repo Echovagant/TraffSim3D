@@ -1501,7 +1501,7 @@ def parse_osmpbf(
 #
 # The bundled Shenzhen extract was generated from `roads.geojson`, which
 # carried only the ROADS — the `highway=traffic_signals` nodes were
-# dropped on the way. Measured on the parsed core: 1 120 junctions and
+# dropped on the way. Measured on the parsed core: 1 264 junctions and
 # **10** of them signalised (14 lights). That is not a city without
 # traffic lights; it is a city with its lights missing from the file.
 #
@@ -1546,7 +1546,7 @@ def attach_traffic_signals(
     # Bucket the signal nodes on a coarse grid (cell = match radius) so
     # each junction checks the handful of nodes in its own cell instead
     # of scanning all of them: O(I + S) instead of O(I × S) — on the
-    # Shenzhen core 1 120 × 268 ≈ 300 k distance checks per attach.
+    # Shenzhen core 1 264 × 302 ≈ 380 k distance checks per attach.
     cell = SIGNAL_MATCH_RADIUS_M
     buckets: dict[tuple[int, int], list[tuple[float, float]]] = {}
     for sx, sz in projected:

@@ -67,15 +67,24 @@ TraffSim3D-backend/tests/contract/snapshots/python_*.json
 # by the backend; user can `rm -rf` to force refresh from overpass-api.de)
 TraffSim3D-backend/geojson/cache/
 
-# ...EXCEPT the one response the demo city needs.
+# ...EXCEPT the responses the demo city needs.
 #
 # The signal-node query for the bundled Shenzhen rectangle: without it
 # `POST /maps/parse-sample` waits for overpass-api.de (up to the
 # request's own budget) before the city can be served — and on a slow
 # or restricted network that is 20+ seconds of a blank city, which is
-# what broke the CI e2e run. 50 kB, ODbL, and it makes the offline demo
+# what broke the CI e2e run. 55 kB, ODbL, and it makes the offline demo
 # offline in fact and not only in principle.
-!TraffSim3D-backend/geojson/cache/c9b347e931a7a7ad.json
+#
+# The key is the hash of the query TEXT, so it changes when the
+# rectangle changes (2026-11-12: the eastern edge reached the 春风隧道
+# to bring the city a real height limit).
+#
+# The BUILDINGS response for the same rectangle — 5.9 MB, and without
+# it a fresh clone has a city with no buildings whenever Overpass is
+# unreachable (which is the normal case on a Chinese network).
+!TraffSim3D-backend/geojson/cache/a7ff0b95fa6c15ec.json
+!TraffSim3D-backend/geojson/cache/cf1958b56341418e.json
 
 # Real-world map data files (large, downloaded/regenerable, not source):
 # keep geojson2osm.py tool but ignore the .geojson / .osm data blobs

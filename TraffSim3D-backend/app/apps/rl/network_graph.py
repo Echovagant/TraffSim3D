@@ -369,7 +369,7 @@ class _NodeGrid:
     """A grid index over the graph's nodes — the nearest-node lookup's index.
 
     The lookup is a nearest-node search with a 50 m cutoff, and it used
-    to scan EVERY node in the graph: on the 988-road Shenzhen extract
+    to scan EVERY node in the graph: on the 1 115-road Shenzhen extract
     the 210 lookups meant 254 300 `math.hypot` calls, which was 77 % of
     the whole graph build (measured, 2026-11-12).
 
