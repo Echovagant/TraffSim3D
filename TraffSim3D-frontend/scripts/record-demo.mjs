@@ -91,9 +91,72 @@ const main = async () => {
   })
   console.log('tracking:', ride)
   await page.waitForTimeout(8_000)
-  // 切驾驶视角：车里看街道。
-  await page.evaluate(() => window.__world.setRideMode('cockpit'))
-  await page.waitForTimeout(6_000)
+
+  // 驾驶舱：**一辆有信号灯的路段上的车**，这样仪表盘不只有速度，
+  // 还有前方信号灯的倒计时与灯色 —— 那是仪表盘上唯一会自己变化的
+  // 读数，也是这段镜头要讲的东西。
+  const cockpitRide = await page.evaluate(() => {
+    const w = window.__world
+    // The junctions that have a light, and the roads that reach them.
+    const signalledRoads = new Set()
+    for (const inter of Object.values(w.network.intersections)) {
+      if ((inter.trafficLights ?? []).length > 0) {
+        for (const id of inter.connectedRoads ?? []) signalledRoads.add(id)
+      }
+    }
+    const candidates = Object.values(w.network.vehicles)
+      .filter((v) => v.type === 'car' && v.speed > 4 && signalledRoads.has(v.roadId))
+      .sort((a, b) => b.speed - a.speed)
+    const car = candidates[0]
+    if (!car) return null
+    w.setRideVehicle(car.id, 'cockpit')
+    return car.id
+  })
+  console.log('cockpit:', cockpitRide)
+  await page.waitForTimeout(9_000)
+
+  // 窄巷限行杆：找一辆**正在驶向窄巷口**的车，用产品自己的跟车镜头拍。
+  //
+  // 限行杆只有 0.25 m 宽，靠相机硬算取景不可靠；换成"跟着一辆会经过
+  // 它��车"，画面里就有那根红杆与它挡住的那条暗巷。
+  const alleyRide = await page.evaluate(() => {
+    const w = window.__world
+    // The width rule, as the domain states it (roadAccess.ts): the lane
+    // metres per OSM class, one lane for the narrow classes.
+    const LANE = { unclassified: 2.2, living_street: 2.2, service: 1.8 }
+    const barred = (r) => {
+      const cls = (r.highway ?? '').toLowerCase()
+      const lanes =
+        cls === 'unclassified' || cls === 'living_street' || cls === 'service'
+          ? 1
+          : Math.max(1, r.laneCount ?? 2)
+      return lanes * (LANE[cls] ?? 3.0) < 2.4
+    }
+    const barredIds = new Set(
+      Object.values(w.network.roads)
+        .filter(barred)
+        .map((r) => r.id),
+    )
+    // The junctions where a narrow lane meets a road a car may use —
+    // the barrier stands at those mouths.
+    const mouths = []
+    for (const inter of Object.values(w.network.intersections)) {
+      const connected = inter.connectedRoads ?? []
+      if (connected.some((id) => barredIds.has(id)) && connected.some((id) => !barredIds.has(id))) {
+        mouths.push(inter)
+      }
+    }
+    const mouthRoads = new Set(mouths.flatMap((m) => m.connectedRoads ?? []))
+    const car = Object.values(w.network.vehicles).find(
+      (v) => v.type === 'car' && v.speed > 4 && mouthRoads.has(v.roadId),
+    )
+    if (!car) return null
+    w.setRideVehicle(car.id, 'chase')
+    return { id: car.id, mouths: mouths.length, barred: barredIds.size }
+  })
+  console.log('alley:', JSON.stringify(alleyRide))
+  await page.waitForTimeout(7_000)
+
   // 退出驾驶，回到鸟瞰收尾这一段。
   await page.evaluate(() => window.__world.setRideVehicle(null))
   await page.waitForTimeout(1_500)
