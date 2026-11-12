@@ -160,6 +160,112 @@
         }
       }
     },
+    "/api/v1/maps/signal-nodes": {
+      "get": {
+        "tags": [
+          "maps",
+          "maps"
+        ],
+        "summary": "Signal Nodes",
+        "description": "The traffic-signal nodes inside a rectangle (WGS84).",
+        "operationId": "signal_nodes_api_v1_maps_signal_nodes_get",
+        "parameters": [
+          {
+            "name": "south",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 90,
+              "minimum": -90,
+              "title": "South"
+            }
+          },
+          {
+            "name": "west",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 180,
+              "minimum": -180,
+              "title": "West"
+            }
+          },
+          {
+            "name": "north",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 90,
+              "minimum": -90,
+              "title": "North"
+            }
+          },
+          {
+            "name": "east",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 180,
+              "minimum": -180,
+              "title": "East"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Signal Nodes Api V1 Maps Signal Nodes Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maps/parse-sample": {
+      "post": {
+        "tags": [
+          "maps",
+          "maps"
+        ],
+        "summary": "Parse Sample",
+        "description": "Parse the city that ships with the backend into a RoadNetwork dict.\n\nThe repository carries a 7.4 MB OSM extract of 深圳福田中心\n(`geojson/福田中心(深圳).osm`). This endpoint parses the 4.4 km ×\n4.1 km core of it — the same rectangle the Smart City basemap draws\n— so the command centre can show a real city with cars driving on\nits roads, without an upload and without Overpass.\n\nThe projection origin is the centre of that rectangle, which is also\nthe frontend's fallback tangent origin (`DEFAULT_TANGENT_ORIGIN`):\nthe simulation and the basemap therefore describe one place.\n\nThe parse costs ~2 s the first time; the result is cached in memory\nand every later call returns the same network.",
+        "operationId": "parse_sample_api_v1_maps_parse_sample_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Parse Sample Api V1 Maps Parse Sample Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/maps/parse-pbf": {
       "post": {
         "tags": [

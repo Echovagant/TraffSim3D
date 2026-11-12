@@ -96,6 +96,12 @@ export type PathsApiV1PingGetResponse = Record<string, boolean>
 /** `POST /api/v1/maps/parse-osm` → 200 */
 export type PathsApiV1MapsParseOsmPostResponse = Record<string, unknown>
 
+/** `GET /api/v1/maps/signal-nodes` → 200 */
+export type PathsApiV1MapsSignalNodesGetResponse = Record<string, unknown>
+
+/** `POST /api/v1/maps/parse-sample` → 200 */
+export type PathsApiV1MapsParseSamplePostResponse = Record<string, unknown>
+
 /** `POST /api/v1/maps/parse-pbf` → 200 */
 export type PathsApiV1MapsParsePbfPostResponse = Record<string, unknown>
 
@@ -164,6 +170,8 @@ export type PathsHealthGetResponse = Record<string, string>
 export interface OpenApiPaths {
   "/api/v1/ping": { get: PathsApiV1PingGetResponse }
   "/api/v1/maps/parse-osm": { post: PathsApiV1MapsParseOsmPostResponse }
+  "/api/v1/maps/signal-nodes": { get: PathsApiV1MapsSignalNodesGetResponse }
+  "/api/v1/maps/parse-sample": { post: PathsApiV1MapsParseSamplePostResponse }
   "/api/v1/maps/parse-pbf": { post: PathsApiV1MapsParsePbfPostResponse }
   "/api/v1/maps/poi": { post: PathsApiV1MapsPoiPostResponse }
   "/api/v1/maps/overpass": { get: PathsApiV1MapsOverpassGetResponse }
