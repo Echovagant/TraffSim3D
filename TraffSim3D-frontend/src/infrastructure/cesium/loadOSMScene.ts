@@ -719,17 +719,24 @@ export const loadNetworkRoads = async (
 }
 
 /**
- * Default bbox around **深圳福田中心** (~4.4 km × 4.1 km).
+ * Default bbox around **深圳福田中心** (~4.4 km × 4.7 km).
  *
  * It is the city the project's own map data comes from
  * (`geojson/福田中心(深圳).osm`), so the Smart City view, the POI
  * layer and the imported maps are all about the same place.
+ *
+ * The eastern edge reaches the 春风隧道's mouth — the one stretch of
+ * the extract with a height limit (`maxheight=3.5`), so the city can
+ * show a road a bus may not enter. It must stay the SAME rectangle as
+ * the backend's `SAMPLE_BBOX`: one is the area the basemap draws, the
+ * other is the area the simulation drives, and they only describe one
+ * place when they are the same rectangle.
  */
 export const DEFAULT_BBOX: Bbox = {
   south: 22.52297,
   west: 114.04865,
   north: 22.56297,
-  east: 114.08865,
+  east: 114.095,
 }
 
 /**

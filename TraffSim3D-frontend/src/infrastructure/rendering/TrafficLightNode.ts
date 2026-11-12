@@ -239,7 +239,7 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
 
   /** What each node last had written — a light whose phase, blink
    *  visibility and countdown bar are unchanged writes nothing. On an
-   *  imported city that is ~460 lights × 4 attribute writes + 4 whole
+   *  imported city that is ~531 lights × 4 attribute writes + 4 whole
    *  GPU buffer uploads per frame, saved. */
   const lastWritten = new Map<string, { phase: string; visible: boolean; bar: number }>()
 

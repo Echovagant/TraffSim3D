@@ -17,6 +17,19 @@ export interface Vehicle {
   position: Position
   /** World-space heading in radians. Derived from lane direction. */
   heading: number
+  /**
+   * The road's SLOPE under the vehicle, in radians.
+   *
+   * Positive means the road climbs in the direction of travel. The
+   * renderer leans the vehicle by this much, so a car on the elevated
+   * scene's ramp **drives up it** instead of sliding across it
+   * sideways — the position already followed the ramp's height, only
+   * the lean was missing.
+   *
+   * `undefined` (every scene saved before this field existed, and the
+   * built-in scenes) means level.
+   */
+  pitch?: number
   /** Current speed in m/s. */
   speed: number
   /** Desired / target speed (m/s). Normally the road's speed limit. */

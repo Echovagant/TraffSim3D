@@ -410,7 +410,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     for (const inter of Object.values(network.intersections)) {
       // Junctions without lights have nothing to control — and on an
       // imported city they are the MAJORITY (the Shenzhen core: 856 of
-      // 1 120 junctions carry no signal). decide() allocates a plan and
+      // 1 264 junctions carry no signal). decide() allocates a plan and
       // a per-axis views record per call, so running it for an empty
       // junction was 856 object allocations + three function calls per
       // tick, every tick, for nothing. Measured: this skip is the
@@ -1091,11 +1091,17 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // y = 0.749 (the ground) while the road at its arc length was at
       // y = 2.0 – 3.1 — a 1.3 – 2.4 m error that grew along the ramp.
       if (vRoad) {
-        const roadY = lanePoint(vRoad, v.laneIndex, v.s).position.y
+        // One lane point gives both the road's height here and the
+        // slope the vehicle leans by (the ramp). The slope used to be
+        // missing entirely: the car followed the ramp's height but
+        // stayed level, so it slid up the ramp sideways.
+        const lp = lanePoint(vRoad, v.laneIndex, v.s)
+        const roadY = lp.position.y
         if (Math.abs(v.position.y - roadY) > 0.01) {
           v.position.y = roadY
           ctx.rapierWorld!.setVehicleHeight(v.id, roadY)
         }
+        v.pitch = lp.pitch
       }
     }
 
@@ -1274,6 +1280,9 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       v.position.y = lp.position.y
       v.position.z = lp.position.z
       v.heading = lp.heading
+      // The road's slope: the vehicle leans by it, exactly as the
+      // physics path does (the fallback path must LOOK the same).
+      v.pitch = lp.pitch
       // Lane change: this path has no lateral dynamics to integrate, so
       // the lateral offset is placed where the SAME P-controller the
       // physics path integrates would have put it: the lateral
@@ -1846,7 +1855,7 @@ const applyTrafficLightConstraint = (
   if (isReplayDriven(ctx, v)) return
   // The junctions ON THIS ROAD, from the per-tick index — not a scan of
   // every junction in the network. The scan was O(junctions) per
-  // vehicle per tick: on the imported Shenzhen core (1 120 junctions)
+  // vehicle per tick: on the imported Shenzhen core (1 264 junctions)
   // and ~90 cars that is 100 000 property lookups per frame, every
   // frame. The index answers the same question in O(junctions on the
   // road) — two or three.

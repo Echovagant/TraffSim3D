@@ -62,8 +62,11 @@ describe('LidarSensor', () => {
     cfg.scanIntervalSec = 0
     const sensor = new LidarSensor(cfg)
     const world = makeMockWorld([
-      { point: { x: 1, y: 0, z: 0 }, distance: 5, colliderHandle: 'self-handle' },
-      { point: { x: 2, y: 0, z: 0 }, distance: 5, colliderHandle: 'other' },
+      // An obstacle's height, not the ground's: a hit at the bare
+      // ground level would be dropped as a floor return (the ground's
+      // top surface IS the road level now).
+      { point: { x: 1, y: 1, z: 0 }, distance: 5, colliderHandle: 'self-handle' },
+      { point: { x: 2, y: 1, z: 0 }, distance: 5, colliderHandle: 'other' },
     ])
     const frame = scanOnce(sensor, world)
     // First ray: self-hit → NaN
@@ -73,8 +76,8 @@ describe('LidarSensor', () => {
   })
 
   it('floor returns are dropped: hits at the bare-ground level are not obstacles', () => {
-    // The physics floor's top surface sits at GROUND_TOP_Y (one vehicle
-    // half-height below the road plane). Rays that leave the road
+    // The physics floor's top surface IS the road plane
+    // (`GROUND_TOP_Y`). Rays that leave the road
     // network hit it and used to paint radial fans on the bare ground
     // beyond the map edge — the "floating LiDAR fan" (user report
     // 2026-11-07). A floor return (point at GROUND_TOP_Y) must read as
@@ -104,8 +107,8 @@ describe('LidarSensor', () => {
     cfg.scanIntervalSec = 0
     const sensor = new LidarSensor(cfg)
     const world = makeMockWorld([
-      { point: { x: 1, y: 0, z: 0 }, distance: 10, colliderHandle: null },
-      { point: { x: 1, y: 0, z: 0 }, distance: 80, colliderHandle: null },
+      { point: { x: 1, y: 1, z: 0 }, distance: 10, colliderHandle: null },
+      { point: { x: 1, y: 1, z: 0 }, distance: 80, colliderHandle: null },
     ])
     const frame = scanOnce(sensor, world)
     expect(frame.intensities[0]!).toBeGreaterThan(frame.intensities[1]!)
@@ -118,8 +121,8 @@ describe('LidarSensor', () => {
     cfg.scanIntervalSec = 1.0
     const sensor = new LidarSensor(cfg)
     const world = makeMockWorld([
-      { point: { x: 1, y: 0, z: 0 }, distance: 5, colliderHandle: null },
-      { point: { x: 1, y: 0, z: 0 }, distance: 5, colliderHandle: null },
+      { point: { x: 1, y: 1, z: 0 }, distance: 5, colliderHandle: null },
+      { point: { x: 1, y: 1, z: 0 }, distance: 5, colliderHandle: null },
     ])
     // First scan at t=0: fresh frame
     const f1 = sensor.scan(world, 0, { position: { x: 0, y: 0, z: 0 }, heading: 0 })

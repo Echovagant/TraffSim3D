@@ -31,7 +31,7 @@ export interface BuiltScene {
    * The signal heads of the whole network, in three draw calls.
    *
    * `null` in smart-city mode: an imported city carries thousands of
-   * junctions (Futian: 1 120), so the light heads alone were ~3 000
+   * junctions (Futian: 1 264), so the light heads alone were ~3 000
    * scene-graph nodes that the basemap renders as a couple of pixels —
    * and Three.js paid for every one of them on every frame (measured:
    ~35% of total CPU in scene-graph traversal). The dashboard's
@@ -222,7 +222,7 @@ export const syncSceneContents = (network: RoadNetwork, built: BuiltScene): void
   if (built.lightLayer) {
     // The set diff WITHOUT allocating: collectLights materialises an
     // array of every light in the network — on an imported city that
-    // is ~460 objects built and dropped EVERY FRAME just to compare a
+    // is ~531 objects built and dropped EVERY FRAME just to compare a
     // count. Walk the intersections directly instead; the array is
     // only built when a rebuild is actually needed.
     let liveCount = 0

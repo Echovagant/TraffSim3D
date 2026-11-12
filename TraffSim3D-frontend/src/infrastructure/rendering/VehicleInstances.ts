@@ -46,6 +46,8 @@ interface SlotData {
   py: number
   pz: number
   heading: number
+  /** The lean (the road's slope), in radians. */
+  pitch: number
 }
 
 export interface VehicleInstances {
@@ -126,6 +128,7 @@ export const createVehicleInstances = (): VehicleInstances => {
         py: 0,
         pz: 0,
         heading: 0,
+        pitch: 0,
       })
     }
   }
@@ -142,8 +145,9 @@ export const createVehicleInstances = (): VehicleInstances => {
     const slotIdx = free.pop()!
 
     const cfg = TYPE_CONFIG[type]
+    const pitch = v.pitch ?? 0
     _pos.set(v.position.x, v.position.y + cfg.yCenter, v.position.z)
-    _euler.set(0, -v.heading, 0)
+    _euler.set(0, -v.heading, pitch)
     _quat.setFromEuler(_euler)
     _scale.set(1, 1, 1)
     const mat4 = new THREE.Matrix4()
@@ -160,6 +164,7 @@ export const createVehicleInstances = (): VehicleInstances => {
     slots[type][slotIdx].py = v.position.y
     slots[type][slotIdx].pz = v.position.z
     slots[type][slotIdx].heading = v.heading
+    slots[type][slotIdx].pitch = pitch
 
     slotToEntity[type].set(slotIdx, v.id)
     entityToSlot[type].set(v.id, slotIdx)
@@ -255,17 +260,29 @@ export const createVehicleInstances = (): VehicleInstances => {
 
     const mesh = meshes[type]
     const slot = slots[type][slotIdx]
+    const pitch = v.pitch ?? 0
 
     // Dirty-check: skip matrix re-upload if position + heading unchanged.
     const moved =
       slot.px !== v.position.x ||
       slot.py !== v.position.y ||
       slot.pz !== v.position.z ||
-      slot.heading !== v.heading
+      slot.heading !== v.heading ||
+      slot.pitch !== pitch
     if (moved) {
       const cfg = TYPE_CONFIG[type]
       _pos.set(v.position.x, v.position.y + cfg.yCenter, v.position.z)
-      _euler.set(0, -v.heading, 0)
+      // The lean: the road's slope under the vehicle. Without it a car
+      // on a ramp follows the ramp's HEIGHT but stays level — it
+      // slides up the slope sideways instead of driving up it.
+      //
+      // The lean is about the car's LATERAL axis (z), not about its
+      // length axis (x): a car on a slope pitches NOSE UP, and a
+      // rotation about x would roll it sideways. The euler's order is
+      // XYZ, so the z rotation is applied in the car's own frame —
+      // first the lean, then the yaw — which is what a car on a ramp
+      // does.
+      _euler.set(0, -v.heading, pitch)
       _quat.setFromEuler(_euler)
       slot.matrix.compose(_pos, _quat, _scale)
       mesh.setMatrixAt(slotIdx, slot.matrix)
@@ -274,6 +291,7 @@ export const createVehicleInstances = (): VehicleInstances => {
       slot.py = v.position.y
       slot.pz = v.position.z
       slot.heading = v.heading
+      slot.pitch = pitch
     }
 
     const newColor = _white.set(v.color)

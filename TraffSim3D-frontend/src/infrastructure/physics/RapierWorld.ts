@@ -86,6 +86,20 @@ const FIXED_DT_EPSILON = 1e-9
  * derived — instead of being written down a second time here, so the
  * ground cannot drift away from the colliders it has to carry.
  */
+/**
+ * The physics floor's top surface — the ROAD level.
+ *
+ * The vehicle's box SITS ON the road: its centre is the road level
+ * plus the vehicle's own half-height, so the box spans the road up to
+ * its real height (a car 1.6 m, a bus 3.4 m). The ground therefore
+ * has its top surface AT the road level, and every type rests on it
+ * exactly.
+ *
+ * It used to be one vehicle half-height BELOW the road, because every
+ * vehicle then had the same flat 1.5 m box centred on the road — the
+ * ground had to sink under them all, and the car was half buried.
+ * With the real per-type heights the box can sit where it belongs.
+ */
 const VEHICLE_COLLIDER_HALF_HEIGHT = ((): number => {
   const zero = { x: 0, y: 0, z: 0 }
   const types = ['car', 'truck', 'bus'] as const
@@ -101,13 +115,22 @@ const VEHICLE_COLLIDER_HALF_HEIGHT = ((): number => {
  * floor returns, which otherwise paint radial fans on the bare ground
  * beyond the road network (measured 2026-11-07).
  */
-export const GROUND_TOP_Y = -VEHICLE_COLLIDER_HALF_HEIGHT
+export const GROUND_TOP_Y = 0
 
 export class RapierWorld {
   private R: typeof import('@dimforge/rapier3d-compat') | null = null
   private world: World | null = null
   private eventQueue: EventQueue | null = null
   private bodies: HandleMap = new Map()
+  /**
+   * Each vehicle's collider half-height.
+   *
+   * The body's CENTRE is the road level plus this: the box sits ON the
+   * road (its bottom at the road surface), so the application layer's
+   * "the vehicle is at the road's height" stays true while the box
+   * occupies the space above it.
+   */
+  private vehicleHalfHeights: Map<string, number> = new Map()
   private colliders: HandleMap = new Map()
   private colliderHandleToVehicleIdMap: Map<number, string> = new Map()
   private bodyForCollider: Map<number, number> = new Map() // collider handle → body handle
@@ -202,6 +225,24 @@ export class RapierWorld {
     // ground 不入 body map — readPose 不会问到.
   }
 
+  /**
+   * Where a vehicle's rigid body sits, given the vehicle's own
+   * position.
+   *
+   * The application's position is the vehicle's ORIGIN — the road
+   * surface under it. The collider box is centred on the road level
+   * plus the vehicle's half-height, so the box stands ON the road
+   * (its underside at the road surface) instead of being half buried
+   * in it.
+   */
+  private bodyCenter(spec: RigidBodySpec): { x: number; y: number; z: number } {
+    return {
+      x: spec.position.x,
+      y: spec.position.y + spec.halfExtents.y,
+      z: spec.position.z,
+    }
+  }
+
   registerVehicle(spec: RigidBodySpec): string {
     if (this.destroyed) throw new Error('RapierWorld already destroyed')
     if (!this.R || !this.world) throw new Error('RapierWorld not initialized — call init() first')
@@ -210,9 +251,10 @@ export class RapierWorld {
     if (existing !== undefined) {
       const body = this.world.getRigidBody(existing)
       if (body) {
-        body.setTranslation(this.toRapierVec3(spec.position), true)
+        body.setTranslation(this.toRapierVec3(this.bodyCenter(spec)), true)
         body.setRotation(this.toRapierQuat(spec.heading), true)
         body.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        this.vehicleHalfHeights.set(spec.vehicleId, spec.halfExtents.y)
         return spec.vehicleId
       }
     }
@@ -254,7 +296,7 @@ export class RapierWorld {
     // angular velocity of a body that is commanded to a stop), not by
     // letting the damping silently slow the vehicle down.
     const bodyDesc = this.R.RigidBodyDesc.dynamic()
-      .setTranslation(spec.position.x, spec.position.y, spec.position.z)
+      .setTranslation(spec.position.x, spec.position.y + spec.halfExtents.y, spec.position.z)
       .setRotation(this.toRapierQuat(spec.heading))
       .setLinearDamping(0)
       .setAngularDamping(0)
@@ -271,6 +313,7 @@ export class RapierWorld {
     const bodyHandle = body.handle
     const colliderHandle = collider.handle
     this.bodies.set(spec.vehicleId, bodyHandle)
+    this.vehicleHalfHeights.set(spec.vehicleId, spec.halfExtents.y)
     this.colliders.set(spec.vehicleId, colliderHandle)
     this.colliderHandleToVehicleIdMap.set(colliderHandle, spec.vehicleId)
     this.bodyForCollider.set(colliderHandle, bodyHandle)
@@ -431,7 +474,10 @@ export class RapierWorld {
     if (bodyHandle === undefined) return
     const body = this.world.getRigidBody(bodyHandle)
     if (!body) return
-    body.setTranslation({ x: position.x, y: position.y, z: position.z }, true)
+    // The box sits ON the road: the body's centre is the given height
+    // (the road's own) plus the vehicle's half-height.
+    const half = this.vehicleHalfHeights.get(vehicleId) ?? 0
+    body.setTranslation({ x: position.x, y: position.y + half, z: position.z }, true)
     body.setLinvel({ x: 0, y: 0, z: 0 }, true)
   }
 
@@ -457,7 +503,11 @@ export class RapierWorld {
     const body = this.world.getRigidBody(bodyHandle)
     if (!body) return
     const t = body.translation()
-    body.setTranslation({ x: t.x, y, z: t.z }, true)
+    // `y` is the ROAD's height (the application layer's convention);
+    // the body's centre is that plus the vehicle's half-height, so the
+    // box keeps sitting on the road.
+    const half = this.vehicleHalfHeights.get(vehicleId) ?? 0
+    body.setTranslation({ x: t.x, y: y + half, z: t.z }, true)
   }
 
   /**
@@ -536,7 +586,20 @@ export class RapierWorld {
     // Build a new spec from RapierBodySpec and re-register.
     // The caller is responsible for updating the entity's type field;
     // here we just need the physical body to match the new type.
-    const spec = buildRigidBodySpec(vehicleId, newType, { x: pos.x, y: pos.y, z: pos.z }, heading)
+    //
+    // The body's translation is its CENTRE (the road level plus the
+    // collider's half-height), so the vehicle's ORIGIN — the road level
+    // it stands on — is the centre minus that half-height. Passing the
+    // centre straight on would raise the new body by a half-height a
+    // second time: a car that became a bus would float above the road.
+    const oldHalfHeight = this.vehicleHalfHeights.get(vehicleId) ?? 0
+    const roadLevelY = pos.y - oldHalfHeight
+    const spec = buildRigidBodySpec(
+      vehicleId,
+      newType,
+      { x: pos.x, y: roadLevelY, z: pos.z },
+      heading,
+    )
     this.registerVehicle(spec)
     // Restore velocity on the new body.
     this.setVehicleSpeed(vehicleId, Math.hypot(linvel.x, linvel.z), heading)
@@ -612,7 +675,13 @@ export class RapierWorld {
     const heading = Math.atan2(2 * (r.w * r.y + r.x * r.z), 1 - 2 * (r.y * r.y + r.x * r.x))
     const lv = body.linvel()
     const speed = Math.hypot(lv.x, lv.z)
-    return { position: { x: t.x, y: t.y, z: t.z }, heading, speed }
+    // The body's translation is its CENTRE; the application's position
+    // is the vehicle's ORIGIN — the road surface under it. Handing the
+    // centre back would leave every vehicle floating by half its
+    // height, and the layer above (the lane frame, the road height
+    // check, the spawn rules) works in the origin's terms.
+    const half = this.vehicleHalfHeights.get(vehicleId) ?? 0
+    return { position: { x: t.x, y: t.y - half, z: t.z }, heading, speed }
   }
 
   castRay(origin: Vec3, dir: Vec3, maxRange: number): RayHit {

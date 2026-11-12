@@ -358,3 +358,46 @@ describe('createVehicleInstances — dispose', () => {
     expect(pool.trails.size).toBe(0)
   })
 })
+
+describe('the vehicle LEANS with the road', () => {
+  it("tilts the body by the road's slope", () => {
+    // A ramp at 11.3° (4 m up over 20 m).
+    const pitch = Math.atan2(4, 20)
+    const v = makeTestVehicle({ pitch, position: { x: 0, y: 0, z: 0 } })
+    pool.allocate(v)
+    pool.update(v)
+
+    const { quat } = decompose(pool.meshes.car, 0)
+    // The body's local X axis is the one that must tilt: a car on a
+    // slope leans about the axis along the road.
+    const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(quat)
+    expect(axis.y).toBeCloseTo(Math.sin(pitch), 6)
+  })
+
+  it('stays level when the road is level', () => {
+    const v = makeTestVehicle({ position: { x: 0, y: 0, z: 0 } })
+    pool.allocate(v)
+    pool.update(v)
+
+    const { quat } = decompose(pool.meshes.car, 0)
+    const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(quat)
+    expect(axis.y).toBeCloseTo(0, 6)
+  })
+
+  it('re-uploads the matrix when only the slope changes', () => {
+    const v = makeTestVehicle({ position: { x: 0, y: 0, z: 0 } })
+    pool.allocate(v)
+    pool.update(v)
+    const before = matrixAt(pool.meshes.car, 0).clone()
+
+    const onRamp = makeTestVehicle({ pitch: 0.2, position: { x: 0, y: 0, z: 0 } })
+    pool.update(onRamp)
+    const after = matrixAt(pool.meshes.car, 0)
+
+    expect(after.equals(before)).toBe(false)
+    const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(
+      new THREE.Quaternion().setFromRotationMatrix(after),
+    )
+    expect(axis.y).toBeCloseTo(Math.sin(0.2), 6)
+  })
+})

@@ -216,13 +216,18 @@ const buildTileUrl = (
  * its own projection origin.
  *
  * Why 深圳: it is the city the project's own map data comes from
- * (`geojson/福田中心(深圳).osm` — 51 715 nodes, and the centroid is
- * exactly these coordinates), so the Smart City view, the POI layer
- * and the imported maps all talk about the same place. The previous
- * anchor (天安门) was a placeholder that had nothing to do with the
- * data.
+ * (`geojson/福田中心(深圳).osm` — 51 715 nodes), so the Smart City
+ * view, the POI layer and the imported maps all talk about the same
+ * place. The previous anchor (天安门) was a placeholder that had
+ * nothing to do with the data.
+ *
+ * The coordinates are the CENTRE of the sample rectangle the backend
+ * clips (`SAMPLE_BBOX` in `app/api/v1/maps.py`): the simulation's
+ * projection origin and this fallback have to be the same point, or
+ * the basemap and the overlay would describe two places that merely
+ * look alike.
  */
-export const DEFAULT_TANGENT_ORIGIN = { lng: 114.06865, lat: 22.54297 }
+export const DEFAULT_TANGENT_ORIGIN = { lng: 114.071825, lat: 22.54297 }
 
 /**
  * Resolve the ENU tangent origin of a scene.

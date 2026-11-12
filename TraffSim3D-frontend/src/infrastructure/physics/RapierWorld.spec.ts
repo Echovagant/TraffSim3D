@@ -377,23 +377,27 @@ describe('RapierWorld — before init()', () => {
 // ---------------------------------------------------------------------------
 
 describe('RapierWorld — init()', () => {
-  it('builds exactly one fixed ground body whose TOP surface is one vehicle half-height below the road', async () => {
+  it('builds exactly one fixed ground body whose TOP surface is the road level', async () => {
     const w = new RapierWorld()
     await w.init()
     expect(R.state.worldCount).toBe(1)
     expect(vehicleBodies()).toHaveLength(0)
     const g = groundBody()
     expect(g.desc.kind).toBe('fixed')
-    // The ground's top surface sits one vehicle collider half-height
-    // (0.75 m) below the road level, so a vehicle body — whose centre the
-    // application layer keeps at the road's y — RESTS on the ground
-    // instead of being buried 0.75 m inside it. A buried body was pushed
-    // out by the contact solver with an impulse that torqued it: a car
-    // stopped at a red light drifted 0.79 rad while standing still.
-    // See `RapierWorld.buildGround`.
+    // The ground's top surface IS the road level: the vehicle's box
+    // SITS on the road (its centre is the road's y plus the vehicle's
+    // own half-height), so every type rests on it exactly — a car on
+    // its 1.6 m wheels, a bus on its 3.4 m ones.
+    //
+    // It used to be one half-height BELOW the road, because every
+    // vehicle then had the same flat 1.5 m box centred on the road
+    // and the ground had to sink under them all. A buried body was
+    // pushed out by the contact solver with an impulse that torqued
+    // it: a car stopped at a red light drifted 0.79 rad while
+    // standing still. See `RapierWorld.buildGround`.
     expect(g.desc.translation).toEqual({
       x: 0,
-      y: -(0.75 + DEFAULT_WORLD_CONFIG.groundThickness),
+      y: -DEFAULT_WORLD_CONFIG.groundThickness,
       z: 0,
     })
   })
@@ -450,7 +454,7 @@ describe('RapierWorld — init()', () => {
     expect(R.state.gravity).toEqual({ x: 0, y: -1.62, z: 0 })
     expect(groundBody().desc.translation).toEqual({
       x: 0,
-      y: -(0.75 + 2.5),
+      y: -2.5,
       z: 0,
     })
     expect(groundColliderDesc().halfExtents.y).toBe(2.5)
@@ -487,7 +491,7 @@ describe('RapierWorld — registerVehicle', () => {
     expect(Number(h)).toBe(R.state.colliders[1]!.handle)
   })
 
-  it('car: dynamic body, NO damping, collider (2.1, 0.75, 0.9) mass 1500 μ=0.5 e=0.2', async () => {
+  it('car: dynamic body, NO damping, collider (2.1, 0.8, 0.9) mass 1500 μ=0.5 e=0.2', async () => {
     const w = new RapierWorld()
     await w.init()
     w.registerVehicle(spec({ type: 'car' }))
@@ -504,14 +508,15 @@ describe('RapierWorld — registerVehicle', () => {
     expect(b.desc.angDamping).toBe(0)
     const d = vehicleColliderDescs()[0]!
     expect(d.halfExtents.x).toBeCloseTo(2.1, 10)
-    expect(d.halfExtents.y).toBe(0.75)
+    // The car's real height (1.6 m), not the flat 1.5 m everybody had.
+    expect(d.halfExtents.y).toBeCloseTo(0.8, 10)
     expect(d.halfExtents.z).toBeCloseTo(0.9, 10)
     expect(d.mass).toBe(1500)
     expect(d.friction).toBe(0.5)
     expect(d.restitution).toBe(0.2)
   })
 
-  it('bus: collider halfExtents (4.5, 0.75, 1.25) with mass 8000', async () => {
+  it('bus: collider halfExtents (4.5, 1.7, 1.25) with mass 8000', async () => {
     const w = new RapierWorld()
     await w.init()
     w.registerVehicle(bodySpec('v-1', 'bus'))
@@ -521,7 +526,7 @@ describe('RapierWorld — registerVehicle', () => {
     expect(d.mass).toBe(8000)
   })
 
-  it('truck: collider halfExtents (3.25, 0.75, 1.1) with mass 4500', async () => {
+  it('truck: collider halfExtents (3.25, 1.8, 1.1) with mass 4500', async () => {
     const w = new RapierWorld()
     await w.init()
     w.registerVehicle(bodySpec('v-1', 'truck'))
@@ -553,7 +558,9 @@ describe('RapierWorld — registerVehicle', () => {
     await w.init()
     w.registerVehicle(spec({ position: { x: 3, y: 0.5, z: -9 }, heading: Math.PI / 2 }))
     const b = vehicleBodies()[0]!
-    expect(b.translation()).toEqual({ x: 3, y: 0.5, z: -9 })
+    // The box sits ON the road: the body's centre is the road level
+    // (0.5) plus the car's half-height (0.8).
+    expect(b.translation()).toEqual({ x: 3, y: 1.3, z: -9 })
     // yaw-only quat: x = z = 0, y = sin(h/2), w = cos(h/2)
     const q = b.rotation()
     expect(q.x).toBe(0)
@@ -584,6 +591,8 @@ describe('RapierWorld — registerVehicle', () => {
     expect(vehicleBodies()).toHaveLength(1)
     expect(w.getColliderHandle('v-1')).toBe(handleBefore)
     const pose = w.readPose('v-1')!
+    // The pose hands back the vehicle's ORIGIN (the road surface
+    // under it), not the body's centre — see `RapierWorld.readPose`.
     expect(pose.position).toEqual({ x: 50, y: 1, z: -50 })
     expect(pose.heading).toBeCloseTo(1, 10)
     // the re-register path also zeroes linvel
@@ -1091,7 +1100,11 @@ describe('RapierWorld — updateVehicleType', () => {
     expect(d.mass).toBe(8000)
 
     const pose = w.readPose('v-1')!
-    expect(pose.position).toEqual({ x: 5, y: 0.3, z: -7 })
+    // The type swap keeps the vehicle on the SAME road: the bus's
+    // taller box sits on the road level the car stood on.
+    expect(pose.position.x).toBe(5)
+    expect(pose.position.y).toBeCloseTo(0.3, 10)
+    expect(pose.position.z).toBe(-7)
     expect(pose.heading).toBeCloseTo(0.7, 10)
     expect(pose.speed).toBeCloseTo(5, 10)
   })

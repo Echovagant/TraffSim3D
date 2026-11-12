@@ -118,7 +118,7 @@
           loading="lazy"
         />
         <figcaption>
-          城区仿真闭环 — 跟踪镜头跟在一辆仿真车后，穿过 988 条道路的白模城区。
+          城区仿真闭环 — 跟踪镜头跟在一辆仿真车后，穿过 1 115 条道路的白模城区。
         </figcaption>
       </figure>
     </section>
@@ -302,7 +302,7 @@ const milestones: readonly { date: string; title: string; desc: string }[] = [
   {
     date: '2026-11-08',
     title: '城区仿真闭环',
-    desc: '仿真网 = 绘制网（随包深圳福田 988 路）、哑光白模主题、点击跟踪与手动驾驶。',
+    desc: '仿真网 = 绘制网（随包深圳福田 1 115 路）、哑光白模主题、点击跟踪与手动驾驶。',
   },
   {
     date: '2026-11-09',

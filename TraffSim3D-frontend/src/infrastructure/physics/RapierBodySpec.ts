@@ -21,6 +21,18 @@ export interface RigidBodySpec {
   halfExtents: Vec3 // half of (length, height, width)
 }
 
+/**
+ * The body's dimensions.
+ *
+ * The HEIGHT is the vehicle's real height (a car 1.6 m, a bus 3.4 m),
+ * not a flat 1.5 m for everybody: the boxes have to be able to say
+ * "this one does not fit under that" — which is exactly what the OSM
+ * `maxheight` rule asks (a 3.5 m tunnel takes a car and refuses a bus).
+ *
+ * The box's half-height is also what places the body: the box SITS ON
+ * the road, so the body's centre is the road level plus this half
+ * (see `RapierWorld.registerVehicle`).
+ */
 export const buildRigidBodySpec = (
   vehicleId: string,
   type: VehicleType,
@@ -34,6 +46,6 @@ export const buildRigidBodySpec = (
     position,
     heading,
     mass: s.mass,
-    halfExtents: { x: s.length / 2, y: 0.75, z: s.width / 2 },
+    halfExtents: { x: s.length / 2, y: s.height / 2, z: s.width / 2 },
   }
 }

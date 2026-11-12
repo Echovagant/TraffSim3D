@@ -367,3 +367,60 @@ describe('nearestLanePointOnRoad — the arc-landing snap', () => {
     expect(nearestLanePointOnRoad(road, 50, -20, 0)).toBeNull()
   })
 })
+
+describe("the lane's SLOPE — the lean a vehicle on a ramp needs", () => {
+  /** A ramp: 20 m long, climbing 4 m — a 20 % gradient. */
+  const ramp: Road = {
+    id: 'r-ramp',
+    startNode: { x: 0, y: 0, z: 0 },
+    endNode: { x: 20, y: 4, z: 0 },
+    waypoints: [
+      { x: 0, y: 0, z: 0 },
+      { x: 5, y: 1, z: 0 },
+      { x: 10, y: 2, z: 0 },
+      { x: 15, y: 3, z: 0 },
+      { x: 20, y: 4, z: 0 },
+    ],
+    laneCount: 2,
+    speedLimit: 13.89,
+    level: 0,
+  }
+
+  it('is zero on a level road', () => {
+    const flat: Road = {
+      ...ramp,
+      waypoints: [
+        { x: 0, y: 0, z: 0 },
+        { x: 20, y: 0, z: 0 },
+      ],
+    }
+    expect(lanePoint(flat, 0, 10).pitch).toBeCloseTo(0, 10)
+  })
+
+  it("is the ramp's gradient, in the direction of travel", () => {
+    // 4 m up over 20 m along the road ⇒ atan(4/20) = 11.3°.
+    const expected = Math.atan2(4, 20)
+    const lp = lanePoint(ramp, 0, 10)
+    expect(lp.pitch).toBeCloseTo(expected, 10)
+    expect((lp.pitch * 180) / Math.PI).toBeCloseTo(11.3, 1)
+  })
+
+  it('flips for the lane that travels the other way', () => {
+    // The backward lane drives DOWN the same ramp, so its slope is
+    // negative — the lean follows the direction of travel, not the
+    // road's digitisation.
+    const forward = lanePoint(ramp, 0, 10).pitch
+    const backward = lanePoint(ramp, 1, 10).pitch
+    expect(backward).toBeCloseTo(-forward, 10)
+  })
+
+  it('comes with the height — the two agree on the same surface', () => {
+    // The arc length is the **3D** length (the ramp is longer than its
+    // footprint), so `s = 10` is a little before the middle — and the
+    // height is just under 2 m for the same reason.
+    const lp = lanePoint(ramp, 0, 10)
+    expect(lp.position.y).toBeGreaterThan(1.5)
+    expect(lp.position.y).toBeLessThan(2.5)
+    expect(lp.pitch).toBeGreaterThan(0)
+  })
+})

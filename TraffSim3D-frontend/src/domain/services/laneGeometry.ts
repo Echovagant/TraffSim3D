@@ -158,6 +158,16 @@ export interface LanePoint {
   position: Position
   /** Heading in radians, aligned with the lane's forward direction. */
   heading: number
+  /**
+   * The lane's SLOPE at this point, in radians.
+   *
+   * Positive means the road climbs in the direction of travel; negative
+   * means it descends. It is the angle between the road surface and the
+   * horizontal, so a vehicle standing on it has to lean by exactly
+   * this much — without it, a car on the elevated scene's ramp slides
+   * uphill sideways instead of driving up it.
+   */
+  pitch: number
 }
 
 /** `radius` defaults to STOP_LINE_DISTANCE * 2 = 10 m for back-compat
@@ -402,7 +412,11 @@ export const lanePoint = (road: Road, laneIndex: number, s: number): LanePoint =
   const wps = roadWaypoints(road)
   const len = roadLength(road)
   if (len < 1e-6 || wps.length < 2) {
-    return { position: { x: wps[0]?.x ?? 0, y: 0, z: wps[0]?.z ?? 0 }, heading: 0 }
+    return {
+      position: { x: wps[0]?.x ?? 0, y: 0, z: wps[0]?.z ?? 0 },
+      heading: 0,
+      pitch: 0,
+    }
   }
   const sClamped = Math.max(0, Math.min(len, s))
   const seg = segmentAt(road, sClamped)
@@ -427,6 +441,11 @@ export const lanePoint = (road: Road, laneIndex: number, s: number): LanePoint =
   // lane N-1 sits at -off. This matches the older formula and is what
   // the renderer expects when painting lane markings.
   const heading = Math.atan2(tanZ * sign, tanX * sign)
+  // The slope, in the direction this lane is travelled: a backward
+  // lane goes the other way, so the same ramp climbs for one lane and
+  // descends for the other.
+  const horizLen = Math.hypot(b.x - a.x, b.z - a.z)
+  const pitch = horizLen < 1e-6 ? 0 : Math.atan2(((b.y ?? 0) - (a.y ?? 0)) * sign, horizLen)
   return {
     position: {
       x: baseX + perpX * off,
@@ -434,6 +453,7 @@ export const lanePoint = (road: Road, laneIndex: number, s: number): LanePoint =
       z: baseZ + perpZ * off,
     },
     heading,
+    pitch,
   }
 }
 
