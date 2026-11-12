@@ -36,6 +36,11 @@ const PUBLIC = path.resolve(process.cwd(), 'public')
  * 交付页需要它——那一页的数字是**实时问后端要来的**，拍早了拍到的是
  * 「—」（未测量的占位符），那正是这张图不该出现的东西。
  */
+/** The chrome that hides behind the city in the picture shots. */
+const HIDE_CHROME = `
+  .dc-topbar, .bottom-bar, .col, .showcase-nav { visibility: hidden !important; }
+`
+
 const TILES = [
   { file: 'tiles/tile-scenelab.png', route: '/scene-editor', wait: 9000 },
   { file: 'tiles/tile-smartcity.png', route: '/smart-city', wait: 16000 },
@@ -105,18 +110,69 @@ const main = async () => {
     await shoot(tile.file, tile.wait, tile.ready)
   }
 
-  // The delivery page's timeline anchor: the chase view.
-  await page.setViewportSize(TIMELINE_VIEWPORT)
-  await page.goto(`${URL}/deliverables`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2000)
-  const anchor = page.locator('img[src="/timeline-chase.png"]')
-  if (await anchor.count()) {
-    const src = path.join(PUBLIC, 'timeline-chase.png')
-    const response = await page.request.get(`${URL}/timeline-chase.png`)
-    fs.writeFileSync(src, await response.body())
-    console.log(`  timeline-chase.png  ${(fs.statSync(src).size / 1024).toFixed(0)} KB`)
-  } else {
-    console.log('  timeline-chase.png  SKIPPED (the page no longer shows that image)')
+  // The delivery page's timeline anchor: the chase view of a car that
+  // is passing a barred alley (the red bar at its mouth).
+  //
+  // It used to be "the file the server serves, copied back" — a no-op
+  // that kept the OLD picture alive. It is a screenshot now, taken the
+  // same way the demo video picks the shot.
+  {
+    await page.setViewportSize(TIMELINE_VIEWPORT)
+    await page.goto(`${URL}/smart-city`, { waitUntil: 'domcontentloaded' })
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('[data-testid="osm-building-count"]')
+        return Boolean(el && Number((el.textContent ?? '0').replace(/\D/g, '')) > 0)
+      },
+      undefined,
+      { timeout: 120_000 },
+    )
+    await page.waitForTimeout(12_000)
+    const ride = await page.evaluate(() => {
+      const w = window.__world
+      const LANE = { unclassified: 2.2, living_street: 2.2, service: 1.8 }
+      const barred = (r) => {
+        const cls = (r.highway ?? '').toLowerCase()
+        const lanes =
+          cls === 'unclassified' || cls === 'living_street' || cls === 'service'
+            ? 1
+            : Math.max(1, r.laneCount ?? 2)
+        return lanes * (LANE[cls] ?? 3.0) < 2.4
+      }
+      const barredIds = new Set(
+        Object.values(w.network.roads)
+          .filter(barred)
+          .map((r) => r.id),
+      )
+      const mouths = []
+      for (const inter of Object.values(w.network.intersections)) {
+        const connected = inter.connectedRoads ?? []
+        if (
+          connected.some((id) => barredIds.has(id)) &&
+          connected.some((id) => !barredIds.has(id))
+        ) {
+          mouths.push(inter)
+        }
+      }
+      const mouthRoads = new Set(mouths.flatMap((m) => m.connectedRoads ?? []))
+      const car = Object.values(w.network.vehicles).find(
+        (v) => v.type === 'car' && v.speed > 4 && mouthRoads.has(v.roadId),
+      )
+      if (!car) return null
+      w.setRideVehicle(car.id, 'chase')
+      return car.id
+    })
+    if (!ride) {
+      console.log('  timeline-chase.png  SKIPPED (no car near a barred alley)')
+    } else {
+      // The anchor is an inline picture on the delivery page: the
+      // dashboard chrome would only cover the street.
+      await page.addStyleTag({ content: HIDE_CHROME })
+      await page.waitForTimeout(5_000)
+      const target = path.join(PUBLIC, 'timeline-chase.png')
+      await page.screenshot({ path: target })
+      console.log(`  timeline-chase.png  ${(fs.statSync(target).size / 1024).toFixed(0)} KB`)
+    }
   }
 
   await browser.close()
