@@ -44,14 +44,31 @@ const world = (page: import('@playwright/test').Page): Promise<PoiWorld> =>
  * junction it is about to reach), so a POI there sends the car
  * around the block — measured: the journey took **twice** as long.
  */
-const poiNextToARoad = async (page: import('@playwright/test').Page) =>
-  page.evaluate(() => {
+const poiNextToARoad = async (page: import('@playwright/test').Page) => {
+  // The scene has to be LOADED before "a road" means anything. Read
+  // too early and the network is still empty: the POI then lands in the
+  // middle of nowhere, the planner finds no route, and the test fails
+  // with a null destination. That is what happened on the CI runner,
+  // where the grid scene takes longer to build than the fixed wait
+  // below allowed for.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const w = (window as unknown as { __world?: PoiWorld }).__world
+          return Object.keys(w?.network?.roads ?? {}).length
+        }),
+      { timeout: 60_000 },
+    )
+    .toBeGreaterThan(0)
+  return page.evaluate(() => {
     const w = (window as unknown as { __world: PoiWorld }).__world
     const road = Object.values(w.network.roads)[0]!
     const line = road.waypoints ?? []
     const middle = line[Math.floor(line.length / 2)] ?? { x: 0, z: 0 }
     return { x: middle.x + 5, z: middle.z + 5 }
   })
+}
 
 test.describe('Driving to a point of interest', () => {
   // The car really drives: the journey is wall-clock time at the
@@ -114,9 +131,17 @@ test.describe('Driving to a point of interest', () => {
     await page.click('[data-testid="poi-go-button"]')
     await expect(page.locator('[data-testid="route-hud"]')).toBeVisible()
 
+    // The destination is set by the click, but the ROUTE comes back
+    // from the backend — so the state is polled rather than read once
+    // (a one-shot read on a slow runner saw the plan before it
+    // arrived).
+    await expect
+      .poll(async () => (await world(page)).poiDestinationId, { timeout: 30_000 })
+      .toBe('osm-node-1')
+    await expect
+      .poll(async () => (await world(page)).plannedRoute, { timeout: 30_000 })
+      .not.toBeNull()
     const planned = await world(page)
-    expect(planned.poiDestinationId).toBe('osm-node-1')
-    expect(planned.plannedRoute).not.toBeNull()
     expect(planned.plannedRoute!.roads.length).toBeGreaterThan(1)
     expect(planned.plannedRoute!.lengthM).toBeGreaterThan(0)
     // The first-person camera is switched on: choosing a destination

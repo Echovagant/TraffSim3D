@@ -111,19 +111,29 @@ test('Smart City: route mounts Cesium + Three.js canvases', async ({ page }) => 
   // tiles are GCJ-02 and sit hundreds of metres from the data
   // (measured at the project's own origin: 605 m). The attribution the
   // tile terms require rides along on the imagery layer.
-  const attribution = await page.evaluate(() => {
-    const viewer = (
-      window as unknown as {
-        __cesium?: {
-          imageryLayers: {
-            get: (i: number) => { imageryProvider?: { credit?: { html?: string } } }
-          }
-        }
-      }
-    ).__cesium
-    return viewer?.imageryLayers.get(0).imageryProvider?.credit?.html ?? null
-  })
-  expect(attribution).toContain('OpenStreetMap')
+  // The credit is a static string on the provider (`DEFAULT_IMAGERY`),
+  // but the PROVIDER only exists once the viewer has been created and
+  // the imagery layer added — which is a moment after the container is
+  // on the page. Read it with a wait: on the CI runner the viewer was
+  // not up yet and the one-shot read returned null.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const viewer = (
+            window as unknown as {
+              __cesium?: {
+                imageryLayers: {
+                  get: (i: number) => { imageryProvider?: { credit?: { html?: string } } }
+                }
+              }
+            }
+          ).__cesium
+          return viewer?.imageryLayers.get(0).imageryProvider?.credit?.html ?? null
+        }),
+      { timeout: 30_000 },
+    )
+    .toContain('OpenStreetMap')
 
   // NOTE: the basemap container is deliberately NOT screenshot-asserted.
   //
