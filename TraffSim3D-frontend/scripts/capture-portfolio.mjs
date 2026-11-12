@@ -29,14 +29,25 @@ const argOf = (name, fallback) => {
 const URL = argOf('url', 'http://127.0.0.1:5188')
 const PUBLIC = path.resolve(process.cwd(), 'public')
 
-/** 每个瓦片：去哪个页面、截哪一块、多等多久。 */
+/**
+ * 每个瓦片：去哪个页面、截哪一块、多等多久。
+ *
+ * `ready` 是一个选择器：等它出现再拍。没有它时只等固定时间。
+ * 交付页需要它——那一页的数字是**实时问后端要来的**，拍早了拍到的是
+ * 「—」（未测量的占位符），那正是这张图不该出现的东西。
+ */
 const TILES = [
   { file: 'tiles/tile-scenelab.png', route: '/scene-editor', wait: 9000 },
   { file: 'tiles/tile-smartcity.png', route: '/smart-city', wait: 16000 },
   { file: 'tiles/tile-ai.png', route: '/ai-playground', wait: 9000 },
   { file: 'tiles/tile-maplab.png', route: '/map-importer', wait: 9000 },
   { file: 'tiles/tile-backend.png', route: '/backend', wait: 9000 },
-  { file: 'tiles/tile-deliverables.png', route: '/deliverables', wait: 9000 },
+  {
+    file: 'tiles/tile-deliverables.png',
+    route: '/deliverables',
+    wait: 3000,
+    ready: '.cap-proof.is-live',
+  },
 ]
 
 /**
@@ -55,7 +66,12 @@ const main = async () => {
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e).slice(0, 200)))
 
-  const shoot = async (file, wait) => {
+  const shoot = async (file, wait, ready) => {
+    if (ready) {
+      // The live numbers have to be IN the picture — a shot of the
+      // placeholder is worse than no shot.
+      await page.waitForSelector(ready, { timeout: 30_000 })
+    }
     await page.waitForTimeout(wait)
     const target = path.join(PUBLIC, file)
     fs.mkdirSync(path.dirname(target), { recursive: true })
@@ -86,7 +102,7 @@ const main = async () => {
   await page.setViewportSize(TILE_VIEWPORT)
   for (const tile of TILES) {
     await page.goto(`${URL}${tile.route}`, { waitUntil: 'domcontentloaded' })
-    await shoot(tile.file, tile.wait)
+    await shoot(tile.file, tile.wait, tile.ready)
   }
 
   // The delivery page's timeline anchor: the chase view.

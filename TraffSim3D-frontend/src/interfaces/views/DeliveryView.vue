@@ -13,12 +13,26 @@
 
     <!-- ===== the numbers ===== -->
     <section class="facts" data-reveal>
-      <div class="fact"><b>1 255</b><span>前端单测</span></div>
-      <div class="fact"><b>58</b><span>e2e 用例</span></div>
+      <div class="fact"><b>1 259</b><span>前端单测</span></div>
+      <div class="fact"><b>57</b><span>e2e 用例</span></div>
       <div class="fact"><b>17</b><span>架构决策 ADR</span></div>
-      <div class="fact"><b>8</b><span>模块路由</span></div>
-      <div class="fact"><b>5 422</b><span>深圳福田建筑</span></div>
-      <div class="fact"><b>988</b><span>导入道路</span></div>
+      <!--
+        The city's own numbers are ASKED FOR, not remembered: the
+        backend counts the very network it serves. Before the answer
+        arrives the cell shows a dash rather than a guess.
+      -->
+      <div class="fact" :class="{ 'is-pending': !cityEvidence }">
+        <b>{{ cityEvidence?.roads ?? '—' }}</b
+        ><span>深圳福田道路</span>
+      </div>
+      <div class="fact" :class="{ 'is-pending': !cityEvidence }">
+        <b>{{ cityEvidence?.intersections ?? '—' }}</b
+        ><span>路口</span>
+      </div>
+      <div class="fact" :class="{ 'is-pending': !cityEvidence }">
+        <b>{{ cityEvidence?.trafficLights ?? '—' }}</b
+        ><span>信号灯</span>
+      </div>
     </section>
 
     <!-- ===== the architecture ===== -->
@@ -66,6 +80,16 @@
           <ul class="cap-list">
             <li v-for="f in c.features" :key="f">{{ f }}</li>
           </ul>
+          <!--
+            The evidence row: what the RUNNING product answered, per
+            capability. A capability that is only claimed has no
+            evidence row — and when the backend is unreachable the row
+            says that, rather than showing the old remembered numbers.
+          -->
+          <p v-if="proofFor(c)" class="cap-proof" :class="proofClass(c)">
+            <span class="cap-proof-tag">{{ proofTag(c) }}</span>
+            <span class="cap-proof-text">{{ proofFor(c) }}</span>
+          </p>
         </div>
       </div>
     </section>
@@ -160,12 +184,18 @@
  * from the shipped Shenzhen slice).
  */
 import { ShowcaseNav } from '@interfaces/components/showcase'
+import { useLiveEvidence } from '@interfaces/composables/useLiveEvidence'
 
 interface Capability {
   name: string
   state: 'live' | 'planned'
   desc: string
   features: string[]
+  /**
+   * Which live probe backs this card. The evidence row shows what the
+   * running product answered for it.
+   */
+  probe?: 'city' | 'rl'
 }
 
 const capabilities: readonly Capability[] = [
@@ -180,12 +210,14 @@ const capabilities: readonly Capability[] = [
     state: 'live',
     desc: '导入真实路网，在同源底图上跑仿真。',
     features: ['OSM / PBF 解析与路网生成', 'Cesium 底图 + Three.js 叠加', '大屏指挥读数'],
+    probe: 'city',
   },
   {
     name: '智能体训练',
     state: 'live',
     desc: '多智能体协商，策略在仿真里试错。',
     features: ['MAPPO 训练与 checkpoint', '训练曲线与回放', '信号策略热加载'],
+    probe: 'rl',
   },
   {
     name: '事故预测',
@@ -194,6 +226,47 @@ const capabilities: readonly Capability[] = [
     features: ['碰撞样本库', '危险路段识别', '给车主的风险解释'],
   },
 ]
+
+/**
+ * The evidence a card shows — what the running product answered.
+ *
+ * The rule the page follows: a number is shown only where it was
+ * MEASURED. When the backend did not answer, the card says so; it
+ * does not fall back to the numbers this page used to hardcode.
+ */
+const {
+  state: evidenceState,
+  city: cityEvidence,
+  rl: rlEvidence,
+  note: evidenceNote,
+} = useLiveEvidence()
+
+const proofFor = (c: Capability): string => {
+  if (c.probe === 'city') {
+    const city = cityEvidence.value
+    if (!city) return ''
+    return `${city.roads} 条道路 · ${city.intersections} 个路口 · ${city.trafficLights} 盏信号灯（随包切片 ${city.source}）`
+  }
+  if (c.probe === 'rl') {
+    const rl = rlEvidence.value
+    if (!rl) return ''
+    const device = rl.cuda ? rl.device : `${rl.device}（无 CUDA）`
+    return `${rl.checkpoints} 个 checkpoint · ${rl.scenes.length} 个训练场景 · torch ${rl.torch} · ${device}`
+  }
+  return ''
+}
+
+const proofTag = (c: Capability): string => {
+  if (evidenceState.value === 'probing') return '实测中'
+  if (evidenceState.value === 'offline') return '未连接'
+  return '实测'
+}
+
+const proofClass = (c: Capability): string => {
+  if (evidenceState.value === 'probing') return 'is-probing'
+  if (evidenceState.value === 'offline') return 'is-offline'
+  return 'is-live'
+}
 
 /**
  * The capability timeline — every entry names a stretch of real
@@ -313,6 +386,11 @@ const screens: ReadonlyArray<{ to: string; name: string; sub: string; tile: stri
   letter-spacing: 0.1em;
   color: var(--dc-text-faint);
 }
+/* A number that has not been measured yet: the dash is dimmed, so the
+   eye reads "not known" instead of "zero". */
+.fact.is-pending b {
+  color: var(--dc-text-faint);
+}
 .block {
   max-width: 900px;
   margin: 0 auto 56px;
@@ -383,6 +461,41 @@ const screens: ReadonlyArray<{ to: string; name: string; sub: string; tile: stri
   border: 1px solid var(--dc-hairline);
   border-radius: var(--dc-radius);
   background: color-mix(in srgb, var(--dc-panel) 70%, transparent);
+}
+/* The evidence row: what the running product answered for this
+   capability. It sits at the bottom of the card, separated by a
+   hairline, so it reads as a measurement rather than as another
+   feature bullet. */
+.cap-proof {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--dc-hairline);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dc-text-faint);
+}
+.cap-proof-tag {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  border: 1px solid currentColor;
+  color: var(--dc-text-faint);
+}
+.cap-proof.is-live .cap-proof-tag {
+  color: var(--dc-flow);
+}
+.cap-proof.is-live .cap-proof-text {
+  color: var(--dc-text);
+}
+.cap-proof.is-probing .cap-proof-tag,
+.cap-proof.is-offline .cap-proof-tag {
+  color: var(--dc-text-faint);
+  opacity: 0.75;
 }
 .cap-head {
   display: flex;
