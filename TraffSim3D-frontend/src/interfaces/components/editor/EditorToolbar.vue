@@ -157,12 +157,11 @@
 // The native control's popup is an OS window (Windows paints the row
 // under the pointer with the system hover colour), so the control is
 // drawn instead — see components/command/AppSelect.vue.
-const CONTROLLER_OPTIONS = [
-  { value: 'fixed-cycle', label: '固定' },
-  { value: 'actuated', label: '感应' },
-  { value: 'coordinated', label: '协调 (绿波带)' },
-  { value: 'rl', label: 'RL (未实装·回退固定周期)' },
-]
+// The list lives in one place, and the RL entry says whether the
+// policy is ACTUALLY installed — see controllerOptions.ts.
+const CONTROLLER_OPTIONS = computed(() =>
+  controllerOptions(!!world.signalPolicy, world.signalPolicyOrigin),
+)
 
 const SCENE_OPTIONS = [
   { value: 'cross', label: '十字路口' },
@@ -176,6 +175,7 @@ const SCENE_OPTIONS = [
   { value: 'micro-city', label: '微型城区' },
 ]
 import AppSelect from '@interfaces/components/command/AppSelect.vue'
+import { controllerOptions } from '@interfaces/components/editor/controllerOptions'
 import { useEditor } from '@interfaces/composables/useEditor'
 import { useSceneIO } from '@interfaces/composables/useSceneIO'
 import { _flashMessageRef, showFlashMessage } from '@interfaces/composables/useFlashMessage'

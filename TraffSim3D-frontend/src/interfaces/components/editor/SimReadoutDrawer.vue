@@ -16,19 +16,18 @@ import { subscribeOobEvents, type OobEvent } from '@application/services/oobClea
 import { M1_MIN_FPS } from '@shared/constants/simulation'
 import AppSelect from '@interfaces/components/command/AppSelect.vue'
 import { CoordinatedConfigModal } from '@interfaces/components/editor'
+import { controllerOptions } from '@interfaces/components/editor/controllerOptions'
 
 const world = useWorldStore()
 const showCoordinated = ref(false)
 
 // The drawn select's options (the native control's popup is an OS
 // window — see components/command/AppSelect.vue). Same sets the old
-// page offered.
-const CONTROLLER_OPTIONS = [
-  { value: 'fixed-cycle', label: '固定' },
-  { value: 'actuated', label: '感应' },
-  { value: 'coordinated', label: '协调 (绿波带)' },
-  { value: 'rl', label: 'RL (未实装·回退固定周期)' },
-]
+// page offered. The list lives in one place, and the RL entry says
+// whether the policy is ACTUALLY installed — see controllerOptions.ts.
+const CONTROLLER_OPTIONS = computed(() =>
+  controllerOptions(!!world.signalPolicy, world.signalPolicyOrigin),
+)
 const SCENE_OPTIONS = [
   { value: 'cross', label: '单路口 (cross)' },
   { value: 'corridor', label: '走廊 (corridor)' },
