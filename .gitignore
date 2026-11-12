@@ -72,6 +72,20 @@ TraffSim3D-backend/geojson/cache/
 TraffSim3D-backend/geojson/*.geojson
 TraffSim3D-backend/geojson/*.osm
 
+# ...EXCEPT the one slice that IS the product's bundled asset.
+#
+# `福田中心(深圳).osm` (7.4 MB) is the offline demo city: the Smart City
+# view parses it through `POST /maps/parse-sample` with no upload and no
+# network, and the backend's own suite asserts on the parsed city
+# (tests/test_api_maps_sample.py). Excluding it left a fresh clone with
+# no city at all — the endpoint answered 500 and CI's parse-sample test
+# failed on every run.
+#
+# The exclusion above was meant for the *regenerable* full-extract blobs
+# (>10 MB), not for the slice the demo depends on. OSM data is ODbL;
+# the attribution is in the README's licence section.
+!TraffSim3D-backend/geojson/福田中心(深圳).osm
+
 # Third-party reference repos cloned into root (not part of this project)
 gsap-skills/
 

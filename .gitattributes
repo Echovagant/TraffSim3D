@@ -11,3 +11,10 @@ TraffSim3D-backend/tests/contract/snapshots/*.json text eol=lf
 # on a pristine clone even when nothing drifted. Pin it to LF, same
 # reasoning as the contract goldens above.
 docs/openapi.json text eol=lf
+
+# The bundled demo-city extract (the offline Smart City scene). The
+# backend's git checkout on Windows converts LF to CRLF (core.autocrlf),
+# so the same file would carry different bytes on every machine. The
+# parser reads XML and does not care about line endings, but a
+# byte-identical asset keeps the repository honest: pin it to LF.
+TraffSim3D-backend/geojson/福田中心(深圳).osm text eol=lf

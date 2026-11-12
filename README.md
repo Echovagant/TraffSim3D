@@ -221,3 +221,9 @@ app/
 ## 许可
 
 [Apache License 2.0](LICENSE) © 2026 Echovagant
+
+**代码**为 Apache-2.0。**地理数据**来自 [OpenStreetMap](https://www.openstreetmap.org/copyright)，
+依 [ODbL](https://opendatacommons.org/licenses/odbl/) 授权；仓库内附的
+`TraffSim3D-backend/geojson/福田中心(深圳).osm` 切片与运行时缓存的 Overpass 响应均属该授权范围。
+© OpenStreetMap contributors。底图瓦片与建筑同样来自 OSM，因此演示环境需要一次外网请求取瓦片；
+**路网切片随包，仿真本身不依赖网络**。
