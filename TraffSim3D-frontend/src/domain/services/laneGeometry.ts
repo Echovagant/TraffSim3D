@@ -635,8 +635,13 @@ export const nearestLanePointOnRoad = (
   headingHint: number | undefined,
   maxDistM: number = 8,
 ): { laneIndex: number; s: number; position: Position; heading: number } | null => {
-  let best: { laneIndex: number; s: number; position: Position; heading: number; distSq: number } | null =
-    null
+  let best: {
+    laneIndex: number
+    s: number
+    position: Position
+    heading: number
+    distSq: number
+  } | null = null
   for (let laneIndex = 0; laneIndex < road.laneCount; laneIndex++) {
     const s = worldToLaneS(road, laneIndex, x, z)
     const lp = lanePoint(road, laneIndex, s)

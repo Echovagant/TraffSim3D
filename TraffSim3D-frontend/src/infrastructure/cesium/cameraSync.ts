@@ -111,8 +111,7 @@ export const syncThreeCameraToCesium = (
   const { cesiumViewer, threeCamera, tangent } = deps
   // With a precomputed pair the tick only multiplies; without one
   // (direct callers, tests) the inverse is built here as before.
-  const framePair =
-    deps.framePair ?? makeTangentFramePair(tangent)
+  const framePair = deps.framePair ?? makeTangentFramePair(tangent)
 
   // 1) Position
   const local = toLocalENU(cesiumViewer.camera.position, framePair)

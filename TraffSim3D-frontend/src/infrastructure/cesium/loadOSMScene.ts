@@ -501,7 +501,10 @@ export const loadNetworkRoads = async (
     // END SEGMENT's normal: a short corridor, which fits any heading —
     // a box could not rotate to match, and the old longitude-offset
     // version skewed across every road that does not run east-west.
-    const ends: Array<{ at: { x: number; y: number; z: number }; next: { x: number; y: number; z: number } }> = []
+    const ends: Array<{
+      at: { x: number; y: number; z: number }
+      next: { x: number; y: number; z: number }
+    }> = []
     if (points.length >= 2) {
       ends.push({ at: points[0]!, next: points[1]! })
       ends.push({ at: points[points.length - 1]!, next: points[points.length - 2]! })

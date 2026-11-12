@@ -1177,7 +1177,9 @@ html {
 }
 .feature-band:hover .band-media {
   transform: translateY(-4px);
-  box-shadow: var(--ds-shadow-product), 0 18px 48px color-mix(in srgb, var(--dc-accent) 14%, transparent);
+  box-shadow:
+    var(--ds-shadow-product),
+    0 18px 48px color-mix(in srgb, var(--dc-accent) 14%, transparent);
 }
 .band-copy {
   display: flex;

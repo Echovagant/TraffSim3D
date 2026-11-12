@@ -317,9 +317,7 @@ const streetAnchor = computed(() => {
   let bestDist = Infinity
   for (const road of Object.values(world.network.roads)) {
     const points =
-      road.waypoints && road.waypoints.length >= 2
-        ? road.waypoints
-        : [road.startNode, road.endNode]
+      road.waypoints && road.waypoints.length >= 2 ? road.waypoints : [road.startNode, road.endNode]
     const mid = points[Math.floor(points.length / 2)]
     if (!mid) continue
     const dist = mid.x * mid.x + mid.z * mid.z
@@ -890,8 +888,7 @@ const leaveRide = (): void => {
 const onRideKey = (e: KeyboardEvent): void => {
   if (!world.rideVehicleId) return
   if (e.code === 'KeyC') world.toggleRideLook()
-  else if (e.code === 'KeyX')
-    world.setRideMode(world.rideMode === 'cockpit' ? 'chase' : 'cockpit')
+  else if (e.code === 'KeyX') world.setRideMode(world.rideMode === 'cockpit' ? 'chase' : 'cockpit')
   else if (e.code === 'Escape') leaveRide()
   else if (e.code === 'KeyA' && world.rideMode === 'cockpit') {
     flashLaneChange(world.requestLaneChange(world.rideVehicleId, 'left'))
@@ -937,9 +934,7 @@ let altLook = false
 const isTypingTarget = (t: EventTarget | null): boolean => {
   const el = t as HTMLElement | null
   if (!el) return false
-  return (
-    el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true
-  )
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true
 }
 
 const setStreetControlsEnabled = (enabled: boolean): void => {
@@ -1044,9 +1039,7 @@ const startCameraSync = (): void => {
     // into the tick through `driverOverride`; letting go of both hands
     // the car straight back to its AI the very next tick.
     if (world.rideVehicleId && world.rideMode === 'cockpit') {
-      world.setDriverInput(
-        keysDown.has('KeyW') ? 'accel' : keysDown.has('KeyS') ? 'brake' : null,
-      )
+      world.setDriverInput(keysDown.has('KeyW') ? 'accel' : keysDown.has('KeyS') ? 'brake' : null)
     } else if (world.driverInput !== null) {
       world.setDriverInput(null)
     }

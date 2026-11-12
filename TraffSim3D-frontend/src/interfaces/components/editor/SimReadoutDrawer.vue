@@ -145,7 +145,9 @@ const frameSnapshot = computed(() => {
   void world.uiTick
   return world.frameStatsSnapshot()
 })
-const fpsText = computed(() => (frameSnapshot.value.fps > 0 ? String(frameSnapshot.value.fps) : '—'))
+const fpsText = computed(() =>
+  frameSnapshot.value.fps > 0 ? String(frameSnapshot.value.fps) : '—',
+)
 const frameAvg = computed(() =>
   Number.isFinite(frameSnapshot.value.avg) ? `${frameSnapshot.value.avg.toFixed(1)}` : '—',
 )
@@ -155,7 +157,8 @@ const frameMin = computed(() =>
 const frameMax = computed(() =>
   Number.isFinite(frameSnapshot.value.max) ? `${frameSnapshot.value.max.toFixed(1)}` : '—',
 )
-const formatRate = (rate: number): string => (Number.isInteger(rate) ? `${rate}×` : `${rate.toFixed(1)}×`)
+const formatRate = (rate: number): string =>
+  Number.isInteger(rate) ? `${rate}×` : `${rate.toFixed(1)}×`
 </script>
 
 <template>
@@ -173,20 +176,34 @@ const formatRate = (rate: number): string => (Number.isInteger(rate) ? `${rate}�
         />
       </header>
       <div class="stats">
-        <span class="stat"><i>车辆</i><b>{{ vehicleCount }}</b></span>
-        <span class="stat"><i>道路</i><b>{{ roadCount }}</b></span>
-        <span class="stat"><i>路口</i><b>{{ intersectionCount }}</b></span>
-        <span class="stat"><i>灯</i><b>{{ lightCount }}</b></span>
-        <span class="stat"><i>NS 队列</i><b>{{ nsQueue }}</b></span>
-        <span class="stat"><i>EW 队列</i><b>{{ ewQueue }}</b></span>
-        <span class="stat"><i>变道</i><b :class="{ changing: changingCount > 0 }">{{ changingCount }}</b></span>
-        <span class="stat" title="每个渲染帧 +1；store 变更通知也会 +1">
-          <i>tick</i><b data-testid="sim-tick">{{ world.uiTick }}</b></span>
-        <span
-          class="stat"
-          title="车偏离车道后会被拉回车道或放回路口起点 — 这里记录最近一次的原因"
+        <span class="stat"
+          ><i>车辆</i><b>{{ vehicleCount }}</b></span
         >
-          <i>越界</i><b data-testid="oob-event" :title="oobEventDetail">{{ oobEventLabel }}</b></span>
+        <span class="stat"
+          ><i>道路</i><b>{{ roadCount }}</b></span
+        >
+        <span class="stat"
+          ><i>路口</i><b>{{ intersectionCount }}</b></span
+        >
+        <span class="stat"
+          ><i>灯</i><b>{{ lightCount }}</b></span
+        >
+        <span class="stat"
+          ><i>NS 队列</i><b>{{ nsQueue }}</b></span
+        >
+        <span class="stat"
+          ><i>EW 队列</i><b>{{ ewQueue }}</b></span
+        >
+        <span class="stat"
+          ><i>变道</i><b :class="{ changing: changingCount > 0 }">{{ changingCount }}</b></span
+        >
+        <span class="stat" title="每个渲染帧 +1；store 变更通知也会 +1">
+          <i>tick</i><b data-testid="sim-tick">{{ world.uiTick }}</b></span
+        >
+        <span class="stat" title="车偏离车道后会被拉回车道或放回路口起点 — 这里记录最近一次的原因">
+          <i>越界</i
+          ><b data-testid="oob-event" :title="oobEventDetail">{{ oobEventLabel }}</b></span
+        >
       </div>
     </section>
 
@@ -217,13 +234,20 @@ const formatRate = (rate: number): string => (Number.isInteger(rate) ? `${rate}�
       </header>
       <table class="phase-table">
         <thead>
-          <tr><th>灯</th><th>轴</th><th>相位</th><th>剩余</th></tr>
+          <tr>
+            <th>灯</th>
+            <th>轴</th>
+            <th>相位</th>
+            <th>剩余</th>
+          </tr>
         </thead>
         <tbody>
           <tr v-for="row in lightRows" :key="row.id">
             <td class="dc-num">{{ row.id }}</td>
             <td>{{ row.axis.toUpperCase() }}</td>
-            <td><span :class="`phase phase-${row.phase}`">{{ row.phase }}</span></td>
+            <td>
+              <span :class="`phase phase-${row.phase}`">{{ row.phase }}</span>
+            </td>
             <td class="dc-num" data-testid="phase-remaining">{{ row.left.toFixed(1) }}</td>
           </tr>
         </tbody>
@@ -248,19 +272,37 @@ const formatRate = (rate: number): string => (Number.isInteger(rate) ? `${rate}�
           :class="{ warn: world.fps > 0 && world.fps < M1_MIN_FPS }"
           title="最近 500 ms 的实际渲染帧率"
         >
-          <i>FPS</i><b data-testid="fps">{{ fpsText }}</b></span>
+          <i>FPS</i><b data-testid="fps">{{ fpsText }}</b></span
+        >
         <span class="stat" title="最近 30 帧的帧间隔均值">
-          <i>帧 ms</i><b data-testid="frame-avg">{{ frameAvg }}</b></span>
+          <i>帧 ms</i><b data-testid="frame-avg">{{ frameAvg }}</b></span
+        >
         <span class="stat" title="本次会话中最短的帧间隔">
-          <i>min</i><b data-testid="frame-min">{{ frameMin }}</b></span>
+          <i>min</i><b data-testid="frame-min">{{ frameMin }}</b></span
+        >
         <span class="stat" title="本次会话中最长的帧间隔">
-          <i>max</i><b data-testid="frame-max">{{ frameMax }}</b></span>
+          <i>max</i><b data-testid="frame-max">{{ frameMax }}</b></span
+        >
         <span class="stat">
           <i>速率</i>
           <b class="rate-control">
-            <button class="rate-btn" data-testid="tick-rate-down" title="减速" @click="world.cycleTickRate(-1)">−</button>
+            <button
+              class="rate-btn"
+              data-testid="tick-rate-down"
+              title="减速"
+              @click="world.cycleTickRate(-1)"
+            >
+              −
+            </button>
             <span class="rate-value" data-testid="tick-rate">{{ formatRate(world.tickRate) }}</span>
-            <button class="rate-btn" data-testid="tick-rate-up" title="加速" @click="world.cycleTickRate(1)">+</button>
+            <button
+              class="rate-btn"
+              data-testid="tick-rate-up"
+              title="加速"
+              @click="world.cycleTickRate(1)"
+            >
+              +
+            </button>
           </b>
         </span>
         <span class="stat">
@@ -272,7 +314,10 @@ const formatRate = (rate: number): string => (Number.isInteger(rate) ? `${rate}�
       </div>
       <div class="traj-row">
         <span>Trajectory</span>
-        <b data-testid="trajectory-rows">{{ world.trajectoryExporter.rowCount }} / {{ world.trajectoryExporter.maxBufferRows }} 行</b>
+        <b data-testid="trajectory-rows"
+          >{{ world.trajectoryExporter.rowCount }} /
+          {{ world.trajectoryExporter.maxBufferRows }} 行</b
+        >
         <b
           data-testid="trajectory-dropped"
           :class="{ warn: droppedSamples() > 0 }"

@@ -843,9 +843,7 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
           // v-1 looped on w-25447649 s=78.9, four trips to the same
           // spot). Snap the landing onto the exit lane itself.
           const lane = network.roads[v.roadId]
-          const snapped = lane
-            ? nearestLanePointOnRoad(lane, end.x, end.z, end.heading)
-            : null
+          const snapped = lane ? nearestLanePointOnRoad(lane, end.x, end.z, end.heading) : null
           const landX = snapped ? snapped.position.x : end.x
           const landZ = snapped ? snapped.position.z : end.z
           const landH = snapped ? snapped.heading : end.heading

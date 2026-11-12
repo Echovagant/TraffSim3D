@@ -30,7 +30,12 @@ const props = withDefaults(
     status?: 'driving' | 'waiting' | 'crashed'
     /** The signal ahead: its phase name, the seconds left, and the
      *  metres to it. Null when the road ahead has no light. */
-    signal?: { label: string; remainingS: number; distanceM: number; tone: 'go' | 'warn' | 'stop' } | null
+    signal?: {
+      label: string
+      remainingS: number
+      distanceM: number
+      tone: 'go' | 'warn' | 'stop'
+    } | null
     /** The steering angle in degrees — how far the car points away
      *  from its lane. Positive is a right turn. */
     steerDeg?: number
@@ -177,7 +182,9 @@ const steerRotation = computed(() => {
       </div>
       <div class="meta">
         <span class="state" :class="stateKind" data-testid="gauge-state">{{ stateLabel }}</span>
-        <span class="limit">限速 <b class="dc-num">{{ limitKmh }}</b></span>
+        <span class="limit"
+          >限速 <b class="dc-num">{{ limitKmh }}</b></span
+        >
       </div>
     </div>
 
@@ -213,7 +220,9 @@ const steerRotation = computed(() => {
 
     <div class="pedals">
       <div class="pedal" :class="{ on: pedal === 'accel' }" data-testid="gauge-accel">加速</div>
-      <div class="pedal brake" :class="{ on: pedal === 'brake' }" data-testid="gauge-brake">刹车</div>
+      <div class="pedal brake" :class="{ on: pedal === 'brake' }" data-testid="gauge-brake">
+        刹车
+      </div>
     </div>
   </div>
 </template>

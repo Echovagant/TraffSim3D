@@ -534,7 +534,10 @@ export class ThreeJSRenderer {
       const behind = FOLLOW_CHASE_BEHIND_M + length / 2
       const above = FOLLOW_CHASE_ABOVE_M + length * 0.18
       const body = new THREE.Vector3(target.position.x, target.position.y, target.position.z)
-      eye = body.clone().sub(forward.clone().multiplyScalar(behind)).add(new THREE.Vector3(0, above, 0))
+      eye = body
+        .clone()
+        .sub(forward.clone().multiplyScalar(behind))
+        .add(new THREE.Vector3(0, above, 0))
       look = body.add(forward.clone().multiplyScalar(8))
     } else if (mode === 'chase-top') {
       // Straight down from above the car: the whole junction in frame.

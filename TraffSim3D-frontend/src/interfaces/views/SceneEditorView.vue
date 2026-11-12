@@ -14,102 +14,102 @@
       live in two columns that cannot overlap, and every panel can be
       folded away — on a narrow viewport the columns fold themselves.
     -->
-      <ShowcaseNav variant="minimal" />
-      <WorldCanvas />
+    <ShowcaseNav variant="minimal" />
+    <WorldCanvas />
 
-      <header class="deck-top">
-        <EditorToolbar />
-      </header>
+    <header class="deck-top">
+      <EditorToolbar />
+    </header>
 
-      <aside class="deck-col deck-left" data-testid="deck-left">
-        <div class="slot" :class="{ 'is-folded': !outlineOpen }">
-          <button
-            class="slot-fold"
-            :title="outlineOpen ? '收起 场景大纲' : '展开 场景大纲'"
-            :aria-expanded="outlineOpen"
-            @click="outlineOpen = !outlineOpen"
-          >
-            {{ outlineOpen ? '◀' : '▶' }}
-          </button>
-          <EntityOutline v-show="outlineOpen" />
-        </div>
+    <aside class="deck-col deck-left" data-testid="deck-left">
+      <div class="slot" :class="{ 'is-folded': !outlineOpen }">
+        <button
+          class="slot-fold"
+          :title="outlineOpen ? '收起 场景大纲' : '展开 场景大纲'"
+          :aria-expanded="outlineOpen"
+          @click="outlineOpen = !outlineOpen"
+        >
+          {{ outlineOpen ? '◀' : '▶' }}
+        </button>
+        <EntityOutline v-show="outlineOpen" />
+      </div>
 
-        <div class="slot" :class="{ 'is-folded': !routeOpen }">
-          <button
-            class="slot-fold"
-            :title="routeOpen ? '收起 路线规划' : '展开 路线规划'"
-            :aria-expanded="routeOpen"
-            @click="routeOpen = !routeOpen"
-          >
-            {{ routeOpen ? '◀' : '▶' }}
-          </button>
-          <RoutePanel v-show="routeOpen" />
-        </div>
+      <div class="slot" :class="{ 'is-folded': !routeOpen }">
+        <button
+          class="slot-fold"
+          :title="routeOpen ? '收起 路线规划' : '展开 路线规划'"
+          :aria-expanded="routeOpen"
+          @click="routeOpen = !routeOpen"
+        >
+          {{ routeOpen ? '◀' : '▶' }}
+        </button>
+        <RoutePanel v-show="routeOpen" />
+      </div>
 
-        <div class="slot" :class="{ 'is-folded': !poiOpen }">
-          <button
-            class="slot-fold"
-            :title="poiOpen ? '收起 兴趣点' : '展开 兴趣点'"
-            :aria-expanded="poiOpen"
-            @click="poiOpen = !poiOpen"
-          >
-            {{ poiOpen ? '◀' : '▶' }}
-          </button>
-          <PoiPanel v-show="poiOpen" />
-        </div>
-      </aside>
+      <div class="slot" :class="{ 'is-folded': !poiOpen }">
+        <button
+          class="slot-fold"
+          :title="poiOpen ? '收起 兴趣点' : '展开 兴趣点'"
+          :aria-expanded="poiOpen"
+          @click="poiOpen = !poiOpen"
+        >
+          {{ poiOpen ? '◀' : '▶' }}
+        </button>
+        <PoiPanel v-show="poiOpen" />
+      </div>
+    </aside>
 
-      <aside class="deck-col deck-right" data-testid="deck-right">
-        <div class="slot" :class="{ 'is-folded': !debugOpen }">
-          <button
-            class="slot-fold"
-            :title="debugOpen ? '收起 调试' : '展开 调试'"
-            :aria-expanded="debugOpen"
-            @click="debugOpen = !debugOpen"
-          >
-            {{ debugOpen ? '▶' : '◀' }}
-          </button>
-          <DebugPanel v-show="debugOpen" />
-        </div>
+    <aside class="deck-col deck-right" data-testid="deck-right">
+      <div class="slot" :class="{ 'is-folded': !debugOpen }">
+        <button
+          class="slot-fold"
+          :title="debugOpen ? '收起 调试' : '展开 调试'"
+          :aria-expanded="debugOpen"
+          @click="debugOpen = !debugOpen"
+        >
+          {{ debugOpen ? '▶' : '◀' }}
+        </button>
+        <DebugPanel v-show="debugOpen" />
+      </div>
 
-        <div class="slot" :class="{ 'is-folded': !cameraOpen }">
-          <button
-            class="slot-fold"
-            :title="cameraOpen ? '收起 相机' : '展开 相机'"
-            :aria-expanded="cameraOpen"
-            @click="cameraOpen = !cameraOpen"
-          >
-            {{ cameraOpen ? '▶' : '◀' }}
-          </button>
-          <CameraView v-show="cameraOpen" />
-        </div>
+      <div class="slot" :class="{ 'is-folded': !cameraOpen }">
+        <button
+          class="slot-fold"
+          :title="cameraOpen ? '收起 相机' : '展开 相机'"
+          :aria-expanded="cameraOpen"
+          @click="cameraOpen = !cameraOpen"
+        >
+          {{ cameraOpen ? '▶' : '◀' }}
+        </button>
+        <CameraView v-show="cameraOpen" />
+      </div>
 
-        <div class="slot" :class="{ 'is-folded': !inspectorOpen }">
-          <button
-            class="slot-fold"
-            :title="inspectorOpen ? '收起 属性' : '展开 属性'"
-            :aria-expanded="inspectorOpen"
-            @click="inspectorOpen = !inspectorOpen"
-          >
-            {{ inspectorOpen ? '▶' : '◀' }}
-          </button>
-          <InspectorPanel v-show="inspectorOpen" />
-        </div>
+      <div class="slot" :class="{ 'is-folded': !inspectorOpen }">
+        <button
+          class="slot-fold"
+          :title="inspectorOpen ? '收起 属性' : '展开 属性'"
+          :aria-expanded="inspectorOpen"
+          @click="inspectorOpen = !inspectorOpen"
+        >
+          {{ inspectorOpen ? '▶' : '◀' }}
+        </button>
+        <InspectorPanel v-show="inspectorOpen" />
+      </div>
 
-        <div class="slot" :class="{ 'is-folded': !sensorOpen }">
-          <button
-            class="slot-fold"
-            :title="sensorOpen ? '收起 传感器' : '展开 传感器'"
-            :aria-expanded="sensorOpen"
-            @click="sensorOpen = !sensorOpen"
-          >
-            {{ sensorOpen ? '▶' : '◀' }}
-          </button>
-          <SensorPanel v-show="sensorOpen" />
-        </div>
-      </aside>
+      <div class="slot" :class="{ 'is-folded': !sensorOpen }">
+        <button
+          class="slot-fold"
+          :title="sensorOpen ? '收起 传感器' : '展开 传感器'"
+          :aria-expanded="sensorOpen"
+          @click="sensorOpen = !sensorOpen"
+        >
+          {{ sensorOpen ? '▶' : '◀' }}
+        </button>
+        <SensorPanel v-show="sensorOpen" />
+      </div>
+    </aside>
 
-      <!--
+    <!--
         The simulation drawer — the bottom strip.
 
         SimulationLab was a whole page for these three cards; they live
@@ -117,33 +117,29 @@
         the map can take the full height when the readouts are not
         wanted.
       -->
-      <footer
-        class="deck-drawer"
-        :class="{ 'is-folded': !drawerOpen }"
-        data-testid="sim-drawer"
-      >
-        <button
-          class="drawer-fold"
-          :title="drawerOpen ? '收起 仿真读数' : '展开 仿真读数'"
-          :aria-expanded="drawerOpen"
-          data-testid="drawer-toggle"
-          @click="drawerOpen = !drawerOpen"
-        >
-          {{ drawerOpen ? '▼ 仿真读数' : '▲ 仿真读数' }}
-        </button>
-        <SimReadoutDrawer v-show="drawerOpen" class="drawer-body" />
-      </footer>
-
-      <!-- The map gets a click back when both columns are folded. -->
+    <footer class="deck-drawer" :class="{ 'is-folded': !drawerOpen }" data-testid="sim-drawer">
       <button
-        v-if="bothColumnsFolded"
-        class="deck-restore"
-        title="展开两侧面板"
-        data-testid="deck-restore"
-        @click="restorePanels"
+        class="drawer-fold"
+        :title="drawerOpen ? '收起 仿真读数' : '展开 仿真读数'"
+        :aria-expanded="drawerOpen"
+        data-testid="drawer-toggle"
+        @click="drawerOpen = !drawerOpen"
       >
-        ⟩ 面板
+        {{ drawerOpen ? '▼ 仿真读数' : '▲ 仿真读数' }}
       </button>
+      <SimReadoutDrawer v-show="drawerOpen" class="drawer-body" />
+    </footer>
+
+    <!-- The map gets a click back when both columns are folded. -->
+    <button
+      v-if="bothColumnsFolded"
+      class="deck-restore"
+      title="展开两侧面板"
+      data-testid="deck-restore"
+      @click="restorePanels"
+    >
+      ⟩ 面板
+    </button>
   </div>
 </template>
 

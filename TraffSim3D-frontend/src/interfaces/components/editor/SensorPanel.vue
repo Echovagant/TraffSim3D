@@ -96,7 +96,8 @@ const exportTrajectoryCsv = (): void => {
       <span class="traj-title">Trajectory</span>
       <span class="traj-line">
         <b data-testid="trajectory-rows"
-          >{{ world.trajectoryExporter.rowCount }} / {{ world.trajectoryExporter.maxBufferRows }} 行</b
+          >{{ world.trajectoryExporter.rowCount }} /
+          {{ world.trajectoryExporter.maxBufferRows }} 行</b
         >
       </span>
       <span

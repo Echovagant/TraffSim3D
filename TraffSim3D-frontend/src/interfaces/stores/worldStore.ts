@@ -570,7 +570,10 @@ export const useWorldStore = defineStore('world', () => {
   const rideMode = ref<'chase' | 'chase-top' | 'cockpit'>('chase')
 
   /** Track (or drive with) a vehicle; `null` leaves the ride. */
-  const setRideVehicle = (id: string | null, mode: 'chase' | 'chase-top' | 'cockpit' = 'chase'): void => {
+  const setRideVehicle = (
+    id: string | null,
+    mode: 'chase' | 'chase-top' | 'cockpit' = 'chase',
+  ): void => {
     rideVehicleId.value = id
     rideMode.value = mode
     followCamera.value = id !== null
