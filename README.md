@@ -75,7 +75,7 @@ SceneLab 页面底部自带**仿真读数抽屉**（原 SimulationLab 并入此�
 
 ### 演示视频
 
-仓库内附一段完整演示（约 2 分钟，三段）：[`docs/media/traffsim3d-demo.webm`](docs/media/traffsim3d-demo.webm) —— 深圳福田白模城区的车辆跟踪与驾驶舱视角、训好的策略在演武场回放、回放进场景编辑器看它按信号开车。
+仓库内附一段完整演示（约 1 分半，**四段**）：[`docs/media/traffsim3d-demo.webm`](docs/media/traffsim3d-demo.webm) —— 深圳福田白模城区的车辆跟踪与驾驶舱视角、训好的策略在演武场回放、回放进场景编辑器看**策略开的那辆车**（本次录制实测走了 434 m）、最后切到 5×5 网格看**RL 指挥的信号灯**（25 个路口、50 盏灯，抽屉里写明「已实装」）。
 
 ---
 

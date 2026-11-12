@@ -38,6 +38,10 @@ const URL = argOf('url', 'http://127.0.0.1:5188')
 const OUT = path.resolve(process.cwd(), argOf('out', '../docs/media/traffsim3d-demo.webm'))
 const TMP_DIR = path.resolve(process.cwd(), '..', '.data', 'demo_video_tmp')
 const SCENE_SECONDS = Number(argOf('scene-seconds', '24'))
+// The grid segment (the RL signal policy commanding 25 junctions) gets
+// its own length: it is the closing shot, and it is short on purpose —
+// the video is 100 seconds, not three.
+const GRID_SECONDS = Number(argOf('grid-seconds', '12'))
 
 const waitFor = async (page, fn, timeout = 40_000) => {
   await page.waitForFunction(fn, undefined, { timeout })
@@ -142,10 +146,6 @@ const main = async () => {
 
   // --- 2) 客户端路由回 SceneLab（不能整页刷新：刷新会重置 store，策略与
   //        回放状态都活在内存里） -----------------------------------------
-  const sBefore = await page.evaluate(() => {
-    const v = window.__world.network.vehicles['v-1']
-    return v ? v.s : null
-  })
   // 回首页再进编辑器——用现在真实存在的导航（玻璃胶囊的 logo 回首页，
   // 场景带进 SceneLab）。客户端路由，策略与回放状态都活在内存里。
   await page.locator('.showcase-nav a[href="/"]').first().click()
@@ -156,6 +156,9 @@ const main = async () => {
     const w = window
     return Boolean(w.__world && Object.keys(w.__world.network.vehicles).length > 0)
   })
+
+  // --- 3) 十字路口：策略开的那辆车在画面上 -----------------------------
+  //
   // 多加几辆车，画面上更有车流的感觉
   await page.evaluate(() => {
     const w = window.__world
@@ -171,7 +174,25 @@ const main = async () => {
     await page.mouse.wheel(0, -400)
     await page.waitForTimeout(200)
   }
-  await page.waitForTimeout(SCENE_SECONDS * 1000)
+  // 「车有没有在开」量的是**走过的路程**，不是起终点距离，也不是 `s`：
+  //   - `s` 是车在**当前那条路**上的弧长，过路口或末端绕回时会重置；
+  //   - 起终点距离在十字路口这种小闭环里几乎是 0（车绕回来了）。
+  // 所以每 250ms 采一次位置，把位移累加成路程。
+  let pathLength = 0
+  let last = await page.evaluate(() => {
+    const v = window.__world.network.vehicles['v-1']
+    return v ? { x: v.position.x, z: v.position.z } : null
+  })
+  const samples = Math.ceil((SCENE_SECONDS * 1000) / 250)
+  for (let i = 0; i < samples; i++) {
+    await page.waitForTimeout(250)
+    const now = await page.evaluate(() => {
+      const v = window.__world.network.vehicles['v-1']
+      return v ? { x: v.position.x, z: v.position.z } : null
+    })
+    if (now && last) pathLength += Math.hypot(now.x - last.x, now.z - last.z)
+    if (now) last = now
+  }
 
   const state = await page.evaluate(() => {
     const w = window.__world
@@ -181,15 +202,57 @@ const main = async () => {
       replayLast: window.__replayLast ?? null,
       fps: Math.round(w.fps),
       vehicles: Object.keys(w.network.vehicles).length,
-      ego: v ? { s: v.s, speed: v.speed, targetSpeed: v.targetSpeed } : null,
+      ego: v
+        ? { x: v.position.x, z: v.position.z, speed: v.speed, targetSpeed: v.targetSpeed }
+        : null,
     }
   })
   console.log('final state:', JSON.stringify(state))
   if (!state.replayActive || !state.replayLast) {
     throw new Error('the replay never ran in the 3D view — the video would be empty')
   }
-  if (sBefore !== null && state.ego && state.ego.s <= sBefore) {
-    throw new Error(`the policy did not drive the ego (s ${sBefore} -> ${state.ego.s})`)
+
+  // --- 4) 切到 5×5 网格：让「RL 指挥信号灯」真的看得见 -------------------
+  //
+  // AI 页装上的是**网格**信号策略（6 obs / 5 act），它只装得上 5×5 网格
+  // 场景（路口数与观测口径要对得上）。这一段原来停在十字路口，抽屉里写
+  // 的是「RL (未实装·回退固定周期)」——**画面上看不出在跑 RL**。
+  //
+  // 切场景会重置网络（回放随之停下），所以这一段放在最后：前面那段先把
+  // 「策略开的那辆车」拍完并断言过，再切网格拍「策略指挥的信号灯」。
+  await page.selectOption('[data-testid="scene-kind-select"]', 'grid')
+  await page.waitForTimeout(3500)
+  // 权威判据是 store 里的 controllerKind（'rl'）；抽屉的触发按钮显示的是
+  // 当前选项的文案（选项列表里始终有一项写着「RL (未实装·回退固定周期)」，
+  // 所以不能拿抽屉的全文去匹配）。
+  const rlSignalInstalled = await page.evaluate(() => {
+    const w = window.__world
+    const trigger = document.querySelector('[data-testid="controller-select"] .app-select-value')
+    return {
+      kind: w?.controllerKind ?? '(none)',
+      label: trigger?.textContent?.trim() ?? '(none)',
+      intersections: Object.keys(w?.network?.intersections ?? {}).length,
+      lights: Object.values(w?.network?.intersections ?? {}).reduce(
+        (n, i) => n + (i.trafficLights?.length ?? 0),
+        0,
+      ),
+    }
+  })
+  console.log('signal controller:', JSON.stringify(rlSignalInstalled))
+  if (rlSignalInstalled.kind !== 'rl') {
+    throw new Error(
+      `the RL signal policy did not install on the grid scene (${rlSignalInstalled.kind} / ${rlSignalInstalled.label})`,
+    )
+  }
+  // 网格要看得**全**（25 个窗口），所以只拉近一点点，不钻到单个路口
+  await page.locator('[data-testid="fit-scene-button"]').click()
+  await page.waitForTimeout(600)
+  await page.mouse.move(640, 400)
+  await page.mouse.wheel(0, -160)
+  await page.waitForTimeout(GRID_SECONDS * 1000)
+  console.log(`ego drove ${pathLength.toFixed(1)} m`)
+  if (pathLength < 50) {
+    throw new Error(`the policy did not drive the ego (drove ${pathLength.toFixed(1)} m)`)
   }
 
   await page.close()
