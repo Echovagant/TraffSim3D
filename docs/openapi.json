@@ -248,7 +248,7 @@
           "maps"
         ],
         "summary": "Parse Sample",
-        "description": "Parse the city that ships with the backend into a RoadNetwork dict.\n\nThe repository carries a 7.4 MB OSM extract of 深圳福田中心\n(`geojson/福田中心(深圳).osm`). This endpoint parses the 4.4 km ×\n4.1 km core of it — the same rectangle the Smart City basemap draws\n— so the command centre can show a real city with cars driving on\nits roads, without an upload and without Overpass.\n\nThe projection origin is the centre of that rectangle, which is also\nthe frontend's fallback tangent origin (`DEFAULT_TANGENT_ORIGIN`):\nthe simulation and the basemap therefore describe one place.\n\nThe parse costs ~2 s the first time; the result is cached in memory\nand every later call returns the same network.",
+        "description": "Parse the city that ships with the backend into a RoadNetwork dict.\n\nThe repository carries a 7.4 MB OSM extract of 深圳福田中心\n(`geojson/福田中心(深圳).osm`). This endpoint parses the 4.4 km ×\n4.1 km core of it — the same rectangle the Smart City basemap draws\n— so the command centre can show a real city with cars driving on\nits roads, without an upload and without Overpass.\n\nThe projection origin is the centre of that rectangle, which is also\nthe frontend's fallback tangent origin (`DEFAULT_TANGENT_ORIGIN`):\nthe simulation and the basemap therefore describe one place.\n\nThe parse costs ~2 s the first time; the result is cached in memory\nand every later call returns the same network.\n\nThe parse runs in a WORKER THREAD. It is a couple of seconds of\nblocking CPU, and an `async def` endpoint that does it inline\nfreezes the whole event loop for that time: the health check, the\nRL status and every other request wait behind the parse. That was\nmeasurable — a client that asked for the city and for the RL\ncapabilities at the same moment lost the second one to its\ntimeout.",
         "operationId": "parse_sample_api_v1_maps_parse_sample_post",
         "responses": {
           "200": {
@@ -273,7 +273,7 @@
           "maps"
         ],
         "summary": "Sample Stats",
-        "description": "The size of the bundled city — without shipping the whole network.\n\nA page that states a number (\"988 roads\") should be able to CHECK\nit, and the check should not cost a megabyte of network. This\nendpoint counts the very same city `parse-sample` serves: the same\nfile, the same rectangle, the same cached parse — so the numbers\nhere describe the city the Smart City view actually drives on.\n\nThe first call pays the parse; every later one is free.",
+        "description": "The size of the bundled city — without shipping the whole network.\n\nA page that states a number (\"988 roads\") should be able to CHECK\nit, and the check should not cost a megabyte of network. This\nendpoint counts the very same city `parse-sample` serves: the same\nfile, the same rectangle, the same cached parse — so the numbers\nhere describe the city the Smart City view actually drives on.\n\nThe first call pays the parse (in a worker thread — see\n`parse-sample`); every later one is free.",
         "operationId": "sample_stats_api_v1_maps_sample_stats_get",
         "responses": {
           "200": {
