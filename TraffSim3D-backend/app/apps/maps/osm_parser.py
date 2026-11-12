@@ -131,6 +131,58 @@ HIGHWAY_SPEED_LIMIT: dict[str, float] = {
 }
 DEFAULT_HIGHWAY_TYPES = frozenset(HIGHWAY_SPEED_LIMIT.keys())
 
+
+def _parse_max_height(value: str | None) -> float | None:
+    """The height limit of a way, in metres — or None when it has none.
+
+    OSM's `maxheight` tag is a free-text field, and the spellings are
+    all of these (they all occur in the bundled Shenzhen extract):
+
+    - `"3.5"` — the common case, metres;
+    - `"4"`, `"3.5 m"` — a number with a unit suffix;
+    - `"3,5"` — the European decimal comma;
+    - `"no"` — explicitly NO limit (not "zero", not "unknown");
+    - `"default"` — the limit is the one that applies by default,
+      i.e. there is no specific limit on this way;
+    - `"3.5;4"` — several limits; the SMALLEST one is the one that
+      binds.
+
+    Only the smallest numeric value is kept, because that is the limit
+    a vehicle actually has to respect. Anything that is not a number
+    (including `no` and `default`) means "no limit on this way", and the
+    road says so by carrying no limit at all.
+
+    The Shenzhen extract has 21 ways with a `maxheight` tag: the
+    春风隧道 tunnel (3.5 m, six segments), 梅观路 and 沙河西路 (5 m),
+    and the rest `no` / `default`.
+    """
+    if value is None:
+        return None
+    text = value.strip().lower()
+    if not text or text in {"no", "default", "none", "unlimited"}:
+        return None
+    best: float | None = None
+    for part in text.replace(",", ".").split(";"):
+        part = part.strip()
+        # Take the leading number of a part like "3.5 m" or "3.5m".
+        digits = ""
+        for ch in part:
+            if ch.isdigit() or ch == ".":
+                digits += ch
+            else:
+                break
+        if not digits:
+            continue
+        try:
+            metres = float(digits)
+        except ValueError:
+            continue
+        if metres <= 0:
+            continue
+        if best is None or metres < best:
+            best = metres
+    return best
+
 # Meters per level step. One `level` step is this many metres, so an OSM
 # `layer=2` lands 8 m above the ground and `layer=-3` lands 12 m below it.
 # The *step* (not the number of levels) is what has to match the frontend's
@@ -1275,6 +1327,10 @@ def _build_network(
                     # road hierarchy — or reason about road rights — needs
                     # the class, not only the two numbers it produced.
                     "highway": way.tags["highway"],
+                    # The way's HEIGHT limit, when it has one (the 春风隧道
+                    # tunnel is 3.5 m). `None` means no limit — which is
+                    # what `maxheight=no` and `maxheight=default` say.
+                    "maxHeightM": _parse_max_height(way.tags.get("maxheight")),
                     "level": level,
                 }
             )

@@ -291,3 +291,47 @@ def test_xml_and_pbf_agree_on_layers_and_roundabouts(tmp_path: Path) -> None:
     levels = sorted(r["level"] for r in from_xml["roads"])
     assert levels == [0, 2]
     assert any(r["oneway"] for r in from_xml["roads"])
+
+
+# ---------------------------------------------------------------------------
+# `maxheight` — the height limit
+# ---------------------------------------------------------------------------
+
+
+def test_maxheight_becomes_a_number_on_the_road() -> None:
+    """A tunnel's height limit is a number the simulation can use.
+
+    The 春风隧道 in the bundled Shenzhen extract is signed
+    `maxheight=3.5`; before this the parser threw the tag away, so the
+    simulation never heard that a bus does not fit under it.
+    """
+    road = _road(_way_xml(900, [("highway", "trunk"), ("maxheight", "3.5")]))
+    assert road["maxHeightM"] == pytest.approx(3.5)
+
+
+def test_maxheight_no_and_default_mean_no_limit() -> None:
+    """`no` and `default` are the two ways OSM says "no limit here"."""
+    for value in ("no", "default"):
+        road = _road(_way_xml(901, [("highway", "trunk"), ("maxheight", value)]))
+        assert road["maxHeightM"] is None, value
+
+
+def test_a_road_without_maxheight_has_no_limit() -> None:
+    road = _road(_way_xml(902, [("highway", "trunk")]))
+    assert road["maxHeightM"] is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("4", 4.0),
+        ("3.5 m", 3.5),
+        ("3,5", 3.5),  # the European decimal comma
+        ("2.5;3", 2.5),  # several limits: the smallest one binds
+        ("3.5;4.2", 3.5),
+    ],
+)
+def test_maxheight_spellings(value: str, expected: float) -> None:
+    """The tag is free text; every spelling that appears means metres."""
+    road = _road(_way_xml(903, [("highway", "trunk"), ("maxheight", value)]))
+    assert road["maxHeightM"] == pytest.approx(expected)
