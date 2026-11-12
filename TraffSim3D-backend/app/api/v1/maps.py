@@ -191,11 +191,18 @@ def _fetch_signal_nodes(bbox: BBox) -> list[tuple[float, float]]:
     The bundled extract was generated from a roads-only GeoJSON, so the
     signal nodes were never in the file: the parsed city had 1 120
     junctions and 10 of them signalised. This puts the lights back.
+
+    The budget is 15 s (not the 60 s the query itself asks Overpass
+    for): the endpoint that calls this one serves the WHOLE city, and a
+    city that arrives 90 seconds late is worse than a city without its
+    extra lights. The response for the bundled rectangle is committed
+    to the repository (50 kB), so the demo and the CI never wait for
+    Overpass at all — the network is the fallback, not the plan.
     """
     from app.apps.maps.overpass_cache import cached_overpass_fetch
 
     try:
-        data = cached_overpass_fetch(_signal_nodes_query(bbox), timeout_s=60.0, budget_s=90.0)
+        data = cached_overpass_fetch(_signal_nodes_query(bbox), timeout_s=15.0, budget_s=20.0)
     except Exception:
         # Overpass is often slow or busy. The city still loads without
         # the extra lights — a missing signal is not a broken map.
