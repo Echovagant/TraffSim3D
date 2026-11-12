@@ -8,6 +8,7 @@ simulate. The parser capability already existed (`osm_parser.parse_osm_xml`
 
 from __future__ import annotations
 
+import asyncio
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
@@ -237,22 +238,12 @@ def signal_nodes(
     return {"count": len(nodes), "nodes": [{"lat": lat, "lon": lon} for lat, lon in nodes]}
 
 
-@router.post("/maps/parse-sample", tags=["maps"])
-async def parse_sample() -> dict[str, Any]:
-    """Parse the city that ships with the backend into a RoadNetwork dict.
+def _sample_city_network() -> dict[str, Any]:
+    """The bundled city, parsed once and kept in memory.
 
-    The repository carries a 7.4 MB OSM extract of 深圳福田中心
-    (`geojson/福田中心(深圳).osm`). This endpoint parses the 4.4 km ×
-    4.1 km core of it — the same rectangle the Smart City basemap draws
-    — so the command centre can show a real city with cars driving on
-    its roads, without an upload and without Overpass.
-
-    The projection origin is the centre of that rectangle, which is also
-    the frontend's fallback tangent origin (`DEFAULT_TANGENT_ORIGIN`):
-    the simulation and the basemap therefore describe one place.
-
-    The parse costs ~2 s the first time; the result is cached in memory
-    and every later call returns the same network.
+    Shared by `parse-sample` (which hands the whole network out) and
+    `sample-stats` (which only counts it) — so both describe the same
+    city, and the second one costs nothing after the first.
     """
     global _sample_network, _sample_signal_nodes, _sample_signals_attached
     if _sample_network is None:
@@ -280,6 +271,61 @@ async def parse_sample() -> dict[str, Any]:
             attach_traffic_signals(_sample_network, _sample_signal_nodes)
         _sample_signals_attached = True
     return _sample_network
+
+
+@router.post("/maps/parse-sample", tags=["maps"])
+async def parse_sample() -> dict[str, Any]:
+    """Parse the city that ships with the backend into a RoadNetwork dict.
+
+    The repository carries a 7.4 MB OSM extract of 深圳福田中心
+    (`geojson/福田中心(深圳).osm`). This endpoint parses the 4.4 km ×
+    4.1 km core of it — the same rectangle the Smart City basemap draws
+    — so the command centre can show a real city with cars driving on
+    its roads, without an upload and without Overpass.
+
+    The projection origin is the centre of that rectangle, which is also
+    the frontend's fallback tangent origin (`DEFAULT_TANGENT_ORIGIN`):
+    the simulation and the basemap therefore describe one place.
+
+    The parse costs ~2 s the first time; the result is cached in memory
+    and every later call returns the same network.
+
+    The parse runs in a WORKER THREAD. It is a couple of seconds of
+    blocking CPU, and an `async def` endpoint that does it inline
+    freezes the whole event loop for that time: the health check, the
+    RL status and every other request wait behind the parse. That was
+    measurable — a client that asked for the city and for the RL
+    capabilities at the same moment lost the second one to its
+    timeout.
+    """
+    return await asyncio.to_thread(_sample_city_network)
+
+
+@router.get("/maps/sample-stats", tags=["maps"])
+async def sample_stats() -> dict[str, Any]:
+    """The size of the bundled city — without shipping the whole network.
+
+    A page that states a number ("988 roads") should be able to CHECK
+    it, and the check should not cost a megabyte of network. This
+    endpoint counts the very same city `parse-sample` serves: the same
+    file, the same rectangle, the same cached parse — so the numbers
+    here describe the city the Smart City view actually drives on.
+
+    The first call pays the parse (in a worker thread — see
+    `parse-sample`); every later one is free.
+    """
+    network = await asyncio.to_thread(_sample_city_network)
+    intersections = network.get("intersections") or []
+    traffic_lights = sum(len(i.get("trafficLights") or []) for i in intersections)
+    return {
+        "source": SAMPLE_OSM_FILE.name,
+        "roads": len(network.get("roads") or []),
+        "intersections": len(intersections),
+        "trafficLights": traffic_lights,
+        "spawnPoints": len(network.get("spawnPoints") or []),
+        "signalsAttached": _sample_signals_attached,
+        "bbox": list(SAMPLE_BBOX),
+    }
 
 
 @router.post("/maps/parse-pbf", tags=["maps"])

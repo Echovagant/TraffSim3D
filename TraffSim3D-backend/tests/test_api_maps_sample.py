@@ -85,3 +85,86 @@ async def test_parse_sample_is_cached(client: AsyncClient) -> None:
 
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json()
+
+
+@pytest.mark.asyncio
+async def test_sample_stats_counts_the_same_city_parse_sample_serves(
+    client: AsyncClient,
+) -> None:
+    """The stats endpoint must describe the SAME city, not a similar one.
+
+    A page that shows "988 roads" has to be able to check the number,
+    and the check has to be about the city the product actually drives
+    on — so the counts are compared against the network `parse-sample`
+    hands out, not against hardcoded numbers.
+    """
+    stats = (await client.get("/api/v1/maps/sample-stats")).json()
+    network = (await client.post("/api/v1/maps/parse-sample")).json()
+
+    assert stats["roads"] == len(network["roads"])
+    assert stats["intersections"] == len(network["intersections"])
+    assert stats["spawnPoints"] == len(network["spawnPoints"])
+    assert stats["trafficLights"] == sum(
+        len(i.get("trafficLights") or []) for i in network["intersections"]
+    )
+    assert stats["source"] == maps_api.SAMPLE_OSM_FILE.name
+    assert stats["bbox"] == list(maps_api.SAMPLE_BBOX)
+
+
+@pytest.mark.asyncio
+async def test_sample_stats_is_a_real_city(client: AsyncClient) -> None:
+    """The counts are the ones the project quotes everywhere else."""
+    stats = (await client.get("/api/v1/maps/sample-stats")).json()
+
+    assert stats["roads"] > 500, f"expected a real city, got {stats['roads']} roads"
+    assert stats["intersections"] > 500
+    assert stats["spawnPoints"] > 100
+    # The lights come from the bundled Overpass response, so they are
+    # there without a network.
+    assert stats["trafficLights"] > 0
+    assert stats["signalsAttached"] is True
+
+
+@pytest.mark.asyncio
+async def test_parsing_the_city_does_not_block_the_health_check(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The city parse must not freeze the whole backend.
+
+    The parse is a couple of seconds of blocking CPU. Run inline in an
+    `async def` endpoint it holds the event loop, so a client that asks
+    for the city and for the health check at the same moment loses the
+    second one to its timeout — measured: the delivery page's own
+    probes, issued together, lost the RL evidence exactly this way.
+
+    The parse therefore runs in a worker thread, and this test pins
+    that: the health check must answer WHILE the parse is running.
+    """
+    import asyncio
+    import time
+
+    # Cold cache: the next request really parses.
+    monkeypatch.setattr(maps_api, "_sample_network", None)
+    monkeypatch.setattr(maps_api, "_sample_signals_attached", False)
+    monkeypatch.setattr(maps_api, "_sample_signal_nodes", None)
+
+    order: list[str] = []
+
+    async def health() -> None:
+        started = time.perf_counter()
+        r = await client.get("/health")
+        order.append(f"health@{time.perf_counter() - started:.2f}s")
+        assert r.status_code == 200
+
+    async def city() -> None:
+        started = time.perf_counter()
+        r = await client.get("/api/v1/maps/sample-stats")
+        order.append(f"city@{time.perf_counter() - started:.2f}s")
+        assert r.status_code == 200
+
+    await asyncio.gather(health(), city())
+
+    # The health check answered before the parse finished — so the
+    # event loop was free while the CPU was busy.
+    assert order[0].startswith("health"), f"the health check waited for the parse: {order}"

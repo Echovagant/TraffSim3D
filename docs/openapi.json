@@ -266,6 +266,31 @@
         }
       }
     },
+    "/api/v1/maps/sample-stats": {
+      "get": {
+        "tags": [
+          "maps",
+          "maps"
+        ],
+        "summary": "Sample Stats",
+        "description": "The size of the bundled city — without shipping the whole network.\n\nA page that states a number (\"988 roads\") should be able to CHECK\nit, and the check should not cost a megabyte of network. This\nendpoint counts the very same city `parse-sample` serves: the same\nfile, the same rectangle, the same cached parse — so the numbers\nhere describe the city the Smart City view actually drives on.\n\nThe first call pays the parse; every later one is free.",
+        "operationId": "sample_stats_api_v1_maps_sample_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Sample Stats Api V1 Maps Sample Stats Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/maps/parse-pbf": {
       "post": {
         "tags": [
