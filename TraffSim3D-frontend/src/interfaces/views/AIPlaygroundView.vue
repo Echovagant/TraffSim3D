@@ -1119,12 +1119,22 @@ const chartH = 120
 let pollHandle: number | null = null
 let replayMirrorHandle: number | null = null
 
-const maxReward = computed(() =>
-  status.value.reward_history.length === 0 ? 0 : Math.max(...status.value.reward_history),
-)
-const minReward = computed(() =>
-  status.value.reward_history.length === 0 ? 0 : Math.min(...status.value.reward_history),
-)
+// The reward history grows with every episode, and `Math.max(...history)`
+// spreads the WHOLE array into the call's arguments — the engine's
+// argument limit is finite (V8: ~125 000), and a long training run
+// walks straight into it with a RangeError. A loop has no limit.
+const maxReward = computed(() => {
+  const history = status.value.reward_history
+  let max = 0
+  for (const value of history) if (value > max) max = value
+  return max
+})
+const minReward = computed(() => {
+  const history = status.value.reward_history
+  let min = 0
+  for (const value of history) if (value < min) min = value
+  return min
+})
 
 const rewardPoints = computed(() => {
   const h = status.value.reward_history

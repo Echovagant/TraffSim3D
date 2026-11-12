@@ -273,7 +273,28 @@ const epStateLabel = (ep: EndpointProbe): string => {
   return '· 待检查'
 }
 
+// The formatted response body, cached by the object it came from.
+//
+// `JSON.stringify(response, null, 2)` used to run for every endpoint on
+// every render — and the OpenAPI document is big, so that is
+// milliseconds per endpoint, several times a second (the page polls
+// every 4 s and re-renders). The probe results are REPLACED, not
+// mutated, when a new poll lands — so the text can be kept next to the
+// object it describes.
+const jsonCache = new WeakMap<object, string>()
 const formatJson = (v: unknown): string => {
+  if (typeof v === 'object' && v !== null) {
+    const cached = jsonCache.get(v)
+    if (cached !== undefined) return cached
+    let text: string
+    try {
+      text = JSON.stringify(v, null, 2)
+    } catch {
+      text = String(v)
+    }
+    jsonCache.set(v, text)
+    return text
+  }
   try {
     return JSON.stringify(v, null, 2)
   } catch {
