@@ -1,11 +1,19 @@
 # TraffSim3D
 
-**面向智慧城市的 3D 智能交通仿真平台。** 前端用 Vue 3 + Three.js 做可视化与物理仿真，后端用 Python FastAPI + PyTorch 跑强化学习引擎 —— 让多智能体 RL 在一座虚拟城市里同时学会**开车**和**调度信号灯**。
+**面向智慧城市的 3D 智能交通仿真平台。** 前端 Vue 3 + Three.js 做可视化与刚体物理仿真，后端 Python FastAPI + PyTorch 跑强化学习引擎 —— 让多智能体 RL 在一座真实城市里同时学会**开车**和**调度信号灯**。
 
 [![CI](https://github.com/Echovagant/TraffSim3D/actions/workflows/ci.yml/badge.svg)](https://github.com/Echovagant/TraffSim3D/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-![TraffSim3D 首页](e2e-output/baseline/home-gsap-hero.png)
+![深圳福田白模城区：真实 OSM 底图上叠着仿真路网与 5 356 栋建筑，右侧是春风隧道口的 3.5 m 限高门架](docs/media/readme-hero.png)
+
+---
+
+## 演示视频
+
+约 1 分 50 秒，**六段**：深圳福田白模城区的鸟瞰与跟车 → 驾驶舱仪表盘（车速 / 限速 / 挡位 / 踏板）→ **窄巷口的红色限行杆**（车进不去的那条巷子）→ 训好的策略在演武场回放 → 回放进场景编辑器看**策略开的那辆车**（本次录制实测走了 436 m）→ 切到 5×5 网格看**RL 指挥的信号灯**（25 个路口、50 盏灯，抽屉里写明「已实装」）。
+
+[`docs/media/traffsim3d-demo.webm`](docs/media/traffsim3d-demo.webm)
 
 ---
 
@@ -19,22 +27,7 @@
 
 **兴趣点（POI）**：把真实地图上的咖啡店、医院、加油站叠到路网上 —— 数据来自 OpenStreetMap，**无需申请任何地图服务的 Key**。按类别着色、按名称筛选、选中高亮。选一个兴趣点作为目的地，车会规划路线开过去，第一人称相机跟着走，到了就停。
 
-SceneLab 页面底部自带**仿真读数抽屉**（原 SimulationLab 并入此处）：场景统计、四套信号控制策略随时切换、性能帧率、越界处理原因 —— 展开即读，收起让位给地图。
-
-### 仿真内核
-
-基于 **Rapier WASM** 的刚体物理，车辆有质量、转向半径、制动距离和轮胎侧滑。固定步长推进，仿真结果不随机器性能漂移。
-
-四套信号控制策略可以随时切换：
-
-| 策略     | 行为                                 |
-| -------- | ------------------------------------ |
-| 固定周期 | 30s 绿 + 3s 黄 + 30s 红，循环        |
-| 感应控制 | 有排队就延长绿灯，对向空了就缩短红灯 |
-| 协调控制 | 相邻路口组成绿波带，车队连续过路口   |
-| RL 控制  | 由训练好的策略网络实时决定配时       |
-
-挂载 **LiDAR 点云**与**相机**传感器，把感知数据导出成点云/轨迹文件。
+页面底部自带**仿真读数抽屉**：场景统计、四套信号控制策略随时切换、性能帧率、越界处理原因 —— 展开即读，收起让位给地图。
 
 ### AI Proving Ground · 智能体演武场
 
@@ -55,7 +48,22 @@ SceneLab 页面底部自带**仿真读数抽屉**（原 SimulationLab 并入此�
 
 **Cesium** 渲染真实城市底图（OSM 瓦片 + OSM 3D 拉伸建筑 + 道路多段线），把仿真叠加上去。底图与路网数据**同源同基准**（都是 WGS84），叠上去的路线与底图上的街道是重合的。
 
-**道路的权利也来自 OSM**：车太宽的巷子画成暗色、路口拉起限行杆；隧道口的 `maxheight`（随包城区的春风隧道是 3.5 m）是**真的限高**——小车过得去，公交与货车上不去，门架上标着那个数字。
+**路权也来自真实数据**：车太宽的巷子画成暗色、路口拉起限行杆；隧道口的 `maxheight`（随包城区的春风隧道是 3.5 m）是**真的限高** —— 小车过得去，公交与货车上不去，门架上标着那个数字。
+
+### 仿真内核
+
+基于 **Rapier WASM** 的刚体物理，车辆有质量、转向半径、制动距离和轮胎侧滑。固定步长推进，仿真结果不随机器性能漂移。路面的高程是真的 —— 车沿着坡道**开上去**，车身随路面俯仰。
+
+四套信号控制策略可以随时切换：
+
+| 策略     | 行为                                 |
+| -------- | ------------------------------------ |
+| 固定周期 | 30s 绿 + 3s 黄 + 30s 红，循环        |
+| 感应控制 | 有排队就延长绿灯，对向空了就缩短红灯 |
+| 协调控制 | 相邻路口组成绿波带，车队连续过路口   |
+| RL 控制  | 由训练好的策略网络实时决定配时       |
+
+挂载 **LiDAR 点云**与**相机**传感器，把感知数据导出成点云/轨迹文件。
 
 ### 跨语言契约
 
@@ -69,15 +77,19 @@ SceneLab 页面底部自带**仿真读数抽屉**（原 SimulationLab 并入此�
 
 ### 场景编辑器
 
-![场景编辑器](docs/media/scene-editor.png)
+![场景编辑器：路网、车辆、信号灯与底部读数抽屉](docs/media/scene-editor.png)
 
 ### 智能体演武场
 
-![AI Proving Ground](e2e-output/baseline/ai-playground.png)
+![AI Proving Ground：reward 曲线、checkpoint 列表与回放控制](TraffSim3D-frontend/public/tiles/tile-ai.png)
 
-### 演示视频
+### 城市 3D
 
-仓库内附一段完整演示（约 1 分 50 秒，**六段**）：[`docs/media/traffsim3d-demo.webm`](docs/media/traffsim3d-demo.webm) —— 深圳福田白模城区的鸟瞰与跟车、驾驶舱仪表盘（车速 / 限速 / 挡位 / 踏板）、**窄巷口的红色限行杆**（车进不去的那条巷子）、训好的策略在演武场回放、回放进场景编辑器看**策略开的那辆车**（本次录制实测走了 430 m）、最后切到 5×5 网格看**RL 指挥的信号灯**（25 个路口、50 盏灯，抽屉里写明「已实装」）。
+![SmartCity 3D：白模城区与指挥大屏](TraffSim3D-frontend/public/tiles/tile-smartcity.png)
+
+### 交付总览
+
+![交付总览：架构、能力矩阵与时间线](TraffSim3D-frontend/public/tiles/tile-deliverables.png)
 
 ---
 
@@ -136,25 +148,25 @@ npm run dev            # http://localhost:5173/
 
 首页 `/` 是总览，主要路由：
 
-| 路由              | 模块         |
-| ----------------- | ------------ |
-| `/scene-editor`   | 场景编辑器 + 仿真读数 |
-| `/ai-playground`  | 智能体演武场 |
-| `/map-importer`   | 地图导入     |
-| `/smart-city`     | 城市 3D 底图 |
-| `/deliverables`   | 交付总览     |
-| `/backend`        | 后端状态自检 |
+| 路由              | 模块                    |
+| ----------------- | ----------------------- |
+| `/scene-editor`   | 场景编辑器 + 仿真读数   |
+| `/ai-playground`  | 智能体演武场            |
+| `/map-importer`   | 地图导入                |
+| `/smart-city`     | 城市 3D 底图            |
+| `/deliverables`   | 交付总览                |
+| `/backend`        | 后端状态自检            |
 
 ### 跑测试
 
 ```bash
-# 前端单元测试
+# 前端单元测试（1277）
 cd TraffSim3D-frontend && npm run test:run
 
-# 后端单元测试
+# 后端单元测试（958）
 cd TraffSim3D-backend && .\.venv\Scripts\python.exe -m pytest
 
-# 端到端测试（需要先装浏览器）
+# 端到端测试（58，需要先装浏览器）
 cd TraffSim3D-frontend && npx playwright install chromium && npm run test:e2e
 
 # 跨语言契约自检
@@ -210,6 +222,7 @@ app/
 
 ## 目录
 
+- [演示视频](#演示视频)
 - [它能做什么](#它能做什么)
 - [界面预览](#界面预览)
 - [技术栈](#技术栈)
