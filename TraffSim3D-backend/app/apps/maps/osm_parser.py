@@ -183,6 +183,7 @@ def _parse_max_height(value: str | None) -> float | None:
             best = metres
     return best
 
+
 # Meters per level step. One `level` step is this many metres, so an OSM
 # `layer=2` lands 8 m above the ground and `layer=-3` lands 12 m below it.
 # The *step* (not the number of levels) is what has to match the frontend's

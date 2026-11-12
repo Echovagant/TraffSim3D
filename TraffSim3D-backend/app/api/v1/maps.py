@@ -218,9 +218,7 @@ def _fetch_signal_nodes(bbox: BBox) -> list[tuple[float, float]]:
     # ~2 000 elements, so the scan was ~2 000 comparisons per way.
     # One index turns it into a lookup.
     by_id: dict[Any, dict[str, Any]] = {
-        element.get("id"): element
-        for element in elements
-        if element.get("type") == "node"
+        element.get("id"): element for element in elements if element.get("type") == "node"
     }
     nodes: list[tuple[float, float]] = []
     for element in elements:
