@@ -394,9 +394,6 @@ test.describe('driving behaviour (live scene)', () => {
       const w = window as unknown as { __world?: { setTickRate?: (r: number) => void } }
       w.__world?.setTickRate?.(4)
     })
-    await startSampler(page, SAMPLE_MS)
-    await page.waitForTimeout(MICRO_SAMPLE_MS)
-    const samples = await collectSamples(page)
 
     const movementOf = (from: number, to: number): 'straight' | 'left' | 'right' | 'uturn' => {
       let d = (to - from) % (2 * Math.PI)
@@ -418,51 +415,72 @@ test.describe('driving behaviour (live scene)', () => {
     const positionFromRight = (laneIndex: number, laneCount: number): number =>
       laneIndex < Math.floor(laneCount / 2) ? laneIndex : laneCount - 1 - laneIndex
 
-    let lefts = 0
-    let rights = 0
-    for (const [, rs] of seriesOf(samples)) {
-      for (let i = 1; i < rs.length; i++) {
-        if (rs[i]!.road === rs[i - 1]!.road) continue
-        const before = rs[i - 1]!
-        // The `after` heading must be past the arc: at i+2 (0.4 s) the
-        // body can still be mid-sweep, and a 90° turn then classifies as
-        // straight. Four samples (0.8 s) clear an arc at scene speeds.
-        const after = rs[Math.min(rs.length - 1, i + 4)]!
-        if (after.road !== rs[i]!.road) continue // next junction already reached — skip this one
-        const movement = movementOf(before.h, after.h)
-        if (movement === 'uturn' || movement === 'straight') continue
-        // Turns onto a one-way RING road are exempt: at a ring junction
-        // the ring's flow leaves exactly one movement open (measured:
-        // the southbound arterial at the SW corner can only turn west),
-        // so the arrows paint that single movement and every lane takes
-        // it. The lane-position rule is asserted where the junction
-        // actually offers a choice — interior-to-interior turns.
-        const target = rs[i]!.road
-        const isRing = /mc-(ew-r0|ew-r2|ns-c0|ns-c3)/.test(target)
-        if (isRing) continue
-        // The lane count of the road the vehicle was ON. The sampler
-        // stores per-row lane data only, so infer it from the road id
-        // convention (mc-*): the middle EW row is the 6-lane arterial,
-        // the one-way couplet and the NS arterial are 4-lane, the rest
-        // of the columns are 2-lane locals.
-        const laneCount = before.road.startsWith('mc-ew-r1')
-          ? 6
-          : before.road.startsWith('mc-ns-c1')
-            ? 4
-            : 2 // the one-way ring streets and the local column
-        const pos = positionFromRight(before.lane, laneCount)
-        const last = travelLanes(before.lane, laneCount) - 1
-        if (movement === 'left') {
-          lefts += 1
-          expect(pos, `left turn from lane position ${pos}/${last} on ${before.road}`).toBe(last)
-        } else {
-          rights += 1
-          expect(pos, `right turn from lane position ${pos} on ${before.road}`).toBe(0)
+    // Classify the sampled road changes into turns and CHECK the lane
+    // rule on each of them. Returns how many of each kind it saw.
+    const classifyTurns = (
+      samples: Array<{ wt: number; rows: SampleRow[] }>,
+    ): { lefts: number; rights: number } => {
+      let lefts = 0
+      let rights = 0
+      for (const [, rs] of seriesOf(samples)) {
+        for (let i = 1; i < rs.length; i++) {
+          if (rs[i]!.road === rs[i - 1]!.road) continue
+          const before = rs[i - 1]!
+          // The `after` heading must be past the arc: at i+2 (0.4 s) the
+          // body can still be mid-sweep, and a 90° turn then classifies as
+          // straight. Four samples (0.8 s) clear an arc at scene speeds.
+          const after = rs[Math.min(rs.length - 1, i + 4)]!
+          if (after.road !== rs[i]!.road) continue // next junction already reached — skip this one
+          const movement = movementOf(before.h, after.h)
+          if (movement === 'uturn' || movement === 'straight') continue
+          // Turns onto a one-way RING road are exempt: at a ring junction
+          // the ring's flow leaves exactly one movement open (measured:
+          // the southbound arterial at the SW corner can only turn west),
+          // so the arrows paint that single movement and every lane takes
+          // it. The lane-position rule is asserted where the junction
+          // actually offers a choice — interior-to-interior turns.
+          const target = rs[i]!.road
+          const isRing = /mc-(ew-r0|ew-r2|ns-c0|ns-c3)/.test(target)
+          if (isRing) continue
+          // The lane count of the road the vehicle was ON. The sampler
+          // stores per-row lane data only, so infer it from the road id
+          // convention (mc-*): the middle EW row is the 6-lane arterial,
+          // the one-way couplet and the NS arterial are 4-lane, the rest
+          // of the columns are 2-lane locals.
+          const laneCount = before.road.startsWith('mc-ew-r1')
+            ? 6
+            : before.road.startsWith('mc-ns-c1')
+              ? 4
+              : 2 // the one-way ring streets and the local column
+          const pos = positionFromRight(before.lane, laneCount)
+          const last = travelLanes(before.lane, laneCount) - 1
+          if (movement === 'left') {
+            lefts += 1
+            expect(pos, `left turn from lane position ${pos}/${last} on ${before.road}`).toBe(last)
+          } else {
+            rights += 1
+            expect(pos, `right turn from lane position ${pos} on ${before.road}`).toBe(0)
+          }
         }
       }
+      return { lefts, rights }
     }
-    // The window saw both kinds of turn — the rule is exercised, not
-    // vacuously true.
+
+    // The window has to SEE both kinds of turn, or the rule is not
+    // exercised. How many turns a window catches depends on the
+    // machine: the sampling timer stretches when the page is busy, and a
+    // turn that happens between two samples is missed. So the window is
+    // sampled again until both kinds are in it (three rounds at most)
+    // instead of being sampled once and hoped for.
+    let lefts = 0
+    let rights = 0
+    for (let round = 0; round < 3 && (lefts === 0 || rights === 0); round++) {
+      await startSampler(page, SAMPLE_MS)
+      await page.waitForTimeout(MICRO_SAMPLE_MS)
+      const counts = classifyTurns(await collectSamples(page))
+      lefts += counts.lefts
+      rights += counts.rights
+    }
     expect(lefts, `lefts=${lefts} rights=${rights}`).toBeGreaterThan(0)
     expect(rights, `lefts=${lefts} rights=${rights}`).toBeGreaterThan(0)
   })

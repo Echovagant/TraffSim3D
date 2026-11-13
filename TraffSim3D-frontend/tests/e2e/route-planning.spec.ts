@@ -115,8 +115,33 @@ test.describe('Route planning + the first-person camera', () => {
     expect(before.position.y).toBeGreaterThan(5)
 
     // After: the camera sits in the car, at eye height.
+    //
+    // The camera EASES into the car, so it has to be waited for — a
+    // fixed wait is a race with the machine: on the CI runner (15 fps
+    // under the software rasterizer) the camera was still 2.8 m above
+    // the car after 800 ms. The ease is timed now, but the test waits
+    // for the ARRIVAL rather than for a number of milliseconds.
     await page.check('[data-testid="follow-camera-checkbox"]')
-    await page.waitForTimeout(800)
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            const w = (window as unknown as { __world: RouteWorld }).__world
+            const cam = (
+              window as unknown as {
+                __camera: () => {
+                  position: { x: number; y: number; z: number }
+                  target: { x: number; y: number; z: number }
+                }
+              }
+            ).__camera()
+            const v = w.network.vehicles[w.routeFollowerId ?? '']
+            if (!v) return Infinity
+            return Math.abs(cam.position.y - (v.position.y + 1.35))
+          }),
+        { timeout: 20_000 },
+      )
+      .toBeLessThan(0.05)
     const after = await page.evaluate(() => {
       const w = (window as unknown as { __world: RouteWorld }).__world
       const cam = (

@@ -39,6 +39,18 @@ export const FOLLOW_CHASE_TOP_M = 55
 export const FOLLOW_ENTRY_FRAMES = 40
 
 /**
+ * How long the camera takes to ease into the driver's eye, in
+ * milliseconds — `FOLLOW_ENTRY_FRAMES` at 60 fps.
+ *
+ * Timed rather than counted in frames: a frame count ties the camera's
+ * arrival to the frame rate, and on a slow machine the first-person
+ * view was still swinging into place seconds after the user expected
+ * it to have arrived (measured on the CI runner: 15 fps, and the
+ * camera was still 2.8 m above the car after 800 ms).
+ */
+export const FOLLOW_ENTRY_MS = (FOLLOW_ENTRY_FRAMES * 1000) / 60
+
+/**
  * What the first-person camera rides with.
  *
  * Structural on purpose — the render layer must not depend on the
@@ -118,7 +130,17 @@ export class ThreeJSRenderer {
   /** Whether the camera is currently easing into / riding the car. */
   private following = false
   /** Frames spent easing into the first-person view (capped). */
-  private followFrames = 0
+  /**
+   * How long the camera has been easing toward the driver's eye, in
+   * MILLISECONDS.
+   *
+   * It used to be a frame COUNT, which tied the camera's arrival to the
+   * frame rate: at 60 fps the ease was over in 0.67 s, at 15 fps it
+   * took 2.7 s — and on a slow machine the first-person view was still
+   * swinging into place long after the user expected it to have
+   * arrived. The arrival is now the same wall-clock time everywhere.
+   */
+  private followElapsedMs = 0
   /** Where the camera is steering its look-at point toward. */
   private followLook = new THREE.Vector3()
   /** The POI markers (one draw call for the whole set). */
@@ -497,7 +519,7 @@ export class ThreeJSRenderer {
       // per-frame placement).
       const follow = this.getFollowTarget?.() ?? null
       if (follow) {
-        this.applyFollowCamera(follow)
+        this.applyFollowCamera(follow, rawDt)
       } else {
         // Leaving the first-person view: the next entry eases in again
         // from wherever the camera is now.
@@ -520,7 +542,7 @@ export class ThreeJSRenderer {
    * the street exactly at the middle of the screen, with nothing in
    * between.
    */
-  private applyFollowCamera(target: FollowCameraTarget): void {
+  private applyFollowCamera(target: FollowCameraTarget, dt: number): void {
     const mode = target.mode ?? 'cockpit'
     const forward = new THREE.Vector3(Math.cos(target.heading), 0, Math.sin(target.heading))
     let eye: THREE.Vector3
@@ -554,22 +576,24 @@ export class ThreeJSRenderer {
     // snap puts the whole view at the car in one frame, and the road
     // swinging around the screen reads as a glitch rather than a move.
     //
-    // The ease-out runs over `FOLLOW_ENTRY_FRAMES` frames and then
+    // The ease-out runs over `FOLLOW_ENTRY_MS` **milliseconds** and then
     // finishes exactly — a lerp that never converges would leave the
-    // view a metre or two behind the car forever.
+    // view a metre or two behind the car forever. It is timed, not
+    // counted in frames: the camera arrives in the same wall-clock
+    // time on a slow machine and on a fast one.
     if (!this.following) {
       // Entering: seed the look-at point from where the camera already
       // points, so the ease-out starts from the user's view rather than
       // from a point somewhere in the sky.
       this.following = true
-      this.followFrames = 0
+      this.followElapsedMs = 0
       this.followLook.copy(this.camera.position)
       const direction = new THREE.Vector3()
       this.camera.getWorldDirection(direction)
       this.followLook.add(direction.multiplyScalar(FOLLOW_LOOK_AHEAD_M))
     }
-    this.followFrames = Math.min(FOLLOW_ENTRY_FRAMES, this.followFrames + 1)
-    const t = this.followFrames / FOLLOW_ENTRY_FRAMES
+    this.followElapsedMs = Math.min(FOLLOW_ENTRY_MS, this.followElapsedMs + dt * 1000)
+    const t = this.followElapsedMs / FOLLOW_ENTRY_MS
     const eased = 1 - Math.pow(1 - t, 3) // ease-out cubic
     this.camera.position.lerp(eye, eased)
     this.followLook.lerp(look, eased)
