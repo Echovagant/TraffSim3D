@@ -81,10 +81,114 @@ const main = async () => {
   const toggle = page.locator('[data-testid="toggle-panels"]')
   if (await toggle.count()) await toggle.click()
   await page.waitForTimeout(1_500)
+
+  // ===== 限高门架：公交进不去的那一段 ==============================
+  //
+  // 春风隧道是随包城区里唯一带 `maxheight` 的路（3.5 m）。这一段
+  // 把它讲清楚：**公交停在门口，小车从它旁边过去**。
+  //
+  // 两辆车是"放"上去的（生成器把车撒在一千多条路上，不会正好落在
+  // 隧道口）。放的时候实体与刚体一起放在车道点上 —— `moveVehicleTo`
+  // 会重新吸附到全网最近的车道，那条路未必是隧道。
+  // 布景期间把底栏藏起来：车道守卫会为「手放的车」记一条事件，
+  // 那是制作过程的注脚，不该出现在演示片里。布景结束后清空事件流
+  // 并把底栏放回来。
+  await page.addStyleTag({ content: '.bottom-bar { visibility: hidden !important; }' })
+  const gantry = await page.evaluate(async () => {
+    const ra = await import('/src/domain/services/roadAccess.ts')
+    const geo = await import('/src/domain/services/laneGeometry.ts')
+    const w = window.__world
+    const limited = Object.values(w.network.roads).filter((r) => ra.roadHeightLimitM(r) !== null)
+    // 选那条「车流方向的前端就是门架」的路：门架立在路的末端，
+    // 顺着车流方向才撞得到它。
+    const tunnel =
+      limited.find((r) => {
+        const wps = geo.roadWaypoints(r)
+        const last = wps[wps.length - 1]
+        return Object.values(w.network.intersections).some(
+          (i) =>
+            (i.connectedRoads ?? []).includes(r.id) &&
+            Math.hypot(i.position.x - last.x, i.position.z - last.z) < 8,
+        )
+      }) ?? limited[0]
+    if (!tunnel) return null
+    const len = geo.roadLength(tunnel)
+    const spec = w.getRapierWorld()
+    // 离门架 75 m（公交）与 100 m（小车）：两条隧道路在另一端汇合，
+    // 靠近汇合点时 tick 的车道吸附会挑到**平行的那条**路，车就会朝
+    // 反方向开走。
+    const place = (type, back) => {
+      const s = Math.max(0, Math.min(len, len - back))
+      const lp = geo.lanePoint(tunnel, 0, s)
+      const car = Object.values(w.network.vehicles).find((v) => v.type === type && !v.__staged)
+      if (!car) return null
+      car.__staged = true
+      const v = w.network.vehicles[car.id]
+      v.roadId = tunnel.id
+      v.laneIndex = 0
+      v.s = s
+      v.position = { x: lp.position.x, y: lp.position.y, z: lp.position.z }
+      v.heading = lp.heading
+      v.speed = 9
+      v.targetSpeed = 9
+      v.status = 'driving'
+      v.desiredStatus = 'driving'
+      spec?.setVehiclePosition(car.id, { x: lp.position.x, y: lp.position.y, z: lp.position.z })
+      spec?.setVehicleSpeed(car.id, 9, lp.heading)
+      return { id: car.id, s: +s.toFixed(1) }
+    }
+    const bus = place('bus', 75)
+    const car = place('car', 100)
+    if (car) w.setRideVehicle(car.id, 'chase')
+    return { tunnel: tunnel.id, limit: ra.roadHeightLimitM(tunnel), bus, car }
+  })
+  console.log('gantry:', JSON.stringify(gantry))
+  if (!gantry?.car) throw new Error('could not stage the height-gantry shot')
+
+  // 两段式放置：先让 tick 的车道同步自己选好车道，再按它选中的
+  // roadId/laneIndex/s 把车**精确**放回那个车道点。只放一次的话，
+  // 车与 tick 认定的车道差着 5 m，车道守卫会每帧把它拽回去（而且
+  // 每次都记一条事件）。
+  await page.waitForTimeout(2_500)
+  const exact = await page.evaluate(
+    async (ids) => {
+      const geo = await import('/src/domain/services/laneGeometry.ts')
+      const w = window.__world
+      const spec = w.getRapierWorld()
+      const out = {}
+      for (const [key, id] of Object.entries(ids)) {
+        const v = w.network.vehicles[id]
+        if (!v) continue
+        const road = w.network.roads[v.roadId]
+        if (!road) continue
+        const lp = geo.lanePoint(road, v.laneIndex, v.s)
+        v.position = { x: lp.position.x, y: lp.position.y, z: lp.position.z }
+        v.heading = lp.heading
+        spec?.setVehiclePosition(id, { x: lp.position.x, y: lp.position.y, z: lp.position.z })
+        spec?.setVehicleSpeed(id, v.speed, lp.heading)
+        out[key] = { roadId: v.roadId, laneIndex: v.laneIndex, s: +v.s.toFixed(1) }
+      }
+      return out
+    },
+    { bus: gantry.bus.id, car: gantry.car.id },
+  )
+  console.log('gantry lanes:', JSON.stringify(exact))
+  await page.waitForTimeout(1_200)
+  // 手放车辆的自述（"已拉回"）不该留在演示片里。
+  await page.evaluate(() => window.__clearCityEvents?.())
+  await page.evaluate(() => {
+    document.querySelectorAll('style').forEach((el) => {
+      if (el.textContent?.includes('.bottom-bar { visibility: hidden')) el.remove()
+    })
+  })
+
   // 跟踪一辆在跑的车（与产品点击拾取走同一个 store 入口）。
   const ride = await page.evaluate(() => {
     const w = window.__world
-    const car = Object.values(w.network.vehicles).find((v) => v.type === 'car' && v.speed > 4)
+    // `__staged` 的两辆是门架那一段的主角，别抢。
+    const car = Object.values(w.network.vehicles).find(
+      (v) => v.type === 'car' && v.speed > 4 && !v.__staged,
+    )
     if (!car) return null
     w.setRideVehicle(car.id, 'chase')
     return car.id
@@ -105,7 +209,7 @@ const main = async () => {
       }
     }
     const candidates = Object.values(w.network.vehicles)
-      .filter((v) => v.type === 'car' && v.speed > 4 && signalledRoads.has(v.roadId))
+      .filter((v) => v.type === 'car' && v.speed > 4 && signalledRoads.has(v.roadId) && !v.__staged)
       .sort((a, b) => b.speed - a.speed)
     const car = candidates[0]
     if (!car) return null
@@ -148,7 +252,7 @@ const main = async () => {
     }
     const mouthRoads = new Set(mouths.flatMap((m) => m.connectedRoads ?? []))
     const car = Object.values(w.network.vehicles).find(
-      (v) => v.type === 'car' && v.speed > 4 && mouthRoads.has(v.roadId),
+      (v) => v.type === 'car' && v.speed > 4 && mouthRoads.has(v.roadId) && !v.__staged,
     )
     if (!car) return null
     w.setRideVehicle(car.id, 'chase')
@@ -156,6 +260,22 @@ const main = async () => {
   })
   console.log('alley:', JSON.stringify(alleyRide))
   await page.waitForTimeout(7_000)
+
+  // ===== 限高门架：公交进不去的那一段 ==============================
+  //
+  // 两辆车在布景时就放好了（见上面「布景」那段），到这一刻，公交
+  // 已经停在门架下、小车跟到了它后面 —— 这一段只是把镜头切过去。
+  const gantryShot = await page.evaluate((carId) => {
+    const w = window.__world
+    if (!carId) return null
+    w.setRideVehicle(carId, 'chase')
+    const v = w.network.vehicles[carId]
+    return v
+      ? { x: +v.position.x.toFixed(1), z: +v.position.z.toFixed(1), v: +v.speed.toFixed(1) }
+      : null
+  }, gantry?.car?.id ?? null)
+  console.log('gantry shot:', JSON.stringify(gantryShot))
+  await page.waitForTimeout(8_000)
 
   // 退出驾驶，回到鸟瞰收尾这一段。
   await page.evaluate(() => window.__world.setRideVehicle(null))

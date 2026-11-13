@@ -11,9 +11,9 @@
 
 ## 演示
 
-![白模城区里跟着一辆车行驶](docs/media/demo-loop.gif)
+![跟着一辆车驶向限高门架：公交停在 3.5 m 的门架下](docs/media/demo-loop.gif)
 
-4 秒循环：仿真车辆在路网上跑（录屏原片 `docs/media/traffsim3d-demo.webm`）。
+4 秒循环：车在白模城区里跑，前方是随包路网的限高门架 —— 公交（3.4 m）过不去，小车过得去。录屏原片 `docs/media/traffsim3d-demo.webm`。
 
 ---
 

@@ -430,6 +430,17 @@ interface FeedEvent {
 const events = ref<FeedEvent[]>([])
 let unsubscribeOob: (() => void) | null = null
 
+// Dev-only: clear the feed. The recording script puts a vehicle on a
+// road by hand (to stage the height-gantry shot), and the lane guard
+// notices the hand-off — one honest, but for a demo, distracting line
+// ("已拉回，速度清零"). Same pattern as `window.__world` /
+// `window.__cesium`: dev tooling, tree-shaken out of production.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __clearCityEvents?: () => void }).__clearCityEvents = () => {
+    events.value = []
+  }
+}
+
 const pushEvent = (kind: string, text: string): void => {
   const now = new Date()
   const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
@@ -721,8 +732,14 @@ onMounted(async () => {
   // Dev-only handle on the viewer, for the e2e specs (the basemap's
   // tile URL is the thing they assert) — same pattern as the store's
   // `window.__world`, and tree-shaken out of the production bundle.
+  //
+  // The Cesium NAMESPACE goes with it: the camera API wants a
+  // `Cartesian3` (a plain `{longitude, latitude, height}` is refused),
+  // and the recording script flies the camera to a gantry for the
+  // close-up shot.
   if (import.meta.env.DEV && typeof window !== 'undefined') {
     ;(window as unknown as { __cesium?: Cesium.Viewer }).__cesium = cesiumViewer
+    ;(window as unknown as { __cesiumLib?: typeof Cesium }).__cesiumLib = Cesium
   }
   try {
     const roads: LoadedNetworkRoads = await loadNetworkRoads(
