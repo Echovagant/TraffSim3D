@@ -16,6 +16,14 @@ export const MAX_DPR = 2
  * the car body (2u) — vehicles visibly straddled multiple lanes.
  */
 export const ROAD_LANE_WIDTH = 3.5
+/**
+ * How far a car's centre may move off its lane's centre before the wheel
+ * stops doing anything: a 3.5 m lane with a 1.8 m body leaves ±1.25 m of
+ * travel, and 1.15 m keeps the tyres just inside the line. Beyond it the
+ * lane edge behaves like a kerb — you can hold the lock, the car does
+ * not go through it.
+ */
+export const STEER_LANE_EDGE_M = 1.15
 /** Number of historical positions kept per vehicle for the trail line. 60 frames ≈ 1s at 60fps. */
 export const TRAIL_LENGTH = 60
 

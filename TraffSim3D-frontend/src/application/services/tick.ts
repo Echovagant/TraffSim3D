@@ -73,6 +73,7 @@ import {
   PYTHON_SIM_SPEED_LIMIT,
   LATERAL_DRIFT_THRESHOLD_M,
   MAX_DECEL_COMFY,
+  STEER_LANE_EDGE_M,
 } from '@shared/constants/simulation'
 import type { RapierWorld, ContactEvent, Vec3 } from '@infrastructure/physics'
 import { findNearestLane } from './laneFrameSync'
@@ -175,11 +176,20 @@ export interface TickContext {
    * still a ceiling that the constraint layers below can lower: the
    * curve warning speed, the red light and the car in front all keep
    * their authority — a manual throttle cannot drive into a queue any
-   * more than an AI one can. The steering side of manual driving is
-   * lane changes (`worldStore.requestLaneChange`), which is what the
-   * lane model offers as steering intent.
+   * more than an AI one can.
    */
   driverOverride?: (vehicleId: string) => number | null
+  /**
+   * The manual driver's steering wheel, −1 … +1 (positive = left, the
+   * simulation's convention for everything that turns).
+   *
+   * This is a real front-wheel angle, not a lane intent: step 5b turns
+   * it into the bicycle model's lateral velocity `v · tan(δ)` and lets
+   * the physics integrate the result. Crossing into the next lane is
+   * still a lane change — the store requests one when the driver keeps
+   * steering past the lane edge — but the wheel itself is analogue.
+   */
+  driverSteer?: (vehicleId: string) => number | null
   /**
    * The cooperative-driving policy over the junction's negotiation
    * (Scene 4), when it is enabled.
@@ -1408,6 +1418,16 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
 // ===== lane change — control constants =====
 /** P-controller gain for lateral linvel (1/s). 2.0 means a 1m gap
  *  gets 2 m/s of lateral velocity. */
+/** The manual wheel's lock: a real car's front wheels stop at ~35°. */
+const DRIVER_MAX_WHEEL_RAD = (35 * Math.PI) / 180
+/**
+ * Cap on the lateral velocity a held lock may command. At 15 m/s the
+ * kinematic value for 35° would be ~10 m/s — far more than a car can
+ * actually hold before the tyres let go, and enough to cross three
+ * lanes in a second. 2.5 m/s keeps a full-lock input at the edge of
+ * what a real lane change does (3.5 m in ~1.6 s).
+ */
+const DRIVER_MAX_LATERAL_MS = 2.5
 const STEER_GAIN = 2.0
 /** Cap on lateral linvel (m/s). 4 m/s ≈ 14 km/h sideways. */
 const MAX_LATERAL_MS = 4.0
@@ -1751,8 +1771,38 @@ const applyLaneChangeLateralVelocity = (network: RoadNetwork, ctx: TickContext):
     // false, and `laneOffset(undefined, …)` is NaN — which would put
     // NaN into the body's lateral velocity and take the whole
     // physics world with it.
-    if (v.desiredLaneIndex == null) continue
     if (v.id === ctx.draggingId) continue
+    if (v.desiredLaneIndex == null) {
+      // No lane change in progress: the manual driver's wheel may still
+      // be turning. A real front-wheel angle δ gives a lateral velocity
+      // of `v · tan(δ)` (the bicycle model, small-angle exact for the
+      // lateral component), capped so a held lock cannot slide the car
+      // across a lane faster than a real one would.
+      const steer = ctx.driverSteer?.(v.id)
+      if (steer != null && Math.abs(steer) > 0.01) {
+        const road = network.roads[v.roadId]
+        const delta = steer * DRIVER_MAX_WHEEL_RAD
+        let lat = Math.max(
+          -DRIVER_MAX_LATERAL_MS,
+          Math.min(DRIVER_MAX_LATERAL_MS, v.speed * Math.tan(delta)),
+        )
+        // The lane edge is a kerb, not a suggestion: with the wheels
+        // already at it, an outward lock cannot move the car further.
+        // (Without this a held key walked the car out of its lane on
+        // the many two-lane ways where no lane change exists, until the
+        // 15 m drift guard snapped it back.)
+        if (road) {
+          const drift =
+            perpendicularOffsetAlongRoad(road, v.s, v.position) -
+            laneOffset(v.laneIndex, road.laneCount)
+          if ((lat > 0 && drift <= -STEER_LANE_EDGE_M) || (lat < 0 && drift >= STEER_LANE_EDGE_M)) {
+            lat = 0
+          }
+        }
+        rapier.setVehicleLateralVelocity(v.id, lat)
+      }
+      continue
+    }
     const road = network.roads[v.roadId]
     if (!road) continue
     const currentLat = perpendicularOffsetAlongRoad(road, v.s, v.position)

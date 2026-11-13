@@ -176,7 +176,7 @@
       <button class="ride-btn ride-exit" data-testid="ride-exit" @click="leaveRide()">退出</button>
       <span class="ride-hint">{{
         ride.mode === 'cockpit'
-          ? 'W/S 油门·刹车 · A/D 变道 · 点击空白退出'
+          ? 'W/S 油门·刹车 · A/D 转向（长按跨线，轻点变道）· 点击空白退出'
           : '点击空白处也可退出 · 滚轮拉远近'
       }}</span>
     </div>
@@ -219,7 +219,7 @@ import type { ThreeJSRenderer } from '@infrastructure/rendering'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 import { computeNetworkBounds } from '@domain/services/networkBounds'
 import { approachSignalFor, signalPhaseLabel } from '@domain/services/approachSignal'
-import { vehicleSteeringAngle } from '@domain/services/steeringAngle'
+import { MAX_ROAD_WHEEL_DEG, vehicleSteeringAngle } from '@domain/services/steeringAngle'
 import {
   createCesiumViewer,
   DEFAULT_IMAGERY,
@@ -620,6 +620,9 @@ const rideSteerDeg = computed(() => {
   if (!v) return 0
   const road = world.network.roads[v.roadId]
   if (!road) return 0
+  // A human at the wheel sees THEIR hands: the car is being steered by
+  // the analogue input, and the lane keeper is not the one turning.
+  if (Math.abs(world.steerInput) > 0.01) return world.steerInput * MAX_ROAD_WHEEL_DEG
   return (vehicleSteeringAngle(v, road) * 180) / Math.PI
 })
 
@@ -892,18 +895,49 @@ const leaveRide = (): void => {
 }
 
 /** The ride's keyboard: C toggles the tracking look, X drives, Esc leaves,
- *  and while DRIVING the A/D keys are the steering intent (the lane
- *  change is what the lane model offers as steering). */
+ *  and while DRIVING the A/D keys are the wheel — held, they steer at a
+ *  hand's rate; tapped, they are still the old lane-change request. */
 const onRideKey = (e: KeyboardEvent): void => {
   if (!world.rideVehicleId) return
   if (e.code === 'KeyC') world.toggleRideLook()
   else if (e.code === 'KeyX') world.setRideMode(world.rideMode === 'cockpit' ? 'chase' : 'cockpit')
   else if (e.code === 'Escape') leaveRide()
-  else if (e.code === 'KeyA' && world.rideMode === 'cockpit') {
-    flashLaneChange(world.requestLaneChange(world.rideVehicleId, 'left'))
-  } else if (e.code === 'KeyD' && world.rideMode === 'cockpit') {
-    flashLaneChange(world.requestLaneChange(world.rideVehicleId, 'right'))
+  else if (e.code === 'KeyA' && world.rideMode === 'cockpit') beginSteer('left')
+  else if (e.code === 'KeyD' && world.rideMode === 'cockpit') beginSteer('right')
+}
+
+// ===== the analogue wheel =====
+//
+// A held key turns the wheel; releasing lets it self-centre. Steering
+// past the lane edge is what changes lanes — the store asks for one when
+// the car gets there — so a long press is "cross", and a tap stays the
+// old discrete request (with its refusal message) for people who just
+// want the car to move over.
+let steerKeyAt: number | null = null
+let steerKeyDir: 'left' | 'right' | null = null
+/** A press shorter than this never turned the wheel far enough to matter. */
+const STEER_TAP_MS = 180
+
+const beginSteer = (dir: 'left' | 'right'): void => {
+  if (steerKeyAt !== null) return
+  steerKeyAt = performance.now()
+  steerKeyDir = dir
+  world.setSteerTarget(dir === 'left' ? 1 : -1)
+}
+
+const endSteer = (): void => {
+  world.setSteerTarget(0)
+  const held = steerKeyAt === null ? Infinity : performance.now() - steerKeyAt
+  const dir = steerKeyDir
+  steerKeyAt = null
+  steerKeyDir = null
+  if (held < STEER_TAP_MS && dir && world.rideVehicleId) {
+    flashLaneChange(world.requestLaneChange(world.rideVehicleId, dir))
   }
+}
+
+const onRideKeyUp = (e: KeyboardEvent): void => {
+  if (e.code === 'KeyA' || e.code === 'KeyD') endSteer()
 }
 
 /**
@@ -970,6 +1004,7 @@ const onKeyDown = (e: KeyboardEvent): void => {
 }
 const onKeyUp = (e: KeyboardEvent): void => {
   keysDown.delete(e.code)
+  onRideKeyUp(e)
   if (e.code === 'AltLeft' || e.code === 'AltRight') {
     altLook = false
     setStreetControlsEnabled(true)

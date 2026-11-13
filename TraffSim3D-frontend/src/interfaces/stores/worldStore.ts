@@ -38,7 +38,11 @@ import {
   type PolicySignalActionSource,
   type SignalPolicyDecision,
 } from '@application/services/signalPolicySource'
-import { requestLaneChange as requestLaneChangeFn } from '@domain/services/laneChange'
+import {
+  requestLaneChange as requestLaneChangeFn,
+  perpendicularOffsetAlongRoad,
+} from '@domain/services/laneChange'
+import { laneOffset } from '@domain/services/laneGeometry'
 import { clearanceBeamsFor } from '@domain/services/clearanceBeams'
 import {
   nextRouteRoad,
@@ -57,7 +61,7 @@ import {
 } from '@application/services/poiNavigation'
 import type { FollowCameraTarget } from '@infrastructure/rendering/ThreeJSRenderer'
 import type { RouteRenderPath } from '@infrastructure/rendering/RouteMesh'
-import { DRIVER_EYE_HEIGHT_M } from '@shared/constants/simulation'
+import { DRIVER_EYE_HEIGHT_M, STEER_LANE_EDGE_M } from '@shared/constants/simulation'
 import { SensorRegistry, type HostPoseLookup } from '@application/services/sensors'
 import {
   LidarSensor,
@@ -596,6 +600,19 @@ export const useWorldStore = defineStore('world', () => {
    * `driverOverride`.
    */
   const driverInput = ref<'accel' | 'brake' | null>(null)
+  /**
+   * The cockpit driver's wheel, −1 … +1 (positive = left).
+   *
+   * The wheel is ANALOGUE: a key press sets a target, and the value
+   * travels there at a hand's rate (`STEER_RATE`, full lock in 1.2 s)
+   * instead of snapping. `tick` turns it into a real front-wheel angle
+   * and the physics integrates `v · tan(δ)`.
+   */
+  const steerInput = ref(0)
+  let steerTarget = 0
+  const setSteerTarget = (next: number): void => {
+    steerTarget = Math.max(-1, Math.min(1, next))
+  }
   const setDriverInput = (input: 'accel' | 'brake' | null): void => {
     driverInput.value = input
   }
@@ -1290,6 +1307,36 @@ export const useWorldStore = defineStore('world', () => {
     lastFpsUpdateMs = performance.now()
   }
 
+  /** Full lock in 1.2 s of hand movement — a real wheel is ~1.5 turns. */
+  const STEER_RATE = 1 / 1.2
+  /**
+   * A held wheel at the lane edge means "change lane" — the analogue
+   * input has to meet the discrete lane model somewhere, and this is the
+   * boundary the car is actually touching. The request goes through the
+   * same tested path as the old A/D keys: gap check, convergence, abort.
+   */
+  let steerLaneChangeCooldown = 0
+  const autoLaneChangeFromSteering = (dt: number): void => {
+    steerLaneChangeCooldown = Math.max(0, steerLaneChangeCooldown - dt)
+    const id = rideVehicleId.value
+    if (!id || rideMode.value !== 'cockpit' || steerLaneChangeCooldown > 0) return
+    if (Math.abs(steerInput.value) < 0.55) return
+    const v = network.value.vehicles[id]
+    if (!v || v.desiredLaneIndex != null) return
+    const road = network.value.roads[v.roadId]
+    if (!road) return
+    const drift =
+      perpendicularOffsetAlongRoad(road, v.s, v.position) -
+      laneOffset(v.laneIndex, road.laneCount)
+    const wantsLeft = steerInput.value > 0
+    const atEdge = wantsLeft ? drift <= -STEER_LANE_EDGE_M : drift >= STEER_LANE_EDGE_M
+    if (!atEdge) return
+    const result = requestLaneChange(id, wantsLeft ? 'left' : 'right')
+    // A refusal (no target lane, gap too small) is retried sooner: the
+    // driver is still holding the wheel, and the gap closes.
+    steerLaneChangeCooldown = result.ok ? 1.2 : 0.5
+  }
+
   const step = (dt: number): number => {
     // Clamp dt (I5): 防止卡顿后大跳跃穿模, AND 防止 rAF 边界
     // 偶发的负 dt 进入仿真推进 (会把车辆位置往回推). 上下界都 clamp 后
@@ -1311,6 +1358,15 @@ export const useWorldStore = defineStore('world', () => {
     // physics layer's own limit, and this one matches it.
     const clampedDt = Math.max(0, Math.min(dt, MAX_PHYSICS_FRAME_DT))
     simTime += clampedDt
+    // The wheel travels at a hand's rate, and self-centres when the key
+    // is released — the same ramp, because a real wheel returns at
+    // about the speed it was turned.
+    {
+      const delta = steerTarget - steerInput.value
+      const stepBy = STEER_RATE * clampedDt
+      steerInput.value =
+        Math.abs(delta) <= stepBy ? steerTarget : steerInput.value + Math.sign(delta) * stepBy
+    }
     tick(network.value, clampedDt, simTime, {
       rapierWorld,
       signal: signalContext,
@@ -1349,12 +1405,22 @@ export const useWorldStore = defineStore('world', () => {
         }
         return Math.max(0, (v.targetSpeed ?? 0) - 9 * clampedDt)
       },
+      // The wheel, same cockpit gate as the pedal.
+      driverSteer: (vehicleId: string): number | null => {
+        if (rideVehicleId.value !== vehicleId || rideMode.value !== 'cockpit') return null
+        return Math.abs(steerInput.value) > 0.01 ? steerInput.value : null
+      },
     })
     // Re-apply the user's speed pins. `tick()` owns the speed
     // computation and always re-derives it from the road limit, so
     // the pins have to be re-applied *after* it — otherwise a pin
     // would last exactly one frame (the bug this replaces).
     applySpeedOverrides()
+
+    // Steering past the lane edge becomes a lane change. The wheel is
+    // analogue; the lane model is not, so the crossing is handed to the
+    // same path the old A/D keys used (gap check, convergence, abort).
+    autoLaneChangeFromSteering(clampedDt)
 
     // The arrival at a POI destination. The driver passes the POI
     // while driving the last road — the route ends at the road's
@@ -2169,6 +2235,8 @@ export const useWorldStore = defineStore('world', () => {
     setRideMode,
     toggleRideLook,
     driverInput,
+    steerInput,
+    setSteerTarget,
     setDriverInput,
     routeRenderPath,
     // sensor + exporter surface
