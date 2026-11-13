@@ -44,6 +44,23 @@ const VEHICLES = Number(argOf('vehicles', '12'))
  */
 const HEADED = args.includes('--headed')
 const MODE = HEADED ? 'headed' : 'headless'
+/**
+ * `--route /smart-city` 量的是**导入城区**（Cesium 底图 + 101 辆车），
+ * 与内置场景编辑器的渲染负载完全不同。报告 §6 曾把这条路径列为「不覆盖」，
+ * 现在它有了自己的读数。
+ *
+ * 这条路径的车队是场景自己生成的（不是 addVehicle 堆出来的），
+ * 所以**不调车数**，也不认 `--vehicles`。
+ */
+const ROUTE_RAW = argOf('route', '/scene-editor')
+/**
+ * ⚠ Git Bash（MSYS）会把以 `/` 开头的参数当成本机路径改写：
+ * `--route /smart-city` 会变成 `F:/…/PortableGit/smart-city`。
+ * 这里只取最后一段，再自己补前导斜杠 —— 于是 `/smart-city`、`smart-city`
+ * 和被打断的长路径都能用同一个写法。
+ */
+const ROUTE = `/${ROUTE_RAW.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? ''}`
+const IS_CITY = ROUTE === '/smart-city'
 const WARMUP_MS = 5_000
 const SAMPLE_MS = Number(argOf('sample-ms', '20000'))
 const SAMPLE_INTERVAL_MS = 500
@@ -65,9 +82,9 @@ const GPU_FRIENDLY_ARGS = [
 const main = async () => {
   const browser = await chromium.launch({ headless: !HEADED, args: GPU_FRIENDLY_ARGS })
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-  // 必须直接进 /scene-editor：下面的 `scene-kind-select` 工具栏只存在于
+  // 默认直接进 /scene-editor：下面的 `scene-kind-select` 工具栏只存在于
   // 场景编辑器视图里，停在首页会一直等不到。
-  await page.goto(`${URL}/scene-editor`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${URL}${ROUTE}`, { waitUntil: 'domcontentloaded' })
 
   // 等场景就绪（世界挂到 window.__world 上）
   await page.waitForFunction(
@@ -79,29 +96,47 @@ const main = async () => {
     { timeout: 40_000 },
   )
 
-  // 选容量最大的内置场景（loop，容量 12）
-  await page.selectOption('[data-testid="scene-kind-select"]', 'loop')
-  await page.waitForTimeout(2_000)
+  let added
+  if (IS_CITY) {
+    // 城区的车队由场景自己生成，这里只**读**它有多少辆。
+    // 等它把车流铺满：底图与路网是异步来的，车会在路网到位后陆续出现。
+    await page.waitForFunction(
+      () => Object.keys(window.__world.network.vehicles).length >= 100,
+      undefined,
+      { timeout: 90_000 },
+    )
+    // Cesium 的瓦片、LOD 与相机过渡都是渐进的 —— 不等它们落定，
+    // 拍到的是「还在加载」的那一段，读数偏低且不可复现。
+    await page.waitForTimeout(Number(argOf('settle-ms', '10000')))
+    added = await page.evaluate(() => ({
+      vehicles: Object.keys(window.__world.network.vehicles).length,
+      saturated: false,
+    }))
+  } else {
+    // 选容量最大的内置场景（loop，容量 12）
+    await page.selectOption('[data-testid="scene-kind-select"]', 'loop')
+    await page.waitForTimeout(2_000)
 
-  // 精确调到目标车数：不够就加，多了就减。
-  // （loop 场景自带 8 辆，只加不减的话永远测不到 4 辆那个点。）
-  const added = await page.evaluate((target) => {
-    const w = window
-    const store = w.__world
-    const ids = () => Object.keys(store.network.vehicles)
-    let guard = 0
-    while (ids().length < target && guard++ < 400) {
-      store.addVehicle()
-    }
-    guard = 0
-    while (ids().length > target && guard++ < 400) {
-      store.removeVehicle(ids()[ids().length - 1])
-    }
-    return {
-      vehicles: ids().length,
-      saturated: ids().length < target,
-    }
-  }, VEHICLES)
+    // 精确调到目标车数：不够就加，多了就减。
+    // （loop 场景自带 8 辆，只加不减的话永远测不到 4 辆那个点。）
+    added = await page.evaluate((target) => {
+      const w = window
+      const store = w.__world
+      const ids = () => Object.keys(store.network.vehicles)
+      let guard = 0
+      while (ids().length < target && guard++ < 400) {
+        store.addVehicle()
+      }
+      guard = 0
+      while (ids().length > target && guard++ < 400) {
+        store.removeVehicle(ids()[ids().length - 1])
+      }
+      return {
+        vehicles: ids().length,
+        saturated: ids().length < target,
+      }
+    }, VEHICLES)
+  }
 
   await page.waitForTimeout(WARMUP_MS)
 
@@ -255,14 +290,16 @@ const main = async () => {
   const avg = Number(timeWeightedFps.toFixed(2))
 
   const report = {
-    requestedVehicles: VEHICLES,
+    route: ROUTE,
+    requestedVehicles: IS_CITY ? null : VEHICLES,
     measuredVehicles: added.vehicles,
     saturatedAtCapacity: added.saturated,
-    scene: 'loop',
+    scene: IS_CITY ? 'smart-city (imported Futian, Cesium basemap)' : 'loop',
     // Measured by tests/e2e/scene-capacity-probe.spec.ts — it calls
     // addVehicle() until the scene refuses, so it is the source of
     // truth. Do not hand-edit: re-run the probe instead.
-    sceneCapacities: { cross: 8, t: 7, loop: 12, elevated: 7, corridor: 8 },
+    // (The imported city has no capacity table: its fleet is generated.)
+    sceneCapacities: IS_CITY ? null : { cross: 8, t: 7, loop: 12, elevated: 7, corridor: 8 },
     renderer,
     mode: MODE,
     headless: !HEADED,
@@ -335,7 +372,8 @@ const main = async () => {
   const outFile = path.join(OUT_DIR, `fps-${added.vehicles}-${MODE}.json`)
   fs.writeFileSync(outFile, JSON.stringify(report, null, 2), 'utf-8')
   console.log(
-    `[perf] mode=${MODE} renderer=${renderer} vehicles=${added.vehicles} ` +
+    `[perf] mode=${MODE} scene=${report.scene} renderer=${renderer} ` +
+      `vehicles=${added.vehicles} ` +
       `sustained=${avg.toFixed(1)} FPS (min ${min.toFixed(1)} / max ${max.toFixed(1)}) ` +
       `frameDelta=${deltaStats.avg.toFixed(1)}ms storeFps=${storeStats.avg} ` +
       `load=${loadPct}% softwareRasterizer=${softwareRasterizer} -> ${outFile}`,

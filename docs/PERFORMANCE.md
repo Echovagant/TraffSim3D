@@ -15,6 +15,10 @@ TraffSim3D 前端的帧率基准：不同车流规模下的真实帧率、测量
 同一台机器、同一个场景、同一套脚本，headless Chromium（SwiftShader 软件光栅）实测
 持续 **28.2 FPS** —— 那是**悲观下界**，不是硬件性能。
 
+**导入城区（`/smart-city`：101 辆车 + Cesium 底图）**：真机 GPU 持续 **79.8 FPS**，
+30 FPS 目标仍达成，但余量从 5 倍收窄到 **2.7 倍**；同一路径在软件光栅上只有
+**2.8 FPS**（慢 28 倍）。详见 §3.5。
+
 | 环境 | 渲染器字符串（实测原文） | 12 车持续帧率 | 帧间隔 p50 | 30 FPS 目标 |
 |---|---|---|---|---|
 | **真机 GPU**（headed Chromium） | `ANGLE (NVIDIA, NVIDIA GeForce RTX 4050 Laptop GPU (0x000028E1) Direct3D11 vs_5_0 ps_5_0, D3D11)` | **164.7 FPS** | 6.1 ms | **达成** —— 门禁在这个环境里**断言** |
@@ -108,6 +112,10 @@ node scripts/measure-fps.mjs --vehicles 12 --headed
 node scripts/measure-fps.mjs --vehicles 4  --headed
 node scripts/measure-fps.mjs --vehicles 8  --headed
 node scripts/measure-fps.mjs --vehicles 12 --headed
+
+# 3) 导入城区（101 辆车 + Cesium 底图，见 §3.5）—— 这条路不认 --vehicles
+node scripts/measure-fps.mjs --route /smart-city
+node scripts/measure-fps.mjs --route /smart-city --headed
 ```
 
 输出示例（软件光栅）：
@@ -240,6 +248,43 @@ e2e 门禁自己跑的那一轮（采样 30 s）读到 **21.9 FPS**（p50 帧间
 这是有意的：宁可给一个偏低的数，也不要给一个只在「恰好没人用电脑时」才成立的数。
 即便如此，真机 GPU 上的 164.7 FPS 仍有 5 倍余量。
 
+### 3.5 导入城区（`/smart-city`）：101 辆车 + Cesium 底图
+
+**测量日期：2026-11-13。** 这一节补上旧版明确排除的那条路径（见 §6 原来的那一行）。
+
+| 项 | 真机 GPU（headed） | 软件光栅（headless，CI） |
+|---|---|---|
+| 场景 | `/smart-city`（随包福田城区，**101 辆车** + Cesium 底图） | 同左 |
+| 车数 | 101（场景自己生成的，不是 `addVehicle` 堆出来的） | 同左 |
+| **持续帧率**（时间加权） | **79.8 FPS** | **2.8 FPS** |
+| 帧间隔 p50 / p90 / p99 | 12.1 / 18.2 / 30.3 ms | 350.0 / 366.7 / 383.3 ms |
+| 最慢一帧 | 42.4 ms（瞬时 23.6 FPS） | 383.3 ms |
+| 采样帧数 | 1 604 | 58 |
+| 采样时 CPU 占用 | 49 % | 91 % |
+| 30 FPS 目标 | **达成** | 不适用（软件光栅） |
+
+**怎么读这三行**：
+
+1. **101 辆车 + 底图仍然达成 30 FPS**，但余量从内置场景的 5 倍掉到 **2.7 倍**
+   （79.8 对 30）。这是「车流 + 底图」第一次真正吃进帧预算。
+2. **软件光栅在这条路径上垮掉**（2.8 FPS，比真机慢 **28 倍**）。12 辆车时只慢 5.8 倍
+   —— Cesium 的瓦片合成在 SwiftShader 上是纯 CPU 的，完全不是一个量级。
+   **所以这条路径不能进 CI 门禁**：在软件光栅上它会一直红，而红的原因不是产品慢。
+3. **最慢的一帧（42 ms / 23.6 FPS）出现在瓦片加载**：p50 只有 12.1 ms、p99 30.3 ms，
+   说明掉帧是**尖峰**而不是稳态 —— 演示时看到的那一下顿，是瓦片在解码，不是车多。
+
+**复现**（两个环境分开跑，数字不能混读）：
+
+```bash
+cd TraffSim3D-frontend
+npm run dev -- --port 5188
+node scripts/measure-fps.mjs --route /smart-city --sample-ms 20000            # 软件光栅
+node scripts/measure-fps.mjs --route /smart-city --headed --sample-ms 20000   # 真机 GPU
+```
+
+> `--route` 只取路径的最后一段：Git Bash（MSYS）会把 `/smart-city` 改写成
+> `F:/…/smart-city` 这样的本机路径，脚本里做了归一化，两种写法都能用。
+
 ---
 
 ## 4. 帧率门禁现在怎么判
@@ -297,10 +342,10 @@ e2e 门禁自己跑的那一轮（采样 30 s）读到 **21.9 FPS**（p50 帧间
 | **165 FPS 是呈现节奏，不是吞吐上限** | 真机 GPU 上帧间隔 p50 = 6.1 ms，且**把视口从 1280×800 放大到 3840×2400（9 倍像素）帧率完全不变** —— 说明 rAF 被合成器的呈现节奏（≈165 Hz）锁住，**不是**渲染算不过来的上限。含义是：**渲染远不是瓶颈**，而不是「这台机器能渲染 165 FPS 的独立内容」。佐证：在页面里包一层 `requestAnimationFrame` 计时（不改仓库代码），应用每帧自身的 JS + 提交开销实测 **均值 0.42 ms / p50 0.1 ms / p99 1.4 ms**（1280×800），离 30 FPS 的 33.3 ms 预算差两个数量级。 |
 | **软件光栅** | headless 的数来自 SwiftShader，**没有用 GPU**。真实硬件上的帧率**高于**这些数（实测高约 5.8 倍）。这让读数成为**悲观下界**，但也意味着**不能用这些数推断真实硬件上的体验**。 |
 | **本机负载** | 测量时机器 64–95 % 忙碌。数字偏悲观，且不是「独占机器」的数。 |
-| **只有 12 辆车** | 内置场景的最大容量就是 12（`spawnVehicle` 车道满即拒绝）。**20 辆车这个规模在当前场景里不可达**，本报告没有也不编造那个点的数字。 |
+| **只有 12 辆车** | 内置场景的最大容量就是 12（`spawnVehicle` 车道满即拒绝）。**20 辆车这个规模在当前场景里不可达**，本报告没有也不编造那个点的数字。（导入城区的 101 辆车不是这个场景，见 §3.5。） |
 | **只有一个分辨率** | 1280×800。真机 GPU 上的分辨率扩展测试见上，但主表只有这一个点。 |
 | **场景只有 `loop`** | 其余内置场景容量更小（7–8 辆），没有单独列。 |
-| **浏览器内单场景** | 不含 Cesium 底图（`/smart-city` 视图）的开销 —— 那条路径的渲染负载完全不同，本报告不覆盖。 |
+| **Cesium 底图只测了一条路径** | §3.5 覆盖 `/smart-city`（101 辆车 + 瓦片底图），且只在**瓦片能取到**的状态下测；瓦片没到位时底图不完整，负载不同，那组数不能与 §3.5 混读。`/map-importer` 等其它 Cesium 页面仍未覆盖。 |
 | **不含后端** | 纯前端渲染基准。后端训练、权重导出等不在此列。 |
 | **帧率不是全部** | 帧率只说明「画面刷新多快」。仿真步进是否跟得上、策略推理是否阻塞，都要看别的指标。 |
 
@@ -310,7 +355,7 @@ e2e 门禁自己跑的那一轮（采样 30 s）读到 **21.9 FPS**（p50 帧间
 
 | 文件 | 作用 |
 |---|---|
-| `TraffSim3D-frontend/scripts/measure-fps.mjs` | 测量脚本（本报告的产出方式）；`--headed` 走真机 GPU |
+| `TraffSim3D-frontend/scripts/measure-fps.mjs` | 测量脚本（本报告的产出方式）；`--headed` 走真机 GPU，`--route /smart-city` 量导入城区 |
 | `TraffSim3D-frontend/tests/e2e/perf-gate.spec.ts` | e2e 帧率门禁：按渲染器字符串分叉，软件只报 / 真机断言 |
 | `TraffSim3D-frontend/src/interfaces/stores/worldStore.ts` | `store.fps` 的来源（墙钟帧间隔统计）与 dt 钳位所在 |
 | `TraffSim3D-frontend/src/shared/constants/simulation.ts` | `MAX_PHYSICS_FRAME_DT`（钳位上限） |
