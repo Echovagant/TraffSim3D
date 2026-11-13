@@ -72,7 +72,10 @@
         <DebugPanel v-show="debugOpen" />
       </div>
 
-      <div class="slot" :class="{ 'is-folded': !cameraOpen }">
+      <!-- No camera, no panel: the fold button used to sit alone here,
+           toggling a region that `v-if="world.cameraEnabled"` had already
+           removed — a control with nothing to fold. -->
+      <div v-if="world.cameraEnabled" class="slot" :class="{ 'is-folded': !cameraOpen }">
         <button
           class="slot-fold"
           :title="cameraOpen ? '收起 相机' : '展开 相机'"
@@ -84,7 +87,9 @@
         <CameraView v-show="cameraOpen" />
       </div>
 
-      <div class="slot" :class="{ 'is-folded': !inspectorOpen }">
+      <!-- Same rule for the inspector: with nothing selected its root
+           renders nothing, so the fold button folded an empty void. -->
+      <div v-if="selection.id" class="slot" :class="{ 'is-folded': !inspectorOpen }">
         <button
           class="slot-fold"
           :title="inspectorOpen ? '收起 属性' : '展开 属性'"
@@ -157,9 +162,14 @@ import InspectorPanel from '@interfaces/components/editor/InspectorPanel.vue'
 import SensorPanel from '@interfaces/components/editor/SensorPanel.vue'
 import SimReadoutDrawer from '@interfaces/components/editor/SimReadoutDrawer.vue'
 import CameraView from '@interfaces/components/debug/CameraView.vue'
+import { useWorldStore } from '@interfaces/stores/worldStore'
+import { useSelectionStore } from '@interfaces/stores/selectionStore'
 import { useEditorShortcuts } from '@interfaces/composables/useEditorShortcuts'
 
 useEditorShortcuts()
+
+const world = useWorldStore()
+const selection = useSelectionStore()
 
 // ===== the foldable panels =====
 //
@@ -302,6 +312,15 @@ const restorePanels = (): void => {
 }
 .slot-body {
   min-width: 0;
+}
+/* The panels set `width: 100%` and their own padding, and this project
+   has no global `box-sizing` rule — so every card was 2 × 12 px wider
+   than its track, and the column's `overflow-x: hidden` cut the right
+   edge clean off (values vanished without even an ellipsis). `min-width:
+   0` stops a long nowrap readout from stretching the track as well. */
+.slot > :not(.slot-fold) {
+  min-width: 0;
+  box-sizing: border-box;
 }
 .slot-fold {
   width: 18px;

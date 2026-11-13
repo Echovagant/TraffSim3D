@@ -16,7 +16,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     title: string
     /** Right-hand corner label (e.g. "实测", "12 条"). */
@@ -29,7 +29,10 @@ withDefaults(
   { badge: '', collapsed: false, collapsible: true },
 )
 
-const isCollapsed = ref(false)
+// `collapsed` is the *starting* state — the caller's default, not a
+// binding. (It used to be ignored outright: a card asking to start
+// folded opened anyway.)
+const isCollapsed = ref(props.collapsed)
 </script>
 
 <template>
