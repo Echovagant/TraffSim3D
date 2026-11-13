@@ -17,6 +17,7 @@
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
+import { MAX_ROAD_WHEEL_DEG } from '@domain/services/steeringAngle'
 
 const props = withDefaults(
   defineProps<{
@@ -36,8 +37,9 @@ const props = withDefaults(
       distanceM: number
       tone: 'go' | 'warn' | 'stop'
     } | null
-    /** The steering angle in degrees — how far the car points away
-     *  from its lane. Positive is a right turn. */
+    /** The **front wheels'** angle in degrees, in the simulation's own
+     *  convention: positive is a left turn. A real car locks at about
+     *  ±35°, and the icon simply stays at the stop beyond that. */
     steerDeg?: number
     size?: number
   }>(),
@@ -120,15 +122,20 @@ const signalSeconds = computed(() =>
 /**
  * The steering wheel's angle.
  *
- * The wheel turns by the car's heading error against its lane — the
- * same cross-track the lane guard watches. A cap keeps it a wheel and
- * not a spinner: a real steering wheel travels about 500° lock to
- * lock, and the model's lane-keeping never asks for more than a
- * fraction of that.
+ * The input is the front wheels' angle in the simulation's convention
+ * (positive = left). Two conversions happen here and nowhere else:
+ *
+ *   - the real lock: a car's wheels stop at ~35°, so anything beyond
+ *     pins the icon at full deflection instead of spinning it;
+ *   - the screen: SVG rotates clockwise for a positive angle, while the
+ *     simulation's positive angle turns the car left. Hence the minus.
+ *
+ * The icon's ±140° is a display scale for a ±35° road wheel (4:1), not
+ * a claim about how far the steering wheel in a real car turns.
  */
 const steerRotation = computed(() => {
-  const deg = Math.max(-140, Math.min(140, props.steerDeg))
-  return deg.toFixed(1)
+  const deg = Math.max(-MAX_ROAD_WHEEL_DEG, Math.min(MAX_ROAD_WHEEL_DEG, props.steerDeg))
+  return (-(deg / MAX_ROAD_WHEEL_DEG) * 140).toFixed(1)
 })
 </script>
 
@@ -200,8 +207,9 @@ const steerRotation = computed(() => {
       </template>
     </div>
 
-    <!-- The steering wheel: it turns by the car's heading error
-         against its lane — the same quantity the lane guard watches. -->
+    <!-- The steering wheel: it shows the angle the simulation is
+         actually applying to the front wheels (see
+         `vehicleSteeringAngle`), not a separate guess. -->
     <svg class="wheel" viewBox="0 0 60 60" role="img" aria-label="方向盘">
       <circle cx="30" cy="30" r="25" fill="none" stroke="currentColor" stroke-width="3.4" />
       <circle cx="30" cy="30" r="6" fill="none" stroke="currentColor" stroke-width="3" />

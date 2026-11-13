@@ -157,7 +157,7 @@ npm run dev            # http://localhost:5173/
 ### 跑测试
 
 ```bash
-cd TraffSim3D-frontend && npm run test:run                    # 1300
+cd TraffSim3D-frontend && npm run test:run                    # 1308
 cd TraffSim3D-backend && .\.venv\Scripts\python.exe -m pytest # 958
 cd TraffSim3D-frontend && npx playwright install chromium && npm run test:e2e  # 59
 cd TraffSim3D-frontend && npm run contract:check              # 跨语言契约

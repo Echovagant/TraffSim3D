@@ -219,7 +219,7 @@ import type { ThreeJSRenderer } from '@infrastructure/rendering'
 import { useWorldStore } from '@interfaces/stores/worldStore'
 import { computeNetworkBounds } from '@domain/services/networkBounds'
 import { approachSignalFor, signalPhaseLabel } from '@domain/services/approachSignal'
-import { laneForwardSign, roadForward, roadLength } from '@domain/services/laneGeometry'
+import { vehicleSteeringAngle } from '@domain/services/steeringAngle'
 import {
   createCesiumViewer,
   DEFAULT_IMAGERY,
@@ -606,12 +606,13 @@ const rideSignal = computed(() => {
 })
 
 /**
- * The steering angle: the car's heading against its lane's direction.
+ * The steering angle the car is **actually holding**.
  *
- * This is the quantity the lane guard watches (a car pointing away
- * from its lane is the failure the guard corrects), so the wheel
- * shows the car's real attitude to the road — it turns when the car
- * drifts, and through the turn arcs.
+ * Not re-derived here: `vehicleSteeringAngle` is the same law `tick.ts`
+ * applies (Pure Pursuit on a lane, arc curvature mid-turn), so the wheel
+ * cannot drift away from the physics it is reporting. Positive is a left
+ * turn — the simulation's own convention; the gauge flips it once, for
+ * the screen.
  */
 const rideSteerDeg = computed(() => {
   void world.uiTick
@@ -619,32 +620,7 @@ const rideSteerDeg = computed(() => {
   if (!v) return 0
   const road = world.network.roads[v.roadId]
   if (!road) return 0
-  // The wheel shows how much steering the road ahead ASKS for: the
-  // angle between where the car points now and the lane's heading a
-  // car's-length-and-a-half ahead. On a straight that is zero; in a
-  // bend it is the corner the wheel has to hold. (Comparing the car's
-  // heading with the lane's tangent AT the car would read zero in a
-  // bend too — the car follows the tangent — which is why the wheel
-  // looked frozen.)
-  const len = roadLength(road)
-  const lookS = Math.min(len, Math.max(0, v.s + 18))
-  const ahead = roadForward(road, lookS)
-  // The tangent is the ROAD's; a car on a backward lane travels the
-  // other way, so the sign of the lane flips it — otherwise every car
-  // on the oncoming carriageway would show the wheel at full lock.
-  const sign = laneForwardSign(v.laneIndex, road.laneCount)
-  const aheadHeading = Math.atan2(ahead.uz * sign, ahead.ux * sign)
-  let diff = aheadHeading - v.heading
-  while (diff > Math.PI) diff -= Math.PI * 2
-  while (diff < -Math.PI) diff += Math.PI * 2
-  let deg = (diff * 180) / Math.PI
-  // A lane change IS a steering input: the wheel turns the way the
-  // car is crossing. Lane 0 is the rightmost, so a HIGHER target lane
-  // is a turn to the LEFT — negative on the dial.
-  if (v.desiredLaneIndex !== null && v.desiredLaneIndex !== v.laneIndex) {
-    deg += v.desiredLaneIndex > v.laneIndex ? -26 : 26
-  }
-  return deg
+  return (vehicleSteeringAngle(v, road) * 180) / Math.PI
 })
 
 // ===== lifecycle ==========================================================
