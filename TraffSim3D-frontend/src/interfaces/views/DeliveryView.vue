@@ -13,8 +13,8 @@
 
     <!-- ===== the numbers ===== -->
     <section class="facts" data-reveal>
-      <div class="fact"><b>1 259</b><span>前端单测</span></div>
-      <div class="fact"><b>57</b><span>e2e 用例</span></div>
+      <div class="fact"><b>1 300</b><span>前端单测</span></div>
+      <div class="fact"><b>59</b><span>e2e 用例</span></div>
       <div class="fact"><b>17</b><span>架构决策 ADR</span></div>
       <!--
         The city's own numbers are ASKED FOR, not remembered: the
