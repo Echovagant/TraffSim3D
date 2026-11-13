@@ -93,14 +93,96 @@ describe('approachSignalFor — the signal the driver is about to meet', () => {
     expect(approachSignalFor(vehicle({}), bare)).toBeNull()
   })
 
-  it('has no signal when the junction is far from the travel end', () => {
-    const far = {
+  // The fix: an imported OSM way is a long polyline that crosses many
+  // junctions in its MIDDLE. The old test rejected every mid-road
+  // junction ("the junction must sit at the travel end"), and the
+  // cluster showed 无信号 to a car 46 m from a red light. The rule now
+  // reads the same projection the stop line is drawn from.
+  it('sees a junction in the MIDDLE of the road, ahead of the car', () => {
+    const mid = {
+      ...network,
+      intersections: {
+        'i-1': { ...junction, position: { x: 60, y: 0, z: 0 } },
+      },
+    } as unknown as RoadNetwork
+    const signal = approachSignalFor(vehicle({ s: 40, position: { x: 40, y: 0, z: 1.75 } }), mid)
+    expect(signal).not.toBeNull()
+    expect(signal!.light.id).toBe('tl-ew')
+    // 20 m from the stop line's junction.
+    expect(signal!.distanceM).toBeGreaterThan(15)
+    expect(signal!.distanceM).toBeLessThan(25)
+  })
+
+  it('ignores a junction the car has already passed', () => {
+    const behind = {
+      ...network,
+      intersections: {
+        'i-1': { ...junction, position: { x: 20, y: 0, z: 0 } },
+      },
+    } as unknown as RoadNetwork
+    // The car at s = 40 has crossed the line at s ≈ 8.5 already.
+    expect(
+      approachSignalFor(vehicle({ s: 40, position: { x: 40, y: 0, z: 1.75 } }), behind),
+    ).toBeNull()
+  })
+
+  it('still shows the light to a car standing exactly on the stop line', () => {
+    // Stop line for the end junction (radius 11.5) sits at s = 88.5.
+    const onLine = approachSignalFor(
+      vehicle({ s: 88.5, position: { x: 88.5, y: 0, z: 1.75 } }),
+      network,
+    )
+    expect(onLine).not.toBeNull()
+    expect(onLine!.remainingS).toBe(12)
+  })
+
+  it('skips a junction whose line the car has crossed (the commitment rule)', () => {
+    // Car at s = 95 is past the line (88.5) but inside the box (< 100):
+    // the tick no longer governs it, and neither does the gauge.
+    expect(
+      approachSignalFor(vehicle({ s: 95, position: { x: 95, y: 0, z: 1.75 } }), network),
+    ).toBeNull()
+  })
+
+  it('measures from the END node for a backward lane', () => {
+    // laneIndex 1 of 2 = backward: s counts from the road's END, so a
+    // car at s = 30 stands at x = 70 and drives towards x = 0.
+    const mid = {
       ...network,
       intersections: {
         'i-1': { ...junction, position: { x: 40, y: 0, z: 0 } },
       },
     } as unknown as RoadNetwork
-    expect(approachSignalFor(vehicle({}), far)).toBeNull()
+    const signal = approachSignalFor(
+      vehicle({ laneIndex: 1, s: 30, position: { x: 70, y: 0, z: -1.75 } }),
+      mid,
+    )
+    expect(signal).not.toBeNull()
+    // 30 m from the junction at x = 40.
+    expect(signal!.distanceM).toBeGreaterThan(25)
+    expect(signal!.distanceM).toBeLessThan(35)
+  })
+
+  // The second bug: the nearest junction ahead often carries NO light —
+  // the driver's light is the NEXT one, on the same road. Returning only
+  // the nearest dropped a lit junction 130 m ahead because a bare one
+  // stood 15 m in front of it (measured on the Shenzhen extract: cars
+  // v-25 and v-53 both showed 无信号 with a light dead ahead).
+  it('walks past a bare junction to the lit one on the same road', () => {
+    const two = {
+      ...network,
+      intersections: {
+        // x = 55: bare (no lights), 15 m ahead of the car.
+        'i-bare': { ...junction, id: 'i-bare', position: { x: 55, y: 0, z: 0 }, trafficLights: [] },
+        // x = 70: lit, 30 m ahead of the car.
+        'i-1': { ...junction, position: { x: 70, y: 0, z: 0 } },
+      },
+    } as unknown as RoadNetwork
+    const signal = approachSignalFor(vehicle({ s: 40, position: { x: 40, y: 0, z: 1.75 } }), two)
+    expect(signal).not.toBeNull()
+    expect(signal!.light.id).toBe('tl-ew')
+    expect(signal!.distanceM).toBeGreaterThan(25)
+    expect(signal!.distanceM).toBeLessThan(35)
   })
 })
 
