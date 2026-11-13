@@ -1294,10 +1294,13 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // target lane over a fixed duration — a *time* mix that ignored
       // both the gain and the cap, so the physics-free path and the
       // physics path did not describe the same manoeuvre.
-      if (v.desiredLaneIndex !== null) {
+      // `!= null` (not `!== null`) so a vehicle whose field is MISSING
+      // counts as "no lane change" — `undefined !== null` is true, and
+      // the lane maths below turns that into NaN.
+      if (v.desiredLaneIndex != null) {
         const fromLat = laneOffset(v.laneIndex, road.laneCount)
-        const toLat = laneOffset(v.desiredLaneIndex, road.laneCount)
-        const elapsed = v.laneChangeStartedAt === null ? 0 : simTime - v.laneChangeStartedAt
+        const toLat = laneOffset(v.desiredLaneIndex!, road.laneCount)
+        const elapsed = v.laneChangeStartedAt == null ? 0 : simTime - v.laneChangeStartedAt
         const offset = fallbackLateralOffset(fromLat, toLat, elapsed)
         // Place the body at that offset from the road's centreline:
         // the lane point plus the shift along the road's right vector.
@@ -1744,7 +1747,11 @@ const applyLaneChangeLateralVelocity = (network: RoadNetwork, ctx: TickContext):
   const rapier = ctx.rapierWorld
   if (!rapier) return
   for (const v of Object.values(network.vehicles)) {
-    if (v.desiredLaneIndex === null) continue
+    // `== null` covers a MISSING field too: `undefined === null` is
+    // false, and `laneOffset(undefined, …)` is NaN — which would put
+    // NaN into the body's lateral velocity and take the whole
+    // physics world with it.
+    if (v.desiredLaneIndex == null) continue
     if (v.id === ctx.draggingId) continue
     const road = network.roads[v.roadId]
     if (!road) continue
@@ -1775,7 +1782,7 @@ const applyLaneChangeLateralVelocity = (network: RoadNetwork, ctx: TickContext):
  */
 const finishLaneChanges = (network: RoadNetwork, ctx: TickContext, simTime: number): void => {
   for (const v of Object.values(network.vehicles)) {
-    if (v.desiredLaneIndex === null) continue
+    if (v.desiredLaneIndex == null) continue
     const road = network.roads[v.roadId]
     if (!road) {
       v.desiredLaneIndex = null

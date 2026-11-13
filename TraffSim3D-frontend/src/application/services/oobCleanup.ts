@@ -327,7 +327,7 @@ export const tickOobCleanup = (
     }
 
     // Skip mid lane-change — position is intentionally off-center.
-    if (v.desiredLaneIndex !== null) continue
+    if (v.desiredLaneIndex != null) continue // `!= null`: a missing field counts as "no lane change"
     // Skip recently spawned (1s grace — Rapier body may not yet have aligned).
     if (simTime - v.spawnedAt < 1.0) continue
     // Skip the vehicle the editor is dragging — the user is moving it.

@@ -369,7 +369,7 @@ const buildTickQueueIndex = (network: RoadNetwork): Map<string, number[]> => {
   }
   for (const v of Object.values(network.vehicles)) {
     if (v.status === 'crashed') continue
-    if (v.enteredIntersectionAt !== null) continue // 在 box 内不算
+    if (v.enteredIntersectionAt != null) continue // 在 box 内不算（`!= null`：字段缺失也算没进 box）
     if (v.s < 0) continue
     const road = network.roads[v.roadId]
     if (!road) continue
@@ -523,7 +523,7 @@ const countQueueAtJunction = (
     if (laneScoped && light.controlledLane !== undefined && v.laneIndex !== light.controlledLane) {
       continue
     }
-    if (v.enteredIntersectionAt !== null) continue // 在 box 内不算
+    if (v.enteredIntersectionAt != null) continue // 在 box 内不算（`!= null`：字段缺失也算没进 box）
     const road = network.roads[v.roadId]
     if (!road) continue
     const sign = laneForwardSign(v.laneIndex, road.laneCount)
