@@ -31,8 +31,28 @@ interface RouteWorld {
   followCamera: boolean
 }
 
+/**
+ * Read ONLY the fields this spec needs.
+ *
+ * Serialising the whole store pulls the trajectory exporter's buffer
+ * along with it (up to 100 000 rows), and the cost GROWS while the
+ * scene drives: measured 4 055 ms after a minute of simulation. The
+ * store is exposed through a dev-only hook precisely so a test can
+ * pick out what it wants.
+ */
 const world = (page: import('@playwright/test').Page): Promise<RouteWorld> =>
-  page.evaluate(() => (window as unknown as { __world: RouteWorld }).__world)
+  page.evaluate(() => {
+    const w = (window as unknown as { __world?: RouteWorld }).__world
+    return {
+      network: {
+        vehicles: w?.network.vehicles ?? {},
+        intersections: w?.network.intersections ?? {},
+      },
+      plannedRoute: w?.plannedRoute ?? null,
+      routeFollowerId: w?.routeFollowerId ?? null,
+      followCamera: w?.followCamera ?? false,
+    }
+  })
 
 test.describe('Route planning + the first-person camera', () => {
   test('a car drives the planned route', async ({ page }) => {

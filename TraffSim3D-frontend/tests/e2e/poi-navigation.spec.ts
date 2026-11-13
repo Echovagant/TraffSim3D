@@ -33,8 +33,40 @@ interface PoiWorld {
   poiArrived: boolean
 }
 
-const world = (page: import('@playwright/test').Page): Promise<PoiWorld> =>
-  page.evaluate(() => (window as unknown as { __world: PoiWorld }).__world)
+/**
+ * Read ONLY the fields this spec needs.
+ *
+ * It used to serialise the WHOLE store — and the store holds the
+ * trajectory exporter's buffer (up to 100 000 rows), so the cost of a
+ * read GREW with every second of driving: measured 4 055 ms after a
+ * minute of simulation, against 55 ms for the fields themselves.
+ *
+ * That is not slow, it is fatal: a `page.evaluate` blocks the page's
+ * main thread, so every poll froze the simulation for four seconds —
+ * and the car, which has to DRIVE to the POI, never got there. The
+ * spec failed for a reason that had nothing to do with navigation.
+ */
+interface PoiState {
+  poiDestinationId: string | null
+  poiDistanceM: number | null
+  poiArrived: boolean
+  plannedRoute: { roads: string[]; lengthM: number } | null
+  followCamera: boolean
+  routeFollowerId: string | null
+}
+
+const world = (page: import('@playwright/test').Page): Promise<PoiState> =>
+  page.evaluate(() => {
+    const w = (window as unknown as { __world?: PoiWorld }).__world
+    return {
+      poiDestinationId: w?.poiDestinationId ?? null,
+      poiDistanceM: w?.poiDistanceM ?? null,
+      poiArrived: w?.poiArrived ?? false,
+      plannedRoute: w?.plannedRoute ?? null,
+      followCamera: w?.followCamera ?? false,
+      routeFollowerId: w?.routeFollowerId ?? null,
+    }
+  })
 
 /**
  * A POI beside one of the grid's roads.
@@ -75,7 +107,12 @@ test.describe('Driving to a point of interest', () => {
   // simulation's own pace. Measured: about two minutes from "开过去" to
   // the arrival on a busy grid, so the arrival poll needs more than the
   // suite's default 60 s — and the test itself more than the poll.
-  test.setTimeout(300_000)
+  // The journey is a two-minute drive at 4x the sim clock, but the sim
+  // clock is not wall time: on a loaded machine the physics stepper
+  // drops the time it cannot keep up with, and the journey then takes
+  // longer in the real world. The budget is generous on purpose — this
+  // test is about the navigation, not about the runner's speed.
+  test.setTimeout(660_000)
 
   test('the car routes to the POI and arrives', async ({ page }) => {
     await waitForSceneReady(page)
@@ -155,11 +192,11 @@ test.describe('Driving to a point of interest', () => {
 
     // The car drives there: the distance shrinks.
     await expect
-      .poll(async () => (await world(page)).poiDistanceM ?? Infinity, { timeout: 60_000 })
+      .poll(async () => (await world(page)).poiDistanceM ?? Infinity, { timeout: 240_000 })
       .toBeLessThan(planned.poiDistanceM ?? Infinity)
 
     // And it arrives.
-    await expect.poll(async () => (await world(page)).poiArrived, { timeout: 240_000 }).toBe(true)
+    await expect.poll(async () => (await world(page)).poiArrived, { timeout: 600_000 }).toBe(true)
     await expect(page.locator('[data-testid="poi-arrived"]')).toContainText('已到达')
     await expect(page.locator('[data-testid="route-hud-distance"]')).toContainText('已到达')
   })
