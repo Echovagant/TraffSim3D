@@ -473,6 +473,18 @@ const endNormal = (
   return { nx: dz / segLen, nz: -dx / segLen }
 }
 
+/**
+ * The city view draws these ribbons UNDER a satellite basemap. The
+ * theme's asphalt is tuned for the editor's dark ground, where it is
+ * the brightest thing on screen; over imagery it is darker than the
+ * streets it is meant to describe — the network vanished at bird's-eye
+ * and the cars looked like they were floating across blocks. Brighten
+ * it here, once, for this view only (the editor keeps the token).
+ */
+const CITY_ROAD_BRIGHTEN = 0.45
+const cityAsphalt = (css: string): Cesium.Color =>
+  Cesium.Color.fromCssColorString(css).brighten(CITY_ROAD_BRIGHTEN, new Cesium.Color())
+
 export const loadNetworkRoads = async (
   viewer: Cesium.Viewer,
   network: RoadNetwork,
@@ -514,7 +526,7 @@ export const loadNetworkRoads = async (
         width: roadWidthM(road),
         height: 0.15,
         material: new Cesium.ColorMaterialProperty(
-          Cesium.Color.fromCssColorString(
+          cityAsphalt(
             fits ? token('--dc-road-main', '#3d4653') : token('--dc-road-local', '#2a323c'),
           ),
         ),
@@ -680,8 +692,8 @@ export const loadNetworkRoads = async (
    * token to apply.
    */
   const restyle = (): void => {
-    const roadColor = Cesium.Color.fromCssColorString(token('--dc-road-main', '#3d4653'))
-    const barredColor = Cesium.Color.fromCssColorString(token('--dc-road-local', '#2a323c'))
+    const roadColor = cityAsphalt(token('--dc-road-main', '#3d4653'))
+    const barredColor = cityAsphalt(token('--dc-road-local', '#2a323c'))
     const barColor = Cesium.Color.fromCssColorString(token('--dc-alert', '#f43f5e'))
     for (const entity of collection.entities.values) {
       const access = entity.properties?.access?.getValue(undefined)
