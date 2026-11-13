@@ -39,6 +39,7 @@ import {
   type SignalPolicyDecision,
 } from '@application/services/signalPolicySource'
 import { requestLaneChange as requestLaneChangeFn } from '@domain/services/laneChange'
+import { clearanceBeamsFor } from '@domain/services/clearanceBeams'
 import {
   nextRouteRoad,
   plannedRouteFrom,
@@ -837,6 +838,11 @@ export const useWorldStore = defineStore('world', () => {
   let rapierWorld: RapierWorld | null = null
   const setRapierWorld = (w: RapierWorld | null): void => {
     rapierWorld = w
+    // The physics world needs the network's clearance beams (the
+    // portals over height-limited roads) as soon as it is attached:
+    // the store may already hold an imported network by then, and
+    // without the beams a bus would drive under a 3.5 m tunnel.
+    if (w) w.syncClearanceBeams(clearanceBeamsFor(network.value))
   }
   const getRapierWorld = (): RapierWorld | null => rapierWorld
 
@@ -1503,6 +1509,8 @@ export const useWorldStore = defineStore('world', () => {
     lidarRateWindowStart = null
     lidarRateLastCount = 0
     network.value = buildCrossIntersectionNetwork()
+    // The portals over height-limited roads follow the network.
+    rapierWorld?.syncClearanceBeams(clearanceBeamsFor(network.value))
     speedOverrides.clear()
     simTime = 0
     fixedStepScheduler.reset() // zero out the 10 Hz cadence
@@ -1876,6 +1884,10 @@ export const useWorldStore = defineStore('world', () => {
     // Assign via .value so Pinia's auto-unwrap on the store
     // surfaces the new network to EntityOutline, InspectorPanel, etc.
     network.value = next
+    // The portals over height-limited roads follow the network: an
+    // imported map brings its own tunnels, and the physics has to
+    // know about them (a bus must not drive under a 3.5 m portal).
+    rapierWorld?.syncClearanceBeams(clearanceBeamsFor(next))
     // The pins belong to the old network's vehicles — they must not
     // silently apply to a different scene (or to an id that happens to
     // repeat in the restored one).

@@ -13,6 +13,8 @@ import type { Vec3, WorldConfig } from './WorldConfig'
 import { DEFAULT_WORLD_CONFIG } from './WorldConfig'
 import type { RigidBodySpec } from './RapierBodySpec'
 import { buildRigidBodySpec } from './RapierBodySpec'
+import type { ClearanceBeam } from '@domain/services/clearanceBeams'
+import { CLEARANCE_BEAM_THICKNESS_M } from '@domain/services/clearanceBeams'
 import type { World, EventQueue } from '@dimforge/rapier3d-compat/pipeline'
 import {
   MAX_PHYSICS_FRAME_DT,
@@ -134,6 +136,16 @@ export class RapierWorld {
   private colliders: HandleMap = new Map()
   private colliderHandleToVehicleIdMap: Map<number, string> = new Map()
   private bodyForCollider: Map<number, number> = new Map() // collider handle → body handle
+  /**
+   * The clearance beams (the portals over height-limited roads), by
+   * beam id → rigid body handle.
+   *
+   * They are FIXED bodies: the portal does not move, and a vehicle
+   * that does not fit hits it. Their colliders are deliberately NOT in
+   * the vehicle maps, so the contact-event drain skips them — a bus
+   * touching a portal is not a crash, it is a bus that does not fit.
+   */
+  private clearanceBodies: Map<string, number> = new Map()
   private cfg: WorldConfig
   private simTime = 0
   private destroyed = false
@@ -318,6 +330,69 @@ export class RapierWorld {
     this.colliderHandleToVehicleIdMap.set(colliderHandle, spec.vehicleId)
     this.bodyForCollider.set(colliderHandle, bodyHandle)
     return spec.vehicleId
+  }
+
+  /**
+   * Sync the world's clearance beams with the network's.
+   *
+   * A beam is a FIXED portal over a height-limited road: a box whose
+   * **underside** sits at the clearance height above the road. A
+   * vehicle taller than the clearance hits it and stops — the physical
+   * twin of the domain's `vehicleFitsRoadHeight` rule.
+   *
+   * The diff is by beam id: a network that gained or lost a
+   * height-limited road gets the portals added or removed, and the
+   * ones that survived keep their bodies (and their handles).
+   *
+   * The beams are NOT registered in the vehicle maps, so the contact
+   * drain skips them: a bus meeting a portal is not a crash.
+   */
+  syncClearanceBeams(beams: readonly ClearanceBeam[]): void {
+    if (!this.R || !this.world) return
+    const wanted = new Set(beams.map((b) => b.id))
+    for (const [id, handle] of this.clearanceBodies) {
+      if (wanted.has(id)) continue
+      const body = this.world.getRigidBody(handle)
+      if (body) this.world.removeRigidBody(body)
+      this.clearanceBodies.delete(id)
+    }
+    for (const beam of beams) {
+      // The beam's CENTRE is half its thickness above its underside.
+      const centreY = beam.y + beam.clearanceM + CLEARANCE_BEAM_THICKNESS_M / 2
+      const existing = this.clearanceBodies.get(beam.id)
+      if (existing !== undefined) {
+        const body = this.world.getRigidBody(existing)
+        if (body) {
+          body.setTranslation({ x: beam.x, y: centreY, z: beam.z }, true)
+          body.setRotation(this.toRapierQuat(beam.heading), true)
+          continue
+        }
+        // The body is gone (the world was rebuilt) — fall through and
+        // create a new one.
+        this.clearanceBodies.delete(beam.id)
+      }
+      const bodyDesc = this.R.RigidBodyDesc.fixed()
+        .setTranslation(beam.x, centreY, beam.z)
+        .setRotation(this.toRapierQuat(beam.heading))
+      const body = this.world.createRigidBody(bodyDesc)
+      // The collider's local axes follow the vehicle convention:
+      // X = along the road (the beam's thickness), Y = up (the
+      // clearance), Z = across the road (the beam's width).
+      const colliderDesc = this.R.ColliderDesc.cuboid(
+        beam.halfDepth,
+        CLEARANCE_BEAM_THICKNESS_M / 2,
+        beam.halfWidth,
+      )
+        .setFriction(0.1)
+        .setRestitution(0)
+      this.world.createCollider(colliderDesc, body)
+      this.clearanceBodies.set(beam.id, body.handle)
+    }
+  }
+
+  /** The number of clearance beams in the world (diagnostics). */
+  clearanceBeamCount(): number {
+    return this.clearanceBodies.size
   }
 
   removeVehicle(vehicleId: string): void {
@@ -731,6 +806,7 @@ export class RapierWorld {
     this.colliders.clear()
     this.colliderHandleToVehicleIdMap.clear()
     this.bodyForCollider.clear()
+    this.clearanceBodies.clear()
     this.R = null
     this.eventQueue = null
   }

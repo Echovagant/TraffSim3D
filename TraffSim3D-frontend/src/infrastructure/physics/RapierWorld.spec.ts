@@ -237,6 +237,7 @@ const { DEFAULT_WORLD_CONFIG } = await import('./WorldConfig')
 const { MAX_PHYSICS_PENDING_STEPS, MAX_PHYSICS_SUB_STEPS } = await import(
   '@shared/constants/simulation'
 )
+import type { ClearanceBeam } from '@domain/services/clearanceBeams'
 
 type Spec = ReturnType<typeof buildRigidBodySpec>
 
@@ -1147,5 +1148,103 @@ describe('RapierWorld — destroy', () => {
     const w = new RapierWorld()
     expect(() => w.destroy()).not.toThrow()
     expect(R.state.freed).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The clearance beams — the physical twin of the height rule.
+//
+// A beam is a FIXED portal over a height-limited road: a box whose
+// UNDERSIDE sits at the clearance height above the road. A vehicle
+// taller than the clearance hits it.
+//
+// The fake has no solver, so these tests pin the DECISIONS (where the
+// body stands, how big the box is, that it is fixed) — the "a bus
+// really stops" proof is the e2e (real WASM, real city).
+// ---------------------------------------------------------------------------
+
+describe('RapierWorld — syncClearanceBeams', () => {
+  const beam = (over: Partial<ClearanceBeam> = {}): ClearanceBeam => ({
+    id: 'r-1#start',
+    clearanceM: 3.3,
+    x: 10,
+    y: 0,
+    z: 20,
+    heading: 0,
+    halfWidth: 2.4,
+    halfDepth: 0.15,
+    ...over,
+  })
+
+  it('builds one FIXED body per beam, with the underside at the clearance', async () => {
+    const w = new RapierWorld()
+    await w.init()
+    w.syncClearanceBeams([beam()])
+    expect(w.clearanceBeamCount()).toBe(1)
+    // The ground is body 0; the beam is the next one.
+    const b = [...R.state.bodies.values()][1]!
+    expect(b.desc.kind).toBe('fixed')
+    // The body's CENTRE is half the beam's thickness above its
+    // underside: clearance 3.3 + 0.15 = 3.45 above the road.
+    expect(b.desc.translation.x).toBe(10)
+    expect(b.desc.translation.y).toBeCloseTo(3.45, 9)
+    expect(b.desc.translation.z).toBe(20)
+  })
+
+  it('gives the beam a box as wide as the road and as thick as the portal', async () => {
+    const w = new RapierWorld()
+    await w.init()
+    w.syncClearanceBeams([beam()])
+    const d = R.state.colliders[R.state.colliders.length - 1]!.desc
+    // Local axes follow the vehicle convention: X along the road, Y
+    // up, Z across the road.
+    expect(d.halfExtents).toEqual({ x: 0.15, y: 0.15, z: 2.4 })
+    expect(d.friction).toBe(0.1)
+    expect(d.restitution).toBe(0)
+  })
+
+  it('is idempotent: syncing the same beams twice does not duplicate them', async () => {
+    const w = new RapierWorld()
+    await w.init()
+    w.syncClearanceBeams([beam()])
+    w.syncClearanceBeams([beam()])
+    expect(w.clearanceBeamCount()).toBe(1)
+    // ground + one beam.
+    expect(R.state.bodies.size).toBe(2)
+  })
+
+  it('removes the beams that left the network and keeps the others', async () => {
+    const w = new RapierWorld()
+    await w.init()
+    w.syncClearanceBeams([beam({ id: 'a#start' }), beam({ id: 'b#start', x: 99 })])
+    expect(w.clearanceBeamCount()).toBe(2)
+    w.syncClearanceBeams([beam({ id: 'a#start' })])
+    expect(w.clearanceBeamCount()).toBe(1)
+    expect(R.state.bodies.size).toBe(2) // ground + the surviving beam
+  })
+
+  it('MOVES a beam whose geometry changed (same id, new position)', async () => {
+    const w = new RapierWorld()
+    await w.init()
+    w.syncClearanceBeams([beam()])
+    w.syncClearanceBeams([beam({ x: 50 })])
+    expect(w.clearanceBeamCount()).toBe(1)
+    const b = [...R.state.bodies.values()][1]!
+    expect(b.translation().x).toBe(50)
+  })
+
+  it('does NOT register the beams as vehicles: a bus meeting a portal is not a crash', async () => {
+    const w = new RapierWorld()
+    await w.init()
+    w.syncClearanceBeams([beam()])
+    // No vehicle collider handle for the beam, so the contact drain
+    // skips the contact (both sides must be vehicles to be reported).
+    expect(w.getColliderHandle('r-1#start')).toBeNull()
+  })
+
+  it('is a no-op before init()', () => {
+    const w = new RapierWorld()
+    w.syncClearanceBeams([beam()])
+    expect(w.clearanceBeamCount()).toBe(0)
   })
 })

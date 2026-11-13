@@ -87,6 +87,9 @@ vi.mock('@infrastructure/physics', () => ({
     setVehiclePosition = vi.fn()
     step = vi.fn()
     getColliderHandle = (id: string) => colliderHandles.get(id) ?? null
+    // The store syncs the network's clearance beams (the portals over
+    // height-limited roads) whenever the network or the world changes.
+    syncClearanceBeams = vi.fn()
     destroy = rapierDestroy
   },
   buildRigidBodySpec,
