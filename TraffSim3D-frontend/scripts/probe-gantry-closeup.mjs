@@ -43,7 +43,6 @@ const main = async () => {
     const geo = await import('/src/domain/services/laneGeometry.ts')
     const w = window.__world
     const limited = Object.values(w.network.roads).filter((r) => ra.roadHeightLimitM(r) !== null)
-    const limitedIds = new Set(limited.map((r) => r.id))
     // The road whose traffic MEETS a portal: the portal stands at the
     // road's END in the direction of travel (lane 0), so the vehicles
     // have to be on a road whose forward direction ends at a portal.

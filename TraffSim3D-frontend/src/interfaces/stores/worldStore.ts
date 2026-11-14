@@ -1326,8 +1326,7 @@ export const useWorldStore = defineStore('world', () => {
     const road = network.value.roads[v.roadId]
     if (!road) return
     const drift =
-      perpendicularOffsetAlongRoad(road, v.s, v.position) -
-      laneOffset(v.laneIndex, road.laneCount)
+      perpendicularOffsetAlongRoad(road, v.s, v.position) - laneOffset(v.laneIndex, road.laneCount)
     const wantsLeft = steerInput.value > 0
     const atEdge = wantsLeft ? drift <= -STEER_LANE_EDGE_M : drift >= STEER_LANE_EDGE_M
     if (!atEdge) return
