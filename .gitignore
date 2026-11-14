@@ -130,6 +130,9 @@ CLAUDE.md
 # The local hand-over note (same convention: lives beside the
 # project, never committed).
 HANDOFF.md
+# The local research notes on NTE (《异环》) as the north-star
+# reference — same convention: lives beside the project, never committed.
+RESEARCH-NTE.md
 任务详细20261016.md
 任务过程.md
 插件兼容性审计.md
