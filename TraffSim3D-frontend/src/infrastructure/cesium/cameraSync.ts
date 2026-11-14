@@ -135,6 +135,29 @@ export const syncThreeCameraToCesium = (
   threeCamera.rotation.set(pitch, -heading, 0, 'YXZ')
   threeCamera.updateMatrixWorld()
 
+  // 3) Projection — the fov MUST match or the overlay drifts off the
+  //    basemap. Cesium's PerspectiveFrustum.fov is HORIZONTAL while
+  //    Three.js' fov is VERTICAL: a "60° / 60°" pair was really
+  //    60° vertical vs 39.7° vertical once the aspect folded in, and
+  //    every vehicle landed up to a kilometre off its road on the bird
+  //    view (measured 60-168 px of screen offset at 1 500 m height,
+  //    2026-11-14 — the "cars wander all over the city" report).
+  //    Aligning the VERTICAL fov and the aspect makes the two
+  //    projection matrices agree, which is what "same camera" has to
+  //    mean for an overlay drawn on top of the basemap.
+  const frustum = cesiumViewer.camera.frustum as Cesium.PerspectiveFrustum | undefined
+  if (frustum && typeof frustum.fovy === 'number' && typeof frustum.aspectRatio === 'number') {
+    const fovyDeg = Cesium.Math.toDegrees(frustum.fovy)
+    if (
+      Math.abs(threeCamera.fov - fovyDeg) > 1e-4 ||
+      Math.abs(threeCamera.aspect - frustum.aspectRatio) > 1e-4
+    ) {
+      threeCamera.fov = fovyDeg
+      if (frustum.aspectRatio > 0) threeCamera.aspect = frustum.aspectRatio
+      threeCamera.updateProjectionMatrix()
+    }
+  }
+
   return threeCamera
 }
 
@@ -177,6 +200,23 @@ export const syncCesiumCameraToThree = (
     destination: ecef,
     orientation: { heading, pitch, roll: 0 },
   })
+  // Projection alignment, the mirror of the Cesium→Three direction: the
+  // basemap must show the same VERTICAL field of view the simulation
+  // camera renders with. Cesium's writable `fov` is HORIZONTAL and
+  // `fovy` is a read-only derivation, so the wanted vertical fov folds
+  // back into a horizontal one through the aspect (same fov-semantics
+  // mismatch as documented on the reverse sync).
+  const frustum = camera.frustum as Cesium.PerspectiveFrustum | undefined
+  if (
+    frustum &&
+    typeof frustum.aspectRatio === 'number' &&
+    frustum.aspectRatio > 0 &&
+    typeof frustum.fov === 'number'
+  ) {
+    const fovH =
+      2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(threeCamera.fov) / 2) * frustum.aspectRatio)
+    if (Math.abs(frustum.fov - fovH) > 1e-9) frustum.fov = fovH
+  }
   return camera
 }
 

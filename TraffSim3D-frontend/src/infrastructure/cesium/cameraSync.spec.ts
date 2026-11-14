@@ -119,6 +119,33 @@ describe('syncThreeCameraToCesium — Cesium drives (the one-way direction)', ()
     expect(forward.y).toBeCloseTo(0, 6)
     expect(forward.z).toBeCloseTo(0, 6)
   })
+
+  it('aligns the projection: Three takes the Cesium VERTICAL fov and aspect', () => {
+    // The fov-semantics bug: Cesium's `fov` is horizontal, Three's is
+    // vertical. A "60° / 60°" pair was really 60° vertical (Three) vs
+    // 39.7° vertical (Cesium at aspect 1.6) — the overlay drifted up to
+    // a kilometre off the basemap. The sync must copy Cesium's VERTICAL
+    // fov (`fovy`) and the aspect, so both projection matrices agree.
+    const frustum = new Cesium.PerspectiveFrustum()
+    frustum.aspectRatio = 1.6
+    frustum.fov = Cesium.Math.toRadians(60) // HORIZONTAL 60° ⇒ fovy ≈ 39.7°
+    const ecef = cameraEcef(ORIGIN, 0, 0, 1000)
+    const viewer = {
+      camera: { position: ecef, heading: 0, pitch: -Math.PI / 2, frustum },
+    }
+    const threeCamera = new THREE.PerspectiveCamera() // default vertical fov 50 — the mismatched starting point
+    expect(threeCamera.fov).toBe(50)
+
+    syncThreeCameraToCesium({
+      cesiumViewer: viewer as unknown as Cesium.Viewer,
+      threeCamera,
+      tangent: ORIGIN,
+    })
+
+    expect(threeCamera.fov).toBeCloseTo(Cesium.Math.toDegrees(frustum.fovy as number), 4)
+    expect(threeCamera.fov).toBeLessThan(45) // the vertical field is the narrow one
+    expect(threeCamera.aspect).toBeCloseTo(1.6, 4)
+  })
 })
 
 describe('syncCesiumCameraToThree — Three drives (the reverse direction)', () => {
@@ -147,6 +174,30 @@ describe('syncCesiumCameraToThree — Three drives (the reverse direction)', () 
     expect(enu.z).toBeCloseTo(1500, 1) // up
     expect(arg.orientation.pitch).toBeCloseTo(-Math.PI / 2, 6)
     expect(arg.orientation.heading).toBeCloseTo(0, 6)
+  })
+
+  it('aligns the projection: the basemap shows the simulation VERTICAL fov', () => {
+    const threeCamera = new THREE.PerspectiveCamera() // vertical fov 50
+    threeCamera.position.set(0, 1500, 0)
+    threeCamera.updateMatrixWorld()
+
+    const setView = vi.fn()
+    const frustum = new Cesium.PerspectiveFrustum()
+    frustum.aspectRatio = 1.6
+    frustum.fov = Cesium.Math.toRadians(39.7) // the old horizontal-only mismatch
+    const viewer = { camera: { setView, frustum } }
+    syncCesiumCameraToThree({
+      cesiumViewer: viewer as unknown as Cesium.Viewer,
+      threeCamera,
+      tangent: ORIGIN,
+    })
+
+    expect(setView).toHaveBeenCalledTimes(1)
+    // The writable fov is horizontal: a 50° vertical fov at aspect 1.6
+    // folds back to 2·atan(tan(25°)·1.6) ≈ 73.4°.
+    const wantH = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(50) / 2) * 1.6)
+    expect(frustum.fov).toBeCloseTo(wantH, 4)
+    expect(frustum.fovy).toBeCloseTo(THREE.MathUtils.degToRad(50), 3)
   })
 })
 
