@@ -220,6 +220,7 @@ import { useWorldStore } from '@interfaces/stores/worldStore'
 import { computeNetworkBounds } from '@domain/services/networkBounds'
 import { approachSignalFor, signalPhaseLabel } from '@domain/services/approachSignal'
 import { MAX_ROAD_WHEEL_DEG, vehicleSteeringAngle } from '@domain/services/steeringAngle'
+import { bboxToLocalRect } from '@domain/services/cityBounds'
 import {
   createCesiumViewer,
   DEFAULT_IMAGERY,
@@ -735,6 +736,20 @@ onMounted(async () => {
     osmStats.value = { roadCount: roads.roadCount, buildingCount: 0 }
     const buildings = await loadOSMBuildings(cesiumViewer, osmBbox.value)
     osmBuildings = buildings
+    // The fleet's home is now known — the buildings' own extent, turned
+    // into the simulation's local metric frame. From here on: spawn
+    // points outside it are pruned (the store does it inside
+    // `setVehicleBounds`) and tick's OOB cleanup removes any vehicle
+    // that drives out of the modelled area.
+    if (buildings.bounds && sceneOrigin.value) {
+      const pruned = world.setVehicleBounds(bboxToLocalRect(sceneOrigin.value, buildings.bounds))
+      if (pruned > 0) {
+        status.value = {
+          kind: 'info',
+          text: `车辆运行边界已按建筑区域设置（移除 ${pruned} 个界外出厂点）`,
+        }
+      }
+    }
     osmStats.value = {
       roadCount: roads.roadCount,
       buildingCount: buildings.buildingCount,

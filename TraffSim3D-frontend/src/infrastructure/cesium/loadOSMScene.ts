@@ -17,24 +17,26 @@
 
 import * as Cesium from 'cesium'
 import { OSM_METERS_PER_DEGREE_LAT } from '@infrastructure/api/osmNetworkAdapter'
+import type { Bbox } from '@domain/services/cityBounds'
 import type { GeoOrigin, RoadNetwork } from '@domain/entities/RoadNetwork'
 import { roadWidthM, vehicleFitsRoad, roadHeightLimitM } from '@domain/services/roadAccess'
 
-export interface Bbox {
-  /** South-west corner (lat, lng). */
-  south: number
-  /** South-west corner (lat, lng). */
-  west: number
-  /** North-east corner. */
-  north: number
-  /** North-east corner. */
-  east: number
-}
+/** A WGS84 rectangle in degrees. The type lives in the domain
+ *  (`cityBounds.ts`) so the vehicle-boundary math can use it without
+ *  the domain importing Cesium; re-exported here for the view layer. */
+export type { Bbox } from '@domain/services/cityBounds'
 
 export interface LoadedOSMBuildings {
   buildings: Cesium.GeoJsonDataSource
   /** How many buildings were drawn. */
   buildingCount: number
+  /**
+   * The WGS84 rectangle the DRAWN buildings actually cover — the fleet's
+   * home area. This is the buildings' own coordinate extent, which is
+   * what "the modelled city" means; narrower or wider than the query
+   * rectangle would lie about it. `null` when nothing was drawn.
+   */
+  bounds: Bbox | null
   /** Re-apply the theme's building colours (a theme switch changes them). */
   restyle: () => void
 }
@@ -407,9 +409,42 @@ export const loadOSMBuildings = async (
     }
   }
 
+  // The fleet's home rectangle: the WGS84 extent of the DRAWN buildings'
+  // coordinates. This is what "the modelled city" means in numbers —
+  // the vehicle boundary the store enforces is derived from it, so it
+  // has to be the buildings' own extent and not the query rectangle
+  // (which only bounds the search).
+  let minLng = Infinity
+  let maxLng = -Infinity
+  let minLat = Infinity
+  let maxLat = -Infinity
+  const scanRing = (ring: unknown): void => {
+    for (const pt of ring as Array<[number, number]>) {
+      if (!Array.isArray(pt) || pt.length < 2) continue
+      if (pt[0]! < minLng) minLng = pt[0]!
+      if (pt[0]! > maxLng) maxLng = pt[0]!
+      if (pt[1]! < minLat) minLat = pt[1]!
+      if (pt[1]! > maxLat) maxLat = pt[1]!
+    }
+  }
+  for (const feature of buildingsGeo.features ?? []) {
+    const geometry = feature.geometry as { type: string; coordinates: unknown } | undefined
+    if (!geometry) continue
+    if (geometry.type === 'Polygon') {
+      for (const ring of geometry.coordinates as unknown[]) scanRing(ring)
+    } else if (geometry.type === 'LineString') {
+      scanRing(geometry.coordinates)
+    }
+  }
+  const bounds =
+    Number.isFinite(minLng) && Number.isFinite(maxLat)
+      ? { south: minLat, west: minLng, north: maxLat, east: maxLng }
+      : null
+
   return {
     buildings,
     buildingCount: buildings.entities.values.length,
+    bounds,
     restyle,
   }
 }

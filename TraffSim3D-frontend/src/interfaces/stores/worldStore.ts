@@ -42,7 +42,8 @@ import {
   requestLaneChange as requestLaneChangeFn,
   perpendicularOffsetAlongRoad,
 } from '@domain/services/laneChange'
-import { laneOffset } from '@domain/services/laneGeometry'
+import { laneOffset, lanePoint } from '@domain/services/laneGeometry'
+import { outOfRect, type LocalRect } from '@domain/services/cityBounds'
 import { clearanceBeamsFor } from '@domain/services/clearanceBeams'
 import {
   nextRouteRoad,
@@ -1375,6 +1376,7 @@ export const useWorldStore = defineStore('world', () => {
       getHostPose,
       draggingId,
       removeVehicle, // OOB cleanup entry point
+      cityBounds: () => vehicleBoundsRect,
       fixedStepScheduler, // drives trajectory export at 10 Hz
       // Pass policy + replay target to tick. tick() reads
       // `replayTargetId` and computes obs + inference each step. The
@@ -1670,6 +1672,31 @@ export const useWorldStore = defineStore('world', () => {
     }
     return ok
   }
+
+  // ===== the fleet's home rectangle (the 3D-modelled city area) =====
+  //
+  // Set once the buildings have loaded: SmartCityView derives the
+  // rectangle from the buildings' own coordinate extent (see
+  // `domain/services/cityBounds`). `null` = no boundary yet. On set the
+  // spawn points outside it are pruned once — a respawn or a manual add
+  // going through them would put a car into the void — and tick's OOB
+  // cleanup removes any vehicle that drives out afterwards.
+  let vehicleBoundsRect: LocalRect | null = null
+  const setVehicleBounds = (rect: LocalRect): number => {
+    vehicleBoundsRect = rect
+    let pruned = 0
+    for (const [id, sp] of Object.entries(network.value.spawnPoints)) {
+      const road = network.value.roads[sp.roadId]
+      if (!road) continue
+      const lp = lanePoint(road, sp.laneIndex, sp.s)
+      if (outOfRect(lp.position, rect)) {
+        delete network.value.spawnPoints[id]
+        pruned += 1
+      }
+    }
+    return pruned
+  }
+  const vehicleBounds = (): LocalRect | null => vehicleBoundsRect
 
   const removeVehicle = (id: string): void => {
     pushHistory()
@@ -2154,6 +2181,8 @@ export const useWorldStore = defineStore('world', () => {
     getNetwork,
     addVehicle,
     removeVehicle,
+    setVehicleBounds,
+    vehicleBounds,
     spawnMany,
     setVehicleSpeed,
     updateVehicleType,

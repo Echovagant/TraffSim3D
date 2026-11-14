@@ -57,6 +57,7 @@ import {
 } from '@domain/services/vehicleDynamics'
 import { computeSteeringAngle, steeringAngleToOmega } from '@domain/services/purePursuit'
 import { pythonSpeedStep } from '@domain/services/egoKernel'
+import type { LocalRect } from '@domain/services/cityBounds'
 import { tickOobCleanup, isOobExiting, recordLaneGuard } from './oobCleanup'
 import {
   CRASH_IMPULSE_THRESHOLD,
@@ -192,6 +193,14 @@ export interface TickContext {
    * steering past the lane edge — but the wheel itself is analogue.
    */
   driverSteer?: (vehicleId: string) => number | null
+  /**
+   * The fleet's home rectangle in local metric metres (the city's
+   * 3D-modelled area — `domain/services/cityBounds`), or `null` before
+   * the buildings have loaded. tick hands it to the OOB cleanup: a
+   * vehicle outside it is removed (there is nothing modelled out there
+   * to drive on).
+   */
+  cityBounds?: () => LocalRect | null
   /**
    * The cooperative-driving policy over the junction's negotiation
    * (Scene 4), when it is enabled.
@@ -1448,6 +1457,9 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       },
       // The vehicle the editor is dragging is under the user's control.
       draggingId: () => ctx.draggingId,
+      // The fleet's home rectangle (the 3D-modelled city area); null
+      // until the buildings have loaded.
+      cityBounds: ctx.cityBounds,
     },
     Object.values(network.vehicles),
     simTime,

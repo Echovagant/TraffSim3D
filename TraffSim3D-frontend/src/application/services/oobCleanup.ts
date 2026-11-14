@@ -42,6 +42,7 @@
 
 import type { Vehicle } from '@domain/entities/Vehicle'
 import type { Road } from '@domain/entities/Road'
+import { outOfRect, type LocalRect } from '@domain/services/cityBounds'
 import { lanePoint } from '@domain/services/laneGeometry'
 import { MAX_DECEL, OUT_OF_BOUNDS_M } from '@shared/constants/simulation'
 
@@ -211,6 +212,13 @@ export interface TickOobDeps {
    * (and must not be teleported away under the user's cursor).
    */
   draggingId?: () => string | null
+  /**
+   * The fleet's home rectangle in local metric metres (the city's
+   * 3D-modelled area — see `domain/services/cityBounds`). `null` until
+   * the buildings have loaded. A vehicle outside it is removed: there
+   * is no road start to send it back to, its own road lies outside too.
+   */
+  cityBounds?: () => LocalRect | null
 }
 
 /**
@@ -332,6 +340,27 @@ export const tickOobCleanup = (
     if (simTime - v.spawnedAt < 1.0) continue
     // Skip the vehicle the editor is dragging — the user is moving it.
     if (deps.draggingId?.() === v.id) continue
+
+    // The fleet's home is the city's 3D-modelled area (see
+    // `domain/services/cityBounds`): the buildings thin out past it and
+    // the user asked for the fleet to stay inside. A vehicle that
+    // leaves is removed outright — there is no road start to send it
+    // back to, its own road lies outside the boundary too. The count
+    // recovers through spawn points inside the boundary.
+    const cityBounds = deps.cityBounds?.()
+    if (cityBounds && outOfRect(v.position, cityBounds)) {
+      exits.delete(v)
+      deps.removeVehicle(v.id)
+      emit({
+        kind: 'orphan-removed',
+        vehicleId: v.id,
+        simTime,
+        distance: 0,
+        speed: v.speed,
+        reason: 'left the modelled city area — the vehicle was removed',
+      })
+      continue
+    }
 
     const expected = lanePoint(road, v.laneIndex, v.s)
     const dx = v.position.x - expected.position.x

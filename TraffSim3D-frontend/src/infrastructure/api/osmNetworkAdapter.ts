@@ -102,8 +102,11 @@ import type { Position } from '@domain/value-objects/Position'
  */
 export const OSM_PAYLOAD_NORTH_IS_POSITIVE_Z = true
 
-/** Metres per degree of latitude used by the backend projection. */
-export const OSM_METERS_PER_DEGREE_LAT = 111000
+/** Metres per degree of latitude used by the backend projection. Lives
+ *  in the domain (`cityBounds.ts`) — the vehicle-boundary math must use
+ *  the SAME number as this projection, and the domain cannot import
+ *  from infrastructure. */
+export { METERS_PER_DEGREE_LAT as OSM_METERS_PER_DEGREE_LAT } from '@domain/services/cityBounds'
 
 const DEFAULT_LANE_COUNT = 2
 const DEFAULT_SPEED_LIMIT = 13.89

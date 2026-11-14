@@ -96,6 +96,51 @@ describe('tickOobCleanup', () => {
     expect(v.targetSpeed).toBe(0)
   })
 
+  it('removes a vehicle that left the modelled city area (cityBounds)', () => {
+    // The fleet's home is the 3D-modelled area: a vehicle out there has
+    // nothing to come back TO (its own road is outside), so the cleanup
+    // removes it instead of respawning it.
+    const v = makeTestVehicle({ id: 'v-out', roadId: 'r-ns', laneIndex: 0, s: 10, spawnedAt: -10 })
+    v.position = { x: 8000, y: 0, z: 8000 } // far outside any sane rectangle
+    net.vehicles['v-out'] = v
+    const inside = makeTestVehicle({
+      id: 'v-in',
+      roadId: 'r-ns',
+      laneIndex: 0,
+      s: 10,
+      spawnedAt: -10,
+    })
+    net.vehicles['v-in'] = inside
+
+    const deps: TickOobDeps = {
+      ...makeDeps(),
+      cityBounds: () => ({ minX: -1000, maxX: 1000, minZ: -1000, maxZ: 1000 }),
+    }
+    tickOobCleanup(deps, Object.values(net.vehicles), 5.0, 1 / 60)
+
+    expect(removed).toEqual(['v-out'])
+    expect(net.vehicles['v-out']).toBeUndefined()
+    // The inside vehicle is untouched — no exit phase, no respawn.
+    expect(removed).not.toContain('v-in')
+    expect(isOobExiting(inside)).toBe(false)
+    // The event log says WHY it was removed.
+    const events = getOobEvents()
+    expect(events[0]!.kind).toBe('orphan-removed')
+    expect(events[0]!.reason).toContain('modelled city area')
+  })
+
+  it('does not judge the cityBounds when none was set (null = no boundary yet)', () => {
+    const v = makeTestVehicle({ id: 'v-far2', roadId: 'r-ns', laneIndex: 0, s: 10, spawnedAt: -10 })
+    v.position = { x: 8000, y: 0, z: 8000 }
+    net.vehicles['v-far2'] = v
+
+    // No cityBounds in deps at all: the buildings have not loaded yet.
+    tickOobCleanup(makeDeps(), Object.values(net.vehicles), 5.0, 1 / 60)
+
+    expect(removed).toHaveLength(0) // far off-lane → exit phase, not removed
+    expect(isOobExiting(v)).toBe(true)
+  })
+
   it('brakes the vehicle down and puts it back once it has stopped', () => {
     const v = makeLostVehicle('v-far', 12)
     const deps = makeDeps()
