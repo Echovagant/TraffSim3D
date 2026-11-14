@@ -216,6 +216,13 @@ export interface TickContext {
    */
   requestUpgrade?: (vehicleId: string) => void
   /**
+   * Whether the tier manager currently holds ANY far vehicle. The
+   * far-advance pass (bucket build + per-vehicle scan) is skipped
+   * entirely when this is false — with zero far vehicles it is pure
+   * waste, and a CI runner's frame budget cannot spare it.
+   */
+  hasFarTier?: () => boolean
+  /**
    * The cooperative-driving policy over the junction's negotiation
    * (Scene 4), when it is enabled.
    *
@@ -1238,7 +1245,13 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     // car — was force-near by the tier manager, so what is advanced
     // here is a straight-road cruise only; a far vehicle reaching its
     // travel end is upgraded on the spot and clamped.
-    if (ctx.tierOf) {
+    //
+    // Gated on `hasFarTier`: with zero far vehicles (the flat editor,
+    // which never writes a camera, and any scene where the whole fleet
+    // is near) the two O(fleet) passes below are pure waste — and on a
+    // CI runner's frame budget that waste was measurable (the
+    // poi-navigation journey stopped fitting its wall-clock budget).
+    if (ctx.tierOf && ctx.hasFarTier?.()) {
       const laneBuckets = new Map<string, Array<{ s: number; speed: number; id: string }>>()
       for (const v of Object.values(network.vehicles)) {
         if (v.turn) continue

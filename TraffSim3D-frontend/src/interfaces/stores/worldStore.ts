@@ -1451,6 +1451,10 @@ export const useWorldStore = defineStore('world', () => {
       // The NTE-style tier system: far vehicles run the light simulation
       // inside tick (no body, no controls), near ones the full physics.
       tierOf: (id) => tierManager.tierOf(id) ?? 'near',
+      // The far-advance pass runs only when the fleet actually HAS far
+      // vehicles — zero-far scenes (the flat editor, all-near fleets)
+      // skip the two O(fleet) passes entirely.
+      hasFarTier: () => tierManager.farCount() > 0,
       requestUpgrade: (id) => {
         tierManager.forceNear(id)
         const v = network.value.vehicles[id]

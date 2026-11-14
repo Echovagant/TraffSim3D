@@ -76,6 +76,11 @@ export interface VehicleTierManager {
   clear: () => void
   /** Debug/test read: how many vehicles currently hold the near tier. */
   nearCount: () => number
+  /** How many vehicles currently hold the far tier. The tick's light
+   *  simulation is gated on this: zero far vehicles = skip the whole
+   *  bucket-building pass (the scene editor never tiers, and its frame
+   *  budget on a CI runner cannot spare even an empty scan). */
+  farCount: () => number
 }
 
 export const createVehicleTierManager = (
@@ -88,6 +93,9 @@ export const createVehicleTierManager = (
   /** The ids currently holding the near tier (the promotion budget
    *  counts against this set's membership changes). */
   const nearIds = new Set<string>()
+  /** The ids currently holding the far tier (the light simulation's
+   *  workload roster — and its skip-gate when empty). */
+  const farIds = new Set<string>()
 
   return {
     update: (entries) => {
@@ -171,12 +179,14 @@ export const createVehicleTierManager = (
       }
       for (const w of wants) {
         tiers.set(w.id, w.tier)
-        if (w.tier === 'near' && !w.wasNear) {
-          nearIds.add(w.id)
+        if (w.tier === 'near') {
+          farIds.delete(w.id)
+          if (!w.wasNear) nearIds.add(w.id)
         }
-        if (w.tier === 'far' && w.wasNear) {
-          downgrades.push(w.id)
+        if (w.tier === 'far') {
           nearIds.delete(w.id)
+          farIds.add(w.id)
+          if (w.wasNear) downgrades.push(w.id)
         }
       }
       return { upgrades, downgrades }
@@ -187,18 +197,23 @@ export const createVehicleTierManager = (
     forceNear: (id) => {
       tiers.set(id, 'near')
       nearIds.add(id)
+      farIds.delete(id)
     },
 
     forget: (id) => {
       tiers.delete(id)
       nearIds.delete(id)
+      farIds.delete(id)
     },
 
     clear: () => {
       tiers.clear()
       nearIds.clear()
+      farIds.clear()
     },
 
     nearCount: () => nearIds.size,
+
+    farCount: () => farIds.size,
   }
 }
