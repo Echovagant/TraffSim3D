@@ -33,12 +33,21 @@ export interface LoadedOSMBuildings {
   /**
    * The WGS84 rectangle the DRAWN buildings actually cover — the fleet's
    * home area. This is the buildings' own coordinate extent, which is
-   * what "the modelled city" means; narrower or wider than the query
-   * rectangle would lie about it. `null` when nothing was drawn.
+   * what "the modelled city" means in numbers; narrower or wider than the
+   * query rectangle would lie about it. `null` when nothing was drawn.
    */
   bounds: Bbox | null
   /** Re-apply the theme's building colours (a theme switch changes them). */
   restyle: () => void
+  /**
+   * Switch the building bodies between the clay-white translucent look
+   * (alpha 0.75 — reads beautifully from the bird view, where the streets
+   * must stay readable THROUGH the massing) and a solid body (alpha 1.0 —
+   * at street level the transparency reads as a rendering artifact: you
+   * see the far side of the street THROUGH the buildings). The view
+   * toggles this per view mode and via the toolbar button.
+   */
+  setSolid: (solid: boolean) => void
 }
 
 /** The simulated network's roads, drawn on the basemap as ribbons. */
@@ -441,11 +450,42 @@ export const loadOSMBuildings = async (
       ? { south: minLat, west: minLng, north: maxLat, east: maxLng }
       : null
 
+  /** Track the current mode so a theme switch (which rewrites every
+   *  material from the clay palette) keeps the solid body solid. */
+  let solid = false
+  const setSolid = (next: boolean): void => {
+    solid = next
+    for (const entity of buildings.entities.values) {
+      if (!entity.polygon) continue
+      const props = entity.properties
+      const getTag = (key: string): string | undefined => {
+        const p = props?.[key as keyof typeof props]
+        if (p && typeof (p as any).getValue === 'function')
+          return (p as any).getValue() as string | undefined
+        return p as string | undefined
+      }
+      const color = getBuildingColor({
+        building: getTag('building'),
+        amenity: getTag('amenity'),
+      })
+      entity.polygon.material = new Cesium.ColorMaterialProperty(
+        Cesium.Color.fromCssColorString(color).withAlpha(solid ? 1.0 : BUILDING_OPACITY),
+      )
+    }
+  }
+  // A theme switch runs `restyle`, which rewrites the materials from the
+  // clay palette — re-apply the solid body on top so the mode survives.
+  const restyleWithMode = (): void => {
+    restyle()
+    if (solid) setSolid(true)
+  }
+
   return {
     buildings,
     buildingCount: buildings.entities.values.length,
     bounds,
-    restyle,
+    restyle: restyleWithMode,
+    setSolid,
   }
 }
 
