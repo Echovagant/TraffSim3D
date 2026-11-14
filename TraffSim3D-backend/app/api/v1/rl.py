@@ -312,9 +312,15 @@ async def terminate_training() -> dict[str, Any]:
 
 
 @router.get("/rl/checkpoints", tags=["rl"])
-async def list_checkpoints() -> dict[str, Any]:
-    """List saved PPO checkpoints across all processes, newest first."""
-    return {"checkpoints": rl_ckpt.list_checkpoints()}
+def list_checkpoints() -> dict[str, Any]:
+    """List saved PPO checkpoints across all processes, newest first.
+
+    A plain `def`, not `async def`: the listing touches the disk, and a
+    synchronous call inside an async handler would hold the event loop
+    for its whole duration — other endpoints then show p95 spikes while
+    the picker is open. FastAPI runs this in a worker thread instead.
+    """
+    return {"checkpoints": rl_ckpt.list_checkpoints_cached()}
 
 
 @router.delete("/rl/checkpoints", tags=["rl"])

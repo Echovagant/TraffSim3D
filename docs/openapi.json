@@ -784,7 +784,7 @@
           "rl"
         ],
         "summary": "List Checkpoints",
-        "description": "List saved PPO checkpoints across all processes, newest first.",
+        "description": "List saved PPO checkpoints across all processes, newest first.\n\nA plain `def`, not `async def`: the listing touches the disk, and a\nsynchronous call inside an async handler would hold the event loop\nfor its whole duration — other endpoints then show p95 spikes while\nthe picker is open. FastAPI runs this in a worker thread instead.",
         "operationId": "list_checkpoints_api_v1_rl_checkpoints_get",
         "responses": {
           "200": {

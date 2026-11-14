@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -149,6 +150,30 @@ def list_checkpoints() -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+# The checkpoint picker polls this list while training runs. A listing
+# walks every per-run directory (232 of them on a working machine, ~1 300
+# entries), which costs tens of milliseconds on Windows — and it was paid
+# again on every request, on the event loop's own thread. The picker does
+# not need sub-second freshness, so a short TTL collapses those walks into
+# one per interval.
+#
+# Kept as a separate wrapper, never as a change to `list_checkpoints`:
+# the tests and `prune_all_checkpoints` must see the real directory.
+_LIST_CACHE_TTL_S = 2.0
+_list_cache_at = 0.0
+_list_cache_rows: list[dict[str, Any]] | None = None
+
+
+def list_checkpoints_cached() -> list[dict[str, Any]]:
+    """`list_checkpoints()`, cached for a couple of seconds."""
+    global _list_cache_at, _list_cache_rows
+    now = time.monotonic()
+    if _list_cache_rows is None or now - _list_cache_at >= _LIST_CACHE_TTL_S:
+        _list_cache_rows = list_checkpoints()
+        _list_cache_at = now
+    return _list_cache_rows
 
 
 def prune_all_checkpoints(keep_total: int = CHECKPOINT_KEEP) -> int:
