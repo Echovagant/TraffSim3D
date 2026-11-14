@@ -59,6 +59,29 @@
           </label>
         </div>
 
+        <button
+          v-if="!ride"
+          class="top-btn top-drive"
+          title="进入第一人称驾驶 — 自动挑一辆离相机最近的车"
+          data-testid="drive-button"
+          @click="enterDrive()"
+        >
+          驾驶
+        </button>
+        <button
+          v-if="viewMode === 'street'"
+          class="top-btn"
+          :class="{ on: buildingsSolid }"
+          :title="
+            buildingsSolid
+              ? '切回哑光白模（半透明，俯视效果好）'
+              : '切到实体白模（不透明，平视不穿帮）'
+          "
+          data-testid="buildings-solid-toggle"
+          @click="setBuildingsSolid(!buildingsSolid)"
+        >
+          {{ buildingsSolid ? '实体' : '哑光' }}
+        </button>
         <h1 class="topbar-title">智慧城市运行管理中心</h1>
 
         <div class="topbar-right">
@@ -233,6 +256,7 @@ import {
   bboxAround,
   DEFAULT_BBOX,
   type LoadedNetworkRoads,
+  type LoadedOSMBuildings,
 } from '@infrastructure/cesium/loadOSMScene'
 import {
   createCameraSync,
@@ -267,7 +291,7 @@ let postRenderHandler: (() => void) | null = null
 let cameraSync: CameraSyncContext | null = null
 // The two city layers, kept so a theme switch can re-colour them.
 let networkRoads: LoadedNetworkRoads | null = null
-let osmBuildings: { restyle: () => void } | null = null
+let osmBuildings: LoadedOSMBuildings | null = null
 
 // Geographic anchor of the loaded scene.
 //
@@ -562,6 +586,47 @@ const driveRide = (): void => {
 }
 
 /**
+ * The toolbar's DRIVE button: pick the vehicle nearest to the camera and
+ * put the driver straight into its cockpit. The ride used to require
+ * spotting and clicking a car in the crowd first — invisible as an
+ * affordance (user report, 2026-11-14). The in-ride view toggles
+ * (cockpit / chase / chase-top, the `C` key and the banner buttons)
+ * already exist and keep working from here.
+ */
+const enterDrive = (): void => {
+  const cam = rendererRef.value?.getCamera().position
+  let bestId: string | null = null
+  let bestDist = Infinity
+  for (const v of Object.values(world.network.vehicles)) {
+    if (!cam) {
+      bestId = v.id
+      break
+    }
+    const d = (v.position.x - cam.x) ** 2 + (v.position.z - cam.z) ** 2
+    if (d < bestDist) {
+      bestDist = d
+      bestId = v.id
+    }
+  }
+  if (!bestId) return
+  world.setRideVehicle(bestId, 'cockpit')
+}
+
+// ===== building body: translucent clay-white vs solid =====
+//
+// The translucent clay-white (alpha 0.75) reads beautifully from the
+// bird view — the streets stay readable THROUGH the massing — but at
+// street level you see the far side of the street THROUGH the buildings,
+// which reads as a rendering artifact (user report, 2026-11-14). Street
+// mode switches to the solid body automatically; the toolbar button
+// flips it back and forth.
+const buildingsSolid = ref(false)
+const setBuildingsSolid = (solid: boolean): void => {
+  buildingsSolid.value = solid
+  osmBuildings?.setSolid(solid)
+}
+
+/**
  * The cluster's readouts, and why they take the tick counter.
  *
  * The store's network is a **shallow** ref — a deep-reactive network
@@ -851,6 +916,9 @@ watch(viewMode, (mode) => {
     // Cesium owns the camera again — hand the current view over once
     // so the switch does not jump.
     cameraSync?.setOwner('cesium')
+    // Bird view is where the translucent clay-white shines (the streets
+    // read through the massing) — back to translucent automatically.
+    setBuildingsSolid(false)
     const view = birdView.value
     cesiumViewer.camera.flyTo({
       destination: view.destination,
@@ -859,6 +927,9 @@ watch(viewMode, (mode) => {
     })
   } else if (mode === 'street') {
     cameraSync?.setOwner('cesium')
+    // Street level: the transparency reads as an artifact — solid bodies
+    // are the default here (the toolbar button flips it back).
+    setBuildingsSolid(true)
     const anchor = streetAnchor.value
     cesiumViewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(anchor.lng, anchor.lat, 1.7),
@@ -1507,6 +1578,17 @@ onBeforeUnmount(() => {
   left: 50%;
   transform: translateX(-50%);
   z-index: var(--dc-z-toast);
+}
+
+/* ===== the DRIVE affordance (toolbar) ===== */
+/* The one visible entry into the first-person drive: a highlighted
+   toolbar button that picks the nearest car automatically — the old
+   path (spot and click a car in the crowd) was invisible as an
+   affordance. */
+.top-drive {
+  color: var(--dc-accent, #4a7fb5);
+  border-color: var(--dc-accent, #4a7fb5);
+  font-weight: 600;
 }
 
 /* ===== the ride banner =====
