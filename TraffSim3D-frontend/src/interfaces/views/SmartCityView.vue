@@ -257,6 +257,7 @@ import { computeNetworkBounds } from '@domain/services/networkBounds'
 import { approachSignalFor, signalPhaseLabel } from '@domain/services/approachSignal'
 import { MAX_ROAD_WHEEL_DEG, vehicleSteeringAngle } from '@domain/services/steeringAngle'
 import { bboxToLocalRect } from '@domain/services/cityBounds'
+import { getMainRenderer } from '@interfaces/composables/rendererRegistry'
 import {
   createCesiumViewer,
   DEFAULT_IMAGERY,
@@ -1198,7 +1199,19 @@ const walkStreet = (dt: number): void => {
  *  loop into one callback. The Cesium→Three projection (incl. the fov)
  *  is synced first, then the simulation advances and the overlay
  *  renders; the Rapier fixed-step semantics live inside
- *  `world.step` and are unaffected by the new dt source. */
+ *  `world.step` and are unaffected by the new dt source.
+ *
+ *  The frame MUST be driven through the RAW renderer — `getMainRenderer()`
+ *  (the module-level reference) — NEVER through `rendererRef.value`:
+ *  that ref is a Vue `ref()`, and calling `frame()` on its reactive
+ *  proxy made `this` a proxy whose `getNetwork()` returned the RAW
+ *  network while `this.currentNetwork` read back as the PROXY — so
+ *  `network !== currentNetwork` was ALWAYS true and the whole scene
+ *  (106 children, 101 fresh trail geometries) was rebuilt EVERY FRAME:
+ *  city frame rate 104 → 26 FPS (measured 2026-11-14, CDP profile:
+ *  computeBoundingSphere 18.7% + Vue reactivity traps ~40%). Every
+ *  per-frame property read on the proxy also paid the reactive get
+ *  trap. The raw reference costs one module lookup and none of that. */
 const startCameraSync = (): void => {
   if (!cesiumViewer) return
   let last = performance.now()
@@ -1208,10 +1221,13 @@ const startCameraSync = (): void => {
       const now = performance.now()
       const dt = Math.min(0.1, (now - last) / 1000)
       last = now
-      if (!cesiumViewer || !rendererRef.value) return
+      // RAW renderer (module registry) — the reactive proxy would
+      // re-trigger the scene rebuild every frame (see the block above).
+      const raw = getMainRenderer()
+      if (!cesiumViewer || !raw) return
       // The tier manager layers the fleet on the LIVE camera: write the
       // position before the simulation advances (same frame).
-      world.setSimCameraPos(rendererRef.value.getCamera().position)
+      world.setSimCameraPos(raw.getCamera().position)
       walkStreet(dt)
       // The cockpit's pedals: W/S held = throttle/brake. The intent goes
       // into the tick through `driverOverride`; letting go of both hands
@@ -1224,13 +1240,13 @@ const startCameraSync = (): void => {
       if (!cameraSync) {
         cameraSync = createCameraSync({
           cesiumViewer,
-          threeCamera: rendererRef.value.getCamera(),
+          threeCamera: raw.getCamera(),
           tangent: tangent.value,
           owner: 'cesium',
         })
       }
       cameraSync.tick()
-      rendererRef.value.frame(now)
+      raw.frame(now)
     } catch (err) {
       // A frame handler runs inside Cesium's render call: one bad tick
       // must not take the whole scene down with it.

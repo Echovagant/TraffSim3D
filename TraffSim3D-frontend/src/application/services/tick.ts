@@ -1253,6 +1253,12 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         if (ctx.tierOf(v.id) !== 'far') continue
         const road = network.roads[v.roadId]
         if (!road) continue
+        // The travel direction: lane 0 of a two-way road moves toward
+        // larger s, the backward lane toward SMALLER s — the advance and
+        // the following constraint must integrate along the lane's own
+        // travel sign, or a backward-lane vehicle drives backwards down
+        // its road forever (the CI poi-navigation timeout, 2026-11-14).
+        const sign = laneForwardSign(v.laneIndex, road.laneCount)
         // Lightweight car following: the nearest same-lane leader ahead
         // (near or far — the bucket holds the whole fleet, so a far
         // vehicle queues behind a PHYSICS vehicle too). A gap under the
@@ -1261,26 +1267,34 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
         // lose.
         const bucket = laneBuckets.get(`${v.roadId}@${v.laneIndex}`) ?? []
         let leader: { s: number; speed: number } | null = null
+        let leaderGap = Infinity
         for (const o of bucket) {
           if (o.id === v.id) continue
-          if (o.s > v.s && (leader === null || o.s < leader.s)) leader = o
+          const ahead = (o.s - v.s) * sign
+          if (ahead > 0 && ahead < leaderGap) {
+            leaderGap = ahead
+            leader = o
+          }
         }
         let target = Math.min(v.targetSpeed, road.speedLimit)
         if (leader) {
-          const gap = leader.s - v.s
           const safe = TIME_HEADWAY * v.speed + MIN_GAP
-          if (gap < safe) target = Math.min(target, Math.max(0, leader.speed))
+          if (leaderGap < safe) target = Math.min(target, Math.max(0, leader.speed))
         }
         v.speed = rampSpeed(v.speed, target, dt, v.type)
-        let s = v.s + v.speed * dt
+        let s = v.s + sign * v.speed * dt
         const len = roadLength(road)
-        if (s >= len) {
-          // Travel end reached while far — the junction turn/wrap logic
-          // needs the full tier. Upgrade on the spot (the manager takes
-          // it from here; the body re-aligns to the entity pose) and
-          // clamp the advance so this frame stays on the road.
+        // Travel end reached while far — the junction turn/wrap logic
+        // needs the full tier. Upgrade on the spot (the manager takes
+        // it from here; the body re-aligns to the entity pose) and
+        // clamp the advance so this frame stays on the road. The end is
+        // s=len on a forward lane and s=0 on a backward one.
+        if (sign > 0 && s >= len) {
           ctx.requestUpgrade?.(v.id)
           s = len - 0.5
+        } else if (sign < 0 && s <= 0) {
+          ctx.requestUpgrade?.(v.id)
+          s = 0.5
         }
         v.s = s
         const lp = lanePoint(road, v.laneIndex, s)
