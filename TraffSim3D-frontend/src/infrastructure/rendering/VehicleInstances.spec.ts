@@ -401,3 +401,81 @@ describe('the vehicle LEANS with the road', () => {
     expect(axis.y).toBeCloseTo(Math.sin(0.2), 6)
   })
 })
+
+describe('createVehicleInstances — far-camera legibility (LOD)', () => {
+  it('keeps unit scale until setLodScale is called', () => {
+    const v = makeTestVehicle({ position: { x: 1, y: 0, z: 2 } })
+    pool.allocate(v)
+    pool.update(v)
+    const { scale } = decompose(pool.meshes.car, 0)
+    expect(scale.x).toBe(1)
+    expect(scale.y).toBe(1)
+    expect(scale.z).toBe(1)
+  })
+
+  it('re-scales every drawn body in place, even while the simulation is paused', () => {
+    const v = makeTestVehicle({ position: { x: 1, y: 0, z: 2 } })
+    pool.allocate(v)
+    pool.update(v)
+
+    pool.setLodScale(4.3)
+
+    // No update() call between setLodScale and the read: the re-composition
+    // happened inside setLodScale, which is what makes the factor land on a
+    // paused scene.
+    const { scale, pos } = decompose(pool.meshes.car, 0)
+    // The instance matrix is stored as Float32: 4.3 arrives as 4.3000002.
+    expect(scale.x).toBeCloseTo(4.3, 5)
+    expect(scale.y).toBeCloseTo(4.3, 5)
+    expect(scale.z).toBeCloseTo(4.3, 5)
+    // The position is untouched — the dot stays where the vehicle is.
+    expect(pos.x).toBeCloseTo(1, 5)
+    expect(pos.z).toBeCloseTo(2, 5)
+  })
+
+  it('composes freshly allocated bodies at the current factor', () => {
+    pool.setLodScale(2)
+    const v = makeTestVehicle({ position: { x: 0, y: 0, z: 0 } })
+    pool.allocate(v)
+    const { scale } = decompose(pool.meshes.car, 0)
+    expect(scale.x).toBeCloseTo(2, 10)
+  })
+
+  it('marks the matrix dirty on the next update after the factor changed', () => {
+    const v = makeTestVehicle({ position: { x: 0, y: 0, z: 0 } })
+    pool.allocate(v)
+    pool.setLodScale(2.5)
+    // A different scale alone must re-upload even though nothing moved.
+    const moved = matrixAt(pool.meshes.car, 0)
+    const { scale } = decompose(pool.meshes.car, 0)
+    expect(scale.x).toBeCloseTo(2.5, 10)
+    expect(moved).toBeDefined()
+  })
+
+  it('keeps a hidden vehicle zeroed while scaling the others', () => {
+    const a = makeTestVehicle({ id: 'a', position: { x: 0, y: 0, z: 0 } })
+    const b = makeTestVehicle({ id: 'b', position: { x: 5, y: 0, z: 0 }, type: 'bus' })
+    pool.allocate(a)
+    pool.allocate(b)
+    pool.hide('a')
+
+    pool.setLodScale(3)
+
+    const hiddenScaleV = new THREE.Vector3()
+    matrixAt(pool.meshes.car, 0).decompose(
+      new THREE.Vector3(),
+      new THREE.Quaternion(),
+      hiddenScaleV,
+    )
+    expect(hiddenScaleV.x).toBe(0) // still hidden
+
+    const { scale: busScale } = decompose(pool.meshes.bus, 0)
+    expect(busScale.x).toBeCloseTo(3, 10)
+
+    // After show, the next update picks the new factor up.
+    pool.show('a')
+    pool.update(a)
+    const { scale: shownScale } = decompose(pool.meshes.car, 0)
+    expect(shownScale.x).toBeCloseTo(3, 10)
+  })
+})

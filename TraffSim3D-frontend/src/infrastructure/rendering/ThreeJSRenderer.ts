@@ -10,6 +10,7 @@ import {
 } from './SceneBuilder'
 import { buildRouteMesh, type RouteRenderPath } from './RouteMesh'
 import { createPoiLayer, type Poi, type PoiLayer } from './PoiLayer'
+import { vehicleLodScale } from './vehicleLod'
 import { MAX_DPR, VEHICLE_BODY_SPEC } from '@shared/constants/simulation'
 
 /** How far ahead of the car the first-person camera looks (m). */
@@ -153,6 +154,13 @@ export class ThreeJSRenderer {
   private rafId: number | null = null
   private lastFrameMs = 0
   private callbacks: RendererCallbacks
+  /**
+   * The canvas' CSS height, as of the last `resize` — the vehicle LOD
+   * factor converts world metres to screen pixels with it. `null` until
+   * the first resize: the LOD then degrades to 1 (true size), which is
+   * the right reading for "viewport unknown".
+   */
+  private viewportHeightPx: number | null = null
 
   constructor(canvas: HTMLCanvasElement, callbacks: RendererCallbacks) {
     this.callbacks = callbacks
@@ -200,6 +208,7 @@ export class ThreeJSRenderer {
   resize(width: number, height: number): void {
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
+    this.viewportHeightPx = height
     this.renderer.setSize(width, height, false)
   }
 
@@ -527,6 +536,25 @@ export class ThreeJSRenderer {
         this.controls?.update()
       }
       this.syncFollowerVisibility(follow)
+      // Far-camera legibility: kilometres away, a real-size car covers
+      // well under one screen pixel and the overview reads "cars
+      // floating on buildings". Scale the drawn bodies up just enough
+      // to hold a minimum mark — the dot is a display symbol; physics,
+      // position and heading are untouched. (Real traffic platforms
+      // show the same thing: city-scale dots that become vehicles as
+      // the camera approaches.) Recomposition happens inside
+      // `setLodScale`, so the factor also lands while paused. Until the
+      // first resize the viewport height is unknown and the factor
+      // degrades to 1.
+      if (this.built) {
+        this.built.vehicles.setLodScale(
+          vehicleLodScale(
+            this.camera.position.length(),
+            this.viewportHeightPx ?? 0,
+            (this.camera.fov * Math.PI) / 180,
+          ),
+        )
+      }
       this.renderer.render(this.scene, this.camera)
       this.rafId = requestAnimationFrame(loop)
     }

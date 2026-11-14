@@ -48,6 +48,8 @@ interface SlotData {
   heading: number
   /** The lean (the road's slope), in radians. */
   pitch: number
+  /** The LOD factor this slot's matrix was composed with. */
+  scale: number
 }
 
 export interface VehicleInstances {
@@ -56,6 +58,15 @@ export interface VehicleInstances {
   allocate: (v: Vehicle) => void
   remove: (entityId: string) => void
   update: (v: Vehicle) => void
+  /**
+   * Apply the far-camera legibility factor (see `vehicleLod.ts`) to
+   * every drawn body: below the camera's minimum-readable size the
+   * instances scale up so a vehicle reads as a small mark instead of a
+   * vanishing dot. Display-only — physics never sees it. Every active
+   * slot is re-composed on change, so the factor also takes effect
+   * while the simulation is paused.
+   */
+  setLodScale: (scale: number) => void
   /** Stop drawing a vehicle without releasing its slot. */
   hide: (entityId: string) => void
   /** Draw a hidden vehicle again. */
@@ -129,6 +140,7 @@ export const createVehicleInstances = (): VehicleInstances => {
         pz: 0,
         heading: 0,
         pitch: 0,
+        scale: 1,
       })
     }
   }
@@ -137,6 +149,40 @@ export const createVehicleInstances = (): VehicleInstances => {
 
   /** Vehicles that are allocated but not drawn (the followed car). */
   const hiddenIds = new Set<string>()
+
+  /** The current far-camera legibility factor (1 = true size). */
+  let lodScale = 1
+
+  /** Compose a slot's matrix from its cached pose at its cached scale. */
+  const recomposeSlot = (type: VehicleType, slot: SlotData): void => {
+    const cfg = TYPE_CONFIG[type]
+    _pos.set(slot.px, slot.py + cfg.yCenter, slot.pz)
+    _euler.set(0, -slot.heading, slot.pitch)
+    _quat.setFromEuler(_euler)
+    _scale.set(slot.scale, slot.scale, slot.scale)
+    slot.matrix.compose(_pos, _quat, _scale)
+  }
+
+  const setLodScale = (next: number): void => {
+    if (next === lodScale) return
+    lodScale = next
+    for (const type of types) {
+      const mesh = meshes[type]
+      let dirty = false
+      for (const [entityId, slotIdx] of entityToSlot[type]) {
+        // A hidden vehicle's matrix must stay zeroed; its scale catches
+        // up on the next `update` after `show` (the cached slot scale
+        // no longer matches, which flags the matrix dirty).
+        if (hiddenIds.has(entityId)) continue
+        const slot = slots[type][slotIdx]
+        slot.scale = next
+        recomposeSlot(type, slot)
+        mesh.setMatrixAt(slotIdx, slot.matrix)
+        dirty = true
+      }
+      if (dirty) mesh.instanceMatrix.needsUpdate = true
+    }
+  }
 
   const allocate = (v: Vehicle): void => {
     const type = v.type
@@ -149,7 +195,7 @@ export const createVehicleInstances = (): VehicleInstances => {
     _pos.set(v.position.x, v.position.y + cfg.yCenter, v.position.z)
     _euler.set(0, -v.heading, pitch)
     _quat.setFromEuler(_euler)
-    _scale.set(1, 1, 1)
+    _scale.set(lodScale, lodScale, lodScale)
     const mat4 = new THREE.Matrix4()
     mat4.compose(_pos, _quat, _scale)
 
@@ -168,6 +214,7 @@ export const createVehicleInstances = (): VehicleInstances => {
 
     slotToEntity[type].set(slotIdx, v.id)
     entityToSlot[type].set(v.id, slotIdx)
+    slots[type][slotIdx].scale = lodScale
 
     meshes[type].count = Math.max(meshes[type].count, slotIdx + 1)
     meshes[type].instanceMatrix.needsUpdate = true
@@ -262,13 +309,14 @@ export const createVehicleInstances = (): VehicleInstances => {
     const slot = slots[type][slotIdx]
     const pitch = v.pitch ?? 0
 
-    // Dirty-check: skip matrix re-upload if position + heading unchanged.
+    // Dirty-check: skip matrix re-upload if position + heading + scale unchanged.
     const moved =
       slot.px !== v.position.x ||
       slot.py !== v.position.y ||
       slot.pz !== v.position.z ||
       slot.heading !== v.heading ||
-      slot.pitch !== pitch
+      slot.pitch !== pitch ||
+      slot.scale !== lodScale
     if (moved) {
       const cfg = TYPE_CONFIG[type]
       _pos.set(v.position.x, v.position.y + cfg.yCenter, v.position.z)
@@ -284,6 +332,7 @@ export const createVehicleInstances = (): VehicleInstances => {
       // does.
       _euler.set(0, -v.heading, pitch)
       _quat.setFromEuler(_euler)
+      _scale.set(lodScale, lodScale, lodScale)
       slot.matrix.compose(_pos, _quat, _scale)
       mesh.setMatrixAt(slotIdx, slot.matrix)
       mesh.instanceMatrix.needsUpdate = true
@@ -292,6 +341,7 @@ export const createVehicleInstances = (): VehicleInstances => {
       slot.pz = v.position.z
       slot.heading = v.heading
       slot.pitch = pitch
+      slot.scale = lodScale
     }
 
     const newColor = _white.set(v.color)
@@ -367,6 +417,7 @@ export const createVehicleInstances = (): VehicleInstances => {
     allocate,
     remove,
     update,
+    setLodScale,
     hide,
     show,
     isHidden,
