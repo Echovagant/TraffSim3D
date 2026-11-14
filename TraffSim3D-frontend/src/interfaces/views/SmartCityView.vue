@@ -1209,6 +1209,9 @@ const startCameraSync = (): void => {
       const dt = Math.min(0.1, (now - last) / 1000)
       last = now
       if (!cesiumViewer || !rendererRef.value) return
+      // The tier manager layers the fleet on the LIVE camera: write the
+      // position before the simulation advances (same frame).
+      world.setSimCameraPos(rendererRef.value.getCamera().position)
       walkStreet(dt)
       // The cockpit's pedals: W/S held = throttle/brake. The intent goes
       // into the tick through `driverOverride`; letting go of both hands

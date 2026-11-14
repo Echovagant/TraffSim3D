@@ -601,6 +601,24 @@ export class RapierWorld {
   }
 
   /**
+   * Enable/disable a vehicle's body in the simulation (the NTE-style
+   * tier system). A disabled body is skipped by step() entirely — no
+   * solver, no broadphase, no contacts — while its transform stays
+   * readable (`readPose` keeps returning the frozen pose). The vehicle
+   * tier manager uses this to run far vehicles as light application
+   * data and re-enable the body when they come near the camera.
+   */
+  setBodyEnabled(vehicleId: string, enabled: boolean): void {
+    if (!this.world) return
+    const bodyHandle = this.bodies.get(vehicleId)
+    if (bodyHandle === undefined) return
+    const body = this.world.getRigidBody(bodyHandle)
+    if (!body) return
+    body.setEnabled(enabled)
+    if (enabled) body.wakeUp()
+  }
+
+  /**
    * Directly set a rigid body's angular velocity around the
    * Y-axis (in world-space). Used by the Pure Pursuit steering loop
    * to turn the vehicle toward the lookahead point.

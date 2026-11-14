@@ -42,8 +42,13 @@ import {
   requestLaneChange as requestLaneChangeFn,
   perpendicularOffsetAlongRoad,
 } from '@domain/services/laneChange'
-import { laneOffset, lanePoint } from '@domain/services/laneGeometry'
+import { laneOffset, lanePoint, laneForwardSign, roadLength } from '@domain/services/laneGeometry'
 import { outOfRect, type LocalRect } from '@domain/services/cityBounds'
+import {
+  createVehicleTierManager,
+  type VehicleTierManager,
+  type TierEntry,
+} from '@application/services/vehicleTierManager'
 import { clearanceBeamsFor } from '@domain/services/clearanceBeams'
 import {
   nextRouteRoad,
@@ -874,6 +879,20 @@ export const useWorldStore = defineStore('world', () => {
   const setDraggingId = (id: string | null): void => {
     draggingId = id
   }
+
+  // ===== the NTE-style vehicle tier system =====
+  //
+  // The camera position is written by the view every frame (the
+  // postRender callback — the same frame the simulation advances in);
+  // the tier manager layers the fleet on it and the store applies the
+  // body enable/disable. `null` until a view writes it: the tier stays
+  // all-near, which is the safe default (the flat editor never writes
+  // a camera and never wants tiers).
+  const tierManager: VehicleTierManager = createVehicleTierManager()
+  let simCameraPos: { x: number; y: number; z: number } | null = null
+  const setSimCameraPos = (p: { x: number; y: number; z: number }): void => {
+    simCameraPos = { x: p.x, y: p.y, z: p.z }
+  }
   const getDraggingId = (): string | null => draggingId
 
   // Per-junction signal controller cache. One SignalController instance
@@ -1358,6 +1377,58 @@ export const useWorldStore = defineStore('world', () => {
     // physics layer's own limit, and this one matches it.
     const clampedDt = Math.max(0, Math.min(dt, MAX_PHYSICS_FRAME_DT))
     simTime += clampedDt
+
+    // ===== the NTE-style tier bookkeeping (per frame, before the tick) =====
+    //
+    // The view writes the live camera position each frame
+    // (`setSimCameraPos`); the tier manager layers the fleet on it —
+    // near vehicles keep their dynamic Rapier bodies, far ones are
+    // disabled and advanced by tick's light simulation. Upgrades are
+    // budgeted per frame; the body enable/disable happens HERE, where
+    // the entity pose is still the truth the body has to align to.
+    if (simCameraPos !== null) {
+      const cam = simCameraPos
+      const entries: TierEntry[] = []
+      for (const v of Object.values(network.value.vehicles)) {
+        const distance = Math.hypot(
+          v.position.x - cam.x,
+          v.position.y - cam.y,
+          v.position.z - cam.z,
+        )
+        const road = network.value.roads[v.roadId]
+        // Travel-end approach on EITHER direction (the lane's travel
+        // end is the far-s end on forward lanes and the near-s end on
+        // backward ones): the junction turn/wrap logic needs the full
+        // tier, so approaching it force-nears the vehicle.
+        const len = road ? roadLength(road) : Infinity
+        const nearTravelEnd = len - v.s < 15 || v.s < 15 || v.turn !== undefined
+        entries.push({
+          id: v.id,
+          distance,
+          forceNear:
+            rideVehicleId.value === v.id ||
+            v.desiredLaneIndex != null ||
+            nearTravelEnd ||
+            v.status === 'crashed' ||
+            draggingId === v.id,
+        })
+      }
+      const result = tierManager.update(entries)
+      for (const id of result.upgrades) {
+        const v = network.value.vehicles[id]
+        if (v && rapierWorld) {
+          rapierWorld.setBodyEnabled(id, true)
+          // The disabled body froze somewhere along the light path:
+          // align it to the entity pose before the physics resumes.
+          rapierWorld.setVehiclePosition(id, v.position)
+          rapierWorld.setVehicleHeading(id, v.heading)
+          rapierWorld.setVehicleSpeed(id, v.speed, v.heading)
+        }
+      }
+      for (const id of result.downgrades) {
+        rapierWorld?.setBodyEnabled(id, false)
+      }
+    }
     // The wheel travels at a hand's rate, and self-centres when the key
     // is released — the same ramp, because a real wheel returns at
     // about the speed it was turned.
@@ -1377,6 +1448,19 @@ export const useWorldStore = defineStore('world', () => {
       draggingId,
       removeVehicle, // OOB cleanup entry point
       cityBounds: () => vehicleBoundsRect,
+      // The NTE-style tier system: far vehicles run the light simulation
+      // inside tick (no body, no controls), near ones the full physics.
+      tierOf: (id) => tierManager.tierOf(id) ?? 'near',
+      requestUpgrade: (id) => {
+        tierManager.forceNear(id)
+        const v = network.value.vehicles[id]
+        if (v && rapierWorld) {
+          rapierWorld.setBodyEnabled(id, true)
+          rapierWorld.setVehiclePosition(id, v.position)
+          rapierWorld.setVehicleHeading(id, v.heading)
+          rapierWorld.setVehicleSpeed(id, v.speed, v.heading)
+        }
+      },
       fixedStepScheduler, // drives trajectory export at 10 Hz
       // Pass policy + replay target to tick. tick() reads
       // `replayTargetId` and computes obs + inference each step. The
@@ -1555,6 +1639,9 @@ export const useWorldStore = defineStore('world', () => {
         rapierWorld.removeVehicle(id)
       }
     }
+    // The tier bookkeeping described the OLD fleet — a fresh network
+    // starts all-near (the tier manager re-layers on the first step).
+    tierManager.clear()
     // Clear any loaded RL policy so it can't drive the
     // fresh network's vehicles with stale target ids.
     clearPolicy()
@@ -1715,6 +1802,9 @@ export const useWorldStore = defineStore('world', () => {
     }
     if (rapierWorld) rapierWorld.removeVehicle(id)
     delete network.value.vehicles[id]
+    // The tier state must go with the vehicle: a stale far entry would
+    // keep tick skipping the id if a new vehicle ever reuses it.
+    tierManager.forget(id)
     bumpTick()
   }
 
@@ -1962,6 +2052,9 @@ export const useWorldStore = defineStore('world', () => {
         rapierWorld.removeVehicle(id)
       }
     }
+    // The tier bookkeeping described the OLD fleet — a fresh network
+    // starts all-near (the tier manager re-layers on the first step).
+    tierManager.clear()
     // Same as reset() — never let a stale policy drive the
     // new network's vehicles. The user's selected replay target id may
     // not even exist in the loaded scene.
@@ -2183,6 +2276,7 @@ export const useWorldStore = defineStore('world', () => {
     removeVehicle,
     setVehicleBounds,
     vehicleBounds,
+    setSimCameraPos,
     spawnMany,
     setVehicleSpeed,
     updateVehicleType,

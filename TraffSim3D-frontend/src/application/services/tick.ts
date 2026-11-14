@@ -202,6 +202,20 @@ export interface TickContext {
    */
   cityBounds?: () => LocalRect | null
   /**
+   * The NTE-style tier lookup (see `vehicleTierManager.ts`): `'far'`
+   * vehicles have NO Rapier body simulation — the far-advance step owns
+   * their pose (ramp + arc-length + lightweight following) and every
+   * physics-facing step skips them. `null`/absent = no tiering (all
+   * vehicles near — the flat editor and every existing test).
+   */
+  tierOf?: (vehicleId: string) => 'near' | 'far'
+  /**
+   * Upgrade a vehicle to the near tier on the spot (the far advance's
+   * travel-end safety net): the store force-nears it in the tier
+   * manager and re-enables + aligns its Rapier body to the entity pose.
+   */
+  requestUpgrade?: (vehicleId: string) => void
+  /**
    * The cooperative-driving policy over the junction's negotiation
    * (Scene 4), when it is enabled.
    *
@@ -626,6 +640,9 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
   for (const v of Object.values(network.vehicles)) {
     const road = network.roads[v.roadId]
     if (!road) continue
+    // FAR tier: the light simulation (the far-advance step) owns the
+    // far vehicles' speed (road limit + its own lightweight following).
+    if (ctx.tierOf?.(v.id) === 'far') continue
     // The replay target's speed is owned by the policy (or by
     // an injected action) and was written in step 2.5. Overwriting it
     // here discarded the policy's output entirely — the replay vehicle
@@ -757,6 +774,9 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // Skip the dragged vehicle — its position is driven by the
       // editor's drag handler, not by Rapier.
       if (v.id === ctx.draggingId) continue
+      // FAR tier: the body is disabled and the light simulation owns the
+      // pose — a setLinvel on a disabled body would be lost anyway.
+      if (ctx.tierOf?.(v.id) === 'far') continue
       // Skip a vehicle that is ON A TURN ARC: its body is dragged
       // kinematically by the arc (step 8), and an applyControl here
       // would push the body off it — the arc owns the pose, the ramp
@@ -812,9 +832,13 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     classifyContacts(network, result.contactEvents)
 
     // 8. Re-derive Vehicle.position / heading from Rapier pose.
-    //    Skip the dragged vehicle.
+    //    Skip the dragged vehicle, and skip FAR-tier vehicles: their
+    //    bodies are disabled and the light simulation owns the pose —
+    //    reading the frozen body pose here would overwrite the advanced
+    //    application position every frame.
     for (const v of Object.values(network.vehicles)) {
       if (v.id === ctx.draggingId) continue
+      if (ctx.tierOf?.(v.id) === 'far') continue
       const pose = ctx.rapierWorld.readPose(v.id)
       if (!pose) continue
       v.position.x = pose.position.x
@@ -1133,6 +1157,10 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
     for (const v of Object.values(network.vehicles)) {
       if (v.id === ctx.draggingId) continue
       if (v.turn) continue // the arc owns the heading mid-turn
+      // FAR tier: the driver's wheel (if held) and the lane keeper only
+      // exist for physics bodies — the light simulation yawed the far
+      // vehicle to the lane tangent itself.
+      if (ctx.tierOf?.(v.id) === 'far') continue
       const road = network.roads[v.roadId]
       if (!road) continue
       // Skip steering when the vehicle is stopped — Pure Pursuit
@@ -1196,6 +1224,69 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       )
       const omega = steeringAngleToOmega(delta)
       ctx.rapierWorld.setVehicleAngularVelocity(v.id, omega)
+    }
+
+    // 8.55. FAR-TIER advance — the light simulation for vehicles the
+    // tier manager marked far (outside the camera's near radius). Their
+    // Rapier bodies are disabled (no solver, no broadphase, no
+    // contacts), so the application advances them: the same speed ramp
+    // toward the road limit, arc-length along the lane, placed on the
+    // lane point, with a LIGHTWEIGHT same-lane car-following constraint
+    // (the only thing that keeps a distant fleet from overlapping —
+    // there is no contact between far bodies). Anything that needs the
+    // full tier — a junction ahead, a lane change, a turn, the ridden
+    // car — was force-near by the tier manager, so what is advanced
+    // here is a straight-road cruise only; a far vehicle reaching its
+    // travel end is upgraded on the spot and clamped.
+    if (ctx.tierOf) {
+      const laneBuckets = new Map<string, Array<{ s: number; speed: number; id: string }>>()
+      for (const v of Object.values(network.vehicles)) {
+        if (v.turn) continue
+        const key = `${v.roadId}@${v.laneIndex}`
+        const arr = laneBuckets.get(key)
+        if (arr) arr.push({ s: v.s, speed: v.speed, id: v.id })
+        else laneBuckets.set(key, [{ s: v.s, speed: v.speed, id: v.id }])
+      }
+      for (const arr of laneBuckets.values()) arr.sort((a, b) => a.s - b.s)
+
+      for (const v of Object.values(network.vehicles)) {
+        if (ctx.tierOf(v.id) !== 'far') continue
+        const road = network.roads[v.roadId]
+        if (!road) continue
+        // Lightweight car following: the nearest same-lane leader ahead
+        // (near or far — the bucket holds the whole fleet, so a far
+        // vehicle queues behind a PHYSICS vehicle too). A gap under the
+        // Newell rule clamps the speed to the leader's: the queue never
+        // overlaps, which is the one behaviour a distant fleet must not
+        // lose.
+        const bucket = laneBuckets.get(`${v.roadId}@${v.laneIndex}`) ?? []
+        let leader: { s: number; speed: number } | null = null
+        for (const o of bucket) {
+          if (o.id === v.id) continue
+          if (o.s > v.s && (leader === null || o.s < leader.s)) leader = o
+        }
+        let target = Math.min(v.targetSpeed, road.speedLimit)
+        if (leader) {
+          const gap = leader.s - v.s
+          const safe = TIME_HEADWAY * v.speed + MIN_GAP
+          if (gap < safe) target = Math.min(target, Math.max(0, leader.speed))
+        }
+        v.speed = rampSpeed(v.speed, target, dt, v.type)
+        let s = v.s + v.speed * dt
+        const len = roadLength(road)
+        if (s >= len) {
+          // Travel end reached while far — the junction turn/wrap logic
+          // needs the full tier. Upgrade on the spot (the manager takes
+          // it from here; the body re-aligns to the entity pose) and
+          // clamp the advance so this frame stays on the road.
+          ctx.requestUpgrade?.(v.id)
+          s = len - 0.5
+        }
+        v.s = s
+        const lp = lanePoint(road, v.laneIndex, s)
+        v.position = { x: lp.position.x, y: lp.position.y, z: lp.position.z }
+        v.heading = lp.heading
+      }
     }
 
     // 8.6. Lane-change convergence. Runs after the pose refresh, so the
