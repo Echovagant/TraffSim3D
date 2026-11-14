@@ -172,14 +172,16 @@ test('zoom limits scale with scene size', async ({ page }) => {
   expect(loop!.minDistance).toBeGreaterThanOrEqual(5)
 })
 
-test('right-click drag does NOT pan (mouseButtons.RIGHT = null)', async ({ page }) => {
+test('right-click drag pans the camera (mouseButtons.RIGHT = PAN)', async ({ page }) => {
   await waitForSceneReady(page)
   await settleFit(page)
   const before = await getCamera(page)
   expect(before).not.toBeNull()
 
-  // Right-click drag in the canvas. OrbitControls with mouseButtons.RIGHT
-  // = null should not pan, so the target should not move.
+  // Right-click drag in the canvas. The mapping is the user's stated
+  // expectation (2026-11-14): left orbit, RIGHT pan — the 2026-10-17
+  // RIGHT=null disabling was reversed. A right-drag must move the pan
+  // TARGET (OrbitControls pans by moving the target, not the camera).
   const canvas = page.locator('[data-testid="world-canvas"]')
   const box = await canvas.boundingBox()
   expect(box).not.toBeNull()
@@ -192,12 +194,21 @@ test('right-click drag does NOT pan (mouseButtons.RIGHT = null)', async ({ page 
   await page.waitForTimeout(400)
   const after = await getCamera(page)
   expect(after).not.toBeNull()
-  // Target should NOT have moved (right-click was a no-op for pan).
-  expect(
-    Math.hypot(after!.target.x - before!.target.x, after!.target.z - before!.target.z),
-  ).toBeLessThan(1)
-  // Camera position should also not have moved significantly.
-  expect(
-    Math.hypot(after!.position.x - before!.position.x, after!.position.z - before!.position.z),
-  ).toBeLessThan(1)
+  // The pan TARGET must have moved (that is what a pan IS).
+  const targetMoved = Math.hypot(
+    after!.target.x - before!.target.x,
+    after!.target.z - before!.target.z,
+  )
+  expect(targetMoved).toBeGreaterThan(10)
+  // Panning translates the camera WITH the target — the camera's offset
+  // from the target stays the same.
+  const beforeOffset = Math.hypot(
+    before!.position.x - before!.target.x,
+    before!.position.z - before!.target.z,
+  )
+  const afterOffset = Math.hypot(
+    after!.position.x - after!.target.x,
+    after!.position.z - after!.target.z,
+  )
+  expect(afterOffset).toBeCloseTo(beforeOffset, 1)
 })
