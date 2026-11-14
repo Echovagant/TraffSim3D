@@ -180,7 +180,7 @@ export const createRoadMarkings = (
       for (let i = 0; i < wps.length - 1; i++) {
         const a = wps[i]!
         const b = wps[i + 1]!
-        pushSegment(a.x, (a.y ?? 0) + 0.02, a.z, b.x, (b.y ?? 0) + 0.02, b.z, CENTERLINE_COLOR)
+        pushSegment(a.x, (a.y ?? 0) + 0.12, a.z, b.x, (b.y ?? 0) + 0.12, b.z, CENTERLINE_COLOR)
       }
     }
 
@@ -209,10 +209,10 @@ export const createRoadMarkings = (
         const pEnd = pointAt(road, offset, sEnd)
         pushSegment(
           pStart.x,
-          pStart.y + 0.02,
+          pStart.y + 0.12,
           pStart.z,
           pEnd.x,
-          pEnd.y + 0.02,
+          pEnd.y + 0.12,
           pEnd.z,
           DIVIDER_COLOR,
         )
@@ -228,10 +228,10 @@ export const createRoadMarkings = (
       const cx = pointAt(road, 0, s)
       pushSegment(
         cx.x + rgt.ux * -halfWidth,
-        cx.y + 0.03,
+        cx.y + 0.13,
         cx.z + rgt.uz * -halfWidth,
         cx.x + rgt.ux * halfWidth,
-        cx.y + 0.03,
+        cx.y + 0.13,
         cx.z + rgt.uz * halfWidth,
         STOPLINE_COLOR,
       )
@@ -258,7 +258,7 @@ export const createRoadMarkings = (
           // the paint lands on exactly the same pixels.
           _euler.set(0, -yaw + (sign === -1 ? Math.PI : 0), 0)
           _quat.setFromEuler(_euler)
-          _pos.set(p.x, p.y + 0.025, p.z)
+          _pos.set(p.x, p.y + 0.125, p.z)
           _matrix.compose(_pos, _quat, _scale)
           for (const [ax, az, bx, bz] of arrowShape) {
             _point.set(ax * ARROW_SIZE, 0, az * ARROW_SIZE).applyMatrix4(_matrix)

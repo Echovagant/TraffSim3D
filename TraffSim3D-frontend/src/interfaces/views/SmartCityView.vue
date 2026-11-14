@@ -167,6 +167,19 @@
       </footer>
     </div>
 
+    <!-- The loading veil: covers the staged city build (network → viewer →
+         roads → buildings → camera fly-in); watching a half-built world
+         assemble read as broken code (user report, 2026-11-14). Fades out
+         once the first complete frame exists — the same "dark first,
+         reveal after" treatment the NTE reference uses for its streams. -->
+    <transition name="veil-fade">
+      <div v-if="loading" class="load-veil" data-testid="load-veil">
+        <div class="veil-brand">
+          <span class="veil-logo">TraffSim3D</span>
+          <span class="veil-status">{{ loadingText }}</span>
+        </div>
+      </div>
+    </transition>
     <!-- Floating error / loading toast (replaces the editor's
          flash-message area while we wait for Cesium + OSM to load). -->
     <div v-if="status" class="status-toast" :class="status.kind" data-testid="status-toast">
@@ -276,6 +289,10 @@ const cesiumContainer = ref<HTMLDivElement | null>(null)
 const threeCanvas = ref<HTMLCanvasElement | null>(null)
 const viewMode = ref<'bird' | 'street' | 'free'>('bird')
 const status = ref<{ kind: 'info' | 'error'; text: string } | null>(null)
+/** The loading veil: covers the staged city build and fades out once the
+ *  first complete frame exists (see the onMounted lift). */
+const loading = ref(true)
+const loadingText = computed(() => status.value?.text ?? '正在载入城市…')
 const osmStats = ref<{ roadCount: number; buildingCount: number } | null>(null)
 /** Both side columns folded away — the map gets the whole screen. */
 const panelsCollapsed = ref(false)
@@ -833,6 +850,19 @@ onMounted(async () => {
       text: `城市绘制失败: ${e instanceof Error ? e.message : String(e)}`,
     }
   }
+
+  // 2.5) Lift the loading veil. The city builds in stages (network →
+  //      viewer → roads → buildings → camera fly-in) and watching a
+  //      half-built world assemble read as broken code (user report,
+  //      2026-11-14) — the veil covers the build and fades out once the
+  //      first complete frame exists (the same "dark first, reveal
+  //      after" treatment the NTE reference uses for its streaming).
+  //      A first painted frame is guaranteed by now: the postRender
+  //      loop started with the viewer and has rendered the finished
+  //      scene at least once.
+  setTimeout(() => {
+    loading.value = false
+  }, 250)
 
   // 3) Start camera sync loop — Cesium → Three.js every frame.
   startCameraSync()
@@ -1542,6 +1572,48 @@ onBeforeUnmount(() => {
   .bottom-bar {
     max-height: 110px;
   }
+}
+
+/* ===== the loading veil ===== */
+/* Covers the staged city build; the toast above it carries the live
+   status. The fade is the reveal: the world appears complete, never
+   half-built. */
+.load-veil {
+  position: fixed;
+  inset: 0;
+  background: var(--dc-screen);
+  z-index: var(--dc-z-popover, 40);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.veil-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.veil-logo {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--dc-text, #e6edf3);
+}
+
+.veil-status {
+  font-size: 13px;
+  color: var(--dc-text-2, #8b949e);
+}
+
+.veil-fade-leave-active {
+  transition: opacity 0.8s ease;
+}
+
+.veil-fade-leave-to {
+  opacity: 0;
 }
 
 /* ===== the toast ===== */

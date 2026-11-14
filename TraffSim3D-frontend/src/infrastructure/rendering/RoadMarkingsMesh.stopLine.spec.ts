@@ -73,10 +73,10 @@ const paintedStopLines = (road: Road, intersections: readonly Intersection[]): n
   for (const child of group.children) {
     if (!(child instanceof THREE.LineSegments)) continue
     const p = child.geometry.attributes.position!.array as Float32Array
-    // The stop lines are the paint at 0.03u above the road; the arrows
-    // sit at 0.025u and the dashes and the centre line at 0.02u.
+    // The stop lines are the paint at 0.13u above the road; the arrows
+    // sit at 0.125u and the dashes and the centre line at 0.12u.
     for (let i = 0; i < p.length; i += 6) {
-      if (Math.abs(p[i + 1]! - 0.03) > 1e-6) continue
+      if (Math.abs(p[i + 1]! - 0.13) > 1e-6) continue
       const midX = (p[i]! + p[i + 3]!) / 2
       const midZ = (p[i + 2]! + p[i + 5]!) / 2
       lines.push(worldToCenterlineS(road, midX, midZ).s)

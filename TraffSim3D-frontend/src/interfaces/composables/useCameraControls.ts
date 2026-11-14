@@ -35,28 +35,19 @@ export const useCameraControls = (
       controls.minDistance = zoomMin
       controls.maxDistance = zoomMax
       controls.maxPolarAngle = Math.PI / 2 - 0.05 // keep camera above ground
-      // Right-click pan is disabled. Three.js OrbitControls
-      // defaults to RIGHT=pan, which is hostile in a 3D traffic sim:
-      //   1. It hijacks the browser's right-click context menu, so the user
-      //      cannot right-click an entity to inspect it.
-      //   2. With damping=0.08, right-drag-pan feels laggy — the damped
-      //      velocity follows the mouse for ~10 frames after release.
-      //   3. Map UIs (OSM / Google Maps / Mapbox) use left-drag for pan and
-      //      wheel for zoom; users expect that.
-      //
-      // HISTORY: commit 95eaf79 introduced this (RIGHT: null) together with the
-      // Playwright test `right-click drag does NOT pan` — that commit reported
-      // "Frontend e2e: 28/28", i.e. the assertion was green. Commit 1c7ffb0
-      // ("risk remediation — signal conflict resolution + lateral drift +
-      // renderer registry") silently flipped it back to MOUSE.PAN, replacing the
-      // rationale comment with a contradictory "right-click is pan by
-      // default". That commit's stated scope does not mention the camera, so the
-      // flip reads as an incidental revert rather than a re-deliberation.
-      // Restored 2026-10-17.
+      // Mouse mapping is the user's expectation, restated 2026-11-14:
+      //   LEFT = orbit/rotate, MIDDLE = dolly, RIGHT = pan/drag.
+      // The RIGHT=pan slot was deliberately emptied on 2026-10-17 (context
+      // menu hijack + damped pan feeling laggy), but the user explicitly
+      // restated the expectation — left orbit, right pan — and the
+      // context-menu concern is moot: OrbitControls preventDefaults the
+      // context menu on its own canvas, and the editor's entity inspect
+      // runs on LEFT click. If damped pan ever feels laggy again, the fix
+      // is damping tuning, not removing an expected control.
       controls.mouseButtons = {
         LEFT: THREE.MOUSE.ROTATE,
         MIDDLE: THREE.MOUSE.DOLLY,
-        RIGHT: null,
+        RIGHT: THREE.MOUSE.PAN,
       } as unknown as typeof controls.mouseButtons
       renderer.attachControls(controls)
       // Expose camera state for Playwright tests.

@@ -172,7 +172,13 @@ export class ThreeJSRenderer {
     // the scene's far plane so we don't waste fillrate on fragments
     // beyond the fog cutoff.
     this.scene.fog = new THREE.Fog(0x0b1220, 500, 4000)
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 8000)
+    // near 0.3 (not 0.1): the depth-buffer precision at the editor's
+    // working distances is z²/(near·2²⁴) — with 0.1 a 300 m-away road
+    // could not be separated from the ground (≈5 cm) and the surface
+    // flickered. 0.3 restores a comfortable margin; nothing in any view
+    // needs to render closer than 0.3 m (the cockpit's own body is
+    // hidden, the eye rides at 1.35 m).
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.3, 8000)
     this.camera.position.set(40, 35, 40)
     this.camera.lookAt(0, 0, 0)
     // alpha:true + clearColor(0,0) makes the Three.js

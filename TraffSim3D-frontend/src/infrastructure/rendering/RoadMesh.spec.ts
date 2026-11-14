@@ -44,9 +44,12 @@ describe('createRoadMesh — 2-point road', () => {
     expect(p[11]).toBeCloseTo(30, 6)
   })
 
-  it('lifts the strip 0.01u off y = 0 so it does not z-fight the ground', () => {
+  it('lifts the strip 0.04u off y = 0 so it does not z-fight the ground', () => {
+    // 1 cm was not enough: the depth buffer cannot separate 1 cm at the
+    // editor's working distances (≈5 cm of precision at 300 m with near
+    // 0.3), so the roads flickered against the ground. See RoadMesh.
     const p = positionsOf(road)
-    for (let i = 1; i < p.length; i += 3) expect(p[i]).toBeCloseTo(0.01, 6)
+    for (let i = 1; i < p.length; i += 3) expect(p[i]).toBeCloseTo(0.04, 6)
   })
 
   it('emits CCW winding for each segment: (a, b, c)(b, d, c)', () => {
@@ -135,10 +138,10 @@ describe('createRoadMesh — polyline road', () => {
       2,
     )
     const p = positionsOf(ramp)
-    // first pair at y = 0 + 0.01
-    expect(p[1]).toBeCloseTo(0.01, 6)
-    // second pair at y = 4 + 0.01
-    expect(p[7]).toBeCloseTo(4.01, 6)
+    // first pair at y = 0 + 0.04
+    expect(p[1]).toBeCloseTo(0.04, 6)
+    // second pair at y = 4 + 0.04
+    expect(p[7]).toBeCloseTo(4.04, 6)
   })
 })
 

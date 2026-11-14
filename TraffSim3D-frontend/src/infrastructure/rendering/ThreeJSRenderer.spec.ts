@@ -202,7 +202,9 @@ describe('ThreeJSRenderer — construction', () => {
     const cam = r.getCamera()
     expect(cam).toBeInstanceOf(THREE.PerspectiveCamera)
     expect(cam.fov).toBe(60)
-    expect(cam.near).toBe(0.1)
+    // near 0.3 (not 0.1): the depth-buffer precision at working distances
+    // could not separate the road from the ground — see the constructor.
+    expect(cam.near).toBe(0.3)
     expect(cam.far).toBe(8000)
     expect(cam.position.x).toBe(40)
     expect(cam.position.y).toBe(35)

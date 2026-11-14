@@ -85,7 +85,7 @@ describe('createRoadMarkings — 2-lane road (length 60)', () => {
     expect(centerline).toHaveLength(1)
     const p = centerline[0]!
     expect(p.a[0]).toBeCloseTo(0, 6)
-    expect(p.a[1]).toBeCloseTo(0.02, 6) // lifted off the road surface
+    expect(p.a[1]).toBeCloseTo(0.12, 6) // lifted off the road surface
     expect(p.a[2]).toBeCloseTo(-30, 6)
     expect(p.b[2]).toBeCloseTo(30, 6)
     // An odd lane count has no centre divider — the road is single-sided.
@@ -100,7 +100,7 @@ describe('createRoadMarkings — 2-lane road (length 60)', () => {
     // floor((60 + 0.6) / 1.2) = 50 dashes, 2 endpoints each
     expect(dividers).toHaveLength(50)
     expect(dividers[0]!.a[0]).toBeCloseTo(3.5, 5)
-    expect(dividers[0]!.a[1]).toBeCloseTo(0.02, 6)
+    expect(dividers[0]!.a[1]).toBeCloseTo(0.12, 6)
     expect(dividers[0]!.a[2]).toBeCloseTo(-30, 5)
     expect(dividers[0]!.b[2]).toBeCloseTo(-29.4, 5) // first dash is DASH = 0.6 long
   })
@@ -115,7 +115,7 @@ describe('createRoadMarkings — 2-lane road (length 60)', () => {
     // of the junction box, not at the road ends.
     expect(stops[0]!.a[0]).toBeCloseTo(-halfWidth, 5)
     expect(stops[0]!.a[2]).toBeCloseTo(-8, 5)
-    expect(stops[0]!.a[1]).toBeCloseTo(0.03, 6)
+    expect(stops[0]!.a[1]).toBeCloseTo(0.13, 6)
     expect(stops[0]!.b[0]).toBeCloseTo(halfWidth, 5)
     expect(stops[1]!.a[2]).toBeCloseTo(8, 5)
     expect(stops[1]!.b[2]).toBeCloseTo(8, 5)
@@ -155,11 +155,11 @@ describe('createRoadMarkings — 3-lane road', () => {
     const white = segmentsWithColor(g, WHITE)
     // 2 stop lines + 6 arrows x 4 segments
     expect(white).toHaveLength(2 + 3 * 2 * 4)
-    // Every arrow segment lies flat on the road, 0.025u above the markings layer.
+    // Every arrow segment lies flat on the road, 0.125u above the road surface.
     const arrows = white.slice(2)
     for (const a of arrows) {
-      expect(a.a[1]).toBeCloseTo(0.025, 6)
-      expect(a.b[1]).toBeCloseTo(0.025, 6)
+      expect(a.a[1]).toBeCloseTo(0.125, 6)
+      expect(a.b[1]).toBeCloseTo(0.125, 6)
     }
   })
 

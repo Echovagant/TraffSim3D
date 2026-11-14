@@ -15,7 +15,13 @@ import { roadWaypoints } from '@domain/services/laneGeometry'
 export const roadSurfaceGeometry = (road: Road): THREE.BufferGeometry => {
   const waypoints = roadWaypoints(road)
   const halfWidth = (ROAD_LANE_WIDTH * road.laneCount) / 2
-  const yOffset = 0.01
+  // 4 cm above the ground plane. 1 cm was NOT enough: at the editor
+  // camera's distances the 24-bit depth buffer cannot separate 1 cm from
+  // the ground (precision ≈ z²/(near·2²⁴) — ~5 cm at 300 m with near
+  // 0.3), so the road surface and the ground fought in the depth buffer
+  // and the roads flickered while panning AND at rest (user report,
+  // 2026-11-14). The markings sit another 8 cm above THIS plane.
+  const yOffset = 0.04
 
   // Per-vertex local perpendicular. Interior vertices average the
   // incoming and outgoing segment tangent so the strip stays
