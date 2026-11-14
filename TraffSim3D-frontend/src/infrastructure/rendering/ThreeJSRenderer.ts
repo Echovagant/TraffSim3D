@@ -474,89 +474,128 @@ export class ThreeJSRenderer {
     this.getTickPolicy = getter
   }
 
+  /** Who drives `frame()`: the internal rAF loop (`start()`, used by
+   *  the flat scene editor, which has no Cesium to piggyback on) or an
+   *  external frame source — the Smart City view hooks the whole frame
+   *  to Cesium's `postRender`, which is what makes the vehicle overlay
+   *  render in the SAME frame as the basemap. The two sources are
+   *  mutually exclusive: with three independent frame loops the overlay
+   *  rendered from the PREVIOUS frame's camera and the cars visibly
+   *  slid across the basemap during a drag. */
+  private frameSource: 'raf' | 'external' | null = null
+
   start(): void {
-    if (this.rafId !== null) return
+    if (this.rafId !== null || this.frameSource === 'external') return
+    this.frameSource = 'raf'
     this.lastFrameMs = performance.now()
     const loop = (now: number) => {
-      const rawDt = Math.min(0.1, (now - this.lastFrameMs) / 1000) // clamp to avoid tab-switch jumps
-      this.lastFrameMs = now
-
-      // Tick policy: read every frame so pause/rate flips take effect
-      // immediately. Default to real-time / unpaused.
-      const policy = this.getTickPolicy ? this.getTickPolicy() : { paused: false, rate: 1 }
-      let simTime = 0
-      if (!policy.paused) {
-        // The store returns the current simulation time so the renderer
-        // can route it to traffic-light flashing logic.
-        simTime = this.callbacks.onTick(rawDt * policy.rate) ?? 0
-      }
-
-      // Reconcile the scene with the current network. `onTick` above has
-      // already mutated positions; this is where the per-frame visual sync
-      // happens (cheap) plus the incremental add/remove diff (also cheap for
-      // the handful of entities a demo scene holds). When paused, the network
-      // is unchanged but we still want mesh positions to track the static
-      // snapshot (a save/load could have replaced it under us).
-      if (this.getNetwork) {
-        const network = this.getNetwork()
-        if (network !== this.currentNetwork) {
-          // The POIs belonged to the OLD map — their coordinates are
-          // projected around the old origin, so they would be in the
-          // wrong place on the new one.
-          this.clearPois()
-          if (this.built) {
-            this.scene.remove(this.built.root)
-            // Dispose is best-effort — new built replaces it. The old meshes
-            // were already linked to the scene root and will be GC'd once
-            // the renderer drops its reference.
-          }
-          this.built = buildScene(network, this.renderMode)
-          this.scene.add(this.built.root)
-          this.currentNetwork = network
-        } else if (this.built) {
-          syncMeshTransforms(network, this.built, simTime)
-          syncSceneContents(network, this.built)
-        }
-      }
-      if (this.built && this.getSelection) {
-        syncSelection(this.built, this.getSelection())
-      }
-      this.syncRouteMesh()
-      // The first-person camera owns the camera while it rides; the
-      // orbit controls stand down (their damping would fight the
-      // per-frame placement).
-      const follow = this.getFollowTarget?.() ?? null
-      if (follow) {
-        this.applyFollowCamera(follow, rawDt)
-      } else {
-        // Leaving the first-person view: the next entry eases in again
-        // from wherever the camera is now.
-        this.following = false
-        this.controls?.update()
-      }
-      this.syncFollowerVisibility(follow)
-      // Far-camera legibility: kilometres away, a real-size car covers
-      // well under one screen pixel and the overview reads "cars
-      // floating on buildings". Each body scales by its TRUE distance to
-      // the camera — a street-level camera is kilometres from the city
-      // origin while the vehicles in view are a few hundred metres away,
-      // and an origin-based factor once scaled them past the horizon
-      // line so they read as cars flying above the skyline. The mark is
-      // a display symbol; physics, position and heading are untouched.
-      // Recomposition happens inside `updateLod`, so the factors also
-      // land while paused. Until the first resize the viewport height is
-      // unknown and every factor degrades to 1.
-      if (this.built) {
-        this.built.vehicles.updateLod(
-          this.camera.position,
-          this.viewportHeightPx ?? 0,
-          (this.camera.fov * Math.PI) / 180,
-        )
-      }
-      this.renderer.render(this.scene, this.camera)
+      this.frame(now)
       this.rafId = requestAnimationFrame(loop)
     }
     this.rafId = requestAnimationFrame(loop)
+  }
+
+  /** Hand the frame driving over to an external source (see
+   *  `frameSource`). Stops the internal rAF loop; `start()` is a no-op
+   *  while an external driver is attached. */
+  attachExternalFrameDriver(): void {
+    this.frameSource = 'external'
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId)
+      this.rafId = null
+    }
+  }
+
+  /** Back to the internal rAF loop (teardown paths that keep the
+   *  renderer alive). */
+  detachExternalFrameDriver(): void {
+    if (this.frameSource !== 'external') return
+    this.frameSource = null
+    this.lastFrameMs = performance.now()
+  }
+
+  /** One full frame: advance the simulation, sync the scene with the
+   *  network, drive the cameras and render. Public so a view can drive
+   *  the renderer from ITS OWN frame source — the Smart City view calls
+   *  this from Cesium's `postRender`, right after the basemap frame was
+   *  produced with the exact same camera state. */
+  frame(nowMs: number): void {
+    const rawDt = Math.min(0.1, (nowMs - this.lastFrameMs) / 1000) // clamp to avoid tab-switch jumps
+    this.lastFrameMs = nowMs
+
+    // Tick policy: read every frame so pause/rate flips take effect
+    // immediately. Default to real-time / unpaused.
+    const policy = this.getTickPolicy ? this.getTickPolicy() : { paused: false, rate: 1 }
+    let simTime = 0
+    if (!policy.paused) {
+      // The store returns the current simulation time so the renderer
+      // can route it to traffic-light flashing logic.
+      simTime = this.callbacks.onTick(rawDt * policy.rate) ?? 0
+    }
+
+    // Reconcile the scene with the current network. `onTick` above has
+    // already mutated positions; this is where the per-frame visual sync
+    // happens (cheap) plus the incremental add/remove diff (also cheap for
+    // the handful of entities a demo scene holds). When paused, the network
+    // is unchanged but we still want mesh positions to track the static
+    // snapshot (a save/load could have replaced it under us).
+    if (this.getNetwork) {
+      const network = this.getNetwork()
+      if (network !== this.currentNetwork) {
+        // The POIs belonged to the OLD map — their coordinates are
+        // projected around the old origin, so they would be in the
+        // wrong place on the new one.
+        this.clearPois()
+        if (this.built) {
+          this.scene.remove(this.built.root)
+          // Dispose is best-effort — new built replaces it. The old meshes
+          // were already linked to the scene root and will be GC'd once
+          // the renderer drops its reference.
+        }
+        this.built = buildScene(network, this.renderMode)
+        this.scene.add(this.built.root)
+        this.currentNetwork = network
+      } else if (this.built) {
+        syncMeshTransforms(network, this.built, simTime)
+        syncSceneContents(network, this.built)
+      }
+    }
+    if (this.built && this.getSelection) {
+      syncSelection(this.built, this.getSelection())
+    }
+    this.syncRouteMesh()
+    // The first-person camera owns the camera while it rides; the
+    // orbit controls stand down (their damping would fight the
+    // per-frame placement).
+    const follow = this.getFollowTarget?.() ?? null
+    if (follow) {
+      this.applyFollowCamera(follow, rawDt)
+    } else {
+      // Leaving the first-person view: the next entry eases in again
+      // from wherever the camera is now.
+      this.following = false
+      this.controls?.update()
+    }
+    this.syncFollowerVisibility(follow)
+    // Far-camera legibility: kilometres away, a real-size car covers
+    // well under one screen pixel and the overview reads "cars
+    // floating on buildings". Each body scales by its TRUE distance to
+    // the camera — a street-level camera is kilometres from the city
+    // origin while the vehicles in view are a few hundred metres away,
+    // and an origin-based factor once scaled them past the horizon
+    // line so they read as cars flying above the skyline. The mark is
+    // a display symbol; physics, position and heading are untouched.
+    // Recomposition happens inside `updateLod`, so the factors also
+    // land while paused. Until the first resize the viewport height is
+    // unknown and every factor degrades to 1.
+    if (this.built) {
+      this.built.vehicles.updateLod(
+        this.camera.position,
+        this.viewportHeightPx ?? 0,
+        (this.camera.fov * Math.PI) / 180,
+      )
+    }
+    this.renderer.render(this.scene, this.camera)
   }
 
   /**

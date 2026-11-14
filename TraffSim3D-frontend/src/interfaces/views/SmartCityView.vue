@@ -260,7 +260,9 @@ const { themeId, themes, setTheme, initTheme } = useTheme()
 const { loadSampleCity } = useSampleCity()
 
 let cesiumViewer: Cesium.Viewer | null = null
-let syncRafId: number | null = null
+/** The Cesium `postRender` handler that drives the whole Three frame —
+ *  see `startCameraSync`. */
+let postRenderHandler: (() => void) | null = null
 let cameraSync: CameraSyncContext | null = null
 // The two city layers, kept so a theme switch can re-colour them.
 let networkRoads: LoadedNetworkRoads | null = null
@@ -1066,43 +1068,67 @@ const walkStreet = (dt: number): void => {
 }
 
 /** Per-frame: apply the current owner's direction (Cesium → Three, or
- *  Three → Cesium in "free" mode). Exactly one direction runs per
- *  frame — see the ownership note in cameraSync.ts. */
+ *  Three → Cesium in "free" mode) and drive the ENTIRE Three frame from
+ *  the same Cesium frame. Exactly one sync direction runs per frame —
+ *  see the ownership note in cameraSync.ts.
+ *
+ *  The renderer used to run its own rAF loop alongside this one: three
+ *  independent frame sources (Three rAF, Cesium's loop, this sync loop)
+ *  meant the vehicle overlay rendered from the PREVIOUS frame's camera
+ *  state during a drag, so the cars visibly slid across the basemap.
+ *  Hooking the whole frame to Cesium's `postRender` — which fires right
+ *  after the basemap frame was produced, with the exact camera state
+ *  that drew it — removes the lag by construction and collapses this
+ *  loop into one callback. The Cesium→Three projection (incl. the fov)
+ *  is synced first, then the simulation advances and the overlay
+ *  renders; the Rapier fixed-step semantics live inside
+ *  `world.step` and are unaffected by the new dt source. */
 const startCameraSync = (): void => {
+  if (!cesiumViewer) return
   let last = performance.now()
-  const tick = (): void => {
-    const now = performance.now()
-    const dt = Math.min(0.1, (now - last) / 1000)
-    last = now
-    if (!cesiumViewer || !rendererRef.value) {
-      syncRafId = requestAnimationFrame(tick)
-      return
+  rendererRef.value?.attachExternalFrameDriver()
+  postRenderHandler = () => {
+    try {
+      const now = performance.now()
+      const dt = Math.min(0.1, (now - last) / 1000)
+      last = now
+      if (!cesiumViewer || !rendererRef.value) return
+      walkStreet(dt)
+      // The cockpit's pedals: W/S held = throttle/brake. The intent goes
+      // into the tick through `driverOverride`; letting go of both hands
+      // the car straight back to its AI the very next tick.
+      if (world.rideVehicleId && world.rideMode === 'cockpit') {
+        world.setDriverInput(keysDown.has('KeyW') ? 'accel' : keysDown.has('KeyS') ? 'brake' : null)
+      } else if (world.driverInput !== null) {
+        world.setDriverInput(null)
+      }
+      if (!cameraSync) {
+        cameraSync = createCameraSync({
+          cesiumViewer,
+          threeCamera: rendererRef.value.getCamera(),
+          tangent: tangent.value,
+          owner: 'cesium',
+        })
+      }
+      cameraSync.tick()
+      rendererRef.value.frame(now)
+    } catch (err) {
+      // A frame handler runs inside Cesium's render call: one bad tick
+      // must not take the whole scene down with it.
+      console.error('[smart-city] frame handler failed', err)
     }
-    walkStreet(dt)
-    // The cockpit's pedals: W/S held = throttle/brake. The intent goes
-    // into the tick through `driverOverride`; letting go of both hands
-    // the car straight back to its AI the very next tick.
-    if (world.rideVehicleId && world.rideMode === 'cockpit') {
-      world.setDriverInput(keysDown.has('KeyW') ? 'accel' : keysDown.has('KeyS') ? 'brake' : null)
-    } else if (world.driverInput !== null) {
-      world.setDriverInput(null)
-    }
-    if (!cameraSync) {
-      cameraSync = createCameraSync({
-        cesiumViewer,
-        threeCamera: rendererRef.value.getCamera(),
-        tangent: tangent.value,
-        owner: 'cesium',
-      })
-    }
-    cameraSync.tick()
-    syncRafId = requestAnimationFrame(tick)
   }
-  syncRafId = requestAnimationFrame(tick)
+  cesiumViewer.scene.postRender.addEventListener(postRenderHandler)
 }
 
 onBeforeUnmount(() => {
-  if (syncRafId !== null) cancelAnimationFrame(syncRafId)
+  if (postRenderHandler && cesiumViewer) {
+    // Must happen BEFORE the viewer is destroyed — the destroyed
+    // scene's event helpers may not be touchable.
+    cesiumViewer.scene.postRender.removeEventListener(postRenderHandler)
+  }
+  postRenderHandler = null
+  rendererRef.value?.detachExternalFrameDriver()
   if (trendTimer !== null) window.clearInterval(trendTimer)
   unsubscribeOob?.()
   window.removeEventListener('keydown', onKeyDown)
