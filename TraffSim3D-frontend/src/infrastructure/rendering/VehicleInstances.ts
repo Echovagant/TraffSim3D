@@ -19,6 +19,7 @@ import type { Vehicle, VehicleType } from '@domain/entities/Vehicle'
 import type { VehicleTrail } from './VehicleTrailMesh'
 import { createVehicleTrail } from './VehicleTrailMesh'
 import { Y_BODY } from './VehicleMesh'
+import { vehicleLodScale } from './vehicleLod'
 import { TRAIL_LENGTH } from '@shared/constants/simulation'
 
 export const MAX_VEHICLES_PER_TYPE = 256
@@ -59,14 +60,18 @@ export interface VehicleInstances {
   remove: (entityId: string) => void
   update: (v: Vehicle) => void
   /**
-   * Apply the far-camera legibility factor (see `vehicleLod.ts`) to
-   * every drawn body: below the camera's minimum-readable size the
-   * instances scale up so a vehicle reads as a small mark instead of a
-   * vanishing dot. Display-only — physics never sees it. Every active
-   * slot is re-composed on change, so the factor also takes effect
-   * while the simulation is paused.
+   * Re-derive every drawn body's far-camera legibility factor (see
+   * `vehicleLod.ts`) from the camera's CURRENT position, per vehicle:
+   * below the minimum-readable size a body scales up so it reads as a
+   * small mark instead of a vanishing dot. Display-only — physics never
+   * sees it. The per-vehicle distance matters: a street-level camera is
+   * kilometres from the city ORIGIN while the vehicles in view are only
+   * a few hundred metres away — a single origin-based factor scaled
+   * those bodies 4-5× past the horizon line and they read as cars
+   * flying above the skyline. Changed factors re-compose immediately,
+   * so the marks also land while the simulation is paused.
    */
-  setLodScale: (scale: number) => void
+  updateLod: (cameraPos: THREE.Vector3, viewportHeightPx: number, fovRad: number) => void
   /** Stop drawing a vehicle without releasing its slot. */
   hide: (entityId: string) => void
   /** Draw a hidden vehicle again. */
@@ -83,6 +88,7 @@ const _pos = new THREE.Vector3()
 const _quat = new THREE.Quaternion()
 const _scale = new THREE.Vector3(1, 1, 1)
 const _euler = new THREE.Euler()
+const _lodPos = new THREE.Vector3()
 const _zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0)
 const _white = new THREE.Color(1, 1, 1)
 
@@ -150,8 +156,21 @@ export const createVehicleInstances = (): VehicleInstances => {
   /** Vehicles that are allocated but not drawn (the followed car). */
   const hiddenIds = new Set<string>()
 
-  /** The current far-camera legibility factor (1 = true size). */
-  let lodScale = 1
+  /**
+   * The camera the LOD factors are derived from — `null` until the
+   * first `updateLod`, so bodies allocated before the first frame read
+   * at true size rather than at a distance from a guessed origin.
+   */
+  let lodCamera: THREE.Vector3 | null = null
+  let lodViewportH = 0
+  let lodFov = 0
+
+  /** The legibility factor one slot needs right now (1 = true size). */
+  const lodScaleFor = (slot: SlotData): number => {
+    if (!lodCamera) return 1
+    const d = lodCamera.distanceTo(_lodPos.set(slot.px, slot.py, slot.pz))
+    return vehicleLodScale(d, lodViewportH, lodFov)
+  }
 
   /** Compose a slot's matrix from its cached pose at its cached scale. */
   const recomposeSlot = (type: VehicleType, slot: SlotData): void => {
@@ -163,9 +182,11 @@ export const createVehicleInstances = (): VehicleInstances => {
     slot.matrix.compose(_pos, _quat, _scale)
   }
 
-  const setLodScale = (next: number): void => {
-    if (next === lodScale) return
-    lodScale = next
+  const updateLod = (cameraPos: THREE.Vector3, viewportHeightPx: number, fovRad: number): void => {
+    if (!lodCamera) lodCamera = new THREE.Vector3()
+    lodCamera.copy(cameraPos)
+    lodViewportH = viewportHeightPx
+    lodFov = fovRad
     for (const type of types) {
       const mesh = meshes[type]
       let dirty = false
@@ -175,6 +196,8 @@ export const createVehicleInstances = (): VehicleInstances => {
         // no longer matches, which flags the matrix dirty).
         if (hiddenIds.has(entityId)) continue
         const slot = slots[type][slotIdx]
+        const next = lodScaleFor(slot)
+        if (next === slot.scale) continue
         slot.scale = next
         recomposeSlot(type, slot)
         mesh.setMatrixAt(slotIdx, slot.matrix)
@@ -195,7 +218,8 @@ export const createVehicleInstances = (): VehicleInstances => {
     _pos.set(v.position.x, v.position.y + cfg.yCenter, v.position.z)
     _euler.set(0, -v.heading, pitch)
     _quat.setFromEuler(_euler)
-    _scale.set(lodScale, lodScale, lodScale)
+    const scale = lodScaleFor(slots[type][slotIdx])
+    _scale.set(scale, scale, scale)
     const mat4 = new THREE.Matrix4()
     mat4.compose(_pos, _quat, _scale)
 
@@ -214,7 +238,7 @@ export const createVehicleInstances = (): VehicleInstances => {
 
     slotToEntity[type].set(slotIdx, v.id)
     entityToSlot[type].set(v.id, slotIdx)
-    slots[type][slotIdx].scale = lodScale
+    slots[type][slotIdx].scale = scale
 
     meshes[type].count = Math.max(meshes[type].count, slotIdx + 1)
     meshes[type].instanceMatrix.needsUpdate = true
@@ -309,14 +333,19 @@ export const createVehicleInstances = (): VehicleInstances => {
     const slot = slots[type][slotIdx]
     const pitch = v.pitch ?? 0
 
-    // Dirty-check: skip matrix re-upload if position + heading + scale unchanged.
+    // Dirty-check: skip matrix re-upload if position, heading AND the
+    // factor this slot needs are all unchanged. The factor is derived
+    // here as well (not only in `updateLod`) so a body that `show`
+    // resurrects — hidden slots are skipped by `updateLod`, their scale
+    // cached stale — picks the fresh factor up on this very update.
+    const scale = lodScaleFor(slot)
     const moved =
       slot.px !== v.position.x ||
       slot.py !== v.position.y ||
       slot.pz !== v.position.z ||
       slot.heading !== v.heading ||
       slot.pitch !== pitch ||
-      slot.scale !== lodScale
+      slot.scale !== scale
     if (moved) {
       const cfg = TYPE_CONFIG[type]
       _pos.set(v.position.x, v.position.y + cfg.yCenter, v.position.z)
@@ -332,7 +361,7 @@ export const createVehicleInstances = (): VehicleInstances => {
       // does.
       _euler.set(0, -v.heading, pitch)
       _quat.setFromEuler(_euler)
-      _scale.set(lodScale, lodScale, lodScale)
+      _scale.set(scale, scale, scale)
       slot.matrix.compose(_pos, _quat, _scale)
       mesh.setMatrixAt(slotIdx, slot.matrix)
       mesh.instanceMatrix.needsUpdate = true
@@ -341,7 +370,7 @@ export const createVehicleInstances = (): VehicleInstances => {
       slot.pz = v.position.z
       slot.heading = v.heading
       slot.pitch = pitch
-      slot.scale = lodScale
+      slot.scale = scale
     }
 
     const newColor = _white.set(v.color)
@@ -417,7 +446,7 @@ export const createVehicleInstances = (): VehicleInstances => {
     allocate,
     remove,
     update,
-    setLodScale,
+    updateLod,
     hide,
     show,
     isHidden,

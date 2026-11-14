@@ -10,7 +10,6 @@ import {
 } from './SceneBuilder'
 import { buildRouteMesh, type RouteRenderPath } from './RouteMesh'
 import { createPoiLayer, type Poi, type PoiLayer } from './PoiLayer'
-import { vehicleLodScale } from './vehicleLod'
 import { MAX_DPR, VEHICLE_BODY_SPEC } from '@shared/constants/simulation'
 
 /** How far ahead of the car the first-person camera looks (m). */
@@ -538,21 +537,20 @@ export class ThreeJSRenderer {
       this.syncFollowerVisibility(follow)
       // Far-camera legibility: kilometres away, a real-size car covers
       // well under one screen pixel and the overview reads "cars
-      // floating on buildings". Scale the drawn bodies up just enough
-      // to hold a minimum mark — the dot is a display symbol; physics,
-      // position and heading are untouched. (Real traffic platforms
-      // show the same thing: city-scale dots that become vehicles as
-      // the camera approaches.) Recomposition happens inside
-      // `setLodScale`, so the factor also lands while paused. Until the
-      // first resize the viewport height is unknown and the factor
-      // degrades to 1.
+      // floating on buildings". Each body scales by its TRUE distance to
+      // the camera — a street-level camera is kilometres from the city
+      // origin while the vehicles in view are a few hundred metres away,
+      // and an origin-based factor once scaled them past the horizon
+      // line so they read as cars flying above the skyline. The mark is
+      // a display symbol; physics, position and heading are untouched.
+      // Recomposition happens inside `updateLod`, so the factors also
+      // land while paused. Until the first resize the viewport height is
+      // unknown and every factor degrades to 1.
       if (this.built) {
-        this.built.vehicles.setLodScale(
-          vehicleLodScale(
-            this.camera.position.length(),
-            this.viewportHeightPx ?? 0,
-            (this.camera.fov * Math.PI) / 180,
-          ),
+        this.built.vehicles.updateLod(
+          this.camera.position,
+          this.viewportHeightPx ?? 0,
+          (this.camera.fov * Math.PI) / 180,
         )
       }
       this.renderer.render(this.scene, this.camera)

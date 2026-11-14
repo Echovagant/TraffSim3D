@@ -403,7 +403,15 @@ describe('the vehicle LEANS with the road', () => {
 })
 
 describe('createVehicleInstances — far-camera legibility (LOD)', () => {
-  it('keeps unit scale until setLodScale is called', () => {
+  // The factor derives from each body's TRUE distance to the camera.
+  // The first implementation used the camera-to-origin distance: at a
+  // street-level camera that is kilometres while the vehicles in view
+  // are a few hundred metres away, the bodies scaled 4-5× past the
+  // horizon line and read as cars flying above the skyline (user
+  // report, 2026-11-14). These tests pin the per-vehicle behaviour.
+  const FOV_60 = (60 * Math.PI) / 180
+
+  it('keeps unit scale until updateLod is called', () => {
     const v = makeTestVehicle({ position: { x: 1, y: 0, z: 2 } })
     pool.allocate(v)
     pool.update(v)
@@ -413,53 +421,60 @@ describe('createVehicleInstances — far-camera legibility (LOD)', () => {
     expect(scale.z).toBe(1)
   })
 
-  it('re-scales every drawn body in place, even while the simulation is paused', () => {
+  it('scales a far body up and leaves a near body at true size — per vehicle', () => {
+    // A street-level camera: one car 100 m away (reads ~19 px — no
+    // scaling), one car 4 700 m away (sub-pixel — must scale to ~4.3×).
+    const near = makeTestVehicle({ id: 'near', position: { x: 100, y: 0, z: 2 } })
+    const far = makeTestVehicle({ id: 'far', position: { x: 4700, y: 0, z: 2 } })
+    pool.allocate(near)
+    pool.allocate(far)
+    pool.update(near)
+    pool.update(far)
+
+    pool.updateLod(new THREE.Vector3(0, 1.7, 2), 900, FOV_60)
+
+    const nearScale = decompose(pool.meshes.car, 0).scale
+    expect(nearScale.x).toBe(1)
+    const farScale = decompose(pool.meshes.car, 1).scale
+    expect(farScale.x).toBeGreaterThan(3.5)
+    expect(farScale.x).toBeLessThan(5.5)
+  })
+
+  it('re-scales a body in place from its TRUE camera distance, even while paused', () => {
     const v = makeTestVehicle({ position: { x: 1, y: 0, z: 2 } })
     pool.allocate(v)
     pool.update(v)
+    // Camera exactly 4 700 m from the body: the factor is ~4.3.
+    pool.updateLod(new THREE.Vector3(4701, 1.7, 2), 900, FOV_60)
 
-    pool.setLodScale(4.3)
-
-    // No update() call between setLodScale and the read: the re-composition
-    // happened inside setLodScale, which is what makes the factor land on a
-    // paused scene.
     const { scale, pos } = decompose(pool.meshes.car, 0)
-    // The instance matrix is stored as Float32: 4.3 arrives as 4.3000002.
-    expect(scale.x).toBeCloseTo(4.3, 5)
-    expect(scale.y).toBeCloseTo(4.3, 5)
-    expect(scale.z).toBeCloseTo(4.3, 5)
+    // The instance matrix is stored as Float32 — allow ~1e-5 slack.
+    expect(scale.x).toBeGreaterThan(3.5)
+    expect(scale.x).toBeLessThan(5.5)
     // The position is untouched — the dot stays where the vehicle is.
     expect(pos.x).toBeCloseTo(1, 5)
     expect(pos.z).toBeCloseTo(2, 5)
   })
 
-  it('composes freshly allocated bodies at the current factor', () => {
-    pool.setLodScale(2)
-    const v = makeTestVehicle({ position: { x: 0, y: 0, z: 0 } })
+  it('composes freshly allocated bodies at the factor their position implies', () => {
+    // First frame: a far camera is registered…
+    pool.updateLod(new THREE.Vector3(3000, 0, 0), 900, FOV_60)
+    // …then a vehicle spawns 3 002 m away — it must not read true-size
+    // for a frame before the next updateLod fixes it.
+    const v = makeTestVehicle({ position: { x: 3002, y: 0, z: 0 } })
     pool.allocate(v)
     const { scale } = decompose(pool.meshes.car, 0)
-    expect(scale.x).toBeCloseTo(2, 10)
-  })
-
-  it('marks the matrix dirty on the next update after the factor changed', () => {
-    const v = makeTestVehicle({ position: { x: 0, y: 0, z: 0 } })
-    pool.allocate(v)
-    pool.setLodScale(2.5)
-    // A different scale alone must re-upload even though nothing moved.
-    const moved = matrixAt(pool.meshes.car, 0)
-    const { scale } = decompose(pool.meshes.car, 0)
-    expect(scale.x).toBeCloseTo(2.5, 10)
-    expect(moved).toBeDefined()
+    expect(scale.x).toBeGreaterThan(1.5)
   })
 
   it('keeps a hidden vehicle zeroed while scaling the others', () => {
-    const a = makeTestVehicle({ id: 'a', position: { x: 0, y: 0, z: 0 } })
-    const b = makeTestVehicle({ id: 'b', position: { x: 5, y: 0, z: 0 }, type: 'bus' })
+    const a = makeTestVehicle({ id: 'a', position: { x: 4700, y: 0, z: 0 } })
+    const b = makeTestVehicle({ id: 'b', position: { x: 4750, y: 0, z: 0 }, type: 'bus' })
     pool.allocate(a)
     pool.allocate(b)
     pool.hide('a')
 
-    pool.setLodScale(3)
+    pool.updateLod(new THREE.Vector3(0, 1.7, 0), 900, FOV_60)
 
     const hiddenScaleV = new THREE.Vector3()
     matrixAt(pool.meshes.car, 0).decompose(
@@ -470,12 +485,12 @@ describe('createVehicleInstances — far-camera legibility (LOD)', () => {
     expect(hiddenScaleV.x).toBe(0) // still hidden
 
     const { scale: busScale } = decompose(pool.meshes.bus, 0)
-    expect(busScale.x).toBeCloseTo(3, 10)
+    expect(busScale.x).toBeGreaterThan(3.5)
 
     // After show, the next update picks the new factor up.
     pool.show('a')
     pool.update(a)
     const { scale: shownScale } = decompose(pool.meshes.car, 0)
-    expect(shownScale.x).toBeCloseTo(3, 10)
+    expect(shownScale.x).toBeGreaterThan(3.5)
   })
 })
