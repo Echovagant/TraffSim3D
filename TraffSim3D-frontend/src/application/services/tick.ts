@@ -74,6 +74,8 @@ import {
   LATERAL_DRIFT_THRESHOLD_M,
   MAX_DECEL_COMFY,
   STEER_LANE_EDGE_M,
+  DRIVER_MAX_LAT_ACCEL_MS2,
+  DRIVER_WHEELBASE_M,
 } from '@shared/constants/simulation'
 import type { RapierWorld, ContactEvent, Vec3 } from '@infrastructure/physics'
 import { findNearestLane } from './laneFrameSync'
@@ -1131,6 +1133,44 @@ export const tick = (network: RoadNetwork, dt: number, simTime: number, ctx: Tic
       // but the heading changes, so when the vehicle resumes it
       // drives in the wrong direction).
       if (v.speed < 0.5) continue
+      // The manual driver's wheel owns the heading while it is held.
+      // The bicycle model turns the front-wheel angle into a yaw rate
+      // `ω = v · tan(δ) / L`, capped by the tyres' lateral grip limit —
+      // the friction circle `a_lat = v · ω ≤ 8 m/s²` (dry asphalt). At
+      // 22 m/s full lock that is a 61 m radius, not the ~6 rad/s spin
+      // the raw geometry would ask for; below ~8 m/s the geometric rate
+      // is smaller than the cap, so the cap only bites at speed — which
+      // is what a real car does. While the wheel is held it REPLACES
+      // the lane keeper's omega: the next `applyControl` re-aligns the
+      // velocity to the yawed heading, so the car genuinely drives an
+      // arc. Releasing hands the body straight back to Pure Pursuit,
+      // which yaws the nose back into the lane. Crossing into the next
+      // lane is still the lane-change path (the store requests one when
+      // the wheel is held at the edge), so while a change is in progress
+      // the keeper owns the heading.
+      const steer = ctx.driverSteer?.(v.id)
+      if (steer != null && v.desiredLaneIndex == null) {
+        const yawRate =
+          (v.speed * Math.tan(steer * DRIVER_MAX_WHEEL_RAD)) / DRIVER_WHEELBASE_M[v.type]
+        const gripCap = DRIVER_MAX_LAT_ACCEL_MS2 / v.speed
+        const omega = Math.max(-gripCap, Math.min(gripCap, yawRate))
+        // The lane edge is a kerb for the nose too — the same rule the
+        // lateral slide applies (see `applyLaneChangeLateralVelocity`),
+        // with the same travelSign reconciliation: a held outward lock at
+        // the edge commands no yaw, and the keeper below pulls the nose
+        // back into the lane instead.
+        const drift =
+          perpendicularOffsetAlongRoad(road, v.s, v.position) -
+          laneOffset(v.laneIndex, road.laneCount)
+        const leftDrift = -laneForwardSign(v.laneIndex, road.laneCount) * drift
+        const outward =
+          (omega > 0 && leftDrift >= STEER_LANE_EDGE_M) ||
+          (omega < 0 && leftDrift <= -STEER_LANE_EDGE_M)
+        if (!outward) {
+          ctx.rapierWorld.setVehicleAngularVelocity(v.id, omega)
+          continue
+        }
+      }
       // While the vehicle is changing lanes the lookahead rides the
       // **target** lane, not the lane it currently occupies: that is
       // what turns the heading into the new lane instead of steering
@@ -1795,7 +1835,18 @@ const applyLaneChangeLateralVelocity = (network: RoadNetwork, ctx: TickContext):
           const drift =
             perpendicularOffsetAlongRoad(road, v.s, v.position) -
             laneOffset(v.laneIndex, road.laneCount)
-          if ((lat > 0 && drift <= -STEER_LANE_EDGE_M) || (lat < 0 && drift >= STEER_LANE_EDGE_M)) {
+          // `drift` is right-of-the-lane-centre positive (the road's own
+          // convention), but the driver's slide is positive toward the
+          // VEHICLE's left — which on a backward lane (lane 1 of a two-way
+          // road) is the road's right. Without the travelSign flip the
+          // kerb guarded the wrong edge on backward lanes: a held wheel
+          // walked the car out of its lane on the side the kerb was
+          // supposed to protect, until the 15 m drift guard snapped it.
+          const leftDrift = -laneForwardSign(v.laneIndex, road.laneCount) * drift
+          if (
+            (lat > 0 && leftDrift >= STEER_LANE_EDGE_M) ||
+            (lat < 0 && leftDrift <= -STEER_LANE_EDGE_M)
+          ) {
             lat = 0
           }
         }

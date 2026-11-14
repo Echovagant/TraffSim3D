@@ -24,6 +24,30 @@ export const ROAD_LANE_WIDTH = 3.5
  * not go through it.
  */
 export const STEER_LANE_EDGE_M = 1.15
+/**
+ * The lateral grip limit of the manual driver's tyres: dry asphalt holds
+ * ≈ 0.8 g ≈ 8 m/s² of lateral acceleration before the tyres slide. This
+ * is the friction circle that caps how fast the body may yaw from the
+ * wheel — full lock at 22 m/s yields ω = 8/22 ≈ 0.36 rad/s (a 61 m
+ * radius, `v²/a`), not the ~6 rad/s spin the raw bicycle geometry would
+ * ask for. Below ~8 m/s the geometric rate is smaller than this cap, so
+ * the cap only bites at speed — which is what a real car does.
+ */
+export const DRIVER_MAX_LAT_ACCEL_MS2 = 8.0
+/**
+ * Real wheelbases (m) for the manual driver's bicycle model. Deliberately
+ * NOT `VEHICLE_PURE_PURSUIT.wheelbase` — those are the lane keeper's
+ * controller calibration values, not the geometry of a car. A 9 m city
+ * bus runs a ~6 m wheelbase, a 6.5 m rigid truck ~4.2 m, a 4.2 m sedan
+ * ~2.7 m; the yaw a driver's lock produces must come from the real
+ * geometry, or the same car would turn tighter under a human hand than
+ * it does under the lane keeper.
+ */
+export const DRIVER_WHEELBASE_M: Record<'car' | 'truck' | 'bus', number> = {
+  car: 2.7,
+  truck: 4.2,
+  bus: 6.0,
+}
 /** Number of historical positions kept per vehicle for the trail line. 60 frames ≈ 1s at 60fps. */
 export const TRAIL_LENGTH = 60
 
