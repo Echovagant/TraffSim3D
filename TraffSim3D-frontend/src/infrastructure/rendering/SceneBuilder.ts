@@ -110,9 +110,14 @@ export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): Bui
 
   let roadSurface: THREE.Mesh | null = null
   let roadMarkings: THREE.Group | null = null
-  // Smart-city mode skips Three.js road meshes because
-  // Cesium draws roads from real OSM data (GeoJsonDataSource).
-  if (mode === 'flat') {
+  // BOTH modes draw the lane-level road surface and paint: the editor on
+  // its dark ground, and the smart-city view OVER the Cesium basemap —
+  // drawing the road in the SAME frame as the vehicles is what makes the
+  // cars sit ON the asphalt by construction (the old Cesium ribbons drew
+  // a second, independent reading of the same city, and the fleet visibly
+  // drifted off them). The geometry merges into two draw calls even for
+  // the 1 115-road Futian extract, so the cost is build-time only.
+  if (mode === 'flat' || mode === 'smart-city') {
     const roads = Object.values(network.roads)
     const intersections = Object.values(network.intersections)
     // The whole carriageway is one mesh and the whole paint is one line

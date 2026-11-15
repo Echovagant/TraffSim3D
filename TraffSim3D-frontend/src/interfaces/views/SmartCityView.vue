@@ -567,12 +567,13 @@ const applyBasemapTuning = (viewer: Cesium.Viewer, theme: string): void => {
   const imageryLayer = viewer.imageryLayers.get(0)
   if (imageryLayer) {
     const paper = theme === 'paper'
-    // The clay theme keeps a whisper of raster texture (its buildings
-    // are light and a fully-black ground reads as a void from street
-    // level) — but at 0.34 the ground washed out the whole street-level
-    // frame and the white model lost its base. 0.22 keeps the texture
-    // and lets the road ribbons own the lower band.
-    const dim = theme === 'paper' ? 1 : theme === 'clay' ? 0.22 : 0.26
+    // The clay theme keeps a WHISPER of raster texture: the Three layer
+    // now draws the lane-level roads in the vehicles' own frame (P4),
+    // so the raster's own streets only compete with them — 0.22 left
+    // both layers half-visible and the network read as mud (measured
+    // 2026-11-15). 0.12 sinks the raster to a texture hint; the Three
+    // road mesh owns the roads.
+    const dim = theme === 'paper' ? 1 : theme === 'clay' ? 0.12 : 0.16
     imageryLayer.brightness = dim
     imageryLayer.contrast = paper ? 1 : 1.05
     imageryLayer.saturation = paper ? 1 : 0.12
@@ -858,10 +859,16 @@ onMounted(async () => {
     ;(window as unknown as { __cesiumLib?: typeof Cesium }).__cesiumLib = Cesium
   }
   try {
+    // `withCorridors: false` — the Three.js layer draws the lane-level
+    // road surface and paint in the vehicles' own frame (buildScene's
+    // smart-city branch now includes them); the Cesium side keeps only
+    // what only it can do here: the height-limit gantries and the
+    // barred-road barriers.
     const roads: LoadedNetworkRoads = await loadNetworkRoads(
       cesiumViewer,
       world.network,
       sceneOrigin.value,
+      { withCorridors: false },
     )
     networkRoads = roads
     // The road count is published as soon as the roads are on the map —
@@ -1297,7 +1304,11 @@ const startCameraSync = (): void => {
         })
       }
       cameraSync.tick()
-      raw.frame(now)
+      // OrbitControls damping runs only while the controls own the
+      // camera ("free" mode); in bird/street the sync owns it and
+      // update() would yank the overlay camera off the basemap (see
+      // frame()'s controlsActive note — the 142 m low-orbit bug).
+      raw.frame(now, cameraSync.owner() === 'three')
     } catch (err) {
       // A frame handler runs inside Cesium's render call: one bad tick
       // must not take the whole scene down with it.
@@ -1571,6 +1582,12 @@ onBeforeUnmount(() => {
 .bottom-bar {
   grid-area: bottom;
   max-height: 168px;
+  /* The bottom-right brand capsule (ShowcaseNav minimal) floats over
+     this panel's right END on every immersive page — an overlap audit
+     measured it covering 98% of the feed's right edge. The feed yields
+     that corner instead: the text block narrows, the capsule gets its
+     own clear corner, and neither layer moves. */
+  padding-right: 190px;
 }
 .event-list {
   max-height: 108px;

@@ -564,6 +564,7 @@ export const loadNetworkRoads = async (
   viewer: Cesium.Viewer,
   network: RoadNetwork,
   origin: GeoOrigin | null,
+  options: { withCorridors?: boolean } = {},
 ): Promise<LoadedNetworkRoads> => {
   const empty: LoadedNetworkRoads = {
     entities: viewer.entities,
@@ -593,22 +594,29 @@ export const loadNetworkRoads = async (
     const fits = vehicleFitsRoad(road, 'car')
     if (!fits) barredCount += 1
     roadCount += 1
-    collection.entities.add({
-      corridor: {
-        positions,
-        // The width the domain agrees on — the same number the spawn
-        // and turn decisions use, so a drawn lane is a drivable lane.
-        width: roadWidthM(road),
-        height: 0.15,
-        material: new Cesium.ColorMaterialProperty(
-          cityAsphalt(
-            fits ? token('--dc-road-main', '#3d4653') : token('--dc-road-local', '#2a323c'),
+    // The asphalt RIBBONS are optional now: the Three.js layer draws the
+    // lane-level road surface and markings (same waypoints, same widths,
+    // same frame as the vehicles), and ribbon-over-mesh just doubled the
+    // picture. The Cesium side keeps what only it can do here — the
+    // height-limit gantries and the barred-road barriers below.
+    if (options.withCorridors !== false) {
+      collection.entities.add({
+        corridor: {
+          positions,
+          // The width the domain agrees on — the same number the spawn
+          // and turn decisions use, so a drawn lane is a drivable lane.
+          width: roadWidthM(road),
+          height: 0.15,
+          material: new Cesium.ColorMaterialProperty(
+            cityAsphalt(
+              fits ? token('--dc-road-main', '#3d4653') : token('--dc-road-local', '#2a323c'),
+            ),
           ),
-        ),
-        outline: false,
-      },
-      properties: { access: fits ? 'road' : 'barred' },
-    })
+          outline: false,
+        },
+        properties: { access: fits ? 'road' : 'barred' },
+      })
+    }
 
     // The HEIGHT limit of this road, when the map states one (the
     // 春风隧道 tunnel is signed 3.5 m). It is drawn as a GANTRY: a

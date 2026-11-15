@@ -145,15 +145,19 @@ describe('buildScene — smart-city mode', () => {
     expect(planeWidth(plane)).toBe(1170)
   })
 
-  it('skips the Three.js road meshes — Cesium draws the basemap', () => {
-    expect(built.roadSurface).toBeNull()
-    expect(built.roadMarkings).toBeNull()
-    // The light layer is skipped too: an imported city's ~3 000 heads
+  it('draws the lane-level road mesh and paint in BOTH modes (P4)', () => {
+    // The smart-city view draws its roads in the SAME Three.js frame as
+    // the vehicles — same waypoints, same widths, same origin — which is
+    // what makes the cars sit ON the asphalt by construction (the old
+    // Cesium ribbons were a second, independent reading of the city).
+    expect(built.roadSurface).not.toBeNull()
+    expect(built.roadMarkings).not.toBeNull()
+    // The light layer is skipped still: an imported city's ~3 000 heads
     // would be invisible over the basemap yet cost a scene-graph
     // traversal every frame.
     expect(built.lightLayer).toBeNull()
-    // pick plane + 3 meshes + 2 trails + 1 ring
-    expect(built.root.children).toHaveLength(7)
+    // pick plane + road surface + markings + 3 meshes + 2 trails + 1 ring
+    expect(built.root.children).toHaveLength(9)
   })
 })
 

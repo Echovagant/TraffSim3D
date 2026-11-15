@@ -15,6 +15,13 @@ import { MAX_DPR, VEHICLE_BODY_SPEC } from '@shared/constants/simulation'
 /** How far ahead of the car the first-person camera looks (m). */
 export const FOLLOW_LOOK_AHEAD_M = 14
 
+/**
+ * The camera height under which the road paint is drawn (m). Above it,
+ * WebGL's 1-px line cap turns the whole paint layer into sub-pixel
+ * flicker; below it, a line is a line again — the paint's own LOD.
+ */
+export const ROAD_PAINT_MAX_HEIGHT_M = 400
+
 /** How far below the driver's eye the camera's look-at point sits (m). */
 export const FOLLOW_LOOK_DOWN_M = 1.6
 
@@ -537,7 +544,19 @@ export class ThreeJSRenderer {
    *  the renderer from ITS OWN frame source — the Smart City view calls
    *  this from Cesium's `postRender`, right after the basemap frame was
    *  produced with the exact same camera state. */
-  frame(nowMs: number): void {
+  /**
+   * Drive one frame. `controlsActive` says whether the OrbitControls
+   * own the camera THIS frame: in the flat editor and the smart-city
+   * "free" mode they do (damping then applies user input); in the
+   * bird/street modes the cameraSync owns the camera and
+   * `controls.update()` MUST be skipped — update() unconditionally
+   * recomputes the position from its own internal spherical state, so
+   * once it ran after the camera sync it yanked the Three camera back
+   * from the 3.3 km bird view to a low orbit (measured: y pinned at
+   * 142 m while Cesium sat at 3 577 m — the overlay showed a few
+   * streets at street height while the basemap showed the whole city).
+   */
+  frame(nowMs: number, controlsActive = true): void {
     const rawDt = Math.min(0.1, (nowMs - this.lastFrameMs) / 1000) // clamp to avoid tab-switch jumps
     this.lastFrameMs = nowMs
 
@@ -592,7 +611,11 @@ export class ThreeJSRenderer {
       // Leaving the first-person view: the next entry eases in again
       // from wherever the camera is now.
       this.following = false
-      this.controls?.update()
+      // OrbitControls damping applies ONLY while the controls own the
+      // camera — see the `controlsActive` note above. Without this
+      // gate, update() overwrote the camera sync's position every frame
+      // and pinned the overlay camera to a low orbit.
+      if (controlsActive) this.controls?.update()
     }
     this.syncFollowerVisibility(follow)
     // Far-camera legibility: kilometres away, a real-size car covers
@@ -612,6 +635,20 @@ export class ThreeJSRenderer {
         this.viewportHeightPx ?? 0,
         (this.camera.fov * Math.PI) / 180,
       )
+      // Road-paint LOD: WebGL lines are hard-capped at 1 screen pixel,
+      // so from the bird view the whole paint layer (~74 k segments on
+      // the Futian extract) compresses into sub-pixel flicker — visible
+      // noise, zero information. The paint earns its draw call only
+      // when the camera is close enough for a line to be a LINE (the
+      // same grammar the vehicle dots use: overview = dots, close =
+      // detail). Camera HEIGHT is the gate (the paint exists at every
+      // horizontal position, so distance-to-origin means nothing).
+      if (this.built.roadMarkings) {
+        const showPaint = this.camera.position.y < ROAD_PAINT_MAX_HEIGHT_M
+        if (this.built.roadMarkings.visible !== showPaint) {
+          this.built.roadMarkings.visible = showPaint
+        }
+      }
     }
     this.renderer.render(this.scene, this.camera)
   }
