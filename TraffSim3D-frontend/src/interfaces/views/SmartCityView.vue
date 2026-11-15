@@ -181,6 +181,15 @@
       </footer>
     </div>
 
+    <!-- The navigation mini-map (P5): the city's road grid, the fleet as
+         dots, and the user's view cone — drawn from the simulation's own
+         network in its own frame, so it cannot disagree with the main
+         picture. Lives above the event feed's right end (which yields
+         its corner to the brand capsule); always visible, including
+         with the panels folded — it is the navigation window of the
+         street view, where the raster basemap is hidden (P5). -->
+    <MiniMap class="page-minimap" />
+
     <!-- The loading veil: covers the staged city build (network → viewer →
          roads → buildings → camera fly-in); watching a half-built world
          assemble read as broken code (user report, 2026-11-14). Fades out
@@ -299,6 +308,7 @@ import MetricCard from '@interfaces/components/command/MetricCard.vue'
 import MiniDonut from '@interfaces/components/command/MiniDonut.vue'
 import MiniLine from '@interfaces/components/command/MiniLine.vue'
 import DriveGauge from '@interfaces/components/command/DriveGauge.vue'
+import MiniMap from '@interfaces/components/command/MiniMap.vue'
 
 const cesiumContainer = ref<HTMLDivElement | null>(null)
 const threeCanvas = ref<HTMLCanvasElement | null>(null)
@@ -988,6 +998,24 @@ watch(themeId, (theme) => {
   networkRoads?.restyle()
   osmBuildings?.restyle()
   if (cesiumViewer) applyBasemapTuning(cesiumViewer, theme)
+})
+
+// ===== the navigation-style street view (P5) =====
+//
+// At street level (and in the low ride views) the raster basemap is the
+// thing the user asked to stop seeing: buildings, the Three.js road
+// mesh and the fleet ARE the picture now. The imagery layer hides and
+// the globe shows the theme's screen colour; the mini-map carries the
+// "where am I relative to the city" duty instead. Bird view restores
+// the raster (there it is the context the fleet reads against).
+const imageryGate = computed(() => {
+  if (viewMode.value === 'street') return true // hidden
+  if (world.rideVehicleId && world.rideMode !== 'chase-top') return true // hidden
+  return false // shown
+})
+watch(imageryGate, (hide) => {
+  const imageryLayer = cesiumViewer?.imageryLayers.get(0)
+  if (imageryLayer) imageryLayer.show = !hide
 })
 
 // View mode toggle: Cesium flyTo for bird/street; orbit controls
@@ -1748,6 +1776,18 @@ onBeforeUnmount(() => {
   color: var(--dc-accent, #4a7fb5);
   border-color: var(--dc-accent, #4a7fb5);
   font-weight: 600;
+}
+
+/* ===== the navigation mini-map (P5) ===== */
+/* Right edge, sitting on the event feed's top edge and clear of the
+   brand capsule's corner (which the feed already yields). Always
+   visible — including panels-collapsed: it is the street view's
+   navigation window, not a collapsible readout. */
+.page-minimap {
+  position: absolute;
+  right: var(--dc-gap, 12px);
+  bottom: 200px;
+  z-index: var(--dc-z-panel, 20);
 }
 
 /* The incident staging button: warm warning tint while a wreck is live
