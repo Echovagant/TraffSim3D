@@ -358,13 +358,22 @@ export const loadOSMBuildings = async (
     entity.polygon.extrudedHeight = new Cesium.ConstantProperty(
       Number.isFinite(height) ? height : DEFAULT_BUILDING_HEIGHT_M,
     )
+    // Height-tinted: supertalls (the Futian extract carries the 599 m
+    // Ping An tower and a band of 300-390 m skyscrapers) brighten with
+    // height so a 600 m volume reads as a LANDMARK instead of an
+    // unlit grey wedge "stuck in the ground" (user report, 2026-11-15
+    // — the polygon material is unlit, so without the tint a supertall
+    // is indistinguishable from a rendering artifact).
+    const colorProp = entity.polygon.material as Cesium.ColorMaterialProperty | undefined
+    const existing = colorProp?.color?.getValue?.() as Cesium.Color | undefined
+    const alpha = existing ? existing.alpha : BUILDING_OPACITY
     const color = getBuildingColor({
       building: getTag('building'),
       amenity: getTag('amenity'),
     })
-    entity.polygon.material = new Cesium.ColorMaterialProperty(
-      Cesium.Color.fromCssColorString(color).withAlpha(BUILDING_OPACITY),
-    )
+    const shade = Number.isFinite(height) && height > 0 ? Math.min(1, height / 600) : 0
+    const tinted = Cesium.Color.fromCssColorString(color).brighten(shade * 0.55, new Cesium.Color())
+    entity.polygon.material = new Cesium.ColorMaterialProperty(tinted.withAlpha(alpha))
     // The outline is the one thing the per-entity flags do NOT settle:
     // on a ground-clamped polygon Cesium still draws the footprint with
     // `outlineColor` (its default is YELLOW). So the colour is set to
@@ -468,8 +477,18 @@ export const loadOSMBuildings = async (
         building: getTag('building'),
         amenity: getTag('amenity'),
       })
+      // Keep the height tint consistent with styleBuilding: supertalls
+      // stay legible as landmarks in the solid body too.
+      const height =
+        (entity.polygon.extrudedHeight?.getValue?.() as number | undefined) ??
+        DEFAULT_BUILDING_HEIGHT_M
+      const shade = Number.isFinite(height) && height > 0 ? Math.min(1, height / 600) : 0
+      const tinted = Cesium.Color.fromCssColorString(color).brighten(
+        shade * 0.55,
+        new Cesium.Color(),
+      )
       entity.polygon.material = new Cesium.ColorMaterialProperty(
-        Cesium.Color.fromCssColorString(color).withAlpha(solid ? 1.0 : BUILDING_OPACITY),
+        tinted.withAlpha(solid ? 1.0 : BUILDING_OPACITY),
       )
     }
   }
