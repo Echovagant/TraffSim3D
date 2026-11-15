@@ -160,7 +160,9 @@ test('Smart City: a road with a height limit gets a gantry that names the limit'
     const r = (
       window as unknown as {
         __renderer?: {
-          built?: { roadSurface?: { geometry?: { attributes?: { position?: { count?: number } } } } }
+          built?: {
+            roadSurface?: { geometry?: { attributes?: { position?: { count?: number } } } }
+          }
         }
       }
     ).__renderer
