@@ -61,10 +61,17 @@ import * as path from 'path'
 import { SCREENSHOT_DIR, waitForSceneReady } from './helpers/wait'
 
 const MIN_FPS = 30
-/** Gate as originally written. See the SCOPE note below — unreachable today. */
+/**
+ * The gate, as written. The 2026-11-15 perf fixes (the cross-road yield
+ * negotiation stopped scanning the whole fleet, the junction index went
+ * O(1) per request) un-froze traffic that used to be held by a distant
+ * junction, and spawn capacity ROSE on every built-in scene
+ * (scene-capacity-probe: cross 16 | t 25 | loop 40 | elevated 15 |
+ * corridor 20 — previously 8 | 7 | 12 | 7 | 8). The largest scene now
+ * holds the 20-vehicle gate for the first time, so this test asserts the
+ * real gate instead of reporting a shortfall against a smaller ceiling.
+ */
 const GATE_VEHICLES = 20
-/** Largest capacity any built-in scene can actually hold (measured). */
-const MEASURED_VEHICLES = 12
 /**
  * Hard floor for the *software* path: below this the page has effectively
  * stopped drawing, which IS conclusive and must fail. It is far below the
@@ -125,16 +132,13 @@ test.use({
 test.describe('performance gate', () => {
   test.setTimeout(180_000)
 
-  test(`${MEASURED_VEHICLES} vehicles sustain the frame-rate target`, async ({ page }) => {
+  test(`${GATE_VEHICLES} vehicles sustain the frame-rate target`, async ({ page }) => {
     await waitForSceneReady(page)
 
-    // SCOPE NOTE — the gate says 20 vehicles but that target is unreachable.
-    // Measured capacities of every built-in scene (tests/e2e/scene-capacity-probe.spec.ts):
-    //   cross 8 | t 7 | loop 12 | elevated 7 | corridor 8
-    // `spawnVehicle` refuses once every lane is occupied ("交通密度已满"), and
-    // road geometry was reworked since the gate was written.
-    // So we measure the largest scene at its real ceiling and report the
-    // shortfall rather than silently redefining the gate as 12 vehicles.
+    // The gate is measured on the largest built-in scene: `spawnVehicle`
+    // refuses once every lane is occupied ("交通密度已满"), and the loop
+    // scene holds the most vehicles of the five (40 at the latest probe —
+    // see the GATE_VEHICLES note above).
     await page.selectOption('[data-testid="scene-kind-select"]', 'loop')
     await page.waitForTimeout(2_000)
 
@@ -156,9 +160,13 @@ test.describe('performance gate', () => {
         saturated: Object.keys(store.network.vehicles).length < target,
       }
     }, GATE_VEHICLES)
-    expect(added.vehicles).toBe(MEASURED_VEHICLES)
-    // Assert the ceiling itself, so if capacity changes this test says so.
-    expect(added.saturated, 'scene capacity changed — update MEASURED_VEHICLES').toBe(true)
+    expect(added.vehicles).toBe(GATE_VEHICLES)
+    // The gate must be fully staffed: a scene that saturates below the gate
+    // is testing a weaker target than this file claims.
+    expect(
+      added.saturated,
+      'loop scene no longer holds the gate — re-run tests/e2e/scene-capacity-probe.spec.ts',
+    ).toBe(false)
 
     // Let the sim settle before sampling — early frames include WASM warm-up.
     await page.waitForTimeout(WARMUP_MS)
@@ -306,14 +314,14 @@ test.describe('performance gate', () => {
         `[perf gate] rAF fps min/avg/max = ${minFps.toFixed(1)}/${sustainedFps.toFixed(1)}/` +
         `${maxFps.toFixed(1)}, frame interval p50 = ${pct(0.5).toFixed(1)} ms, ` +
         `frameMs avg = ${frameAvg.toFixed(2)}, vehicles = ${added.vehicles} ` +
-        `(gate asked for ${GATE_VEHICLES}; scene capacity max is ${MEASURED_VEHICLES})\n` +
+        `(gate asked for ${GATE_VEHICLES})\n` +
         `[perf gate] target = ${MIN_FPS} FPS (asserted on GPU: ${report.targetAsserted})`,
     )
 
     // The store must actually have been ticking — a frozen sim would read
     // as a suspiciously high fps and would invalidate the whole reading.
     expect(maxFps).toBeGreaterThan(0)
-    expect(samples.every((s) => s.vehicles === MEASURED_VEHICLES)).toBe(true)
+    expect(samples.every((s) => s.vehicles === GATE_VEHICLES)).toBe(true)
 
     // Conclusive assertions (see the honesty note at the top of this file):
     // every reading is a real number, and the page has not collapsed.
@@ -321,7 +329,7 @@ test.describe('performance gate', () => {
     expect(samples.every((s) => Number.isFinite(s.frameMsAvg))).toBe(true)
     expect(
       sustainedFps,
-      `the simulator collapsed to ${sustainedFps.toFixed(1)} FPS at ${MEASURED_VEHICLES} vehicles ` +
+      `the simulator collapsed to ${sustainedFps.toFixed(1)} FPS at ${GATE_VEHICLES} vehicles ` +
         `(degraded floor ${DEGRADED_FPS_FLOOR}). Renderer: ${report.renderer}.`,
     ).toBeGreaterThan(DEGRADED_FPS_FLOOR)
 
@@ -353,11 +361,11 @@ test.describe('performance gate', () => {
 
     // Real GPU: this is the environment the 30 FPS target is about, so it is
     // asserted here. Measured on this host (RTX 4050 Laptop GPU, D3D11):
-    // ~165 FPS sustained at 12 vehicles — ~5.5x the 30 FPS target.
+    // see the latest [perf gate] log line for the sustained figure.
     expect(
       sustainedFps,
       `frame rate target not met on real hardware: ${sustainedFps.toFixed(1)} FPS sustained ` +
-        `at ${MEASURED_VEHICLES} vehicles (target ${MIN_FPS}). ` +
+        `at ${GATE_VEHICLES} vehicles (target ${MIN_FPS}). ` +
         `Renderer: ${renderer}. p50 frame interval ${pct(0.5).toFixed(1)} ms.`,
     ).toBeGreaterThanOrEqual(MIN_FPS)
   })
