@@ -534,11 +534,10 @@ describe('ThreeJSRenderer — scene rebuild', () => {
     const scRoot = builtRoot()
     expect(scRoot).not.toBe(flatRoot)
     expect(scRoot.children.some((c) => c.name === 'pick-plane')).toBe(true)
-    // Flat mode holds the light layer in a Group; smart-city keeps the
-    // road-markings group (both modes paint, P4) and drops only the
-    // lights (an imported city's light heads would be invisible over
-    // the basemap yet cost a traversal every frame).
-    expect(scRoot.children.filter((c) => c instanceof THREE.Group)).toHaveLength(roadGroups - 1)
+    // Both modes paint AND hold the signal heads (P4/P5): the Group
+    // count is identical across the rebuild — what changes is the
+    // ground/pick plane and the road mesh's scene membership.
+    expect(scRoot.children.filter((c) => c instanceof THREE.Group)).toHaveLength(roadGroups)
   })
 
   it('setRenderMode to the current mode is a no-op (no rebuild)', () => {

@@ -31,8 +31,14 @@ export const FOLLOW_CHASE_BEHIND_M = 9
 /** How far above the car the chase camera hangs (m). */
 export const FOLLOW_CHASE_ABOVE_M = 3.4
 
-/** How high the overhead chase camera looks down from (m). */
-export const FOLLOW_CHASE_TOP_M = 55
+/**
+ * How high the overhead chase camera looks down from (m). 55 m filled
+ * the frame with city blocks — the user asked for the racing-game
+ * overhead: the car's WHOLE body legible with a margin of road around
+ * it. 18 m over a 4.2 m car in a 60° fov reads as "the car + one
+ * junction's worth of context" (report, 2026-11-15).
+ */
+export const FOLLOW_CHASE_TOP_M = 18
 
 /**
  * How many frames the camera takes to arrive at the driver's eye.

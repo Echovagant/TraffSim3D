@@ -619,6 +619,22 @@ export const useWorldStore = defineStore('world', () => {
   const setSteerTarget = (next: number): void => {
     steerTarget = Math.max(-1, Math.min(1, next))
   }
+  /**
+   * A short steering PULSE (the tap-steer fallback): on the Futian
+   * network a two-way road's adjacent lane is the ONCOMING one, so a
+   * lane-change tap is refused by real-traffic rules almost everywhere —
+   * and a tap that does nothing visible reads as a broken key (user
+   * report, 2026-11-15). Instead the wheel kicks to ~55% lock and the
+   * existing self-centre ramp walks it back: the body dips toward the
+   * kerb and straightens — what a real driver's试探 tap feels like.
+   * The kerb (STEER_LANE_EDGE_M) and the friction circle keep it safe.
+   */
+  const steerPulse = (dir: number): void => {
+    steerTarget = Math.max(-1, Math.min(1, dir * 0.55))
+    window.setTimeout(() => {
+      steerTarget = 0
+    }, 260)
+  }
   const setDriverInput = (input: 'accel' | 'brake' | null): void => {
     driverInput.value = input
   }
@@ -626,7 +642,12 @@ export const useWorldStore = defineStore('world', () => {
   /** chase ↔ chase-top — the tracking view's own look toggles. */
   const toggleRideLook = (): void => {
     if (!rideVehicleId.value) return
-    rideMode.value = rideMode.value === 'chase-top' ? 'chase' : 'chase-top'
+    // THREE-state cycle: cockpit → chase → chase-top → cockpit. The old
+    // two-state flip skipped cockpit entirely — pressing the look button
+    // (or the C key) while DRIVING did nothing, which the user read as a
+    // broken button (report, 2026-11-15).
+    rideMode.value =
+      rideMode.value === 'cockpit' ? 'chase' : rideMode.value === 'chase' ? 'chase-top' : 'cockpit'
     bumpTick()
   }
 
@@ -2403,6 +2424,7 @@ export const useWorldStore = defineStore('world', () => {
     driverInput,
     steerInput,
     setSteerTarget,
+    steerPulse,
     setDriverInput,
     routeRenderPath,
     // sensor + exporter surface

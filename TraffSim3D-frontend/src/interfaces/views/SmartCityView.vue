@@ -75,12 +75,15 @@
         </button>
         <button
           v-if="!ride"
-          class="top-btn top-drive"
-          title="进入第一人称驾驶 — 自动挑一辆离相机最近的车"
+          class="top-btn"
+          :class="{ 'top-drive': pickDriveArmed }"
+          :title="
+            pickDriveArmed ? '选车模式 — 点击画面里想驾驶的车' : '驾驶 — 点击后选择画面里想开的车'
+          "
           data-testid="drive-button"
           @click="enterDrive()"
         >
-          驾驶
+          {{ pickDriveArmed ? '选车中…' : '驾驶' }}
         </button>
         <button
           v-if="viewMode === 'street'"
@@ -637,10 +640,16 @@ const driveRide = (): void => {
  * already exist and keep working from here.
  */
 const enterDrive = (): void => {
-  const bestId = nearestVehicleId()
-  if (!bestId) return
-  world.setRideVehicle(bestId, 'cockpit')
+  // First press ARMS the pick mode: the user asked to CHOOSE the car
+  // they drive instead of always getting the nearest one (report,
+  // 2026-11-15). Clicking a vehicle while armed enters its cockpit;
+  // clicking empty space cancels. The toast explains the interaction.
+  pickDriveArmed.value = true
+  status.value = { kind: 'info', text: '选车模式：点击想驾驶的车（点击空白处取消）' }
 }
+
+/** Whether the DRIVE button has armed vehicle picking (crosshair). */
+const pickDriveArmed = ref(false)
 
 /** The vehicle nearest to the camera (the DRIVE and ACCIDENT buttons'
  *  shared pick — "nearest" reads as "the one I am looking at"). */
@@ -1079,6 +1088,25 @@ const onPointerUp = (e: PointerEvent): void => {
   const renderer = rendererRef.value
   if (!renderer) return
   const hit = renderer.pick(e.clientX, e.clientY, world.network)
+  // The DRIVE button's pick mode: the user asked to CHOOSE the car they
+  // drive (2026-11-15) — clicking a vehicle while armed enters its
+  // cockpit directly, and the mode disarms itself whatever happens.
+  if (pickDriveArmed.value) {
+    pickDriveArmed.value = false
+    if (hit?.kind === 'vehicle') {
+      world.setRideVehicle(hit.id, 'cockpit')
+      status.value = { kind: 'info', text: `已进入 ${hit.id} 的驾驶舱 — WASD 驾驶，C 切换视角` }
+      setTimeout(() => {
+        if (status.value?.text?.startsWith('已进入')) status.value = null
+      }, 3000)
+      return
+    }
+    status.value = { kind: 'info', text: '已取消选车 — 再按「驾驶」重试' }
+    setTimeout(() => {
+      if (status.value?.text?.startsWith('已取消')) status.value = null
+    }, 3000)
+    return
+  }
   if (hit?.kind === 'vehicle') {
     world.setRideVehicle(hit.id, 'chase')
   } else if (world.rideVehicleId) {
@@ -1137,7 +1165,21 @@ const endSteer = (): void => {
   steerKeyAt = null
   steerKeyDir = null
   if (held < STEER_TAP_MS && dir && world.rideVehicleId) {
-    flashLaneChange(world.requestLaneChange(world.rideVehicleId, dir))
+    const result = world.requestLaneChange(world.rideVehicleId, dir)
+    if (result.ok) {
+      flashLaneChange(result)
+    } else {
+      // The tap's FALLBACK: on the Futian network a two-way road's
+      // adjacent lane is the oncoming one, so real-traffic rules refuse
+      // the lane change almost everywhere — and a tap that does nothing
+      // visible reads as a broken key (user report, 2026-11-15). The
+      // pulse kicks the wheel to partial lock and the self-centre ramp
+      // walks it back: the body dips toward the kerb and straightens,
+      // which is what a real tap feels like. The refusal reason still
+      // shows in the toast.
+      world.steerPulse(dir === 'left' ? 1 : -1)
+      flashLaneChange(result)
+    }
   }
 }
 

@@ -145,10 +145,14 @@ export const buildScene = (network: RoadNetwork, mode: RenderMode = 'flat'): Bui
     if (trail) root.add(trail.line)
   }
 
-  // The light heads exist only in the editor's flat mode. In smart-city
-  // mode the basemap owns the picture and the heads would be invisible
-  // — but Three.js would still traverse ~3 000 nodes every frame.
-  const lightLayer = mode === 'smart-city' ? null : createTrafficLightLayer()
+  // The light heads exist in BOTH modes now: the user cannot drive a
+  // traffic simulation they cannot SEE the signals of (report,
+  // 2026-11-15 — the smart-city mode used to skip the layer because the
+  // basemap "owned the picture", but the drive view made the missing
+  // lights a correctness hole, not a perf trade). The per-light dirty
+  // skip (lastWritten cache) keeps the per-frame sync near zero when
+  // nothing changes.
+  const lightLayer = createTrafficLightLayer()
   if (lightLayer) {
     lightLayer.setLights(collectLights(network))
     root.add(lightLayer.root)
