@@ -731,6 +731,7 @@ export const useWorldStore = defineStore('world', () => {
     const riding = rideVehicleId.value === id
     const mode: FollowCameraTarget['mode'] = !riding ? 'cockpit' : rideMode.value
     return {
+      speedMps: vehicle.speed,
       position: {
         x: vehicle.position.x,
         y: vehicle.position.y + DRIVER_EYE_HEIGHT_M,
@@ -1789,6 +1790,43 @@ export const useWorldStore = defineStore('world', () => {
   }
   const vehicleBounds = (): LocalRect | null => vehicleBoundsRect
 
+  // ===== the incident staging (the NTE-style "wreck the traffic" tool) =====
+  //
+  // Staging a crash is the DEMO's lever on emergent congestion: a wrecked
+  // vehicle stands in its lane forever (the `crashed` status is sticky and
+  // applyControl holds it at zero), the car-following model treats it as a
+  // leader with speed 0, and the queue behind it grows lane by lane — the
+  // "one crash jams the district" chain that, per the NTE research, is the
+  // single most viral traffic picture. `reviveVehicle` undoes it so a demo
+  // can stage, watch, and clear.
+  const crashVehicle = (vehicleId: string): boolean => {
+    const v = network.value.vehicles[vehicleId]
+    if (!v || v.status === 'crashed') return false
+    v.status = 'crashed'
+    v.desiredStatus = 'crashed'
+    v.targetSpeed = 0
+    v.speed = 0
+    // Hold the body NOW — the next applyControl would brake it anyway,
+    // but an immediate zero means the wreck stands exactly where the
+    // button was pressed.
+    rapierWorld?.setVehicleSpeed(vehicleId, 0, v.heading)
+    rapierWorld?.setVehicleAngularVelocity(vehicleId, 0)
+    bumpTick()
+    return true
+  }
+  const reviveVehicle = (vehicleId: string): boolean => {
+    const v = network.value.vehicles[vehicleId]
+    if (!v || v.status !== 'crashed') return false
+    v.status = 'driving'
+    v.desiredStatus = 'driving'
+    v.targetSpeed = Math.min(v.targetSpeed || roadSpeedDefault(v), roadSpeedDefault(v))
+    bumpTick()
+    return true
+  }
+  /** The road's own limit — a revived vehicle resumes AT the legal pace. */
+  const roadSpeedDefault = (v: Vehicle): number =>
+    network.value.roads[v.roadId]?.speedLimit ?? 13.89
+
   const removeVehicle = (id: string): void => {
     pushHistory()
     // A pin on a deleted vehicle is meaningless — drop it, otherwise
@@ -2281,6 +2319,8 @@ export const useWorldStore = defineStore('world', () => {
     setVehicleBounds,
     vehicleBounds,
     setSimCameraPos,
+    crashVehicle,
+    reviveVehicle,
     spawnMany,
     setVehicleSpeed,
     updateVehicleType,

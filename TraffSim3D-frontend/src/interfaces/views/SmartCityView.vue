@@ -61,6 +61,20 @@
 
         <button
           v-if="!ride"
+          class="top-btn"
+          :class="{ 'top-accident-on': wreckedId }"
+          :title="
+            wreckedId
+              ? '解除事故 — 该车恢复行驶'
+              : '制造事故 — 最近的车抛锚挡路，后方车流将排队拥堵'
+          "
+          data-testid="accident-button"
+          @click="toggleAccident()"
+        >
+          {{ wreckedId ? '解除事故' : '制造事故' }}
+        </button>
+        <button
+          v-if="!ride"
           class="top-btn top-drive"
           title="进入第一人称驾驶 — 自动挑一辆离相机最近的车"
           data-testid="drive-button"
@@ -612,10 +626,19 @@ const driveRide = (): void => {
  * already exist and keep working from here.
  */
 const enterDrive = (): void => {
+  const bestId = nearestVehicleId()
+  if (!bestId) return
+  world.setRideVehicle(bestId, 'cockpit')
+}
+
+/** The vehicle nearest to the camera (the DRIVE and ACCIDENT buttons'
+ *  shared pick — "nearest" reads as "the one I am looking at"). */
+const nearestVehicleId = (): string | null => {
   const cam = rendererRef.value?.getCamera().position
   let bestId: string | null = null
   let bestDist = Infinity
   for (const v of Object.values(world.network.vehicles)) {
+    if (v.status === 'crashed') continue // a wreck is nobody's ride or target
     if (!cam) {
       bestId = v.id
       break
@@ -626,8 +649,36 @@ const enterDrive = (): void => {
       bestId = v.id
     }
   }
-  if (!bestId) return
-  world.setRideVehicle(bestId, 'cockpit')
+  return bestId
+}
+
+// ===== the incident staging (the NTE-style congestion lever) =====
+//
+// One wreck in a lane is the seed of the emergent jam: the followers
+// queue behind it (the car-following model treats a crashed vehicle as a
+// stopped leader), the queue spills across junctions, and the vehicle
+// donut's waiting share climbs — the district visibly chokes. The wreck
+// is undoable: the button toggles, so a demo can stage, watch, clear.
+const wreckedId = ref<string | null>(null)
+const toggleAccident = (): void => {
+  if (wreckedId.value) {
+    const id = wreckedId.value
+    world.reviveVehicle(id)
+    wreckedId.value = null
+    status.value = { kind: 'info', text: `${id} 已解除事故，恢复行驶` }
+  } else {
+    const id = nearestVehicleId()
+    if (!id) return
+    world.crashVehicle(id)
+    wreckedId.value = id
+    status.value = {
+      kind: 'info',
+      text: `⚠ ${id} 已抛锚 — 后方车流将排队拥堵`,
+    }
+  }
+  setTimeout(() => {
+    status.value = null
+  }, 3000)
 }
 
 // ===== building body: translucent clay-white vs solid =====
@@ -1679,6 +1730,14 @@ onBeforeUnmount(() => {
 .top-drive {
   color: var(--dc-accent, #4a7fb5);
   border-color: var(--dc-accent, #4a7fb5);
+  font-weight: 600;
+}
+
+/* The incident staging button: warm warning tint while a wreck is live
+   (the operator should see at a glance that the city is staged). */
+.top-accident-on {
+  color: var(--dc-warning, #f59e0b);
+  border-color: var(--dc-warning, #f59e0b);
   font-weight: 600;
 }
 

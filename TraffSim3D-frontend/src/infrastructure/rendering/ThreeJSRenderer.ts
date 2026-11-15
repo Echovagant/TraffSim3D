@@ -71,6 +71,15 @@ export interface FollowCameraTarget {
   /** The body length the chase camera hangs off (defaults to a car). */
   vehicleKind?: 'car' | 'truck' | 'bus'
   /**
+   * The ridden vehicle's current speed (m/s), when known. The camera
+   * leans on it for SPEED FEEL: the chase hang-back stretches and the
+   * field of view widens as the fleet moves faster, and both relax
+   * back when the car slows — the standard arcade-racing camera grammar
+   * (the NTE reference's ride views were panned for exactly this and
+   * it is what makes the drive READ as fast).
+   */
+  speedMps?: number
+  /**
    * Which ride the camera takes. `cockpit` (default) sits at the
    * driver's eye — the POI drive's first person; the car's own body is
    * hidden while it rides. `chase` hangs behind and above the car (the
@@ -480,6 +489,9 @@ export class ThreeJSRenderer {
     this.getTickPolicy = getter
   }
 
+  /** The pre-ride field of view, remembered while the speed feel
+   *  stretches it — restored on leaving the ride (null = not riding). */
+  private rideBaseFov: number | null = null
   /** Who drives `frame()`: the internal rAF loop (`start()`, used by
    *  the flat scene editor, which has no Cesium to piggyback on) or an
    *  external frame source — the Smart City view hooks the whole frame
@@ -623,9 +635,15 @@ export class ThreeJSRenderer {
       // is driving through, with the car itself in the lower third.
       // The hang-back distance scales with the body — the constants
       // are tuned for a car, and a 9 m bus would fill the frame.
+      //
+      // It ALSO stretches with speed (up to +35% at ~17 m/s): a fixed
+      // hang-back makes 60 km/h look like 20 — the car barely grows in
+      // frame and nothing streams past. More air behind the subject is
+      // what makes pace legible.
       const length = VEHICLE_BODY_SPEC[target.vehicleKind ?? 'car'].length
-      const behind = FOLLOW_CHASE_BEHIND_M + length / 2
-      const above = FOLLOW_CHASE_ABOVE_M + length * 0.18
+      const speedFeel = this.speedFeel(target.speedMps ?? 0)
+      const behind = (FOLLOW_CHASE_BEHIND_M + length / 2) * (1 + speedFeel * 0.35)
+      const above = FOLLOW_CHASE_ABOVE_M + length * 0.18 + speedFeel * 1.2
       const body = new THREE.Vector3(target.position.x, target.position.y, target.position.z)
       eye = body
         .clone()
@@ -669,10 +687,29 @@ export class ThreeJSRenderer {
     this.camera.position.lerp(eye, eased)
     this.followLook.lerp(look, eased)
     this.camera.lookAt(this.followLook)
+    // Speed feel, part 2: the field of view widens with pace (up to
+    // +14° at ~17 m/s) — the world streaming past the edges is what a
+    // fast drive FEELS like. The base fov is remembered so leaving the
+    // ride restores exactly what the orbit/basemap sync had. The Cesium
+    // basemap follows through the camera sync (the ride hands the
+    // camera to Three, Cesium mirrors), so both layers widen together.
+    const speedFeel = this.speedFeel(target.speedMps ?? 0)
+    if (this.rideBaseFov === null) this.rideBaseFov = this.camera.fov
+    const wantedFov = this.rideBaseFov + speedFeel * 14
+    if (Math.abs(this.camera.fov - wantedFov) > 0.05) {
+      this.camera.fov = wantedFov
+      this.camera.updateProjectionMatrix()
+    }
     // Keep the orbit controls' target on the look-at point, so leaving
     // the first-person camera starts the orbit from where the user was
     // looking rather than from wherever the orbit camera was parked.
     this.controls?.target?.copy(look)
+  }
+
+  /** 0..1 speed feel: 0 below 5 m/s (parking pace), 1 at ~17 m/s (the
+   *  city's top cruising speed) — the ramp the camera grammar uses. */
+  private speedFeel(speedMps: number): number {
+    return Math.max(0, Math.min(1, (speedMps - 5) / 12))
   }
 
   /**
@@ -698,6 +735,14 @@ export class ThreeJSRenderer {
     if (wanted) {
       vehicles.hide(wanted)
       this.hiddenFollowerId = wanted
+    }
+    // Leaving the ride: restore the field of view the speed-feel was
+    // stretching, so the orbit/basemap camera resumes exactly what it
+    // had (the base fov is the pre-ride value, remembered on first use).
+    if (!follow && this.rideBaseFov !== null) {
+      this.camera.fov = this.rideBaseFov
+      this.camera.updateProjectionMatrix()
+      this.rideBaseFov = null
     }
   }
 
