@@ -177,6 +177,13 @@ export class TrajectoryExporter {
 
   record(network: RoadNetwork, simTime: number, sampleInterval: number): void {
     if (simTime - this.lastSampleSimTime < sampleInterval) return
+    // Buffer full = STOP appending. The old behaviour auto-flushed by
+    // triggering a browser download — with the fleet recording at 10 Hz
+    // the cap fills in ~100 s, so a download dialog popped every minute
+    // and a half of running the city, which the user read as a bug
+    // (report, 2026-11-15). The manual export buttons remain the way to
+    // get the CSV; telemetry past the cap is simply not collected.
+    if (this.buffer.length >= this.cap) return
     this.lastSampleSimTime = simTime
     for (const v of Object.values(network.vehicles)) {
       const prev = this.lastSamplePerVehicle.get(v.id) ?? null
@@ -218,17 +225,6 @@ export class TrajectoryExporter {
         speed: v.speed,
         exportedT: simTime,
       })
-    }
-    if (this.buffer.length >= this.cap) {
-      // Auto-flush: download as CSV.
-      const blob = this.exportAsBlob({ kind: 'csv', includeCrashed: true, sampleInterval })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `trajectory-autoflush-${Date.now()}.csv`
-      a.click()
-      URL.revokeObjectURL(url)
-      this.buffer = []
     }
   }
 
