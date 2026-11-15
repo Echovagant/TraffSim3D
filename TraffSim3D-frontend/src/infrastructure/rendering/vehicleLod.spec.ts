@@ -28,12 +28,12 @@ describe('vehicleLodScale', () => {
     expect(f).toBeLessThan(1.01)
   })
 
-  it('gives ~4× at the city-overview slant distance (~4.7 km)', () => {
+  it('gives ~5.7× at the city-overview slant distance (~4.7 km)', () => {
     // The 45° bird view at 3324 m height sits ~4700 m from the centre.
     const f = vehicleLodScale(4700, 900, FOV_60)
-    // apparentPx = 4.2·900/(2·4700·tan30°) ≈ 0.697 → 3/0.697 ≈ 4.3.
-    expect(f).toBeGreaterThan(3.5)
-    expect(f).toBeLessThan(5.5)
+    // apparentPx = 4.2·900/(2·4700·tan30°) ≈ 0.697 → 4/0.697 ≈ 5.7.
+    expect(f).toBeGreaterThan(4.5)
+    expect(f).toBeLessThan(6.5)
   })
 
   it('is monotone in distance and continuous across the threshold', () => {

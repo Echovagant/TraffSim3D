@@ -655,6 +655,18 @@ export class ThreeJSRenderer {
           this.built.roadMarkings.visible = showPaint
         }
       }
+      // Signal-head LOD: below the legibility pixel floor a head is
+      // decoration drawn into a couple of pixels — hide it outright
+      // instead of scaling it up (the opposite trade from the vehicle
+      // dots above, which ARE the information). Same cadence, same
+      // inputs as the vehicle LOD call above.
+      if (this.built.lightLayer) {
+        this.built.lightLayer.applyCameraLod(
+          this.camera.position,
+          this.viewportHeightPx ?? 0,
+          (this.camera.fov * Math.PI) / 180,
+        )
+      }
     }
     this.renderer.render(this.scene, this.camera)
   }

@@ -438,21 +438,21 @@ describe('createVehicleInstances — far-camera legibility (LOD)', () => {
     const nearScale = decompose(pool.meshes.car, 0).scale
     expect(nearScale.x).toBe(1)
     const farScale = decompose(pool.meshes.car, 1).scale
-    expect(farScale.x).toBeGreaterThan(3.5)
-    expect(farScale.x).toBeLessThan(5.5)
+    expect(farScale.x).toBeGreaterThan(4.5)
+    expect(farScale.x).toBeLessThan(6.5)
   })
 
   it('re-scales a body in place from its TRUE camera distance, even while paused', () => {
     const v = makeTestVehicle({ position: { x: 1, y: 0, z: 2 } })
     pool.allocate(v)
     pool.update(v)
-    // Camera exactly 4 700 m from the body: the factor is ~4.3.
+    // Camera exactly 4 700 m from the body: the factor is ~5.7.
     pool.updateLod(new THREE.Vector3(4701, 1.7, 2), 900, FOV_60)
 
     const { scale, pos } = decompose(pool.meshes.car, 0)
     // The instance matrix is stored as Float32 — allow ~1e-5 slack.
-    expect(scale.x).toBeGreaterThan(3.5)
-    expect(scale.x).toBeLessThan(5.5)
+    expect(scale.x).toBeGreaterThan(4.5)
+    expect(scale.x).toBeLessThan(6.5)
     // The position is untouched — the dot stays where the vehicle is.
     expect(pos.x).toBeCloseTo(1, 5)
     expect(pos.z).toBeCloseTo(2, 5)

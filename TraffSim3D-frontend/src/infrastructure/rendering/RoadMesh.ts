@@ -124,6 +124,24 @@ export const createRoadMesh = (roads: readonly Road[]): THREE.Mesh => {
     // changed shape and the merge is no longer valid.
     throw new Error('createRoadMesh: the road geometries could not be merged')
   }
-  const mat = new THREE.MeshStandardMaterial({ color: 0x374151, roughness: 0.95 })
+  // The asphalt sits millimetres under the vehicle bodies (wheels touch,
+  // the body is 1 m up), and at the bird view's ~5 km camera distance a
+  // 1 m height difference is BELOW one 24-bit depth-buffer step
+  // (d(depth)/d(distance) ≈ 2.3e-8/m at 5 km, one step = 6e-8) — every
+  // car and the road underneath it read as the SAME depth, and with the
+  // default LessEqualDepth test whichever fragment draws last wins. The
+  // road draws after the nearer cars, so the asphalt swallowed every
+  // car pixel at overview range: the user's "鸟瞰看不到车辆" report,
+  // open since the road layer moved into Three (P4). The polygon offset
+  // pushes the road fragments a few depth steps away from the camera,
+  // which restores the 1 m hierarchy at every distance without touching
+  // the near view (the offset is slope-scaled and vanishes up close).
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x374151,
+    roughness: 0.95,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 4,
+  })
   return new THREE.Mesh(merged, mat)
 }

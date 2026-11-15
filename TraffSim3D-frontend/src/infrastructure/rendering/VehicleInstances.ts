@@ -57,6 +57,8 @@ interface SlotData {
   pitch: number
   /** The LOD factor this slot's matrix was composed with. */
   scale: number
+  /** The display-symbol emissive this slot currently shows (0..1). */
+  glow: number
 }
 
 export interface VehicleInstances {
@@ -131,6 +133,34 @@ export const createVehicleInstances = (): VehicleInstances => {
       roughness: 0.6,
       metalness: 0.1,
     })
+    // Far-camera display-symbol glow, the vehicle twin of the signal
+    // heads' `instanceGlow`: once a body is scaled past its true size it
+    // IS a dot on a map, not a car — and a lit paint job is what makes
+    // the dot readable on the dark carriageway (the 2026-11-15 bird-view
+    // probe could not find ANY of the 372 cars in a zoomed crop; the
+    // #3a86ff car paint sits at ~35% luminance over a ~15% road). The
+    // glow rides the same continuous ramp as the scale, so there is no
+    // visible switch: true-size bodies keep their paint, scaled-up dots
+    // light up in their own colour.
+    mat.emissive = new THREE.Color(0xffffff)
+    mat.emissiveIntensity = 1
+    mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nattribute float instanceGlow;\nvarying float vInstanceGlow;',
+        )
+        .replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\n\tvInstanceGlow = instanceGlow;',
+        )
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vInstanceGlow;')
+        .replace(
+          '#include <emissivemap_fragment>',
+          '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += vInstanceGlow * vColor.rgb;',
+        )
+    }
     const mesh = new THREE.InstancedMesh(geom, mat, MAX_VEHICLES_PER_TYPE)
     mesh.count = 0
     mesh.frustumCulled = false
@@ -139,6 +169,9 @@ export const createVehicleInstances = (): VehicleInstances => {
     const colors = new Float32Array(MAX_VEHICLES_PER_TYPE * 3)
     for (let i = 0; i < MAX_VEHICLES_PER_TYPE * 3; i++) colors[i] = 1
     mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3)
+
+    const glows = new Float32Array(MAX_VEHICLES_PER_TYPE)
+    geom.setAttribute('instanceGlow', new THREE.InstancedBufferAttribute(glows, 1))
 
     meshes[type] = mesh
     for (let i = MAX_VEHICLES_PER_TYPE - 1; i >= 0; i--) freeSlots[type].push(i)
@@ -153,6 +186,7 @@ export const createVehicleInstances = (): VehicleInstances => {
         heading: 0,
         pitch: 0,
         scale: 1,
+        glow: 0,
       })
     }
   }
@@ -203,6 +237,19 @@ export const createVehicleInstances = (): VehicleInstances => {
         if (hiddenIds.has(entityId)) continue
         const slot = slots[type][slotIdx]
         const next = lodScaleFor(slot)
+        // The glow ramps with the same factor — from the first moment a
+        // body is scaled past true size (it has become a dot) it brightens
+        // toward a full self-lit symbol, reaching it at 1.6x where the
+        // shape is unmistakably a mark. Continuous, so a car at the ramp
+        // edge never flickers between paint and symbol.
+        const nextGlow = Math.min(1, Math.max(0, (next - 1) / 0.6))
+        if (next === slot.scale && nextGlow === slot.glow) continue
+        if (nextGlow !== slot.glow) {
+          slot.glow = nextGlow
+          const attr = mesh.geometry.getAttribute('instanceGlow') as THREE.InstancedBufferAttribute
+          attr.setX(slotIdx, nextGlow)
+          attr.needsUpdate = true
+        }
         if (next === slot.scale) continue
         slot.scale = next
         recomposeSlot(type, slot)
@@ -241,6 +288,12 @@ export const createVehicleInstances = (): VehicleInstances => {
     slots[type][slotIdx].pz = v.position.z
     slots[type][slotIdx].heading = v.heading
     slots[type][slotIdx].pitch = pitch
+    slots[type][slotIdx].glow = 0
+    const glowAttr = meshes[type].geometry.getAttribute(
+      'instanceGlow',
+    ) as THREE.InstancedBufferAttribute
+    glowAttr.setX(slotIdx, 0)
+    glowAttr.needsUpdate = true
 
     slotToEntity[type].set(slotIdx, v.id)
     entityToSlot[type].set(v.id, slotIdx)

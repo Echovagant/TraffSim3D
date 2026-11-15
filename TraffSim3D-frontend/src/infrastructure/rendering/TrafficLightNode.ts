@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { TrafficLight } from '@domain/entities/TrafficLight'
 import { LightPhase } from '@domain/value-objects/Phase'
 import { PHASE_DURATIONS } from '@shared/constants/simulation'
+import { signalHeadApparentPx } from './vehicleLod'
 
 // Extended color map covers all 10 phase values.
 // Per 007 §1.1 rendering enforcement — exhaustive (no `default: gray`).
@@ -70,6 +71,14 @@ export interface TrafficLightLayer {
   setLights: (lights: readonly TrafficLight[]) => void
   /** Per-frame update of one light. */
   update: (node: TrafficLightNode, light: TrafficLight, simTime: number) => void
+  /**
+   * Hide heads the camera cannot legibly draw (see `signalHeadApparentPx`).
+   * A hidden head writes a zero matrix; re-showing restores the cached
+   * one, so the steady state costs nothing — only heads whose visibility
+   * class changed get written. `update` short-circuits for hidden lights,
+   * so the per-frame phase sync also stops paying for them.
+   */
+  applyCameraLod: (cameraPos: THREE.Vector3, viewportHeightPx: number, fovRad: number) => void
   /** The light behind an instance id (from a raycast). */
   lightIdAt: (instanceId: number) => string | undefined
   /** Release the GPU resources of the layer. */
@@ -168,6 +177,8 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
     poles,
     setLights: (lights) => setLights(lights),
     update: (node, light, simTime) => update(node, light, simTime),
+    applyCameraLod: (cameraPos, viewportHeightPx, fovRad) =>
+      applyCameraLod(cameraPos, viewportHeightPx, fovRad),
     lightIdAt: (instanceId) => lightIdAt(instanceId),
     dispose: () => dispose(),
   }
@@ -186,6 +197,9 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
     nodes.clear()
     ids.length = 0
     lastWritten.clear()
+    hidden.clear()
+    bulbMatrices.length = 0
+    barMatrices.length = 0
 
     const count = lights.length
     bulbs = createInstancedHeads(bulbGeometry, material, count)
@@ -218,10 +232,12 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
       // The bulb sits on top of the pole...
       _pos.set(light.position.x, light.position.y + BULB_HEIGHT, light.position.z)
       _matrix.compose(_pos, _quat, _scale)
+      bulbMatrices[index] = _matrix.clone()
       bulbs.setMatrixAt(index, _matrix)
       // ... and the countdown bar above it. Its width is set per frame.
       _pos.set(light.position.x, light.position.y + BAR_HEIGHT, light.position.z)
       _matrix.compose(_pos, _quat, _scale)
+      barMatrices[index] = _matrix.clone()
       bars.setMatrixAt(index, _matrix)
       // The head starts in the light's own phase, not in white.
       update(node, light, 0)
@@ -244,6 +260,10 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
   const lastWritten = new Map<string, { phase: string; visible: boolean; bar: number }>()
 
   const update = (node: TrafficLightNode, light: TrafficLight, simTime: number): void => {
+    // A camera-LOD-hidden head owns its instance slot: writing phase
+    // state here would clobber the zero matrix with a restored one
+    // while the head is still below the pixel floor.
+    if (hidden.has(node.index)) return
     let phase = light.phase
     let visible = true
     if (phase === LightPhase.FlashingYellow) {
@@ -294,11 +314,76 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
     _scale.set(bar, 1, 1)
     _pos.set(node.position.x, node.position.y + BAR_HEIGHT, node.position.z)
     _matrix.compose(_pos, _quat, _scale)
+    barMatrices[node.index] = _matrix.clone()
     bars.setMatrixAt(node.index, _matrix)
     bars.instanceMatrix.needsUpdate = true
   }
 
   const lightIdAt = (instanceId: number): string | undefined => ids[instanceId]
+
+  // --- Camera-distance LOD -------------------------------------------------
+  //
+  // The heads are decoration at city-overview range: at 1 500 m a bulb
+  // (1.2 m across) covers ~2 screen pixels, and the whole layer was
+  // ~270 k triangles of spheres drawn into those pixels — measured at
+  // 44.3 FPS with the layer on vs ~60 with it off (2026-11-15). The fix
+  // hides a head below the pixel floor instead of scaling it up: a
+  // scaled-up bulb would buy fake presence and overdraw, the opposite
+  // trade from the vehicle dots (which ARE the information, so they
+  // scale). Hidden = zero matrix; re-show = restore the cached matrix.
+  // Hysteresis on the pixel floor keeps a head hovering at the threshold
+  // from flipping every frame.
+  const hidden = new Set<number>()
+  /** Per-index matrix cache — restore targets for re-shown heads. */
+  const bulbMatrices: THREE.Matrix4[] = []
+  const barMatrices: THREE.Matrix4[] = []
+  const ZERO_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0)
+  /** Below this apparent size (px) a head goes hidden... */
+  const LOD_HIDE_PX = 2.0 // keep
+  /** ...and it only comes back above this — 20% hysteresis band. */
+  const LOD_SHOW_PX = 2.4
+
+  const applyCameraLod = (
+    cameraPos: THREE.Vector3,
+    viewportHeightPx: number,
+    fovRad: number,
+  ): void => {
+    if (nodes.size === 0) return
+    let dirty = false
+    let anyVisible = false
+    for (const node of nodes.values()) {
+      const index = node.index
+      const dist = cameraPos.distanceTo(node.position)
+      const px = signalHeadApparentPx(dist, viewportHeightPx, fovRad)
+      const wasHidden = hidden.has(index)
+      const show = px >= LOD_SHOW_PX
+      const hide = px < LOD_HIDE_PX
+      if (!wasHidden && hide) {
+        hidden.add(index)
+        bulbs.setMatrixAt(index, ZERO_MATRIX)
+        bars.setMatrixAt(index, ZERO_MATRIX)
+        dirty = true
+      } else if (wasHidden && show) {
+        hidden.delete(index)
+        bulbs.setMatrixAt(index, bulbMatrices[index]!)
+        bars.setMatrixAt(index, barMatrices[index]!)
+        dirty = true
+      }
+      if (!hidden.has(index)) anyVisible = true
+    }
+    if (dirty) {
+      bulbs.instanceMatrix.needsUpdate = true
+      bars.instanceMatrix.needsUpdate = true
+    }
+    // The poles ride with the bulbs: a merged single mesh cannot hide
+    // per head, but at overview range every head is below the floor at
+    // once, and close range keeps every head above it — the all-or-
+    // nothing switch covers both regimes and saves the last draw call.
+    if (poles) {
+      const polesVisible = anyVisible
+      if (poles.visible !== polesVisible) poles.visible = polesVisible
+    }
+  }
 
   const dispose = (): void => {
     root.remove(bulbs)
@@ -317,6 +402,9 @@ export const createTrafficLightLayer = (): TrafficLightLayer => {
     nodes.clear()
     ids.length = 0
     lastWritten.clear()
+    hidden.clear()
+    bulbMatrices.length = 0
+    barMatrices.length = 0
     layer.bulbs = bulbs
     layer.bars = bars
     layer.poles = poles
