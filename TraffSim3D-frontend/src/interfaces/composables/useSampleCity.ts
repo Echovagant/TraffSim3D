@@ -38,12 +38,51 @@ export const SAMPLE_CITY_LABEL = '福田中心(深圳).osm'
  * The map importer scales by `roads / 13` and stops at 40 — that is the
  * right number for a map you just imported and want to look at. The
  * command centre is a different job: it is a city that has to look
- * alive from the bird's-eye view, so it scales by `roads / 11` and
- * allows twice the importer's ceiling.
+ * alive from the bird's-eye view. Density TIERS calibrated against
+ * real urban-traffic numbers (2026-11-15 research): the Futian extract
+ * is ~167 km of road over ~334 lane-km, and congested Chinese urban
+ * arterials run ~20-30 km/h at 30-60 veh/km/lane (LOS D-F), so:
+ *   low  = ~10 veh/lane-km  (light, free-flow-ish)
+ *   mid  = ~20 veh/lane-km  (dense but moving — the default)
+ *   high = ~40 veh/lane-km  (peak hour, LOS F — the jam demo)
  */
+export const DENSITY_TIERS = [
+  { id: 'low', label: '低密度', divisor: 6, cap: 400 },
+  { id: 'mid', label: '中密度', divisor: 3, cap: 900 },
+  { id: 'high', label: '高密度（高峰）', divisor: 1.5, cap: 2000 },
+] as const
+
+export type DensityTierId = (typeof DENSITY_TIERS)[number]['id']
+
+const DENSITY_STORAGE_KEY = 'traffsim3d-density'
+
+export const densityTierSetting = (): DensityTierId => {
+  try {
+    const raw = localStorage.getItem(DENSITY_STORAGE_KEY) as DensityTierId | null
+    if (raw && DENSITY_TIERS.some((t) => t.id === raw)) return raw
+  } catch {
+    /* storage unavailable — fall through to the default */
+  }
+  return 'mid'
+}
+
+export const setDensityTierSetting = (id: DensityTierId): void => {
+  try {
+    localStorage.setItem(DENSITY_STORAGE_KEY, id)
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export const sampleCityVehicleCountFor = (roadCount: number, tier: DensityTierId): number => {
+  if (!Number.isFinite(roadCount) || roadCount <= 0) return 40
+  const tierDef = DENSITY_TIERS.find((t) => t.id === tier) ?? DENSITY_TIERS[1]
+  return Math.min(tierDef.cap, Math.max(40, Math.round(roadCount / tierDef.divisor)))
+}
+
 export const sampleCityVehicleCount = (roadCount: number): number => {
   if (!Number.isFinite(roadCount) || roadCount <= 0) return 40
-  return Math.min(120, Math.max(40, Math.round(roadCount / 11)))
+  return sampleCityVehicleCountFor(roadCount, densityTierSetting())
 }
 
 export interface SampleCityResult {

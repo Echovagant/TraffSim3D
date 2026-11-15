@@ -126,6 +126,20 @@ export const createCesiumViewer = (
     }),
   )
 
+  // ---- Mouse mapping (user expectation, 2026-11-15): LEFT orbit,
+  // RIGHT pan/drag, MIDDLE+WHEEL zoom. Cesium's 3-D defaults put
+  // RIGHT_DRAG in the zoom list — the user kept getting zoom where they
+  // expected a pan. RIGHT moves to the translate list (3-D pan), and
+  // RIGHT_DRAG is removed from tilt/zoom so no handler claims it.
+  const controller = viewer.scene.screenSpaceCameraController
+  controller.zoomEventTypes = [
+    Cesium.CameraEventType.WHEEL,
+    Cesium.CameraEventType.MIDDLE_DRAG,
+    Cesium.CameraEventType.PINCH,
+  ]
+  controller.translateEventTypes = [Cesium.CameraEventType.RIGHT_DRAG]
+  controller.tiltEventTypes = [Cesium.CameraEventType.MIDDLE_DRAG, Cesium.CameraEventType.PINCH]
+
   // ---- Performance tuning ----
   // Fog: hides distant geometry (buildings, basemap edge) smoothly
   // into the sky color. Density / near / far follow the user's

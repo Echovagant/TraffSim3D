@@ -290,14 +290,16 @@ export const spawnVehicle = (
 
   // Prefer the first free spawn point that is also clear of
   // nearby vehicles. Empty spawnPoints → fall through to back-compat.
+  // Spawn points EXHAUSTED → random-lane fallback: at the density tiers
+  // (a high-tier run wants ~2 000 vehicles on ~1 000 spawn points) the
+  // preset points alone cannot seat the fleet — but any drivable lane
+  // with a clear gap is a legal parking spot, so the legacy
+  // findFreeLanes path doubles as the density fallback.
   let spot: SpawnCandidate | null = null
   if (Object.keys(network.spawnPoints).length > 0) {
     spot = pickFreeSpawnPoint(network, minGap, type)
-    if (!spot) {
-      return { ok: false, reason: 'no free spawn point' }
-    }
-  } else {
-    // Back-compat: legacy saved scenes with no spawn points.
+  }
+  if (!spot) {
     const candidates = findFreeLanes(network, minGap, type)
     if (candidates.length === 0) {
       return { ok: false, reason: 'traffic density full' }

@@ -2302,7 +2302,17 @@ const applyCrossRoadYield = (
   ctx: TickContext,
   junctions: JunctionIndex,
 ): void => {
-  const cars = Object.values(network.vehicles)
+  // The negotiation only concerns vehicles AT a junction — and those are
+  // exactly the force-near vehicles (the tier bookkeeping force-nears
+  // anything within 15 m of a travel end). FAR vehicles never reach a
+  // box: their light simulation hands them to the full tier before that.
+  // Scanning the WHOLE fleet was O(n²) over 69k pairs at density tiers
+  // and the single top JS hotspot of the 372-vehicle scene (24.6% self
+  // time, CDP profile 2026-11-15) — the candidate filter cuts the pair
+  // count by ~28x.
+  const cars = Object.values(network.vehicles).filter(
+    (v) => ctx.tierOf?.(v.id) !== 'far',
+  )
   for (let i = 0; i < cars.length; i++) {
     const a = cars[i]!
     const roadA = network.roads[a.roadId]

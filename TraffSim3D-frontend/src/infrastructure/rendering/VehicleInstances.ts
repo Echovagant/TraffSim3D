@@ -22,7 +22,13 @@ import { Y_BODY } from './VehicleMesh'
 import { vehicleLodScale } from './vehicleLod'
 import { TRAIL_LENGTH } from '@shared/constants/simulation'
 
-export const MAX_VEHICLES_PER_TYPE = 256
+/**
+ * Per-type instance capacity. 1024 x 3 types = a 3 072-vehicle fleet —
+ * sized for the density tiers (the high tier puts ~2 000 vehicles on
+ * the Futian extract). The buffers are small (a few MB total) next to
+ * the basemap textures.
+ */
+export const MAX_VEHICLES_PER_TYPE = 1024
 
 interface TypeConfig {
   width: number

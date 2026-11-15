@@ -45,11 +45,13 @@ beforeEach(() => {
 })
 
 describe('createVehicleInstances — pool construction', () => {
-  it('caps each type at MAX_VEHICLES_PER_TYPE (256) slots', () => {
-    expect(MAX_VEHICLES_PER_TYPE).toBe(256)
+  it('caps each type at MAX_VEHICLES_PER_TYPE (1024) slots', () => {
+    // 1024 x 3 types = a 3 072-vehicle fleet, sized for the density
+    // tiers (the high tier puts ~2 000 vehicles on the Futian extract).
+    expect(MAX_VEHICLES_PER_TYPE).toBe(1024)
     for (const t of TYPES) {
       expect(pool.meshes[t]).toBeInstanceOf(THREE.InstancedMesh)
-      expect(pool.meshes[t].instanceMatrix.count).toBe(256)
+      expect(pool.meshes[t].instanceMatrix.count).toBe(1024)
     }
   })
 
@@ -87,7 +89,7 @@ describe('createVehicleInstances — pool construction', () => {
 
   it('pre-fills instanceColor with opaque white so an unwritten slot is not black', () => {
     const arr = pool.meshes.car.instanceColor!.array as Float32Array
-    expect(arr).toHaveLength(256 * 3)
+    expect(arr).toHaveLength(MAX_VEHICLES_PER_TYPE * 3)
     expect(arr.every((v) => v === 1)).toBe(true)
     expect(pool.meshes.car.instanceColor!.itemSize).toBe(3)
   })
@@ -158,15 +160,15 @@ describe('createVehicleInstances — allocate', () => {
     expect(trail.history[59]).toEqual({ x: 1, y: 0, z: 2 })
   })
 
-  it('is a silent no-op once the 256-slot pool for that type is exhausted', () => {
+  it('is a silent no-op once the per-type pool is exhausted', () => {
     for (let i = 0; i < MAX_VEHICLES_PER_TYPE; i++) {
       pool.allocate(makeTestVehicle({ id: `v-${i}` }))
     }
-    expect(pool.meshes.car.count).toBe(256)
+    expect(pool.meshes.car.count).toBe(MAX_VEHICLES_PER_TYPE)
     pool.allocate(makeTestVehicle({ id: 'overflow' }))
     expect(pool.trails.has('overflow')).toBe(false)
     expect(pool.getPosition('overflow')).toBeNull()
-    expect(pool.meshes.car.count).toBe(256)
+    expect(pool.meshes.car.count).toBe(MAX_VEHICLES_PER_TYPE)
   })
 
   it('getPosition returns null for an unknown id', () => {

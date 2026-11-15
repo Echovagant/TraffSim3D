@@ -57,6 +57,18 @@
               data-testid="view-mode-select"
             />
           </label>
+          <label
+            class="top-field"
+            title="车辆密度 — 切换后重新加载城市（密度标定：真实城市高峰干道 30-60 辆/km/车道）"
+          >
+            <span>车流</span>
+            <AppSelect
+              v-model="densityTier"
+              :options="DENSITY_OPTIONS"
+              aria-label="车辆密度"
+              data-testid="density-select"
+            />
+          </label>
         </div>
 
         <button
@@ -253,6 +265,28 @@ const VIEW_MODE_OPTIONS = [
   { value: 'street', label: '平视 (1.7m)' },
   { value: 'free', label: '自由' },
 ]
+
+// The fleet density tiers (calibrated against real urban-traffic
+// numbers — see useSampleCity). Switching reloads the bundled city so
+// the new fleet size takes effect.
+const DENSITY_OPTIONS = DENSITY_TIERS.map((t) => ({ value: t.id, label: t.label }))
+const densityTier = ref<DensityTierId>(densityTierSetting())
+watch(densityTier, async (tier) => {
+  setDensityTierSetting(tier)
+  // Force a fresh bundled-city load: the gate only skips when the
+  // network has an origin, so park the scene on a builtin first.
+  world.switchScene('cross')
+  const result = await loadSampleCity()
+  if (result.ok) {
+    status.value = {
+      kind: 'info',
+      text: `已按「${DENSITY_TIERS.find((t) => t.id === tier)!.label}」重新铺设 ${result.vehicleCount} 辆车`,
+    }
+    setTimeout(() => {
+      if (status.value?.text?.startsWith('已按')) status.value = null
+    }, 3000)
+  }
+})
 /**
  * Smart City — the command-centre view.
  *
@@ -272,6 +306,7 @@ const VIEW_MODE_OPTIONS = [
  */
 import AppSelect from '@interfaces/components/command/AppSelect.vue'
 import { ShowcaseNav } from '@interfaces/components/showcase'
+import * as THREE from 'three'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as Cesium from 'cesium'
 import { useWorldSimulation } from '@interfaces/composables/useWorldSimulation'
@@ -305,7 +340,13 @@ import {
 } from '@infrastructure/cesium/cameraSync'
 import { subscribeOobEvents, type OobEvent } from '@application/services/oobCleanup'
 import { useTheme } from '@interfaces/composables/useTheme'
-import { useSampleCity } from '@interfaces/composables/useSampleCity'
+import {
+  DENSITY_TIERS,
+  densityTierSetting,
+  setDensityTierSetting,
+  type DensityTierId,
+  useSampleCity,
+} from '@interfaces/composables/useSampleCity'
 import PanelCard from '@interfaces/components/command/PanelCard.vue'
 import MetricCard from '@interfaces/components/command/MetricCard.vue'
 import MiniDonut from '@interfaces/components/command/MiniDonut.vue'
@@ -1087,15 +1128,22 @@ const onPointerUp = (e: PointerEvent): void => {
   if (Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 6) return
   const renderer = rendererRef.value
   if (!renderer) return
+  // Precise ray pick first; if it misses, fall back to a SCREEN-SPACE
+  // nearest-vehicle search within a tolerance radius. In the bird view
+  // a running car is a 3-5 px dot that KEEPS MOVING — a ray needs a
+  // pixel-exact hit on a moving target, which is why picking appeared
+  // broken from the overview (user report, 2026-11-15). A tolerance
+  // radius is the standard pick grammar for small moving targets.
   const hit = renderer.pick(e.clientX, e.clientY, world.network)
+  const nearestId = hit?.kind === 'vehicle' ? hit.id : nearestVehicleToScreen(e.clientX, e.clientY)
   // The DRIVE button's pick mode: the user asked to CHOOSE the car they
   // drive (2026-11-15) — clicking a vehicle while armed enters its
   // cockpit directly, and the mode disarms itself whatever happens.
   if (pickDriveArmed.value) {
     pickDriveArmed.value = false
-    if (hit?.kind === 'vehicle') {
-      world.setRideVehicle(hit.id, 'cockpit')
-      status.value = { kind: 'info', text: `已进入 ${hit.id} 的驾驶舱 — WASD 驾驶，C 切换视角` }
+    if (nearestId) {
+      world.setRideVehicle(nearestId, 'cockpit')
+      status.value = { kind: 'info', text: `已进入 ${nearestId} 的驾驶舱 — WASD 驾驶，C 切换视角` }
       setTimeout(() => {
         if (status.value?.text?.startsWith('已进入')) status.value = null
       }, 3000)
@@ -1107,12 +1155,38 @@ const onPointerUp = (e: PointerEvent): void => {
     }, 3000)
     return
   }
-  if (hit?.kind === 'vehicle') {
-    world.setRideVehicle(hit.id, 'chase')
+  if (nearestId) {
+    world.setRideVehicle(nearestId, 'chase')
   } else if (world.rideVehicleId) {
     // Clicking empty space leaves the ride — the basemap comes back.
     leaveRide()
   }
+}
+
+/** The nearest running vehicle to a screen point, within the pick
+ *  tolerance radius (px). Null when none qualifies. Uses the same RAW
+ *  camera the main view renders with, so the screen projection matches
+ *  what the user sees. */
+const PICK_TOLERANCE_PX = 18
+const nearestVehicleToScreen = (sx: number, sy: number): string | null => {
+  const renderer = rendererRef.value
+  if (!renderer) return null
+  const cam = renderer.getCamera()
+  let bestId: string | null = null
+  let bestD = PICK_TOLERANCE_PX
+  for (const v of Object.values(world.network.vehicles)) {
+    if (v.status === 'crashed') continue
+    const p = new THREE.Vector3(v.position.x, v.position.y, v.position.z).project(cam)
+    if (p.z > 1) continue // behind the camera
+    const px = (p.x * 0.5 + 0.5) * window.innerWidth
+    const py = (-p.y * 0.5 + 0.5) * window.innerHeight
+    const d = Math.hypot(px - sx, py - sy)
+    if (d < bestD) {
+      bestD = d
+      bestId = v.id
+    }
+  }
+  return bestId
 }
 
 const leaveRide = (): void => {

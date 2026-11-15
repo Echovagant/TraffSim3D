@@ -67,6 +67,18 @@ export interface JunctionIndex {
 interface CachedIndex {
   /** How many intersections the index was built from. */
   count: number
+  /**
+   * The intersections OBJECT the index was built from. The per-frame
+   * freshness check is an identity compare (O(1)) — counting was
+   * O(junctions) per request, and `roadContinuation` requests the index
+   * once per VEHICLE per tick (372 vehicles x 1 264 intersections =
+   * ~470 k property enumerations per frame, 5.7% of the CDP profile at
+   * density tiers, 2026-11-15). Identity is a safe freshness signal:
+   * in-place intersection mutations happen only during scene BUILDING
+   * (before the first tick), and scene loads replace the network object,
+   * which swaps the WeakMap key anyway.
+   */
+  sourceObj: object
   /** roadId → the junctions on that road, in network junction order. */
   byRoad: Map<string, Intersection[]>
 }
@@ -102,10 +114,13 @@ const buildByRoad = (network: RoadNetwork): Map<string, Intersection[]> => {
  * thousands of them.
  */
 export const junctionIndex = (network: RoadNetwork): JunctionIndex => {
-  const count = intersectionCount(network)
   let cached = cache.get(network)
-  if (!cached || cached.count !== count) {
-    cached = { count, byRoad: buildByRoad(network) }
+  if (!cached || cached.sourceObj !== network.intersections) {
+    cached = {
+      count: intersectionCount(network),
+      byRoad: buildByRoad(network),
+      sourceObj: network.intersections,
+    }
     cache.set(network, cached)
   }
   const byRoad = cached.byRoad
