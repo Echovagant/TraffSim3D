@@ -150,9 +150,23 @@ test('Smart City: a road with a height limit gets a gantry that names the limit'
     return { gantries, roads }
   })
 
-  // The imported map is the one on screen (two roads, not the bundled
-  // city's 988).
-  expect(drawn.roads).toBe(2)
+  // The imported map is the one on screen. Since P4 the Cesium side
+  // draws NO asphalt ribbons (withCorridors: false — the Three layer
+  // owns the lane-level road surface in the vehicles' own frame), so
+  // the corridor count reads 0 by design; the road exists where the
+  // cars drive — the Three.js road surface.
+  expect(drawn.roads).toBe(0)
+  const threeRoadVerts = await page.evaluate(() => {
+    const r = (
+      window as unknown as {
+        __renderer?: {
+          built?: { roadSurface?: { geometry?: { attributes?: { position?: { count?: number } } } } }
+        }
+      }
+    ).__renderer
+    return r?.built?.roadSurface?.geometry?.attributes?.position?.count ?? 0
+  })
+  expect(threeRoadVerts).toBeGreaterThan(0)
 
   // The gantry exists and names the limit.
   expect(drawn.gantries.length).toBeGreaterThan(0)
